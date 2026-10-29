@@ -138,7 +138,7 @@ func (s *Server) maybeAutoAddExternalContacts(ctx context.Context, user userReco
 		}
 		name := truncate(strings.TrimSpace(stateString(person, "name")), 240)
 		if name == "" {
-			name = email
+			name = displayNameFromEmail(email)
 		}
 		_, _ = s.store.DB.Exec(ctx, `
 			INSERT INTO contacts (id, tenant_id, user_id, email, name, source, uid, resource_name, etag)

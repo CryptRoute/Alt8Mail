@@ -129,7 +129,7 @@ func (s *Server) autoSaveContact(w http.ResponseWriter, r *http.Request) {
 	}
 	name := truncate(strings.TrimSpace(body.Name), 240)
 	if name == "" {
-		name = email
+		name = displayNameFromEmail(email)
 	}
 	id := newID("contact")
 	etag := newID("etag")
