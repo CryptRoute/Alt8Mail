@@ -141,7 +141,7 @@ rollback() {
   switch_release "$OLD_TARGET"
   restore_copy="/tmp/a8m-restore-$$.dump"
   if install -m 0600 -o postgres -g postgres "$BACKUP_DIR/database.dump" "$restore_copy"; then
-    if runuser -u postgres -- pg_restore --clean --if-exists --no-owner --no-privileges -d a8m "$restore_copy"; then
+    if runuser -u postgres -- pg_restore --clean --if-exists -d a8m "$restore_copy"; then
       restored=1
     fi
   fi
@@ -190,7 +190,6 @@ for migration in "$MIGRATION_TMP"/*.sql; do
   runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -f "$migration"
 done
 runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q <<'SQL'
-GRANT USAGE, CREATE ON SCHEMA public TO a8m_app;
 DO $$
 DECLARE r record;
 BEGIN
@@ -201,9 +200,8 @@ BEGIN
     EXECUTE format('ALTER SEQUENCE public.%I OWNER TO a8m_app', r.sequence_name);
   END LOOP;
 END $$;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO a8m_app;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO a8m_app;
 SQL
+runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -f - < "$TARGET_RELEASE/deploy/postgresql/grants.sql"
 
 switch_release "$TARGET_RELEASE"
 log "restarting services"

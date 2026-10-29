@@ -335,7 +335,6 @@ done
 rm -rf "$MIGRATION_TMP"
 
 runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q <<'SQL'
-GRANT USAGE, CREATE ON SCHEMA public TO a8m_app;
 DO $$
 DECLARE r record;
 BEGIN
@@ -346,11 +345,8 @@ BEGIN
     EXECUTE format('ALTER SEQUENCE public.%I OWNER TO a8m_app', r.sequence_name);
   END LOOP;
 END $$;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO a8m_app;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO a8m_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO a8m_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO a8m_app;
 SQL
+runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -f - < "$SOURCE_DIR/deploy/postgresql/grants.sql"
 
 # ---------------------------------------------------------------------------
 # Redis, Dovecot, Postfix, Rspamd and ClamAV
