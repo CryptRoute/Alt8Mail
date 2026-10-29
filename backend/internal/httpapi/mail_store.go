@@ -264,6 +264,26 @@ func (s *Server) loadMailMessagesQuery(ctx context.Context, userID, query string
 	if err != nil {
 		return nil, nil, err
 	}
+	// Persist decoded legacy-charset subjects the first time these rows are
+	// read, so search and future API calls use the readable subject too.
+	for i := range records {
+		subject := records[i].Subject
+		if subject == "" || !strings.Contains(subject, "=?") {
+			continue
+		}
+		decoded := decodeHeader(subject)
+		if decoded == subject {
+			continue
+		}
+		records[i].Subject = decoded
+		_, _ = s.store.DB.Exec(ctx, `
+			UPDATE mail_messages
+			SET subject = $1,
+			    snippet = CASE WHEN snippet = $2 THEN $1 ELSE snippet END,
+			    updated_at = now()
+			WHERE id = $3 AND user_id = $4
+		`, decoded, subject, records[i].ID, userID)
+	}
 	messages := make([]map[string]any, 0, len(records))
 	for _, row := range records {
 		messages = append(messages, row.stateMap(nil, byMessage[row.ID]))

@@ -90,7 +90,7 @@ func (s *Server) directoryPeople(ctx context.Context, sess *sessionRecord, inclu
 	// organization directory policy. Auto-saved recipients must remain available
 	// for compose autocomplete and the People page.
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT email::text, name, company, title, phone, location, source
+		SELECT id, email::text, name, company, title, phone, location, source
 		FROM contacts WHERE user_id = $1 ORDER BY name, email
 	`, sess.User.ID)
 	if err != nil {
@@ -98,8 +98,8 @@ func (s *Server) directoryPeople(ctx context.Context, sess *sessionRecord, inclu
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var email, name, company, title, phone, location, source string
-		if rows.Scan(&email, &name, &company, &title, &phone, &location, &source) == nil {
+		var id, email, name, company, title, phone, location, source string
+		if rows.Scan(&id, &email, &name, &company, &title, &phone, &location, &source) == nil {
 			email = strings.ToLower(email)
 			if seen[email] {
 				continue
@@ -109,7 +109,7 @@ func (s *Server) directoryPeople(ctx context.Context, sess *sessionRecord, inclu
 				source = "contact"
 			}
 			people = append(people, map[string]any{
-				"name": firstNonEmpty(name, email), "email": email, "role": "Contact", "company": company,
+				"id": id, "name": firstNonEmpty(name, email), "email": email, "role": "Contact", "company": company,
 				"team": "", "title": title, "phone": phone, "location": location, "reportsTo": "",
 				"initials": initialsForName(firstNonEmpty(name, email)), "color": colorForString(email),
 				"source": source,

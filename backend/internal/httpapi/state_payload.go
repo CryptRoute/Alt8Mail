@@ -94,6 +94,17 @@ func publicStateMessage(state map[string]any, message map[string]any) map[string
 	for key, value := range message {
 		out[key] = value
 	}
+	// Rows imported before the MIME decoder learned legacy charsets still hold
+	// the raw encoded word in mail_messages. Decode on read so every API surface
+	// (bootstrap, search, thread and folder views) presents the real subject.
+	if subject := stateString(out, "subject"); subject != "" && strings.Contains(subject, "=?") {
+		if decoded := decodeHeader(subject); decoded != subject {
+			out["subject"] = decoded
+			if stateString(out, "snippet") == subject {
+				out["snippet"] = decoded
+			}
+		}
+	}
 	from, _ := message["from"].(map[string]any)
 	external := stateBool(message, "external")
 	out["trusted"] = !external || trustedIn(state, stateString(from, "email"))

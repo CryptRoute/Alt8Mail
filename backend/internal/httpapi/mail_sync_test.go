@@ -104,3 +104,20 @@ func TestRepairEncodedSubjects(t *testing.T) {
 		t.Fatalf("unexpected repaired subject %q", got)
 	}
 }
+
+func TestPublicStateMessageDecodesLegacySubject(t *testing.T) {
+	state := map[string]any{"messages": []any{}}
+	message := map[string]any{
+		"id": "m1", "subject": "=?Windows-1252?Q?Je_suis_vraiment_d=E9sol=E9,_mon_amour?=",
+		"snippet":  "=?Windows-1252?Q?Je_suis_vraiment_d=E9sol=E9,_mon_amour?=",
+		"from":     map[string]any{"name": "Crypt Route", "email": "cryptroute@hotmail.com"},
+		"external": true,
+	}
+	out := publicStateMessage(state, message)
+	if got := stateString(out, "subject"); got != "Je suis vraiment désolé, mon amour" {
+		t.Fatalf("unexpected public subject %q", got)
+	}
+	if got := stateString(out, "snippet"); got != "Je suis vraiment désolé, mon amour" {
+		t.Fatalf("unexpected public snippet %q", got)
+	}
+}
