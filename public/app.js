@@ -7193,7 +7193,7 @@ function renderFiles() {
   if (!filtered.some((file) => file.id === state.selectedFileId)) state.selectedFileId = filtered[0] ? filtered[0].id : null;
   const used = connected.reduce((sum, provider) => sum + (Number(provider.usedBytes) || 0), 0);
   const limit = connected.reduce((sum, provider) => sum + (Number(provider.limitBytes) || 0), 0);
-  filesMeta.textContent = `${available.length} files · ${connected.length} connected drive${connected.length === 1 ? "" : "s"} · ${formatBytes(used)}${limit ? ` of ${formatBytes(limit)}` : ""}`;
+  filesMeta.textContent = `${available.length} items · ${connected.length} connected drive${connected.length === 1 ? "" : "s"} · ${formatBytes(used)}${limit ? ` of ${formatBytes(limit)}` : ""}`;
   storageStrip.innerHTML = state.storageProviders.map((provider) => {
     const percent = provider.limitBytes ? Math.min(100, (provider.usedBytes / provider.limitBytes) * 100) : 0;
     return `<article class="storage-card${provider.connected ? " is-connected" : ""}" style="--provider:${provider.color}">
