@@ -9,7 +9,7 @@ myorigin = __DOMAIN__
 mydestination = localhost
 mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
 inet_interfaces = all
-inet_protocols = all
+inet_protocols = ipv4
 mailbox_size_limit = 0
 recipient_delimiter = +
 alias_maps = hash:/etc/aliases
@@ -41,7 +41,7 @@ smtp_tls_security_level = may
 smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
 smtp_use_tls = yes
 smtp_bind_address =
-smtp_helo_name =
+smtp_helo_name = __MAIL_HOSTNAME__
 sender_dependent_default_transport_maps =
 
 smtpd_milters = inet:127.0.0.1:11332

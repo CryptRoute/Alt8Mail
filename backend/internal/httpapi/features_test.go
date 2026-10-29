@@ -81,6 +81,20 @@ func TestBuildMIMEMessage(t *testing.T) {
 	}
 }
 
+func TestApplyAuthenticationResultsFolded(t *testing.T) {
+	fetched := &fetchedMail{Auth: map[string]any{}}
+	applyAuthenticationResults(fetched, `mail.a8m.test;
+	dkim=pass header.d=hotmail.com header.s=selector1 header.b=abc;
+	spf=pass smtp.mailfrom=cryptroute@hotmail.com;
+	dmarc=pass (policy=none) header.from=hotmail.com`)
+	if fetched.Auth["dkim"] != "pass" || fetched.Auth["spf"] != "pass" || fetched.Auth["dmarc"] != "pass" {
+		t.Fatalf("folded authentication results not parsed: %#v", fetched.Auth)
+	}
+	if fetched.Auth["signer"] != "hotmail.com" {
+		t.Fatalf("DKIM signer not parsed: %#v", fetched.Auth)
+	}
+}
+
 func TestParseIMAPMessageBodiesAndAttachments(t *testing.T) {
 	raw := strings.Join([]string{
 		"From: Elena Vasquez <elena.vasquez@a8m.test>",

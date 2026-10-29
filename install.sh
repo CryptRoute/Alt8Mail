@@ -397,11 +397,13 @@ postconf -P submission/inet/syslog_name=postfix/submission
 postconf -P submission/inet/smtpd_tls_security_level=encrypt
 postconf -P submission/inet/smtpd_sasl_auth_enable=yes
 postconf -e smtpd_tls_security_level=may
+[[ -n "$(postconf -h smtp_helo_name)" ]] || die "smtp_helo_name is empty after rendering main.cf"
 
 log "configuring Rspamd and ClamAV"
 install -d -m 0755 /etc/rspamd/local.d /var/lib/rspamd/dkim
 install -m 0644 "$SOURCE_DIR/deploy/rspamd/antivirus.conf" /etc/rspamd/local.d/antivirus.conf
 install -m 0644 "$SOURCE_DIR/deploy/rspamd/dkim_signing.conf" /etc/rspamd/local.d/dkim_signing.conf
+install -m 0644 "$SOURCE_DIR/deploy/rspamd/milter_headers.conf" /etc/rspamd/local.d/milter_headers.conf
 sed "s|__REDIS_PASSWORD__|$REDIS_PASSWORD|g" "$SOURCE_DIR/deploy/rspamd/redis.conf" > /etc/rspamd/local.d/redis.conf
 chown root:_rspamd /etc/rspamd/local.d/redis.conf 2>/dev/null || true
 chmod 0640 /etc/rspamd/local.d/redis.conf
