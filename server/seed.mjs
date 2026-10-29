@@ -72,6 +72,7 @@ const ME = {
   initials: "AC",
   color: "#34557a",
   role: "VP Product",
+  isSystemAdmin: true,
   company: "Alt8Mail",
   team: "Product",
   phone: "+1 (415) 555-0101",
@@ -672,11 +673,11 @@ export function seedDatabase() {
   ];
 
   const storageProviders = [
-    { id: "a8m", name: "Alt8Mail Drive", kind: "internal", connected: true, account: DEMO_EMAIL, usedBytes: 12.4 * GIB, limitBytes: 100 * GIB, color: "#0f6cbd", status: "synced", lastSyncAt: iso(4 * MINUTE), description: "Company-managed, encrypted at rest." },
-    { id: "onedrive", name: "Microsoft OneDrive", kind: "oauth", connected: true, account: "avery.chen@a8m.example", usedBytes: 286 * GIB, limitBytes: 1024 * GIB, color: "#0364b8", status: "synced", lastSyncAt: iso(2 * MINUTE), description: "Business account · Microsoft 365 tenant." },
-    { id: "dropbox", name: "Dropbox Business", kind: "oauth", connected: false, account: "", usedBytes: 0, limitBytes: 2 * 1024 * GIB, color: "#0061ff", status: "disconnected", lastSyncAt: null, description: "Connect a Dropbox Business team folder." },
-    { id: "gdrive", name: "Google Drive", kind: "oauth", connected: false, account: "", usedBytes: 0, limitBytes: 2 * 1024 * GIB, color: "#188038", status: "disconnected", lastSyncAt: null, description: "Connect Google Workspace shared drives." },
-    { id: "s3", name: "AWS S3", kind: "s3", connected: false, account: "", usedBytes: 0, limitBytes: 0, color: "#d97706", status: "disconnected", lastSyncAt: null, description: "Bring your own bucket with IAM role access." }
+    { id: "a8m", name: "Alt8Mail Drive", kind: "internal", configured: true, connected: true, account: DEMO_EMAIL, usedBytes: 12.4 * GIB, limitBytes: 100 * GIB, color: "#0f6cbd", status: "synced", lastSyncAt: iso(4 * MINUTE), description: "Company-managed, encrypted at rest." },
+    { id: "onedrive", name: "Microsoft OneDrive", kind: "oauth", configured: true, connected: true, account: "avery.chen@a8m.example", usedBytes: 286 * GIB, limitBytes: 1024 * GIB, color: "#0364b8", status: "synced", lastSyncAt: iso(2 * MINUTE), description: "Business account · Microsoft 365 tenant." },
+    { id: "dropbox", name: "Dropbox Business", kind: "oauth", configured: true, connected: false, account: "", usedBytes: 0, limitBytes: 2 * 1024 * GIB, color: "#0061ff", status: "disconnected", lastSyncAt: null, description: "Connect a Dropbox Business team folder." },
+    { id: "gdrive", name: "Google Drive", kind: "oauth", configured: true, connected: false, account: "", usedBytes: 0, limitBytes: 2 * 1024 * GIB, color: "#188038", status: "disconnected", lastSyncAt: null, description: "Connect Google Workspace shared drives." },
+    { id: "s3", name: "AWS S3", kind: "s3", configured: true, connected: false, account: "", usedBytes: 0, limitBytes: 0, color: "#d97706", status: "disconnected", lastSyncAt: null, description: "Bring your own bucket with IAM role access." }
   ];
 
   return {
@@ -738,6 +739,7 @@ export function seedDatabase() {
     tasks,
     files,
     storageProviders,
+    defaultStorage: "a8m",
     attachments: {}
   };
 }

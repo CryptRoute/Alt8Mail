@@ -457,6 +457,10 @@ const state = {
   tasks: [],
   files: [],
   storageProviders: [],
+  defaultStorage: "a8m",
+  storageCredentialData: [],
+  storageCredentialProvider: "",
+  composeAttachProvider: "all",
   taskFilter: "all",
   selectedTaskId: null,
   editingTaskId: null,
@@ -688,6 +692,59 @@ const readerSpamBtn = document.getElementById("readerSpamBtn");
 const readerSpamLabel = document.getElementById("readerSpamLabel");
 const readerSpamIcon = document.getElementById("readerSpamIcon");
 const storageOverlay = document.getElementById("storageOverlay");
+const storageCredentialsOverlay = document.getElementById("storageCredentialsOverlay");
+const storageCredentialsTabs = document.getElementById("storageCredentialsTabs");
+const storageCredentialFields = document.getElementById("storageCredentialFields");
+const storageCredentialStatus = document.getElementById("storageCredentialStatus");
+const confirmOverlay = document.getElementById("confirmOverlay");
+const domainBlockedOverlay = document.getElementById("domainBlockedOverlay");
+let confirmResolver = null;
+
+function appConfirm({ title = "Confirm action", message = "", confirmLabel = "Confirm", cancelLabel = "Cancel", tone = "default", icon = "i-alert" } = {}) {
+  if (window.__a8mAutoConfirm) return Promise.resolve(true);
+  if (confirmResolver) { confirmResolver(false); confirmResolver = null; }
+  return new Promise((resolve) => {
+    confirmResolver = resolve;
+    document.getElementById("confirmTitle").textContent = title;
+    document.getElementById("confirmMessage").textContent = message;
+    const iconBox = document.getElementById("confirmIcon");
+    if (iconBox) {
+      iconBox.className = `confirm-icon${tone === "danger" ? " is-danger" : tone === "warning" ? " is-warning" : ""}`;
+      iconBox.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#${icon}"/></svg>`;
+    }
+    const accept = document.getElementById("confirmAccept");
+    accept.textContent = confirmLabel;
+    accept.className = `btn-primary${tone === "danger" ? " danger-btn" : ""}`;
+    const cancel = document.getElementById("confirmCancel");
+    cancel.textContent = cancelLabel;
+    confirmOverlay.hidden = false;
+    setTimeout(() => (tone === "danger" ? cancel : accept).focus(), 30);
+  });
+}
+
+function settleConfirm(value) {
+  if (!confirmResolver) return;
+  const resolve = confirmResolver;
+  confirmResolver = null;
+  confirmOverlay.hidden = true;
+  resolve(value);
+}
+
+function openDomainBlockedDialog(details = {}) {
+  const domain = details.domain || "your sending domain";
+  const missing = Array.isArray(details.missing) ? details.missing : [];
+  const message = document.getElementById("domainBlockedMessage");
+  if (message) message.textContent = `Sending from ${domain} is blocked until its DNS ownership and mail records are complete. Missing or invalid: ${missing.join(", ") || "DNS verification"}.`;
+  const records = details.records && typeof details.records === "object" ? details.records : {};
+  const holder = document.getElementById("domainBlockedRecords");
+  if (holder) {
+    holder.innerHTML = Object.entries(records).map(([key, record]) => {
+      if (!record || !record.name) return "";
+      return `<div class="domain-record-row"><span class="domain-record-purpose">${esc(key)}</span><div><strong>${esc(record.type)}</strong><code>${esc(record.name)}</code><code>${esc(record.value || "")}</code></div></div>`;
+    }).join("") || `<div class="settings-note">${esc(details.ownership?.name || "_a8m-verification." + domain)} TXT ${esc(details.ownership?.value || "a8m-verify=<token>")}</div>`;
+  }
+  domainBlockedOverlay.hidden = false;
+}
 const shareOverlay = document.getElementById("shareOverlay");
 const recoveryOverlay = document.getElementById("recoveryOverlay");
 const scheduledChip = document.getElementById("scheduledChip");
@@ -1787,7 +1844,7 @@ async function addPasskey() {
 }
 
 async function removePasskey(id) {
-  if (!window.confirm("Remove this passkey from your account?")) return;
+  if (!(await appConfirm({ title: "Remove this passkey?", message: "You will no longer be able to sign in with this passkey. Other sign-in methods remain available.", confirmLabel: "Remove passkey", tone: "danger" }))) return;
   try {
     const data = await api(`/api/security/webauthn/${encodeURIComponent(id)}`, { method: "DELETE", body: {} });
     state.security = data.security || state.security;
@@ -1868,6 +1925,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.tasks = data.tasks || [];
   state.files = data.files || [];
   state.storageProviders = data.storageProviders || [];
+  state.defaultStorage = data.defaultStorage || state.defaultStorage || "a8m";
   state.tenantPolicy = data.tenantPolicy || null;
   state.attachmentMaxBytes = data.attachmentMaxBytes || 8 * 1024 * 1024;
   state.preferences = { ...DEFAULT_PREFERENCES, ...(data.user && data.user.preferences ? data.user.preferences : {}) };
@@ -2300,7 +2358,7 @@ function renderAccountSessions(sessions) {
 }
 
 async function revokeSession(id) {
-  if (!window.confirm("Sign out that browser session?")) return;
+  if (!(await appConfirm({ title: "Sign out this session?", message: "That browser will need to sign in again.", confirmLabel: "Sign out", tone: "danger" }))) return;
   try {
     const data = await api(`/api/security/sessions/${encodeURIComponent(id)}/revoke`, { method: "POST", body: {} });
     if (data.current) { await logout(); return; }
@@ -2310,7 +2368,7 @@ async function revokeSession(id) {
 }
 
 async function revokeOtherSessions() {
-  if (!window.confirm("Sign out every other browser session for this account?")) return;
+  if (!(await appConfirm({ title: "Sign out other sessions?", message: "Every other browser signed in to this account will be signed out immediately.", confirmLabel: "Sign out others", tone: "danger" }))) return;
   try {
     const data = await api("/api/security/sessions/revoke-others", { method: "POST", body: {} });
     await loadAccountSessions();
@@ -2598,7 +2656,7 @@ function threadMessageMarkup(message, expanded) {
       </div>
       <div class="email-body">${safeEmailHtml(message.bodyHtml || `<p>${esc(message.snippet || "")}</p>`)}</div>
       ${meetingMarkup(message)}
-      ${attachmentMarkup(message.attachments)}
+      ${attachmentMarkup(message.attachments, message)}
       <div class="thread-message-actions">
         <button type="button" data-reply-message="${esc(message.id)}"><svg class="icon" aria-hidden="true"><use href="#i-reply"/></svg>Reply</button>
         <button type="button" data-forward-message="${esc(message.id)}"><svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg>Forward</button>
@@ -2929,19 +2987,71 @@ function meetingMarkup(message) {
   </div>`;
 }
 
-function attachmentMarkup(files) {
+function attachmentMarkup(files, message = null) {
   if (!files || !files.length) return "";
-  return `<div class="attachments">
-    <h3 class="attach-title"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>${files.length} attachment${files.length === 1 ? "" : "s"} · Scanned</h3>
+  const messageId = message?.id || "";
+  return `<div class="attachments" data-attachment-message="${esc(messageId)}">
+    <div class="attach-title-row"><h3 class="attach-title"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>${files.length} attachment${files.length === 1 ? "" : "s"} · Scanned</h3>
+      ${messageId ? `<button class="link-btn attach-save-all" data-save-all-attachments="${esc(messageId)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg>Save all to Cabinet</button>` : ""}
+    </div>
     <div class="attach-grid">
-      ${files.map((file) => `<button class="attach" data-attachment="${esc(file.name)}" data-file-id="${esc(file.id || "")}" data-file-type="${esc(file.type)}" data-file-size="${esc(file.size || formatBytes(file.sizeBytes))}" data-file-mime="${esc(file.mime || "")}" data-file-url="${esc(file.contentUrl || "")}" data-file-previewable="${file.previewable ? "true" : "false"}" type="button">
-        <span class="attach-badge" data-type="${esc(file.type)}">${esc(file.type)}</span>
-        <span class="attach-info"><span class="attach-name">${esc(file.name)}</span><span class="attach-size">${esc(file.size || formatBytes(file.sizeBytes))}</span></span>
-        <svg class="icon attach-safe" role="img" aria-label="Scanned, no threats" title="Scanned, no threats"><use href="#i-shield-check"/></svg>
-        <span class="attach-preview-hint">${file.previewable ? "Preview" : "Info"}</span>
-      </button>`).join("")}
+      ${files.map((file) => `<div class="attach-item">
+        <button class="attach" data-attachment="${esc(file.name)}" data-file-id="${esc(file.id || "")}" data-file-type="${esc(file.type)}" data-file-size="${esc(file.size || formatBytes(file.sizeBytes))}" data-file-mime="${esc(file.mime || "")}" data-file-url="${esc(file.contentUrl || "")}" data-file-previewable="${file.previewable ? "true" : "false"}" type="button">
+          <span class="attach-badge" data-type="${esc(file.type)}">${esc(file.type)}</span>
+          <span class="attach-info"><span class="attach-name">${esc(file.name)}</span><span class="attach-size">${esc(file.size || formatBytes(file.sizeBytes))}</span></span>
+          <svg class="icon attach-safe" role="img" aria-label="Scanned, no threats" title="Scanned, no threats"><use href="#i-shield-check"/></svg>
+          <span class="attach-preview-hint">${file.previewable ? "Preview" : "Info"}</span>
+        </button>
+        ${file.id ? `<button class="attach-save" data-save-attachment="${esc(file.id)}" data-save-attachment-name="${esc(file.name)}" type="button" title="Save to Cabinet" aria-label="Save ${esc(file.name)} to Cabinet"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg></button>` : ""}
+      </div>`).join("")}
     </div>
   </div>`;
+}
+
+function cabinetDestinationId() {
+  const preferred = storageProvider(state.defaultStorage);
+  return preferred && preferred.connected ? preferred.id : "a8m";
+}
+
+async function saveAttachmentToCabinet(attachmentId, name, { quiet = false } = {}) {
+  if (!attachmentId) {
+    showToast("This attachment is not available to save", "error");
+    return false;
+  }
+  const providerId = cabinetDestinationId();
+  try {
+    const data = await api("/api/files", {
+      method: "POST",
+      body: {
+        providerId, attachmentId,
+        path: "Email attachments",
+        description: "Saved from a mail message to the Cabinet."
+      }
+    });
+    if (data.file) {
+      state.files = [data.file, ...state.files.filter((file) => file.id !== data.file.id)];
+      if (state.task === "files") renderFiles();
+      if (!quiet) showToast(`${name || data.file.name} saved to ${storageProvider(providerId)?.name || "Cabinet"}`);
+    }
+    return true;
+  } catch (error) {
+    showError(error);
+    return false;
+  }
+}
+
+async function saveAllAttachmentsToCabinet(messageId) {
+  const message = messageById(messageId);
+  const attachments = (message?.attachments || []).filter((file) => file.id);
+  if (!attachments.length) {
+    showToast("No saved attachments were found on this message", "error");
+    return;
+  }
+  let saved = 0;
+  for (const file of attachments) {
+    if (await saveAttachmentToCabinet(file.id, file.name, { quiet: true })) saved += 1;
+  }
+  if (saved) showToast(`${saved} attachment${saved === 1 ? "" : "s"} saved to ${storageProvider(cabinetDestinationId())?.name || "Cabinet"}`);
 }
 
 function closePreview() {
@@ -3681,8 +3791,8 @@ function syncSearchContext() {
     searchInput.placeholder = "Search tasks";
     searchInput.setAttribute("aria-label", "Search tasks");
   } else if (state.task === "files") {
-    searchInput.placeholder = "Search files";
-    searchInput.setAttribute("aria-label", "Search files");
+    searchInput.placeholder = "Search Cabinet";
+    searchInput.setAttribute("aria-label", "Search Cabinet");
   } else if (state.task === "scheduled") {
     searchInput.placeholder = "Search scheduled";
     searchInput.setAttribute("aria-label", "Search scheduled messages");
@@ -4660,6 +4770,7 @@ function openComposeAttach(sessionId) {
   const session = sessionById(sessionId);
   if (!session) return;
   attachPickerSessionId = sessionId;
+  state.composeAttachProvider = storageDefaultId();
   composeAttachOverlay.hidden = false;
   const limit = document.getElementById("composeAttachLimit");
   if (limit) limit.textContent = formatBytes(state.attachmentMaxBytes || 8 * 1024 * 1024);
@@ -5176,7 +5287,11 @@ async function sendComposeSession(id) {
     session.error = error.message;
     if (sendButton) sendButton.disabled = false;
     updateComposeStatus(session);
-    showError(error);
+    if (error.code === "DOMAIN_DNS_REQUIRED") {
+      openDomainBlockedDialog(error.details || {});
+    } else {
+      showError(error);
+    }
     if (error.code === "OUTBOUND_CAP") openStatusPop("outbound");
   }
 }
@@ -5449,7 +5564,8 @@ async function confirmScheduledSend() {
   } catch (error) {
     scheduleWarning.hidden = false;
     scheduleWarning.textContent = error.message;
-    showError(error);
+    if (error.code === "DOMAIN_DNS_REQUIRED") openDomainBlockedDialog(error.details || {});
+    else showError(error);
   } finally {
     button.disabled = false;
     button.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Schedule send';
@@ -5844,7 +5960,7 @@ function syncStatusRange() {
     const open = state.tasks.filter((task) => task.status === "open").length;
     statusRange.textContent = `${open} open · ${state.tasks.length - open} completed`;
   } else if (state.task === "files") {
-    statusRange.textContent = `${state.files.length} files`;
+    statusRange.textContent = `${state.files.length} items`;
   } else if (state.task === "scheduled") {
     statusRange.textContent = `${scheduledItems().length} scheduled`;
   } else if (state.task === "settings") {
@@ -5859,7 +5975,7 @@ function syncStatusContext() {
   if (state.task === "calendar") statusMid.textContent = "Calendar synced · Alt8Mail";
   else if (state.task === "people") statusMid.textContent = "Directory synced · Alt8Mail";
   else if (state.task === "tasks") statusMid.textContent = "Task workspace synced · Alt8Mail";
-  else if (state.task === "files") statusMid.textContent = `${state.storageProviders.filter((provider) => provider.connected).length} storage providers connected`;
+  else if (state.task === "files") statusMid.textContent = `Cabinet synced · ${state.storageProviders.filter((provider) => provider.connected).length} storage providers`;
   else if (state.task === "scheduled") statusMid.textContent = "Server outbox synced · Alt8Mail";
   else if (state.task === "settings") statusMid.textContent = "Policy managed by Alt8Mail";
   else if (state.query) statusMid.textContent = `Searching ${state.messages.length} message index`;
@@ -5938,6 +6054,7 @@ const SETTINGS_META = {
   appearance: { title: "Appearance", eyebrow: "Workspace preferences" },
   mail: { title: "Mail & reading", eyebrow: "How you read and compose" },
   compose: { title: "Compose", eyebrow: "Editor, window and sending defaults" },
+  storage: { title: "Storage", eyebrow: "Cabinet and connected drives" },
   identities: { title: "Identities & forwarding", eyebrow: "Verified senders and mail forwarding" },
   notifications: { title: "Notifications", eyebrow: "Delivery and alerts" },
   regional: { title: "Language & time", eyebrow: "Locale, time zone and work hours" },
@@ -5983,6 +6100,7 @@ function renderSettingsDynamic() {
   if (state.task !== "settings" && !["rules", "audit", "account", "security", "regional", "autoreply", "identities"].includes(state.settingsTab)) return;
   if (state.settingsTab === "rules") renderRules();
   else if (["appearance", "mail", "compose", "notifications"].includes(state.settingsTab)) syncPreferencesUi();
+  else if (state.settingsTab === "storage") renderStorageSettings();
   else if (state.settingsTab === "identities") { renderIdentities(); refreshIdentities(); loadForwardingSettings(); }
   else if (state.settingsTab === "autoreply") renderAutoReply();
   else if (state.settingsTab === "regional") syncPreferencesUi();
@@ -6190,7 +6308,7 @@ async function createAppPassword() {
 }
 
 async function revokeAppPassword(id) {
-  if (!window.confirm("Revoke this app password? Devices using it will lose access immediately.")) return;
+  if (!(await appConfirm({ title: "Revoke app password?", message: "Devices using this app password will lose access immediately.", confirmLabel: "Revoke", tone: "danger" }))) return;
   try {
     await api(`/api/security/app-passwords/${encodeURIComponent(id)}`, { method: "DELETE" });
     showToast("App password revoked");
@@ -6331,7 +6449,7 @@ async function resendIdentity(id) {
 }
 
 async function deleteIdentity(id) {
-  if (!window.confirm("Remove this sending identity?")) return;
+  if (!(await appConfirm({ title: "Remove sending identity?", message: "This address will no longer be available in the From selector.", confirmLabel: "Remove", tone: "danger" }))) return;
   try {
     await api(`/api/identities/${encodeURIComponent(id)}`, { method: "DELETE" });
     showToast("Sending identity removed");
@@ -6736,7 +6854,7 @@ function setExternalWarningsUi(value) {
 }
 
 async function resyncMailbox() {
-  if (!window.confirm("Refresh the mailbox from Dovecot now? Open compose windows are kept.")) return;
+  if (!(await appConfirm({ title: "Refresh mailbox?", message: "Alt8Mail will ask Dovecot for new messages. Open compose windows are kept.", confirmLabel: "Refresh" }))) return;
   try {
     const result = await api("/api/mail/sync", { method: "POST", body: {} });
     await refreshMailbox({ quiet: true });
@@ -6747,7 +6865,7 @@ async function resyncMailbox() {
 }
 
 async function resetDemoData() {
-  if (!window.confirm("Reset the demo mailbox, rules, drafts, drafts queue and audit log to the seeded state?")) return;
+  if (!(await appConfirm({ title: "Reset demo data?", message: "The demo mailbox, rules, drafts, send queue and audit log will return to the seeded state.", confirmLabel: "Reset demo", tone: "danger" }))) return;
   try {
     await api("/api/dev/reset", { method: "POST", body: {} });
     composeSessions.slice().forEach((session) => removeComposeSessionUi(session.id));
@@ -6983,7 +7101,7 @@ async function toggleTask(taskId) {
 async function deleteTask(taskId) {
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task) return;
-  if (!window.confirm(`Delete “${task.title}”?`)) return;
+  if (!(await appConfirm({ title: "Delete this task?", message: `“${task.title}” will be removed from the task workspace.`, confirmLabel: "Delete task", tone: "danger" }))) return;
   try {
     await api(`/api/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
     state.tasks = state.tasks.filter((item) => item.id !== taskId);
@@ -7027,7 +7145,7 @@ function openTaskFromEmail(threadId) {
    files + storage
    ============================================================ */
 const FILE_FILTERS = [
-  { id: "all", label: "All files" },
+  { id: "all", label: "All items" },
   { id: "recent", label: "Recent" },
   { id: "shared", label: "Shared" },
   { id: "images", label: "Images" },
@@ -7080,7 +7198,7 @@ function renderFiles() {
     const percent = provider.limitBytes ? Math.min(100, (provider.usedBytes / provider.limitBytes) * 100) : 0;
     return `<article class="storage-card${provider.connected ? " is-connected" : ""}" style="--provider:${provider.color}">
       <div class="storage-card-head">
-        <span class="storage-provider-mark">${esc(provider.name.split(" ").map((part) => part[0]).join("").slice(0, 2))}</span>
+        ${storageProviderMarkup(provider)}
         <div class="storage-card-name"><strong>${esc(provider.name)}</strong><span>${provider.connected ? esc(provider.account || "Connected") : provider.kind === "internal" ? "Internal storage" : "Available to connect"}</span></div>
         ${provider.connected ? '<span class="storage-status"><span class="status-dot"></span>Synced</span>' : `<button class="link-btn" data-storage-connect="${esc(provider.id)}" type="button">Connect</button>`}
       </div>
@@ -7092,6 +7210,9 @@ function renderFiles() {
   if (state.fileProvider !== "all" && !connected.some((provider) => provider.id === state.fileProvider)) state.fileProvider = "all";
   fileProviderFilter.value = state.fileProvider;
   fileFilters.innerHTML = FILE_FILTERS.map((filter) => `<button class="chip${state.fileFilter === filter.id ? " is-active" : ""}" data-file-filter="${filter.id}" type="button">${filter.label}</button>`).join("");
+  syncStorageDefaultSelects();
+  const manageCredentials = document.getElementById("manageStorageCredentialsBtn");
+  if (manageCredentials) manageCredentials.hidden = !storageCanManage();
   fileList.innerHTML = filtered.length ? filtered.map((file) => {
     const provider = storageProvider(file.providerId);
     const selected = file.id === state.selectedFileId;
@@ -7104,7 +7225,7 @@ function renderFiles() {
       <span class="file-flags">${(file.sharedWith || []).length ? '<svg class="icon" aria-label="Shared" title="Shared"><use href="#i-people"/></svg>' : ""}${file.locked ? '<svg class="icon" aria-label="Locked" title="Locked"><use href="#i-lock"/></svg>' : ""}</span>
       <button class="star-btn${file.starred ? " is-starred" : ""}" data-file-star="${esc(file.id)}" type="button" aria-label="${file.starred ? "Remove star" : "Star file"}" aria-pressed="${file.starred ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>
     </div>`;
-  }).join("") : `<div class="file-empty"><svg class="icon" aria-hidden="true"><use href="#i-files"/></svg><strong>No files here</strong><span>${state.query ? "Try a different search." : "Connect a storage provider or upload a file."}</span></div>`;
+  }).join("") : `<div class="file-empty"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg><strong>Cabinet is empty</strong><span>${state.query ? "Try a different search." : "Save an email attachment, connect a drive or upload a document."}</span></div>`;
   renderFileDetail();
   syncStatusRange();
   syncStatusContext();
@@ -7114,7 +7235,7 @@ function renderFileDetail() {
   if (!fileDetail) return;
   const file = state.files.find((item) => item.id === state.selectedFileId);
   if (!file) {
-    fileDetail.innerHTML = `<div class="file-detail-empty"><span class="file-detail-mark"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg></span><h2>Your files, connected</h2><p>Alt8Mail Drive and OneDrive are connected. Add Dropbox, Google Drive or S3 to bring every team file into one view.</p><button class="btn-secondary" data-open-storage type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add storage</button><div class="file-detail-tips"><span>${state.files.filter((item) => storageConnected(item.providerId)).length} indexed files</span><span>OAuth-ready connectors</span><span>Enterprise sharing controls</span></div></div>`;
+    fileDetail.innerHTML = `<div class="file-detail-empty"><span class="file-detail-mark"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg></span><h2>Your Cabinet, connected</h2><p>Keep documents, attachments and connected-drive files together in one secure workspace.</p><button class="btn-secondary" data-open-storage type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add storage</button><div class="file-detail-tips"><span>${state.files.filter((item) => storageConnected(item.providerId)).length} indexed items</span><span>OAuth-ready connectors</span><span>Enterprise sharing controls</span></div></div>`;
     return;
   }
   const provider = storageProvider(file.providerId);
@@ -7151,11 +7272,187 @@ function colorForString(value) {
   return palette[hash % palette.length];
 }
 
+function storageCanManage() {
+  return Boolean(state.user && (state.user.isSystemAdmin === true || ["owner", "admin"].includes(String(state.user.role || "").toLowerCase())));
+}
+
+function storageDefaultId() {
+  const current = state.storageProviders.find((provider) => provider.id === state.defaultStorage && provider.connected);
+  return current ? current.id : "a8m";
+}
+
+function storageDefaultOptions() {
+  return state.storageProviders
+    .filter((provider) => provider.connected)
+    .map((provider) => `<option value="${esc(provider.id)}">${esc(provider.name)}</option>`)
+    .join("");
+}
+
+function syncStorageDefaultSelects() {
+  const options = storageDefaultOptions();
+  const selected = storageDefaultId();
+  for (const id of ["defaultStorageSelect", "settingsDefaultStorage"]) {
+    const select = document.getElementById(id);
+    if (!select) continue;
+    if (select.innerHTML !== options) select.innerHTML = options;
+    select.value = selected;
+  }
+}
+
+async function setDefaultStorage(providerId) {
+  try {
+    const data = await api("/api/storage/default", { method: "PUT", body: { providerId } });
+    state.defaultStorage = data.defaultProvider || providerId;
+    syncStorageDefaultSelects();
+    showToast(`${storageProvider(state.defaultStorage)?.name || "Storage"} is now the default`);
+  } catch (error) {
+    showError(error);
+    syncStorageDefaultSelects();
+  }
+}
+
+function storageProviderMarkup(provider) {
+  if (provider.id === "a8m") {
+    return `<span class="storage-provider-mark"><svg class="icon" aria-hidden="true"><use href="#i-drive-cloud"/></svg></span>`;
+  }
+  return `<span class="storage-provider-mark" style="--provider:${provider.color}">${esc(provider.name.split(" ").map((part) => part[0]).join("").slice(0, 2))}</span>`;
+}
+
+function renderStorageSettings() {
+  const list = document.getElementById("settingsStorageList");
+  if (!list) return;
+  syncStorageDefaultSelects();
+  list.innerHTML = state.storageProviders.map((provider) => `<div class="settings-storage-row">
+    ${storageProviderMarkup(provider)}
+    <div class="settings-storage-copy"><strong>${esc(provider.name)}</strong><span>${provider.connected ? `Connected${provider.account ? ` as ${esc(provider.account)}` : ""}` : provider.configured ? "Ready to connect" : "Credentials not configured"}</span></div>
+    ${provider.connected ? `<span class="storage-status"><span class="status-dot"></span>${provider.id === state.defaultStorage ? "Default" : "Connected"}</span>` : ""}
+    <div class="settings-storage-actions">
+      ${provider.kind !== "internal" && !provider.configured ? `<button class="link-btn" data-storage-configure="${esc(provider.id)}" type="button">Configure</button>` : ""}
+      ${provider.kind !== "internal" && provider.configured && !provider.connected ? `<button class="link-btn" data-storage-connect="${esc(provider.id)}" type="button">Connect</button>` : ""}
+      ${provider.connected && provider.kind !== "internal" ? `<button class="link-btn" data-storage-sync="${esc(provider.id)}" type="button">Sync</button><button class="link-btn" data-storage-disconnect="${esc(provider.id)}" type="button">Disconnect</button>` : ""}
+    </div>
+  </div>`).join("");
+  if (!storageCanManage()) {
+    const manage = document.getElementById("settingsManageStorageBtn");
+    if (manage) manage.hidden = true;
+  }
+}
+
+async function refreshStorageProviders() {
+  const data = await api("/api/storage");
+  state.storageProviders = data.providers || state.storageProviders;
+  if (data.defaultProvider) state.defaultStorage = data.defaultProvider;
+  syncStorageDefaultSelects();
+  if (state.task === "files") renderFiles();
+  if (state.task === "settings" && state.settingsTab === "storage") renderStorageSettings();
+}
+
+function credentialProvider() {
+  return state.storageCredentialData.find((provider) => provider.id === state.storageCredentialProvider) || state.storageCredentialData[0] || null;
+}
+
+function renderStorageCredentials() {
+  if (!storageCredentialsTabs || !storageCredentialFields) return;
+  storageCredentialsTabs.innerHTML = state.storageCredentialData.map((provider) => `<button class="storage-credentials-tab${provider.id === state.storageCredentialProvider ? " is-active" : ""}" data-credential-provider="${esc(provider.id)}" type="button" role="tab" aria-selected="${provider.id === state.storageCredentialProvider ? "true" : "false"}"><span>${esc(provider.name)}</span><span class="credential-state ${provider.configured ? "is-set" : ""}">${provider.configured ? "Configured" : "Not configured"}</span></button>`).join("");
+  const provider = credentialProvider();
+  if (!provider) {
+    storageCredentialFields.innerHTML = `<div class="settings-note">No external storage providers are available.</div>`;
+    return;
+  }
+  if (provider.kind === "s3") {
+    storageCredentialFields.innerHTML = `
+      <div class="credential-callout"><strong>S3 / MinIO bucket</strong><span>The bucket must already exist and allow the access key to list, read, write and delete objects.</span></div>
+      <div class="credential-grid">
+        <label class="form-field"><span>Endpoint <small>optional</small></span><input data-credential-field="endpoint" value="${esc(provider.endpoint || "")}" placeholder="https://s3.example.com"></label>
+        <label class="form-field"><span>Region</span><input data-credential-field="region" value="${esc(provider.region || "us-east-1")}" placeholder="us-east-1"></label>
+        <label class="form-field"><span>Bucket</span><input data-credential-field="bucket" value="${esc(provider.bucket || "")}" placeholder="alt8mail-cabinet"></label>
+        <label class="form-field"><span>Access key</span><input data-credential-field="accessKey" value="${esc(provider.accessKey || "")}" autocomplete="off"></label>
+        <label class="form-field"><span>Secret key</span><input data-credential-field="secretKey" type="password" placeholder="${provider.hasSecret ? "Leave blank to keep the saved secret" : "Enter the secret key"}" autocomplete="new-password"></label>
+      </div>
+      <div class="credential-checks"><label class="compose-check"><input type="checkbox" data-credential-field="useSSL" ${provider.useSSL !== false ? "checked" : ""}>Use TLS</label><label class="compose-check"><input type="checkbox" data-credential-field="pathStyle" ${provider.pathStyle !== false ? "checked" : ""}>Path-style addressing</label></div>`;
+  } else {
+    storageCredentialFields.innerHTML = `
+      <div class="credential-callout"><strong>OAuth redirect URI</strong><span>Register this exact callback in the provider console before connecting.</span><div class="credential-uri"><code>${esc(provider.redirectUri || "")}</code><button class="link-btn" data-copy-credential-uri="${esc(provider.redirectUri || "")}" type="button">Copy</button></div></div>
+      <div class="credential-grid">
+        <label class="form-field"><span>Client ID</span><input data-credential-field="clientId" value="${esc(provider.clientId || "")}" autocomplete="off" spellcheck="false"></label>
+        <label class="form-field"><span>Client secret</span><input data-credential-field="clientSecret" type="password" placeholder="${provider.hasClientSecret ? "Leave blank to keep the saved secret" : "Enter the client secret"}" autocomplete="new-password"></label>
+      </div>`;
+  }
+  storageCredentialStatus.textContent = provider.configured
+    ? `Configured${provider.source === "environment" ? " from the server environment" : ""}. Saving replaces the tenant configuration.`
+    : "Not configured yet. Save credentials, then connect from the Cabinet.";
+  if (storageCredentialsOverlay) storageCredentialsOverlay.hidden = false;
+}
+
+async function openStorageCredentials(providerId = "") {
+  if (!storageCanManage()) {
+    showToast("Only organization owners and administrators can manage storage credentials");
+    return;
+  }
+  try {
+    const data = await api("/api/storage/credentials");
+    state.storageCredentialData = data.providers || [];
+    state.storageCredentialProvider = providerId || state.storageCredentialData[0]?.id || "";
+    renderStorageCredentials();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function closeStorageCredentials() {
+  if (storageCredentialsOverlay) storageCredentialsOverlay.hidden = true;
+}
+
+async function saveStorageCredentials() {
+  const provider = credentialProvider();
+  if (!provider) return;
+  const body = {};
+  for (const input of storageCredentialFields.querySelectorAll("[data-credential-field]")) {
+    const key = input.getAttribute("data-credential-field");
+    if (input.type === "checkbox") body[key] = input.checked;
+    else body[key] = input.value.trim();
+  }
+  const button = document.getElementById("storageCredentialsSave");
+  if (button) { button.disabled = true; button.textContent = "Saving…"; }
+  try {
+    const data = await api(`/api/storage/credentials/${encodeURIComponent(provider.id)}`, { method: "PUT", body });
+    const index = state.storageCredentialData.findIndex((item) => item.id === provider.id);
+    if (index >= 0) state.storageCredentialData[index] = data.provider;
+    await refreshStorageProviders();
+    renderStorageCredentials();
+    showToast(`${provider.name} credentials saved`);
+  } catch (error) {
+    showError(error);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "Save credentials"; }
+  }
+}
+
+async function clearStorageCredentials() {
+  const provider = credentialProvider();
+  if (!provider) return;
+  const ok = await appConfirm({
+    title: "Clear saved credentials?",
+    message: `The ${provider.name} connector will stop working for this organization until credentials are configured again.`,
+    confirmLabel: "Clear credentials",
+    tone: "danger"
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/storage/credentials/${encodeURIComponent(provider.id)}`, { method: "DELETE" });
+    const index = state.storageCredentialData.findIndex((item) => item.id === provider.id);
+    if (index >= 0) state.storageCredentialData[index] = { ...provider, configured: false, clientId: "", hasClientSecret: false, hasSecret: false, source: "none" };
+    await refreshStorageProviders();
+    renderStorageCredentials();
+    showToast("Storage credentials cleared");
+  } catch (error) { showError(error); }
+}
+
 function openStorageDialog() {
   storageConnectList.innerHTML = state.storageProviders.map((provider) => `<div class="storage-connect-row" data-provider="${esc(provider.id)}">
-    <span class="storage-provider-mark" style="--provider:${provider.color}">${esc(provider.name.split(" ").map((part) => part[0]).join("").slice(0, 2))}</span>
-    <div class="storage-connect-copy"><strong>${esc(provider.name)}</strong><span>${provider.connected ? `Connected as ${esc(provider.account || state.user.email)}` : esc(provider.description)}</span></div>
-    ${provider.connected ? `<span class="storage-status"><span class="status-dot"></span>Connected</span>${provider.kind !== "internal" ? `<button class="link-btn" data-storage-sync="${esc(provider.id)}" type="button">Sync</button>` : ""}<button class="link-btn" data-storage-disconnect="${esc(provider.id)}" type="button">Disconnect</button>` : `<button class="btn-secondary" data-storage-connect="${esc(provider.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg>Connect</button>`}
+    ${storageProviderMarkup(provider)}
+    <div class="storage-connect-copy"><strong>${esc(provider.name)}</strong><span>${provider.connected ? `Connected as ${esc(provider.account || state.user.email)}` : provider.configured ? esc(provider.description) : "Credentials are not configured for this connector"}</span></div>
+    ${provider.connected ? `<span class="storage-status"><span class="status-dot"></span>Connected</span>${provider.kind !== "internal" ? `<button class="link-btn" data-storage-sync="${esc(provider.id)}" type="button">Sync</button>` : ""}<button class="link-btn" data-storage-disconnect="${esc(provider.id)}" type="button">Disconnect</button>` : provider.kind !== "internal" && !provider.configured ? `<button class="btn-secondary" data-storage-configure="${esc(provider.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>Configure</button>` : `<button class="btn-secondary" data-storage-connect="${esc(provider.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg>Connect</button>`}
   </div>`).join("");
   storageOverlay.hidden = false;
 }
@@ -7171,6 +7468,7 @@ async function connectStorage(providerId, button) {
     if (index >= 0) state.storageProviders[index] = data.provider;
     for (const file of data.files || []) if (!state.files.some((item) => item.id === file.id)) state.files.push(file);
     renderFiles();
+    syncStorageDefaultSelects();
     openStorageDialog();
     showToast(`${provider.name} connected`);
   } catch (error) {
@@ -7182,13 +7480,14 @@ async function connectStorage(providerId, button) {
 async function disconnectStorage(providerId) {
   const provider = storageProvider(providerId);
   if (!provider) return;
-  if (!window.confirm(`Disconnect ${provider.name}? Its files will be hidden until you reconnect.`)) return;
+  if (!(await appConfirm({ title: `Disconnect ${provider.name}?`, message: "Its files will be hidden from the Cabinet until you reconnect the drive.", confirmLabel: "Disconnect", tone: "danger" }))) return;
   try {
     const data = await api(`/api/storage/${encodeURIComponent(providerId)}/disconnect`, { method: "POST", body: {} });
     const index = state.storageProviders.findIndex((item) => item.id === providerId);
     if (index >= 0) state.storageProviders[index] = data.provider;
     if (state.fileProvider === providerId) state.fileProvider = "all";
     renderFiles();
+    syncStorageDefaultSelects();
     openStorageDialog();
     showToast(`${provider.name} disconnected`);
   } catch (error) {
@@ -7206,6 +7505,7 @@ async function syncStorage(providerId) {
     state.files = state.files.filter((file) => file.providerId !== providerId);
     for (const file of data.files || []) if (!state.files.some((item) => item.id === file.id)) state.files.push(file);
     renderFiles();
+    syncStorageDefaultSelects();
     openStorageDialog();
     showToast(`${provider.name} synced`);
   } catch (error) { showError(error); }
@@ -7280,7 +7580,7 @@ async function toggleFileStar(fileId) {
 async function deleteFile(fileId) {
   const file = state.files.find((item) => item.id === fileId);
   if (!file) return;
-  if (!window.confirm(`Delete ${file.name}? This removes it from the workspace index.`)) return;
+  if (!(await appConfirm({ title: "Delete this file?", message: `${file.name} will be removed from the Cabinet index.`, confirmLabel: "Delete file", tone: "danger" }))) return;
   try {
     await api(`/api/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
     state.files = state.files.filter((item) => item.id !== fileId);
@@ -7836,7 +8136,7 @@ async function saveContact() {
 }
 
 async function deleteContactByEmail(email) {
-  if (!email || !window.confirm("Delete this contact? Messages are not affected.")) return;
+  if (!email || !(await appConfirm({ title: "Delete this contact?", message: "The contact will be removed from People. Existing messages are not affected.", confirmLabel: "Delete contact", tone: "danger" }))) return;
   try {
     const record = await loadContactRecord(email);
     if (!record) { showToast("Contact not found"); return; }
@@ -8092,7 +8392,7 @@ async function saveEvent() {
 }
 
 async function deleteCalendarEvent(id) {
-  if (!id || !window.confirm("Delete this event from your calendar?")) return;
+  if (!id || !(await appConfirm({ title: "Delete this event?", message: "The calendar event will be removed from your calendar.", confirmLabel: "Delete event", tone: "danger" }))) return;
   try {
     await api(`/api/calendar/events/${encodeURIComponent(id)}`, { method: "DELETE" });
     state.calendarEvents = state.calendarEvents.filter((item) => item.id !== id);
@@ -8866,8 +9166,15 @@ function handleFeatureClick(event) {
     return true;
   }
   if (target.closest("#storageClose") || target === storageOverlay) { storageOverlay.hidden = true; return true; }
+  if (target.closest("#storageCredentialsClose") || target.closest("#storageCredentialsCancel") || target === storageCredentialsOverlay) { closeStorageCredentials(); return true; }
   const storageConnect = target.closest("[data-storage-connect]");
   if (storageConnect) { event.preventDefault(); connectStorage(storageConnect.getAttribute("data-storage-connect"), storageConnect); return true; }
+  const storageConfigure = target.closest("[data-storage-configure]");
+  if (storageConfigure) { event.preventDefault(); openStorageCredentials(storageConfigure.getAttribute("data-storage-configure")); return true; }
+  const credentialProviderButton = target.closest("[data-credential-provider]");
+  if (credentialProviderButton) { event.preventDefault(); state.storageCredentialProvider = credentialProviderButton.getAttribute("data-credential-provider"); renderStorageCredentials(); return true; }
+  const copyCredentialURI = target.closest("[data-copy-credential-uri]");
+  if (copyCredentialURI) { event.preventDefault(); copyText(copyCredentialURI.getAttribute("data-copy-credential-uri")); return true; }
   const storageDisconnect = target.closest("[data-storage-disconnect]");
   if (storageDisconnect) { event.preventDefault(); disconnectStorage(storageDisconnect.getAttribute("data-storage-disconnect")); return true; }
   const storageSync = target.closest("[data-storage-sync]");
@@ -9098,6 +9405,10 @@ function bindEvents() {
       toggleTrust(trustToggle.getAttribute("data-trust-toggle"), trustToggle.getAttribute("data-trust-value") === "true");
       return;
     }
+    const saveAllAttachments = target.closest("[data-save-all-attachments]");
+    if (saveAllAttachments) { event.preventDefault(); saveAllAttachmentsToCabinet(saveAllAttachments.getAttribute("data-save-all-attachments")); return; }
+    const saveAttachment = target.closest("[data-save-attachment]");
+    if (saveAttachment) { event.preventDefault(); saveAttachmentToCabinet(saveAttachment.getAttribute("data-save-attachment"), saveAttachment.getAttribute("data-save-attachment-name")); return; }
     const attachment = target.closest("[data-attachment]");
     if (attachment) {
       openPreview({
@@ -9281,8 +9592,9 @@ function bindEvents() {
     if (ruleDelete) {
       event.preventDefault();
       const id = ruleDelete.getAttribute("data-rule-delete");
-      if (!window.confirm("Delete this Sieve rule?")) return;
-      saveSieve(state.sieve.rules.filter((item) => item.id !== id), state.sieve.vacation, "Rule deleted");
+      appConfirm({ title: "Delete this rule?", message: "The Sieve rule will stop filtering incoming mail immediately.", confirmLabel: "Delete rule", tone: "danger" }).then((ok) => {
+        if (ok) saveSieve(state.sieve.rules.filter((item) => item.id !== id), state.sieve.vacation, "Rule deleted");
+      });
       return;
     }
     const ruleUp = target.closest("[data-rule-up]");
@@ -9511,6 +9823,19 @@ function bindEvents() {
     state.peopleQuery = event.target.value;
     renderPeople();
   });
+  document.getElementById("confirmAccept")?.addEventListener("click", () => settleConfirm(true));
+  document.getElementById("confirmCancel")?.addEventListener("click", () => settleConfirm(false));
+  confirmOverlay?.addEventListener("click", (event) => { if (event.target === confirmOverlay) settleConfirm(false); });
+  document.getElementById("domainBlockedClose")?.addEventListener("click", () => { domainBlockedOverlay.hidden = true; });
+  domainBlockedOverlay?.addEventListener("click", (event) => { if (event.target === domainBlockedOverlay) domainBlockedOverlay.hidden = true; });
+  storageCredentialsOverlay?.addEventListener("click", (event) => { if (event.target === storageCredentialsOverlay) closeStorageCredentials(); });
+  document.getElementById("manageStorageCredentialsBtn")?.addEventListener("click", () => openStorageCredentials());
+  document.getElementById("settingsManageStorageBtn")?.addEventListener("click", () => openStorageCredentials());
+  document.getElementById("settingsConnectStorageBtn")?.addEventListener("click", openStorageDialog);
+  document.getElementById("storageCredentialsSave")?.addEventListener("click", saveStorageCredentials);
+  document.getElementById("storageCredentialsClear")?.addEventListener("click", clearStorageCredentials);
+  document.getElementById("defaultStorageSelect")?.addEventListener("change", (event) => setDefaultStorage(event.target.value));
+  document.getElementById("settingsDefaultStorage")?.addEventListener("change", (event) => setDefaultStorage(event.target.value));
   document.getElementById("contactClose")?.addEventListener("click", closeContactDialog);
   document.getElementById("contactCancel")?.addEventListener("click", closeContactDialog);
   document.getElementById("contactSave")?.addEventListener("click", saveContact);
@@ -9786,7 +10111,9 @@ function bindEvents() {
       else if (kind === "send") sendComposeSession(session.id);
       else if (kind === "schedule") openScheduleDialog(session);
       else if (kind === "discard") {
-        if (window.confirm("Discard this draft?")) closeComposeSession(session.id, { discard: true });
+        appConfirm({ title: "Discard this draft?", message: "Your recipient, subject and message content will be deleted.", confirmLabel: "Discard draft", tone: "danger" }).then((ok) => {
+          if (ok) closeComposeSession(session.id, { discard: true });
+        });
       } else if (kind === "attach") { openComposeAttach(session.id); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
       else if (kind === "ai") { toggleComposeAi(session); }
@@ -9917,6 +10244,10 @@ function bindEvents() {
     refreshAttachPickerIfOpen();
   });
 
+  document.getElementById("composeAttachProviderFilter")?.addEventListener("change", (event) => {
+    state.composeAttachProvider = event.target.value || "all";
+    renderComposeAttachPicker();
+  });
   composeAttachOverlay?.addEventListener("click", (event) => {
     if (event.target === composeAttachOverlay || event.target.closest("#composeAttachClose") || event.target.closest("#composeAttachDone")) {
       closeComposeAttach();
@@ -10018,6 +10349,9 @@ function bindEvents() {
       return;
     }
     if (event.key === "Escape") {
+      if (!confirmOverlay.hidden) { settleConfirm(false); return; }
+      if (!domainBlockedOverlay.hidden) { domainBlockedOverlay.hidden = true; return; }
+      if (storageCredentialsOverlay && !storageCredentialsOverlay.hidden) { closeStorageCredentials(); return; }
       if (!passkeyOverlay.hidden) { hidePasskeyPrompt(); return; }
       if (!sendNowOverlay.hidden) { closeSendNowDialog(); return; }
       if (!scheduledEditOverlay.hidden) { closeScheduledEdit(); return; }

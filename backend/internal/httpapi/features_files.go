@@ -64,7 +64,9 @@ func (s *Server) getStorage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STORAGE", "Could not load storage providers")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"providers": providers, "defaultProvider": s.defaultStorageProvider(r.Context(), sess.User.ID),
+	})
 }
 
 func (s *Server) storageAction(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +77,12 @@ func (s *Server) storageAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "Storage provider not found")
 		return
+	}
+	for _, configured := range s.storageProviderDefsFor(r.Context(), sess.User.TenantID) {
+		if configured.ID == providerID {
+			provider = configured
+			break
+		}
 	}
 	switch action {
 	case "connect":
@@ -99,9 +107,10 @@ func (s *Server) storageAction(w http.ResponseWriter, r *http.Request) {
 		accountEmail := sess.User.Email
 		providerKind := "internal"
 		if provider.Kind == "s3" {
-			accountEmail = s.cfg.S3Bucket
+			runtime := s.storageRuntimeConfig(r.Context(), sess.User.TenantID, "s3")
+			accountEmail = runtime.Bucket
 			providerKind = "s3"
-			if err := s.checkS3(r.Context()); err != nil {
+			if err := s.checkS3(r.Context(), sess.User.TenantID); err != nil {
 				writeError(w, http.StatusBadGateway, "S3_UNAVAILABLE", "The S3 bucket is not reachable: "+err.Error())
 				return
 			}
@@ -129,6 +138,7 @@ func (s *Server) storageAction(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM files WHERE user_id=$1 AND provider_id=$2`, sess.User.ID, providerID)
 		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM storage_accounts WHERE user_id=$1 AND provider_id=$2`, sess.User.ID, providerID)
+		_, _ = s.store.DB.Exec(r.Context(), `UPDATE storage_defaults SET provider_id='a8m', updated_at=now() WHERE user_id=$1 AND provider_id=$2`, sess.User.ID, providerID)
 		s.recordWorkspaceAudit(r.Context(), sess, "storage.disconnected", provider.Name, "Storage provider disconnected")
 	case "sync":
 		if err := s.syncStorageProvider(r.Context(), sess, providerID); err != nil {
@@ -279,7 +289,7 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	switch provider.Kind {
 	case "s3":
 		key := fmt.Sprintf("tenants/%s/users/%s/files/%s/%s", sess.User.TenantID, sess.User.ID, id, name)
-		if err := s.s3PutObject(r.Context(), key, mime, data); err != nil {
+		if err := s.s3PutObject(r.Context(), sess.User.TenantID, key, mime, data); err != nil {
 			writeError(w, http.StatusBadGateway, "S3_UPLOAD", "Could not upload the file to S3: "+err.Error())
 			return
 		}
@@ -437,7 +447,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	id := r.PathValue("id")
 	if file, err := s.loadFileContent(r.Context(), sess.User.ID, id); err == nil && file.ProviderID == "s3" && file.StorageKey != "" {
-		if err := s.s3DeleteObject(r.Context(), file.StorageKey); err != nil {
+		if err := s.s3DeleteObject(r.Context(), sess.User.TenantID, file.StorageKey); err != nil {
 			s.logger.Warn("S3 object delete failed", "err", err)
 			// Keep the row so the user can retry. Deleting it now would make the
 			// next bucket sync resurrect the object as a new file record.
@@ -487,7 +497,7 @@ func (s *Server) getFileContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "File not found")
 		return
 	}
-	s.serveFileContent(w, r, file, file.OwnerID)
+	s.serveFileContent(w, r, file, file.OwnerID, sess.User.TenantID)
 }
 
 type contentFile struct {
@@ -512,7 +522,7 @@ func (s *Server) loadFileContent(ctx context.Context, userID, id string) (conten
 	return file, nil
 }
 
-func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file contentFile, ownerID string) {
+func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file contentFile, ownerID, tenantID string) {
 	inline := r.URL.Query().Get("download") != "1"
 	disposition := "attachment"
 	if inline && file.Previewable {
@@ -547,7 +557,7 @@ func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file c
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.Copy(w, handle)
 	case "s3":
-		data, err := s.s3GetObject(r.Context(), file.StorageKey)
+		data, err := s.s3GetObject(r.Context(), tenantID, file.StorageKey)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "STORAGE_CONTENT", "Could not read the S3 object")
 			return

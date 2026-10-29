@@ -218,7 +218,7 @@ try {
   await page.pressKey("r");
   await sleep(400);
   check(await page.eval("[...document.querySelectorAll('.compose [data-compose-field=\"subject\"]')].at(-1)?.value.startsWith('Re:')"), "R opens a reply with a Re: subject");
-  await page.eval("window.confirm = () => true");
+  await page.eval("window.__a8mAutoConfirm = true");
   const replyId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
   await page.click(`[data-compose-id="${replyId}"] [data-compose-action="discard"]`);
   await sleep(600);
@@ -271,7 +271,7 @@ try {
     return compose ? [...compose.querySelectorAll('.recipient-chip-name')].map(e=>e.textContent).join(' ') : '';
   })()`);
   check(restoredChipText.includes("Elena Vasquez"), "restored draft renders its recipient as a chip");
-  await page.eval("window.confirm = () => true");
+  await page.eval("window.__a8mAutoConfirm = true");
   await page.click("#cmdCompose");
   await sleep(350);
   const chipComposeId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
@@ -619,6 +619,51 @@ try {
   check(await page.eval("document.querySelector('.storage-card')?.textContent.length > 0"), "storage cards show live usage");
   await page.screenshot(path.join(artifacts, "21-files.png"));
 
+  check(await page.eval("document.querySelector('#filesView h1')?.textContent === 'Cabinet'"), "Files module is labelled Cabinet");
+  check(await page.eval("document.querySelector('.rail-btn[data-task=\"files\"] .rail-label')?.textContent === 'Cabinet'"), "Cabinet navigation label is updated");
+  await page.setValue("#defaultStorageSelect", "onedrive");
+  await sleep(450);
+  const defaultStorage = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>d.defaultStorage)");
+  equal(defaultStorage, "onedrive", "default storage is persisted");
+  await page.click("#manageStorageCredentialsBtn");
+  await sleep(450);
+  check(await page.eval("!document.getElementById('storageCredentialsOverlay').hidden"), "storage credential modal opens");
+  equal(await page.eval("document.querySelectorAll('#storageCredentialsTabs [data-credential-provider]').length"), 4, "credential modal lists every external connector");
+  await page.click("#storageCredentialsTabs [data-credential-provider='gdrive']");
+  await sleep(200);
+  check(await page.eval("document.getElementById('storageCredentialFields').textContent.includes('OAuth redirect URI')"), "OAuth credential form shows the redirect URI");
+  await page.setValue("[data-credential-field='clientId']", "demo-google-client.apps.googleusercontent.com");
+  await page.setValue("[data-credential-field='clientSecret']", "demo-secret");
+  await page.click("#storageCredentialsSave");
+  await sleep(650);
+  check(await page.eval("document.getElementById('storageCredentialStatus').textContent.includes('Configured')"), "OAuth credentials save for the tenant");
+  await page.click("#storageCredentialsClose");
+  await sleep(250);
+  await page.setValue("#defaultStorageSelect", "a8m");
+  await sleep(350);
+  await page.screenshot(path.join(artifacts, "21b-cabinet.png"));
+
+  await page.eval("window.__a8mAutoConfirm = false");
+  await page.click(".rail-btn[data-task='mail']");
+  await sleep(250);
+  await page.click("#cmdCompose");
+  await sleep(300);
+  const modalComposeId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
+  await page.click(`[data-compose-id="${modalComposeId}"] [data-compose-action="discard"]`);
+  await sleep(250);
+  check(await page.eval("!document.getElementById('confirmOverlay').hidden"), "destructive actions use an in-app confirmation modal");
+  check(await page.eval("document.getElementById('confirmTitle').textContent.includes('Discard this draft')"), "discard modal explains the draft action");
+  await page.click("#confirmCancel");
+  await sleep(200);
+  check(await page.eval("document.getElementById('confirmOverlay').hidden"), "confirmation modal can be cancelled");
+  await page.click(`[data-compose-id="${modalComposeId}"] [data-compose-action="discard"]`);
+  await sleep(200);
+  await page.click("#confirmAccept");
+  await sleep(300);
+  const modalSelector = "[data-compose-id=\"" + modalComposeId + "\"]";
+  check(await page.eval(`!document.querySelector(${JSON.stringify(modalSelector)})`), "confirmation modal completes the discard action");
+  await page.eval("window.__a8mAutoConfirm = true");
+
   console.log("\n[9g] Send later scheduling flow");
   await page.click(".rail-btn[data-task='mail']");
   await sleep(350);
@@ -659,7 +704,7 @@ try {
   check(await page.eval("document.getElementById('toast').textContent.includes('Scheduled send cancelled')"), "cancel confirmation restores the message to drafts");
   if (await page.eval("!document.getElementById('statusPop').hidden")) { await page.click("#statusPopClose"); }
   const restoredScheduleId = await openComposeBySubject("Scheduled E2E note");
-  await page.eval("window.confirm = () => true");
+  await page.eval("window.__a8mAutoConfirm = true");
   await page.click(`[data-compose-id="${restoredScheduleId}"] [data-compose-action="discard"]`);
   await sleep(600);
 

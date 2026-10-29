@@ -936,6 +936,7 @@ export async function createApp(options = {}) {
       tasks: db.tasks,
       files: db.files,
       storageProviders: db.storageProviders,
+      defaultStorage: db.defaultStorage || "a8m",
       sieve: publicSieve(),
       quota: quotaInfo(),
       outbound: outboundInfo(),
@@ -1248,7 +1249,58 @@ export async function createApp(options = {}) {
       }
 
       if (pathname === "/api/storage" && req.method === "GET") {
-        sendJson(res, 200, { providers: db.storageProviders });
+        sendJson(res, 200, { providers: db.storageProviders, defaultProvider: db.defaultStorage || "a8m" });
+        return;
+      }
+      if (pathname === "/api/storage/default" && req.method === "PUT") {
+        const body = await readJson(req);
+        const provider = providerById(String(body.providerId || "a8m"));
+        if (!provider) throw new ApiError(400, "STORAGE_PROVIDER", "Choose a valid storage provider");
+        if (!provider.connected && provider.kind !== "internal") throw new ApiError(409, "PROVIDER_OFFLINE", "Connect that storage provider first");
+        db.defaultStorage = provider.id;
+        addAudit(req, "storage.default", provider.name, "Default storage changed");
+        await store.save();
+        sendJson(res, 200, { ok: true, defaultProvider: provider.id });
+        return;
+      }
+      if (pathname === "/api/storage/credentials" && req.method === "GET") {
+        const providers = db.storageProviders.filter((provider) => provider.kind !== "internal").map((provider) => ({
+          ...provider, clientId: provider.clientId || "", hasClientSecret: Boolean(provider.hasClientSecret), hasSecret: Boolean(provider.hasSecret),
+          endpoint: provider.endpoint || "", region: provider.region || "us-east-1", bucket: provider.bucket || "", accessKey: provider.accessKey || "",
+          useSSL: provider.useSSL !== false, pathStyle: provider.pathStyle !== false,
+          redirectUri: `${isSecure(req) ? "https" : "http"}://${req.headers.host || "localhost"}/api/storage/oauth/${provider.id}/callback`
+        }));
+        sendJson(res, 200, { providers });
+        return;
+      }
+      const credentialMatch = pathname.match(/^\/api\/storage\/credentials\/([A-Za-z0-9_-]{1,40})$/);
+      if (credentialMatch && (req.method === "PUT" || req.method === "DELETE")) {
+        const provider = providerById(credentialMatch[1]);
+        if (!provider) throw new ApiError(400, "STORAGE_PROVIDER", "Choose a valid storage provider");
+        if (req.method === "DELETE") {
+          provider.configured = false;
+          delete provider.hasClientSecret;
+          delete provider.hasSecret;
+          addAudit(req, "storage.credentials_cleared", provider.name, "Storage credentials cleared");
+          await store.save();
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+        const body = await readJson(req);
+        provider.configured = true;
+        if (provider.kind === "s3") {
+          provider.endpoint = String(body.endpoint || "");
+          provider.region = String(body.region || "us-east-1");
+          provider.bucket = String(body.bucket || "");
+          provider.accessKey = String(body.accessKey || "");
+          provider.hasSecret = Boolean(body.secretKey || provider.hasSecret);
+        } else {
+          provider.clientId = String(body.clientId || "");
+          provider.hasClientSecret = Boolean(body.clientSecret || provider.hasClientSecret);
+        }
+        addAudit(req, "storage.credentials_updated", provider.name, "Storage credentials updated");
+        await store.save();
+        sendJson(res, 200, { ok: true, provider });
         return;
       }
       const storageActionMatch = pathname.match(/^\/api\/storage\/([A-Za-z0-9_-]{1,40})\/(connect|disconnect)$/);

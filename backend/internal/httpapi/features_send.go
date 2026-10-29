@@ -66,6 +66,9 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		if alias == nil || alias["canSend"] == false {
 			return fail(http.StatusForbidden, "BAD_FROM", "That From identity is not available for sending")
 		}
+		if err := s.enforceSenderDomainDNS(r.Context(), sess.User.TenantID, stateString(alias, "email")); err != nil {
+			return err
+		}
 		to, invalid := parseRecipients(body.To, state)
 		if len(invalid) > 0 {
 			return fail(http.StatusBadRequest, "BAD_RECIPIENT", "Check these recipients: "+strings.Join(invalid, ", "))

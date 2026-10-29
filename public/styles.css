@@ -3900,3 +3900,93 @@ button.agenda-event:hover { border-color: var(--brand); }
 .directory-badge.auto { color: var(--warning); }
 .person-notes { margin-top: 18px; }
 .person-notes p { margin: 5px 0 0; color: var(--text-2); font-size: 0.75rem; line-height: 1.55; white-space: pre-wrap; }
+
+/* ---------- Cabinet, storage credentials and confirmations ---------- */
+.default-storage-pick { display: flex; align-items: center; gap: 6px; font-size: 0.625rem; color: var(--text-3); }
+.default-storage-pick .pref-select { width: 142px; }
+.storage-provider-mark svg { width: 18px; height: 18px; }
+.settings-storage-list { display: flex; flex-direction: column; gap: 8px; }
+.settings-storage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.settings-storage-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.settings-storage-copy strong { font-size: 0.75rem; }
+.settings-storage-copy span { font-size: 0.625rem; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-storage-actions { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.storage-credentials-dialog { width: min(680px, calc(100vw - 32px)); }
+.storage-credentials-tabs { display: flex; gap: 5px; overflow-x: auto; padding: 4px 20px 12px; border-bottom: 1px solid var(--border); }
+.storage-credentials-tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.storage-credentials-tab:hover { background: var(--surface-3); color: var(--text); }
+.storage-credentials-tab.is-active { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); background: var(--accent-soft); color: var(--accent-ink); }
+.credential-state { font-size: 0.5rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); }
+.credential-state.is-set { color: var(--success); }
+.storage-credentials-body { padding: 16px 20px 6px; display: flex; flex-direction: column; gap: 12px; }
+.credential-callout { padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); display: flex; flex-direction: column; gap: 4px; }
+.credential-callout strong { font-size: 0.75rem; }
+.credential-callout span { color: var(--text-3); font-size: 0.6875rem; }
+.credential-uri { display: flex; align-items: center; gap: 8px; margin-top: 5px; min-width: 0; }
+.credential-uri code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 5px 7px; border-radius: var(--r-sm); background: var(--surface-3); font-size: 0.625rem; }
+.credential-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.credential-checks { display: flex; gap: 16px; flex-wrap: wrap; }
+.storage-credentials-note { padding: 8px 20px 4px; min-height: 26px; font-size: 0.6875rem; color: var(--text-3); }
+.storage-credentials-dialog .dialog-foot { padding: 12px 20px 16px; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--border); }
+.dialog-foot-spacer { flex: 1; }
+.compose-attach-source { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: 0.625rem; color: var(--text-3); }
+.compose-attach-source .pref-select { width: 140px; height: 28px; font-size: 0.6875rem; }
+.attach-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.attach-save-all { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 0.625rem; }
+.attach-save-all svg { width: 13px; height: 13px; }
+.attach-item { display: flex; align-items: stretch; gap: 5px; }
+.attach-item .attach { flex: 1; }
+.attach-save {
+  width: 30px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.attach-save:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+.attach-save svg { width: 15px; height: 15px; }
+.confirm-dialog { width: min(430px, calc(100vw - 32px)); padding: 26px; text-align: center; }
+.confirm-icon { width: 50px; height: 50px; margin: 0 auto 13px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); }
+.confirm-icon svg { width: 23px; height: 23px; }
+.confirm-icon.is-danger { background: var(--danger-soft); color: var(--danger); }
+.confirm-icon.is-warning { background: var(--warning-soft); color: var(--warning); }
+.confirm-dialog h2 { margin: 0 0 7px; font-size: 1.125rem; }
+.confirm-dialog p { margin: 0; color: var(--text-2); font-size: 0.8125rem; line-height: 1.55; }
+.confirm-actions { display: flex; justify-content: center; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+.domain-blocked-dialog { width: min(620px, calc(100vw - 32px)); }
+.domain-blocked-records { display: flex; flex-direction: column; gap: 7px; margin: 16px 0; max-height: 290px; overflow-y: auto; }
+.domain-record-row { display: flex; gap: 10px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.domain-record-purpose { flex: none; width: 72px; font-size: 0.5625rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.domain-record-row > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.domain-record-row strong { font-size: 0.625rem; color: var(--accent-ink); }
+.domain-record-row code { word-break: break-all; font-size: 0.625rem; color: var(--text-2); }
+@media (max-width: 640px) {
+  .credential-grid { grid-template-columns: 1fr; }
+  .storage-credentials-tabs { padding-left: 14px; padding-right: 14px; }
+  .storage-credentials-body { padding-left: 14px; padding-right: 14px; }
+  .storage-credentials-dialog .dialog-foot { padding-left: 14px; padding-right: 14px; flex-wrap: wrap; }
+  .default-storage-pick { display: none; }
+}

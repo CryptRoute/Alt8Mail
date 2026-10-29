@@ -148,6 +148,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.requireUser(s.deleteTask))
 
 	mux.HandleFunc("GET /api/storage", s.requireUser(s.getStorage))
+	mux.HandleFunc("PUT /api/storage/default", s.requireUser(s.setDefaultStorage))
+	mux.HandleFunc("GET /api/storage/credentials", s.requireUser(s.getStorageCredentials))
+	mux.HandleFunc("PUT /api/storage/credentials/{provider}", s.requireUser(s.putStorageCredentials))
+	mux.HandleFunc("DELETE /api/storage/credentials/{provider}", s.requireUser(s.deleteStorageCredentials))
 	mux.HandleFunc("POST /api/storage/{id}/{action}", s.requireUser(s.storageAction))
 	mux.HandleFunc("GET /api/storage/oauth/{provider}/start", s.requireUser(s.startStorageOAuth))
 	mux.HandleFunc("GET /api/storage/oauth/{provider}/callback", s.storageOAuthCallback)
@@ -542,6 +546,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"files":            files,
 		"calendarEvents":   calendarEvents,
 		"storageProviders": providers,
+		"defaultStorage":   s.defaultStorageProvider(ctx, sess.User.ID),
 		"tenantPolicy": map[string]any{
 			"mail": map[string]any{"externalTag": policy.Mail.ExternalTag},
 			"directory": map[string]any{

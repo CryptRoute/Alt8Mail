@@ -77,7 +77,7 @@ func (s *Server) publicStorageProviders(ctx context.Context, user userRecord) ([
 		fileRows.Close()
 	}
 	providers := []map[string]any{}
-	for _, provider := range s.storageProviderDefs() {
+	for _, provider := range s.storageProviderDefsFor(ctx, user.TenantID) {
 		account, hasAccount := accounts[provider.ID]
 		connected := false
 		accountEmail := ""
@@ -93,7 +93,7 @@ func (s *Server) publicStorageProviders(ctx context.Context, user userRecord) ([
 		} else if provider.Kind == "s3" {
 			if hasAccount && account.Status == "connected" {
 				connected = true
-				accountEmail = firstNonEmpty(account.AccountEmail, s.cfg.S3Bucket)
+				accountEmail = firstNonEmpty(account.AccountEmail, s.storageRuntimeConfig(ctx, user.TenantID, "s3").Bucket)
 				status = "synced"
 				used = account.UsedBytes
 				limit = account.LimitBytes

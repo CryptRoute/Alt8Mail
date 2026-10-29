@@ -389,6 +389,20 @@ decisions and audit entries.
 - **Undo move/delete** — folder moves, archives and deletes return an undo
   token valid for 30 seconds; the toast exposes Undo for 12 seconds. Permanent
   deletes from Trash can be undone as well.
+- **Cabinet and connected storage** — the Files workspace is now **Cabinet**,
+  with a filing-cabinet icon and a disk-with-cloud mark for Alt8Mail Drive. It
+  stores uploads and mail attachments. A per-user default storage provider is
+  used for **Save to Cabinet** and for the compose "Attach from" picker.
+  Tenant owners and administrators can configure Google Drive, Dropbox,
+  OneDrive and S3/MinIO credentials in the storage modal or Settings → Storage;
+  OAuth client secrets and S3 secret keys are sealed in PostgreSQL.
+- **Attachment save actions** — received attachments expose individual **Save**
+  actions and **Save all to Cabinet**, with the destination following the
+  user's default storage provider.
+- **DNS-gated sending** — outbound send is refused until the sender domain has
+  a matching `_a8m-verification` TXT value plus the required MX, SPF, DKIM and
+  DMARC records. The webmail shows a structured missing-record dialog instead
+  of sending in the background.
 - **Server-backed compose sessions** — every compose window is a server draft,
   autosaved on a debounce and flushed on tab hide. Reload/navigate and the
   compose windows come back with recipient, subject, body, attachments and the

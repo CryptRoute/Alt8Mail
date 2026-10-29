@@ -82,7 +82,7 @@ func (s *Server) publicShareContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "SHARE_NOT_FOUND", "This share link is invalid or has expired")
 		return
 	}
-	s.serveFileContent(w, r, share.contentFile, share.OwnerID)
+	s.serveFileContent(w, r, share.contentFile, share.OwnerID, share.TenantID)
 }
 
 var publicShareTemplate = template.Must(template.New("share").Parse(`<!doctype html>
@@ -199,7 +199,7 @@ func (s *Server) publicShareReplace(w http.ResponseWriter, r *http.Request) {
 		}
 	case "s3":
 		storageKey = fmt.Sprintf("tenants/%s/users/%s/files/%s/%s", share.TenantID, share.OwnerID, share.ID, name)
-		if err := s.s3PutObject(r.Context(), storageKey, mime, data); err != nil {
+		if err := s.s3PutObject(r.Context(), share.TenantID, storageKey, mime, data); err != nil {
 			http.Error(w, "The S3 upload failed.", http.StatusBadGateway)
 			return
 		}

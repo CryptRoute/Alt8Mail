@@ -19,44 +19,39 @@ type oauthProviderConfig struct {
 	ExtraAuth                     map[string]string
 }
 
-func (s *Server) oauthConfig(providerID string) (oauthProviderConfig, string, bool) {
+func (s *Server) oauthConfig(ctx context.Context, tenantID, providerID string) (oauthProviderConfig, string, string, bool) {
+	cfg := s.storageRuntimeConfig(ctx, tenantID, providerID)
+	if !cfg.Enabled || !cfg.Configured || cfg.ClientID == "" || cfg.ClientSecret == "" {
+		return oauthProviderConfig{}, "", "", false
+	}
 	switch providerID {
 	case "gdrive":
-		if s.cfg.GoogleClientID == "" || s.cfg.GoogleClientSecret == "" {
-			return oauthProviderConfig{}, "", false
-		}
 		return oauthProviderConfig{
 			AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth",
 			TokenURL:     "https://oauth2.googleapis.com/token",
 			Scope:        "openid email https://www.googleapis.com/auth/drive",
 			ExtraAuth:    map[string]string{"access_type": "offline", "prompt": "consent"},
-		}, s.cfg.GoogleClientID, true
+		}, cfg.ClientID, cfg.ClientSecret, true
 	case "dropbox":
-		if s.cfg.DropboxClientID == "" || s.cfg.DropboxClientSecret == "" {
-			return oauthProviderConfig{}, "", false
-		}
 		return oauthProviderConfig{
 			AuthorizeURL: "https://www.dropbox.com/oauth2/authorize",
 			TokenURL:     "https://api.dropboxapi.com/oauth2/token",
 			Scope:        "account_info.read files.metadata.read files.content.read files.content.write",
 			ExtraAuth:    map[string]string{"token_access_type": "offline"},
-		}, s.cfg.DropboxClientID, true
+		}, cfg.ClientID, cfg.ClientSecret, true
 	case "onedrive":
-		if s.cfg.MicrosoftClientID == "" || s.cfg.MicrosoftClientSecret == "" {
-			return oauthProviderConfig{}, "", false
-		}
 		return oauthProviderConfig{
 			AuthorizeURL: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
 			TokenURL:     "https://login.microsoftonline.com/common/oauth2/v2.0/token",
 			Scope:        "offline_access Files.ReadWrite User.Read",
 			ExtraAuth:    map[string]string{"prompt": "consent"},
-		}, s.cfg.MicrosoftClientID, true
+		}, cfg.ClientID, cfg.ClientSecret, true
 	}
-	return oauthProviderConfig{}, "", false
+	return oauthProviderConfig{}, "", "", false
 }
 
 func (s *Server) beginStorageOAuth(ctx context.Context, sess *sessionRecord, providerID string) (string, error) {
-	config, clientID, ok := s.oauthConfig(providerID)
+	config, clientID, _, ok := s.oauthConfig(ctx, sess.User.TenantID, providerID)
 	if !ok {
 		return "", fmt.Errorf("OAuth is not configured for %s", providerID)
 	}
@@ -107,12 +102,12 @@ func (s *Server) storageOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		s.redirectOAuthResult(w, r, "error", "OAuth state is invalid or expired")
 		return
 	}
-	config, clientID, ok := s.oauthConfig(providerID)
+	config, clientID, clientSecret, ok := s.oauthConfig(r.Context(), tenantID, providerID)
 	if !ok {
 		s.redirectOAuthResult(w, r, "error", "OAuth provider is not configured")
 		return
 	}
-	token, err := s.exchangeOAuthCode(r.Context(), config, clientID, providerID, code)
+	token, err := s.exchangeOAuthCode(r.Context(), config, clientID, clientSecret, providerID, code)
 	if err != nil {
 		s.redirectOAuthResult(w, r, "error", err.Error())
 		return
@@ -168,16 +163,7 @@ type oauthToken struct {
 	TokenType    string `json:"token_type"`
 }
 
-func (s *Server) exchangeOAuthCode(ctx context.Context, config oauthProviderConfig, clientID, providerID, code string) (oauthToken, error) {
-	clientSecret := ""
-	switch providerID {
-	case "gdrive":
-		clientSecret = s.cfg.GoogleClientSecret
-	case "dropbox":
-		clientSecret = s.cfg.DropboxClientSecret
-	case "onedrive":
-		clientSecret = s.cfg.MicrosoftClientSecret
-	}
+func (s *Server) exchangeOAuthCode(ctx context.Context, config oauthProviderConfig, clientID, clientSecret, providerID, code string) (oauthToken, error) {
 	form := url.Values{
 		"grant_type": {"authorization_code"}, "code": {code}, "client_id": {clientID},
 		"client_secret": {clientSecret}, "redirect_uri": {s.oauthRedirectURL(providerID)},
@@ -236,12 +222,12 @@ func (s *Server) oauthAccountEmail(ctx context.Context, providerID, accessToken 
 }
 
 func (s *Server) oauthAccessToken(ctx context.Context, userID, providerID string) (string, error) {
-	var accessEnc, refreshEnc string
+	var accessEnc, refreshEnc, tenantID string
 	var expiresAt *time.Time
 	err := s.store.DB.QueryRow(ctx, `
-		SELECT access_token_enc, refresh_token_enc, token_expires_at
+		SELECT access_token_enc, refresh_token_enc, token_expires_at, tenant_id::text
 		FROM storage_accounts WHERE user_id=$1 AND provider_id=$2 AND status='connected'
-	`, userID, providerID).Scan(&accessEnc, &refreshEnc, &expiresAt)
+	`, userID, providerID).Scan(&accessEnc, &refreshEnc, &expiresAt, &tenantID)
 	if err != nil {
 		return "", fmt.Errorf("%s is not connected", providerID)
 	}
@@ -252,18 +238,9 @@ func (s *Server) oauthAccessToken(ctx context.Context, userID, providerID string
 	if err != nil || refresh == "" {
 		return "", fmt.Errorf("%s authorization expired; reconnect the provider", providerID)
 	}
-	config, clientID, ok := s.oauthConfig(providerID)
+	config, clientID, clientSecret, ok := s.oauthConfig(ctx, tenantID, providerID)
 	if !ok {
 		return "", fmt.Errorf("OAuth provider is not configured")
-	}
-	clientSecret := ""
-	switch providerID {
-	case "gdrive":
-		clientSecret = s.cfg.GoogleClientSecret
-	case "dropbox":
-		clientSecret = s.cfg.DropboxClientSecret
-	case "onedrive":
-		clientSecret = s.cfg.MicrosoftClientSecret
 	}
 	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}, "client_id": {clientID}, "client_secret": {clientSecret}}
 	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, config.TokenURL, strings.NewReader(form.Encode()))

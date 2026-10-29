@@ -16,18 +16,19 @@ import (
 
 const maxS3ObjectBytes = 100 * 1024 * 1024
 
-func (s *Server) s3Client(ctx context.Context) (*s3.Client, error) {
-	if !s.s3Configured() {
-		return nil, fmt.Errorf("S3/MinIO is not configured")
+func (s *Server) s3Client(ctx context.Context, tenantID string) (*s3.Client, error) {
+	runtime, err := s.s3Runtime(ctx, tenantID)
+	if err != nil {
+		return nil, err
 	}
-	region := s.cfg.S3Region
+	region := runtime.Region
 	if region == "" {
 		region = "us-east-1"
 	}
-	endpoint := strings.TrimSpace(s.cfg.S3Endpoint)
+	endpoint := strings.TrimSpace(runtime.Endpoint)
 	if endpoint != "" && !strings.Contains(endpoint, "://") {
 		scheme := "https"
-		if !s.cfg.S3UseSSL {
+		if !runtime.UseSSL {
 			scheme = "http"
 		}
 		endpoint = scheme + "://" + endpoint
@@ -35,63 +36,79 @@ func (s *Server) s3Client(ctx context.Context) (*s3.Client, error) {
 	loaded, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(region),
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-			s.cfg.S3AccessKey, s.cfg.S3SecretKey, "",
+			runtime.AccessKey, runtime.SecretKey, "",
 		)),
 	)
 	if err != nil {
 		return nil, err
 	}
 	return s3.NewFromConfig(loaded, func(options *s3.Options) {
-		options.UsePathStyle = s.cfg.S3PathStyle
+		options.UsePathStyle = runtime.PathStyle
 		if endpoint != "" {
 			options.BaseEndpoint = aws.String(endpoint)
 		}
 	}), nil
 }
 
-func (s *Server) checkS3(ctx context.Context) error {
-	client, err := s.s3Client(ctx)
+func (s *Server) checkS3(ctx context.Context, tenantID string) error {
+	client, err := s.s3Client(ctx, tenantID)
 	if err != nil {
 		return err
 	}
-	_, err = client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.cfg.S3Bucket)})
+	runtime, err := s.s3Runtime(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	_, err = client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(runtime.Bucket)})
 	return err
 }
 
-func (s *Server) s3PutObject(ctx context.Context, key, contentType string, data []byte) error {
-	client, err := s.s3Client(ctx)
+func (s *Server) s3PutObject(ctx context.Context, tenantID, key, contentType string, data []byte) error {
+	client, err := s.s3Client(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	runtime, err := s.s3Runtime(ctx, tenantID)
 	if err != nil {
 		return err
 	}
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(s.cfg.S3Bucket), Key: aws.String(key),
+		Bucket: aws.String(runtime.Bucket), Key: aws.String(key),
 		Body: bytes.NewReader(data), ContentType: aws.String(contentType),
 		ContentLength: aws.Int64(int64(len(data))),
 	})
 	return err
 }
 
-func (s *Server) s3DeleteObject(ctx context.Context, key string) error {
+func (s *Server) s3DeleteObject(ctx context.Context, tenantID, key string) error {
 	if key == "" {
 		return nil
 	}
-	client, err := s.s3Client(ctx)
+	client, err := s.s3Client(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	runtime, err := s.s3Runtime(ctx, tenantID)
 	if err != nil {
 		return err
 	}
 	_, err = client.DeleteObject(ctx, &s3.DeleteObjectInput{
-		Bucket: aws.String(s.cfg.S3Bucket), Key: aws.String(key),
+		Bucket: aws.String(runtime.Bucket), Key: aws.String(key),
 	})
 	return err
 }
 
-func (s *Server) s3GetObject(ctx context.Context, key string) ([]byte, error) {
-	client, err := s.s3Client(ctx)
+func (s *Server) s3GetObject(ctx context.Context, tenantID, key string) ([]byte, error) {
+	client, err := s.s3Client(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	runtime, err := s.s3Runtime(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	object, err := client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(s.cfg.S3Bucket), Key: aws.String(key),
+		Bucket: aws.String(runtime.Bucket), Key: aws.String(key),
 	})
 	if err != nil {
 		return nil, err
@@ -108,13 +125,17 @@ func (s *Server) s3GetObject(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (s *Server) syncS3Provider(ctx context.Context, sess *sessionRecord) error {
-	client, err := s.s3Client(ctx)
+	client, err := s.s3Client(ctx, sess.User.TenantID)
+	if err != nil {
+		return err
+	}
+	runtime, err := s.s3Runtime(ctx, sess.User.TenantID)
 	if err != nil {
 		return err
 	}
 	prefix := fmt.Sprintf("tenants/%s/users/%s/files/", sess.User.TenantID, sess.User.ID)
 	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
-		Bucket: aws.String(s.cfg.S3Bucket), Prefix: aws.String(prefix),
+		Bucket: aws.String(runtime.Bucket), Prefix: aws.String(prefix),
 	})
 	var total int64
 	seenKeys := []string{}
