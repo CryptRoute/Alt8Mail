@@ -1,0 +1,13 @@
+[DEFAULT]
+backend = systemd
+banaction = ufw
+# Never ban loopback: the System Control terminal authenticates to sshd over
+# 127.0.0.1, and a UFW reject for ::1/127.0.0.1 would break local mail and SSH.
+ignoreip = 127.0.0.1/8 ::1
+bantime = 1h
+findtime = 10m
+maxretry = 5
+
+[sshd]
+enabled = true
+port = ssh

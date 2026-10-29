@@ -1,0 +1,57 @@
+package httpapi
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestSanitizeComposeHTML(t *testing.T) {
+	raw := `<p style="text-align:center;color:#123456" onclick="alert(1)">Hello <strong>team</strong></p>` +
+		`<script>alert(1)</script><a href="javascript:alert(1)">bad</a>` +
+		`<a href="https://example.com">good</a><iframe src="https://evil.test"></iframe>`
+	clean := sanitizeComposeHTML(raw)
+	if strings.Contains(strings.ToLower(clean), "script") ||
+		strings.Contains(strings.ToLower(clean), "onclick") ||
+		strings.Contains(strings.ToLower(clean), "javascript:") ||
+		strings.Contains(strings.ToLower(clean), "iframe") {
+		t.Fatalf("sanitizer retained active content: %s", clean)
+	}
+	if !strings.Contains(clean, "text-align") || !strings.Contains(clean, "https://example.com") {
+		t.Fatalf("sanitizer removed safe formatting: %s", clean)
+	}
+}
+
+func TestSanitizeComposeHTMLFonts(t *testing.T) {
+	clean := sanitizeComposeHTML(`<p style="font-family:&quot;Segoe UI&quot;, Arial, sans-serif;font-size:15px">Hello</p>`)
+	if !strings.Contains(clean, "font-family") || !strings.Contains(clean, "font-size") {
+		t.Fatalf("safe font formatting was removed: %s", clean)
+	}
+	unsafe := sanitizeComposeHTML(`<span style="font-family: Arial; background-image: url(https://evil.test/x); font-size: expression(alert(1))">x</span>`)
+	if strings.Contains(strings.ToLower(unsafe), "url(") || strings.Contains(strings.ToLower(unsafe), "expression") {
+		t.Fatalf("unsafe font CSS survived sanitization: %s", unsafe)
+	}
+}
+
+func TestNormalizeComposeBody(t *testing.T) {
+	htmlBody, textBody := normalizeComposeBody("", "Hello\n\nTeam")
+	if !strings.Contains(htmlBody, "<p>Hello</p>") || !strings.Contains(textBody, "Hello") {
+		t.Fatalf("plain text was not converted: %q / %q", htmlBody, textBody)
+	}
+	htmlBody, textBody = normalizeComposeBody("<p>Hello <strong>Team</strong></p>", "")
+	if strings.TrimSpace(textBody) != "Hello Team" {
+		t.Fatalf("HTML text extraction = %q", textBody)
+	}
+}
+
+func TestRenderForwarding(t *testing.T) {
+	lines := renderForwarding(map[string]any{
+		"enabled": true, "target": "archive@example.com", "keepCopy": false,
+		"permanent": false, "start": "2026-10-01", "end": "2026-12-31",
+	})
+	script := strings.Join(lines, "\n")
+	for _, expected := range []string{"redirect \"archive@example.com\";", "stop;", "currentdate"} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("forwarding script missing %q:\n%s", expected, script)
+		}
+	}
+}

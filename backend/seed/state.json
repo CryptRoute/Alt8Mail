@@ -1,0 +1,3117 @@
+{
+  "version": 2,
+  "createdAt": "2026-10-28T04:56:09.395Z",
+  "user": {
+    "name": "Avery Chen",
+    "email": "avery.chen@meridian.test",
+    "initials": "AC",
+    "color": "#34557a",
+    "role": "VP Product",
+    "company": "Meridian",
+    "team": "Product",
+    "phone": "+1 (415) 555-0101",
+    "location": "San Francisco",
+    "reportsTo": "Dana Whitfield, CEO",
+    "timezone": "America/Los_Angeles",
+    "quota": {
+      "limitBytes": 16106127360,
+      "baselineUsedBytes": 2547224781
+    },
+    "aliases": [
+      {
+        "id": "primary",
+        "email": "avery.chen@meridian.test",
+        "label": "Avery Chen",
+        "kind": "primary",
+        "canSend": true,
+        "reason": ""
+      },
+      {
+        "id": "short",
+        "email": "a.chen@meridian.test",
+        "label": "Avery Chen (short)",
+        "kind": "alias",
+        "canSend": true,
+        "reason": ""
+      },
+      {
+        "id": "product",
+        "email": "product@meridian.test",
+        "label": "Product Team",
+        "kind": "shared",
+        "canSend": true,
+        "reason": ""
+      },
+      {
+        "id": "support",
+        "email": "support@meridian.test",
+        "label": "Support queue",
+        "kind": "shared",
+        "canSend": false,
+        "reason": "Requires delegated access"
+      }
+    ],
+    "trustedSenders": [],
+    "outbound": {
+      "limit": 200,
+      "windowHours": 24,
+      "baselineUsed": 37,
+      "events": []
+    },
+    "preferences": {
+      "language": "en-US",
+      "timeFormat": "12h",
+      "dateFormat": "auto",
+      "timeZone": "America/Los_Angeles",
+      "weekStart": "monday",
+      "workStart": "09:00",
+      "workEnd": "17:00",
+      "workDays": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "defaultFrom": "avery.chen@meridian.test",
+      "signatureEnabled": true,
+      "signature": "Avery Chen\nVP Product · Meridian\n+1 (415) 555-0101",
+      "autoAdvance": false
+    }
+  },
+  "folders": [
+    {
+      "id": "inbox",
+      "label": "Inbox",
+      "icon": "i-inbox",
+      "section": "favorites"
+    },
+    {
+      "id": "starred",
+      "label": "Starred",
+      "icon": "i-star",
+      "section": "favorites",
+      "virtual": true
+    },
+    {
+      "id": "sent",
+      "label": "Sent",
+      "icon": "i-send",
+      "section": "folders"
+    },
+    {
+      "id": "drafts",
+      "label": "Drafts",
+      "icon": "i-file",
+      "section": "folders"
+    },
+    {
+      "id": "archive",
+      "label": "Archive",
+      "icon": "i-archive",
+      "section": "folders"
+    },
+    {
+      "id": "spam",
+      "label": "Spam",
+      "icon": "i-alert",
+      "section": "folders"
+    },
+    {
+      "id": "trash",
+      "label": "Trash",
+      "icon": "i-trash",
+      "section": "folders"
+    }
+  ],
+  "people": [
+    {
+      "name": "Elena Vasquez",
+      "role": "VP Product",
+      "company": "Meridian",
+      "team": "Product",
+      "email": "elena.vasquez@meridian.test",
+      "phone": "+1 (415) 555-0138",
+      "location": "San Francisco",
+      "reportsTo": "Dana Whitfield, CEO",
+      "initials": "EV",
+      "color": "#34557a"
+    },
+    {
+      "name": "Marcus Webb",
+      "role": "Legal Counsel",
+      "company": "Meridian",
+      "team": "Legal",
+      "email": "marcus.webb@meridian.test",
+      "phone": "+1 (415) 555-0112",
+      "location": "New York",
+      "reportsTo": "Dana Whitfield, CEO",
+      "initials": "MW",
+      "color": "#3d6b62"
+    },
+    {
+      "name": "Nora Patel",
+      "role": "Design Lead",
+      "company": "Meridian",
+      "team": "Design",
+      "email": "nora.patel@meridian.test",
+      "phone": "+1 (415) 555-0164",
+      "location": "San Francisco",
+      "reportsTo": "Elena Vasquez, VP Product",
+      "initials": "NP",
+      "color": "#5b4a7e"
+    },
+    {
+      "name": "Priya Shah",
+      "role": "Finance Manager",
+      "company": "Meridian",
+      "team": "Finance",
+      "email": "priya.shah@meridian.test",
+      "phone": "+1 (415) 555-0179",
+      "location": "London",
+      "reportsTo": "Dana Whitfield, CEO",
+      "initials": "PS",
+      "color": "#7a4a5c"
+    },
+    {
+      "name": "Tomás Ribeiro",
+      "role": "Customer Success Lead",
+      "company": "Meridian",
+      "team": "Customer Success",
+      "email": "tomas.ribeiro@meridian.test",
+      "phone": "+1 (415) 555-0193",
+      "location": "Lisbon",
+      "reportsTo": "Elena Vasquez, VP Product",
+      "initials": "TR",
+      "color": "#7a5a3a"
+    },
+    {
+      "name": "Lena Fischer",
+      "role": "People Operations",
+      "company": "Meridian",
+      "team": "People",
+      "email": "lena.fischer@meridian.test",
+      "phone": "+1 (415) 555-0147",
+      "location": "Berlin",
+      "reportsTo": "Dana Whitfield, CEO",
+      "initials": "LF",
+      "color": "#3f6570"
+    },
+    {
+      "name": "Daniel Kim",
+      "role": "Data & Analytics",
+      "company": "Meridian",
+      "team": "Data",
+      "email": "daniel.kim@meridian.test",
+      "phone": "+1 (415) 555-0125",
+      "location": "San Francisco",
+      "reportsTo": "Elena Vasquez, VP Product",
+      "initials": "DK",
+      "color": "#476b4f"
+    },
+    {
+      "name": "Aisha Bello",
+      "role": "Engineering Manager",
+      "company": "Meridian",
+      "team": "Engineering",
+      "email": "aisha.bello@meridian.test",
+      "phone": "+1 (415) 555-0186",
+      "location": "London",
+      "reportsTo": "Dana Whitfield, CEO",
+      "initials": "AB",
+      "color": "#4f5673"
+    }
+  ],
+  "messages": [
+    {
+      "id": "m1",
+      "threadId": "t1",
+      "folder": "inbox",
+      "from": {
+        "name": "Elena Vasquez",
+        "email": "elena.vasquez@meridian.test",
+        "initials": "EV",
+        "color": "#34557a"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Q4 roadmap review — Thursday 10:00",
+      "snippet": "I pulled the revised scope into the deck and trimmed the wish list to what we can ship before the holidays.",
+      "bodyHtml": "<p>Hi Avery,</p>\n<p>I pulled the revised scope into the deck and trimmed the wish list to what we can realistically ship before the holidays. The two open questions are:</p>\n<ol><li>Do we keep the shared-inbox beta in Q4, or move it to January?</li><li>Is the analytics export a launch blocker, or can it follow a week later?</li></ol>\n<p>I'd like to settle both on Thursday so we can lock the plan. I'll send an agenda Wednesday morning.</p>\n<p>Thanks,<br>Elena</p><p class=\"sig\">Elena Vasquez<br><span>VP Product · Meridian</span></p>",
+      "bodyText": "Hi Avery, I pulled the revised scope into the deck and trimmed the wish list to what we can realistically ship before the holidays. The two open questions are: Do we keep the shared-inbox beta in Q4, or move it to January? Is the analytics export a launch blocker, or can it follow a week later? I'd like to settle both on Thursday so we can lock the plan. I'll send an agenda Wednesday morning. Thanks, Elena Elena Vasquez VP Product · Meridian",
+      "date": "2026-10-28T02:51:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [
+        {
+          "id": "att_fa499222",
+          "name": "Q4-roadmap-v3.pdf",
+          "size": "2.4 MB",
+          "sizeBytes": 2516582,
+          "type": "PDF",
+          "mime": "application/pdf",
+          "contentUrl": "/samples/Q4-roadmap-v3.pdf",
+          "previewable": true
+        },
+        {
+          "id": "att_1426c2ee",
+          "name": "Launch-scope.xlsx",
+          "size": "480 KB",
+          "sizeBytes": 491520,
+          "type": "XLS",
+          "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "contentUrl": null,
+          "previewable": false
+        }
+      ],
+      "categories": [
+        "decision",
+        "product"
+      ],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": {
+        "title": "Q4 roadmap review",
+        "day": "Thursday, October 29",
+        "time": "10:00–11:00",
+        "where": "Conference Room B · Teams",
+        "attendees": 6,
+        "response": null
+      },
+      "sizeBytes": 3016294,
+      "messageId": "<m1@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m2",
+      "threadId": "t1",
+      "folder": "sent",
+      "from": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "to": [
+        {
+          "name": "Elena Vasquez",
+          "email": "elena.vasquez@meridian.test",
+          "initials": "EV",
+          "color": "#34557a"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Q4 roadmap review — Thursday 10:00",
+      "snippet": "The deck looks tight. I'd keep the shared-inbox beta in Q4 and move the analytics export to early January.",
+      "bodyHtml": "<p>Elena —</p><p>The deck looks tight. I'd keep the shared-inbox beta in Q4 and move the analytics export to early January, as long as support has the macro library ready.</p><p>I'll bring both questions to Thursday.</p><p>Avery</p>",
+      "bodyText": "Elena — The deck looks tight. I'd keep the shared-inbox beta in Q4 and move the analytics export to early January, as long as support has the macro library ready. I'll bring both questions to Thursday. Avery",
+      "date": "2026-10-28T02:58:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 16384,
+      "messageId": "<m2@meridian.test>",
+      "inReplyTo": "<m1@meridian.test>",
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m3",
+      "threadId": "t1",
+      "folder": "inbox",
+      "from": {
+        "name": "Elena Vasquez",
+        "email": "elena.vasquez@meridian.test",
+        "initials": "EV",
+        "color": "#34557a"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Q4 roadmap review — Thursday 10:00",
+      "snippet": "One more thing for the agenda: support asked for a hard date on the macro library.",
+      "bodyHtml": "<p>One more thing for the agenda: support asked for a hard date on the macro library. Could you bring the latest estimate?</p><p>Thanks — Elena</p>",
+      "bodyText": "One more thing for the agenda: support asked for a hard date on the macro library. Could you bring the latest estimate? Thanks — Elena",
+      "date": "2026-10-28T04:18:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [
+        "decision"
+      ],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 9216,
+      "messageId": "<m3@meridian.test>",
+      "inReplyTo": "<m2@meridian.test>",
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m4",
+      "threadId": "t2",
+      "folder": "inbox",
+      "from": {
+        "name": "Jordan Blake",
+        "email": "jordan.blake@brightline.example",
+        "initials": "JB",
+        "color": "#8a6a3a",
+        "company": "Brightline"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Brightline — signed order form and next steps",
+      "snippet": "Attaching the countersigned order form. Procurement approved the annual term; security is finishing its review.",
+      "bodyHtml": "<p>Avery,</p><p>Attaching the countersigned order form. Procurement has approved the annual term; our security team is finishing its review and we expect to close by Friday.</p><p>Could you confirm the billing contact and the PO reference when you have a moment?</p><p>Jordan</p><p class=\"sig\">Jordan Blake<br><span>Brightline</span></p>",
+      "bodyText": "Avery, Attaching the countersigned order form. Procurement has approved the annual term; our security team is finishing its review and we expect to close by Friday. Could you confirm the billing contact and the PO reference when you have a moment? Jordan Jordan Blake Brightline",
+      "date": "2026-10-28T01:51:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [
+        {
+          "id": "att_e4057b8e",
+          "name": "Brightline-order-form.pdf",
+          "size": "1.8 MB",
+          "sizeBytes": 1887437,
+          "type": "PDF",
+          "mime": "application/pdf",
+          "contentUrl": "/samples/Brightline-order-form.pdf",
+          "previewable": true
+        }
+      ],
+      "categories": [
+        "sales"
+      ],
+      "classification": "Internal",
+      "external": true,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "198.51.100.24",
+        "signer": "brightline.example",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 1895629,
+      "messageId": "<m4@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m5",
+      "threadId": "t2",
+      "folder": "sent",
+      "from": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "to": [
+        {
+          "name": "Jordan Blake",
+          "email": "jordan.blake@brightline.example",
+          "initials": "JB",
+          "color": "#8a6a3a",
+          "company": "Brightline"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Brightline — signed order form and next steps",
+      "snippet": "Jordan, Received — thank you. Billing contact is Priya Shah; the PO reference is PO-2026-0418. Avery",
+      "bodyHtml": "<p>Jordan,</p><p>Received — thank you. Billing contact is Priya Shah; the PO reference is PO-2026-0418.</p><p>Avery</p>",
+      "bodyText": "Jordan, Received — thank you. Billing contact is Priya Shah; the PO reference is PO-2026-0418. Avery",
+      "date": "2026-10-28T02:16:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 18432,
+      "messageId": "<m5@meridian.test>",
+      "inReplyTo": "<m4@meridian.test>",
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m6",
+      "threadId": "t2",
+      "folder": "inbox",
+      "from": {
+        "name": "Jordan Blake",
+        "email": "jordan.blake@brightline.example",
+        "initials": "JB",
+        "color": "#8a6a3a",
+        "company": "Brightline"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Brightline — signed order form and next steps",
+      "snippet": "Perfect. Security signed off this morning — we are cleared to start onboarding Monday.",
+      "bodyHtml": "<p>Perfect. Security signed off this morning — we're cleared to start onboarding Monday.</p><p>I'll ask our team to send the kickoff invite.</p><p>Jordan</p>",
+      "bodyText": "Perfect. Security signed off this morning — we're cleared to start onboarding Monday. I'll ask our team to send the kickoff invite. Jordan",
+      "date": "2026-10-28T04:06:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [
+        "sales"
+      ],
+      "classification": "Internal",
+      "external": true,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "198.51.100.24",
+        "signer": "brightline.example",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<m6@meridian.test>",
+      "inReplyTo": "<m5@meridian.test>",
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m7",
+      "threadId": "t3",
+      "folder": "inbox",
+      "from": {
+        "name": "Marcus Webb",
+        "email": "marcus.webb@meridian.test",
+        "initials": "MW",
+        "color": "#3d6b62"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Contract renewal — legal has signed off",
+      "snippet": "Good news: the redlines are cleared and the countersigned copy is on its way.",
+      "bodyHtml": "<p>Avery —</p><p>Good news from legal: the redlines are cleared and the countersigned copy is on its way. Nothing further is needed from your side this week. I'll file the executed agreement once it lands and send you the reference number.</p><p>Marcus</p>",
+      "bodyText": "Avery — Good news from legal: the redlines are cleared and the countersigned copy is on its way. Nothing further is needed from your side this week. I'll file the executed agreement once it lands and send you the reference number. Marcus",
+      "date": "2026-10-28T00:41:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [
+        "legal"
+      ],
+      "classification": "Confidential",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 43008,
+      "messageId": "<m7@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m8",
+      "threadId": "t3",
+      "folder": "sent",
+      "from": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "to": [
+        {
+          "name": "Marcus Webb",
+          "email": "marcus.webb@meridian.test",
+          "initials": "MW",
+          "color": "#3d6b62"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Contract renewal — legal has signed off",
+      "snippet": "Marcus, Thanks for pushing this through. Let me know when the countersigned copy is filed and I'll update the vendor record. Avery",
+      "bodyHtml": "<p>Marcus,</p><p>Thanks for pushing this through. Let me know when the countersigned copy is filed and I'll update the vendor record.</p><p>Avery</p>",
+      "bodyText": "Marcus, Thanks for pushing this through. Let me know when the countersigned copy is filed and I'll update the vendor record. Avery",
+      "date": "2026-10-28T01:01:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 12288,
+      "messageId": "<m8@meridian.test>",
+      "inReplyTo": "<m7@meridian.test>",
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m9",
+      "threadId": "t3",
+      "folder": "inbox",
+      "from": {
+        "name": "Marcus Webb",
+        "email": "marcus.webb@meridian.test",
+        "initials": "MW",
+        "color": "#3d6b62"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Contract renewal — legal has signed off",
+      "snippet": "Filed under REF-2026-1019. I've copied the executed copy into the vendor folder.",
+      "bodyHtml": "<p>Filed under REF-2026-1019. I've copied the executed copy into the vendor folder.</p><p>Marcus</p>",
+      "bodyText": "Filed under REF-2026-1019. I've copied the executed copy into the vendor folder. Marcus",
+      "date": "2026-10-28T02:36:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [
+        "legal"
+      ],
+      "classification": "Confidential",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<m9@meridian.test>",
+      "inReplyTo": "<m8@meridian.test>",
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m10",
+      "threadId": "t4",
+      "folder": "inbox",
+      "from": {
+        "name": "Nora Patel",
+        "email": "nora.patel@meridian.test",
+        "initials": "NP",
+        "color": "#5b4a7e"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Design review notes + updated flows",
+      "snippet": "Thanks for the sharp feedback yesterday. I folded the empty-state notes into the flows and tightened the first-run copy.",
+      "bodyHtml": "<p>Hi Avery,</p><p>Thanks for the sharp feedback yesterday. I folded the empty-state notes into the flows and tightened the first-run copy. The updated prototype is linked in the doc.</p><p>Could you take another pass before Thursday? I'm most unsure about the second step — it may be doing too much for one screen.</p><p>Nora</p><p class=\"sig\">Nora Patel<br><span>Design Lead · Meridian</span></p>",
+      "bodyText": "Hi Avery, Thanks for the sharp feedback yesterday. I folded the empty-state notes into the flows and tightened the first-run copy. The updated prototype is linked in the doc. Could you take another pass before Thursday? I'm most unsure about the second step — it may be doing too much for one screen. Nora Nora Patel Design Lead · Meridian",
+      "date": "2026-10-27T22:36:09.395Z",
+      "unread": false,
+      "starred": true,
+      "draft": false,
+      "attachments": [
+        {
+          "id": "att_f348bd78",
+          "name": "first-run-flows.pdf",
+          "size": "1.1 MB",
+          "sizeBytes": 1153434,
+          "type": "PDF",
+          "mime": "application/pdf",
+          "contentUrl": "/samples/first-run-flows.pdf",
+          "previewable": true
+        }
+      ],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 1161626,
+      "messageId": "<m10@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m11",
+      "threadId": "t4",
+      "folder": "sent",
+      "from": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "to": [
+        {
+          "name": "Nora Patel",
+          "email": "nora.patel@meridian.test",
+          "initials": "NP",
+          "color": "#5b4a7e"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Design review notes + updated flows",
+      "snippet": "Nora — The second step is close. I'd merge the permission prompt into step three and keep the copy short. I left two comments in the doc. Avery",
+      "bodyHtml": "<p>Nora —</p><p>The second step is close. I'd merge the permission prompt into step three and keep the copy short. I left two comments in the doc.</p><p>Avery</p>",
+      "bodyText": "Nora — The second step is close. I'd merge the permission prompt into step three and keep the copy short. I left two comments in the doc. Avery",
+      "date": "2026-10-27T23:46:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 14336,
+      "messageId": "<m11@meridian.test>",
+      "inReplyTo": "<m10@meridian.test>",
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m12",
+      "threadId": "t4",
+      "folder": "inbox",
+      "from": {
+        "name": "Nora Patel",
+        "email": "nora.patel@meridian.test",
+        "initials": "NP",
+        "color": "#5b4a7e"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Design review notes + updated flows",
+      "snippet": "Merged the permission prompt into step three. One question about the mobile empty state.",
+      "bodyHtml": "<p>Merged the permission prompt into step three. One question about the mobile empty state — should it mention search?</p><p>Nora</p>",
+      "bodyText": "Merged the permission prompt into step three. One question about the mobile empty state — should it mention search? Nora",
+      "date": "2026-10-28T03:51:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<m12@meridian.test>",
+      "inReplyTo": "<m11@meridian.test>",
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m13",
+      "threadId": "t5",
+      "folder": "inbox",
+      "from": {
+        "name": "Priya Shah",
+        "email": "priya.shah@meridian.test",
+        "initials": "PS",
+        "color": "#7a4a5c"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Invoice #4821 is ready for approval",
+      "snippet": "Please review before Friday; the PO number is on the second page.",
+      "bodyHtml": "<p>Hi Avery,</p><p>Invoice #4821 is ready for approval. Please review before Friday; the PO number is on the second page. If everything looks right, a one-line reply is enough and I'll route it to AP.</p><p>Thanks, Priya</p>",
+      "bodyText": "Hi Avery, Invoice #4821 is ready for approval. Please review before Friday; the PO number is on the second page. If everything looks right, a one-line reply is enough and I'll route it to AP. Thanks, Priya",
+      "date": "2026-10-27T20:56:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [
+        {
+          "id": "att_3c4cfc98",
+          "name": "invoice-4821.pdf",
+          "size": "312 KB",
+          "sizeBytes": 319488,
+          "type": "PDF",
+          "mime": "application/pdf",
+          "contentUrl": "/samples/invoice-4821.pdf",
+          "previewable": true
+        }
+      ],
+      "categories": [
+        "finance"
+      ],
+      "classification": "Confidential",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 327680,
+      "messageId": "<m13@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m14",
+      "threadId": "t5",
+      "folder": "inbox",
+      "from": {
+        "name": "Priya Shah",
+        "email": "priya.shah@meridian.test",
+        "initials": "PS",
+        "color": "#7a4a5c"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Invoice #4821 is ready for approval",
+      "snippet": "Quick reminder: AP closes the batch at 16:00 today.",
+      "bodyHtml": "<p>Quick reminder: AP closes the batch at 16:00 today.</p><p>Priya</p>",
+      "bodyText": "Quick reminder: AP closes the batch at 16:00 today. Priya",
+      "date": "2026-10-27T21:41:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [
+        "finance"
+      ],
+      "classification": "Confidential",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<m14@meridian.test>",
+      "inReplyTo": "<m13@meridian.test>",
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m15",
+      "threadId": "t6",
+      "folder": "inbox",
+      "from": {
+        "name": "Tomás Ribeiro",
+        "email": "tomas.ribeiro@meridian.test",
+        "initials": "TR",
+        "color": "#7a5a3a"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Customer call recap: Brightline",
+      "snippet": "Three themes came up: onboarding speed, reporting depth, and the export limits on the team plan.",
+      "bodyHtml": "<p>Avery,</p><p>Three themes came up on the Brightline call: onboarding speed, reporting depth, and the export limits on the team plan. I've written them up with quotes in the shared doc.</p><p>Want to fold the export issue into Thursday's agenda? It sounds like the most urgent one.</p><p>Tomás</p>",
+      "bodyText": "Avery, Three themes came up on the Brightline call: onboarding speed, reporting depth, and the export limits on the team plan. I've written them up with quotes in the shared doc. Want to fold the export issue into Thursday's agenda? It sounds like the most urgent one. Tomás",
+      "date": "2026-10-27T02:56:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<m15@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m16",
+      "threadId": "t7",
+      "folder": "inbox",
+      "from": {
+        "name": "Lena Fischer",
+        "email": "lena.fischer@meridian.test",
+        "initials": "LF",
+        "color": "#3f6570"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "You're invited: Product offsite — Nov 14",
+      "snippet": "Location is still TBD; I'll confirm once we have the headcount. Please add dietary notes by Monday.",
+      "bodyHtml": "<p>Hi everyone,</p><p>You're invited to the product offsite on Friday, November 14. Location is still TBD; I'll confirm once we have the headcount. Please add one dietary note to the sheet by Monday.</p><p>I'll share the travel guidance in the same thread.</p><p>Lena</p>",
+      "bodyText": "Hi everyone, You're invited to the product offsite on Friday, November 14. Location is still TBD; I'll confirm once we have the headcount. Please add one dietary note to the sheet by Monday. I'll share the travel guidance in the same thread. Lena",
+      "date": "2026-10-27T00:56:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [
+        "people"
+      ],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": {
+        "title": "Product offsite",
+        "day": "Friday, November 14",
+        "time": "09:00–17:00",
+        "where": "Meridian HQ",
+        "attendees": 24,
+        "response": null
+      },
+      "sizeBytes": 22528,
+      "messageId": "<m16@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m17",
+      "threadId": "t8",
+      "folder": "inbox",
+      "from": {
+        "name": "Daniel Kim",
+        "email": "daniel.kim@meridian.test",
+        "initials": "DK",
+        "color": "#476b4f"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Weekly metrics — week 43",
+      "snippet": "Active workspaces are up 4.2% week over week; churn is flat. The retention bump is mostly from shared inbox.",
+      "bodyHtml": "<p>Hi Avery,</p><p>Active workspaces are up 4.2% week over week; churn is flat. The retention bump is mostly from the new shared-inbox cohort, which is holding better than we expected.</p><p>Full numbers are in the attached sheet. Happy to walk through the cohort view on Thursday if useful.</p><p>Daniel</p>",
+      "bodyText": "Hi Avery, Active workspaces are up 4.2% week over week; churn is flat. The retention bump is mostly from the new shared-inbox cohort, which is holding better than we expected. Full numbers are in the attached sheet. Happy to walk through the cohort view on Thursday if useful. Daniel",
+      "date": "2026-10-26T22:56:09.395Z",
+      "unread": false,
+      "starred": true,
+      "draft": false,
+      "attachments": [
+        {
+          "id": "att_76b0bd54",
+          "name": "week-43-metrics.xlsx",
+          "size": "744 KB",
+          "sizeBytes": 761856,
+          "type": "XLS",
+          "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "contentUrl": null,
+          "previewable": false
+        }
+      ],
+      "categories": [
+        "analytics"
+      ],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 770048,
+      "messageId": "<m17@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m18",
+      "threadId": "t9",
+      "folder": "inbox",
+      "from": {
+        "name": "Aisha Bello",
+        "email": "aisha.bello@meridian.test",
+        "initials": "AB",
+        "color": "#4f5673"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Re: Welcome to the team",
+      "snippet": "Thrilled to have you aboard! Your first-week schedule is in the calendar, and I've paired you with Nora.",
+      "bodyHtml": "<p>Thrilled to have you aboard!</p><p>Your first-week schedule is in the calendar, and I've paired you with Nora for the design walkthrough. Ping me if anything is missing.</p><p>Aisha</p>",
+      "bodyText": "Thrilled to have you aboard! Your first-week schedule is in the calendar, and I've paired you with Nora for the design walkthrough. Ping me if anything is missing. Aisha",
+      "date": "2026-10-25T02:56:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<m18@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m19",
+      "threadId": "t10",
+      "folder": "inbox",
+      "from": {
+        "name": "Meridian IT",
+        "email": "it@meridian.test",
+        "initials": "IT",
+        "color": "#64748b"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Scheduled maintenance: Saturday 02:00–04:00 UTC",
+      "snippet": "Mail delivery will continue; the admin console may be briefly unavailable.",
+      "bodyHtml": "<p>Hello,</p><p>Scheduled maintenance will take place this Saturday, 02:00–04:00 UTC. Mail delivery will continue; the admin console may be briefly unavailable during the window.</p><p>No action is needed from you.</p><p>— Meridian IT</p>",
+      "bodyText": "Hello, Scheduled maintenance will take place this Saturday, 02:00–04:00 UTC. Mail delivery will continue; the admin console may be briefly unavailable during the window. No action is needed from you. — Meridian IT",
+      "date": "2026-10-24T01:56:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<m19@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m20",
+      "threadId": "t11",
+      "folder": "inbox",
+      "from": {
+        "name": "Nadia Haddad",
+        "email": "nadia.haddad@meridian.test",
+        "initials": "NH",
+        "color": "#b8336a"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Photos from the offsite",
+      "snippet": "Finally sorted the good ones. The album link expires in 30 days.",
+      "bodyHtml": "<p>Hi Avery,</p><p>Finally sorted the good ones from the offsite. The album link expires in 30 days, and I've attached a smaller set for the deck.</p><p>Let me know which ones you want to use and I'll send high-resolution versions.</p><p>Nadia</p>",
+      "bodyText": "Hi Avery, Finally sorted the good ones from the offsite. The album link expires in 30 days, and I've attached a smaller set for the deck. Let me know which ones you want to use and I'll send high-resolution versions. Nadia",
+      "date": "2026-10-23T03:56:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [
+        {
+          "id": "att_a32f36f5",
+          "name": "offsite-picks.zip",
+          "size": "18.2 MB",
+          "sizeBytes": 19084083,
+          "type": "ZIP",
+          "mime": "application/zip",
+          "contentUrl": null,
+          "previewable": false
+        },
+        {
+          "id": "att_5cdbacbc",
+          "name": "offsite-team.svg",
+          "size": "1.8 MB",
+          "sizeBytes": 1887437,
+          "type": "IMG",
+          "mime": "image/svg+xml",
+          "contentUrl": "/samples/offsite-team.svg",
+          "previewable": true
+        }
+      ],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 20979712,
+      "messageId": "<m20@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "m21",
+      "threadId": "t12",
+      "folder": "inbox",
+      "from": {
+        "name": "Meridian Finance",
+        "email": "finance@meridian.test",
+        "initials": "MF",
+        "color": "#15803d"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Your expense report was approved",
+      "snippet": "€418.60 will be reimbursed in the next payroll run.",
+      "bodyHtml": "<p>Hello Avery,</p><p>Your expense report for the Berlin trip has been approved. €418.60 will be reimbursed in the next payroll run. No further action is needed from you.</p><p>— Meridian Finance</p>",
+      "bodyText": "Hello Avery, Your expense report for the Berlin trip has been approved. €418.60 will be reimbursed in the next payroll run. No further action is needed from you. — Meridian Finance",
+      "date": "2026-10-22T04:56:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [
+        "finance"
+      ],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<m21@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "a1",
+      "threadId": "ta1",
+      "folder": "archive",
+      "from": {
+        "name": "Andrew Lowe",
+        "email": "andrew.lowe@meridian.test",
+        "initials": "AL",
+        "color": "#0e7490"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Q3 retrospective notes",
+      "snippet": "The recurring theme was too many handoffs late in the quarter.",
+      "bodyHtml": "<p>All,</p><p>The recurring theme was too many handoffs late in the quarter. I've captured the actions and owners in the attached notes. We'll revisit them at the start of Q4.</p><p>Andrew</p>",
+      "bodyText": "All, The recurring theme was too many handoffs late in the quarter. I've captured the actions and owners in the attached notes. We'll revisit them at the start of Q4. Andrew",
+      "date": "2026-10-19T04:56:09.395Z",
+      "unread": false,
+      "starred": true,
+      "draft": false,
+      "attachments": [
+        {
+          "id": "att_75179694",
+          "name": "q3-retro.pdf",
+          "size": "920 KB",
+          "sizeBytes": 942080,
+          "type": "PDF",
+          "mime": "application/pdf",
+          "contentUrl": "/samples/q3-retro.pdf",
+          "previewable": true
+        }
+      ],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 950272,
+      "messageId": "<a1@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "a2",
+      "threadId": "ta2",
+      "folder": "archive",
+      "from": {
+        "name": "Lena Fischer",
+        "email": "lena.fischer@meridian.test",
+        "initials": "LF",
+        "color": "#3f6570"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Benefits enrollment closes Friday",
+      "snippet": "A quick reminder to review your selections before the window closes.",
+      "bodyHtml": "<p>Hi Avery,</p><p>A quick reminder to review your benefits selections before the enrollment window closes on Friday. Your current choices carry over if you don't change anything.</p><p>Lena</p>",
+      "bodyText": "Hi Avery, A quick reminder to review your benefits selections before the enrollment window closes on Friday. Your current choices carry over if you don't change anything. Lena",
+      "date": "2026-10-14T04:56:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<a2@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "a3",
+      "threadId": "ta3",
+      "folder": "archive",
+      "from": {
+        "name": "Priya Shah",
+        "email": "priya.shah@meridian.test",
+        "initials": "PS",
+        "color": "#7a4a5c"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "2027 budget template",
+      "snippet": "The template is ready for departmental submissions.",
+      "bodyHtml": "<p>Hello,</p><p>The 2027 budget template is ready for departmental submissions. Please use the tabs marked for your team and return it by the end of the month.</p><p>Priya</p>",
+      "bodyText": "Hello, The 2027 budget template is ready for departmental submissions. Please use the tabs marked for your team and return it by the end of the month. Priya",
+      "date": "2026-10-08T04:56:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [
+        {
+          "id": "att_78918f57",
+          "name": "budget-2027.xlsx",
+          "size": "388 KB",
+          "sizeBytes": 397312,
+          "type": "XLS",
+          "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "contentUrl": null,
+          "previewable": false
+        }
+      ],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 405504,
+      "messageId": "<a3@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "sp1",
+      "threadId": "tsp1",
+      "folder": "spam",
+      "from": {
+        "name": "Parcel Notice",
+        "email": "no-reply@parcel-alert.example",
+        "initials": "PN",
+        "color": "#64748b"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Your parcel is waiting",
+      "snippet": "Confirm your details within 24 hours to arrange delivery.",
+      "bodyHtml": "<p>Your parcel is being held. Confirm your details within 24 hours to arrange delivery.</p>",
+      "bodyText": "Your parcel is being held. Confirm your details within 24 hours to arrange delivery.",
+      "date": "2026-10-27T21:56:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": true,
+      "auth": {
+        "spf": "softfail",
+        "dkim": "none",
+        "dmarc": "fail",
+        "tls": "TLS 1.3",
+        "ip": "203.0.113.77",
+        "signer": "",
+        "firstContact": false,
+        "warnings": [
+          "Sender domain does not match the visible name",
+          "First contact from this sender"
+        ]
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<sp1@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "sp2",
+      "threadId": "tsp2",
+      "folder": "spam",
+      "from": {
+        "name": "Offers Daily",
+        "email": "hello@offers-daily.example",
+        "initials": "OD",
+        "color": "#b45309"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Exclusive offer: 70% off",
+      "snippet": "Today only — a selection of deals chosen for you.",
+      "bodyHtml": "<p>Today only: a selection of deals chosen for you. Unsubscribe at any time.</p>",
+      "bodyText": "Today only: a selection of deals chosen for you. Unsubscribe at any time.",
+      "date": "2026-10-26T04:56:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": true,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "203.0.113.19",
+        "signer": "brightline.example",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<sp2@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "sp3",
+      "threadId": "tsp3",
+      "folder": "spam",
+      "from": {
+        "name": "Meridian Account Team",
+        "email": "account-verify@meridian-security.example",
+        "initials": "MA",
+        "color": "#991b1b"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Action required: re-verify your Meridian account",
+      "snippet": "Your mailbox will be suspended unless you confirm your password today.",
+      "bodyHtml": "<p>Your mailbox will be suspended unless you confirm your password today.</p><p>Open the secure form to keep access.</p>",
+      "bodyText": "Your mailbox will be suspended unless you confirm your password today. Open the secure form to keep access.",
+      "date": "2026-10-28T04:16:09.395Z",
+      "unread": true,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Confidential",
+      "external": true,
+      "auth": {
+        "spf": "fail",
+        "dkim": "none",
+        "dmarc": "fail",
+        "tls": "TLS 1.3",
+        "ip": "192.0.2.201",
+        "signer": "",
+        "firstContact": false,
+        "warnings": [
+          "SPF and DMARC failed",
+          "Lookalike domain: meridian-security.example",
+          "Urgency and credential request detected"
+        ]
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<sp3@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "tr1",
+      "threadId": "ttr1",
+      "folder": "trash",
+      "from": {
+        "name": "Design Weekly",
+        "email": "news@designweekly.example",
+        "initials": "DW",
+        "color": "#6346d8"
+      },
+      "to": [
+        {
+          "name": "Avery Chen",
+          "email": "avery.chen@meridian.test",
+          "initials": "AC",
+          "color": "#34557a",
+          "role": "VP Product",
+          "company": "Meridian",
+          "team": "Product",
+          "phone": "+1 (415) 555-0101",
+          "location": "San Francisco",
+          "reportsTo": "Dana Whitfield, CEO"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "This week in product design",
+      "snippet": "Five reads on onboarding, pricing pages and design systems.",
+      "bodyHtml": "<p>Five reads on onboarding, pricing pages and design systems, selected by the Design Weekly editors.</p>",
+      "bodyText": "Five reads on onboarding, pricing pages and design systems, selected by the Design Weekly editors.",
+      "date": "2026-10-23T23:56:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": false,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": true,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "198.51.100.8",
+        "signer": "designweekly.example",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 8192,
+      "messageId": "<tr1@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "floating",
+      "threadIdExplicit": true
+    },
+    {
+      "id": "draft-offsite",
+      "threadId": "tdraft1",
+      "folder": "drafts",
+      "from": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "to": [
+        {
+          "name": "Lena Fischer",
+          "email": "lena.fischer@meridian.test",
+          "initials": "LF",
+          "color": "#3f6570"
+        }
+      ],
+      "cc": [],
+      "bcc": [],
+      "subject": "Offsite logistics",
+      "snippet": "Lena —\nA few questions about the offsite:\n1. Do we have a travel budget per person?\n2. Should the customer-success team join the afternoon session?",
+      "bodyHtml": "<p>Lena —</p><p>A few questions about the offsite:</p><p>1. Do we have a travel budget per person?</p><p>2. Should the customer-success team join the afternoon session?</p>",
+      "bodyText": "Lena —\nA few questions about the offsite:\n1. Do we have a travel budget per person?\n2. Should the customer-success team join the afternoon session?",
+      "date": "2026-10-28T04:26:09.395Z",
+      "unread": false,
+      "starred": false,
+      "draft": true,
+      "attachments": [],
+      "categories": [],
+      "classification": "Internal",
+      "external": false,
+      "auth": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass",
+        "tls": "TLS 1.3",
+        "ip": "10.20.4.18",
+        "signer": "meridian.test",
+        "firstContact": false,
+        "warnings": []
+      },
+      "event": null,
+      "sizeBytes": 6144,
+      "messageId": "<draft-offsite@meridian.test>",
+      "inReplyTo": null,
+      "priority": "normal",
+      "receipt": false,
+      "delivery": false,
+      "saveCopy": true,
+      "viaApi": false,
+      "windowMode": "minimized",
+      "threadIdExplicit": true
+    }
+  ],
+  "sieve": {
+    "revision": 1,
+    "updatedAt": "2026-10-26T04:56:09.395Z",
+    "rules": [
+      {
+        "id": "rule_invoices",
+        "name": "Archive invoices",
+        "enabled": true,
+        "priority": 1,
+        "match": "any",
+        "conditions": [
+          {
+            "field": "subject",
+            "operator": "contains",
+            "value": "invoice"
+          },
+          {
+            "field": "body",
+            "operator": "contains",
+            "value": "invoice"
+          }
+        ],
+        "action": {
+          "type": "move",
+          "value": "archive"
+        }
+      },
+      {
+        "id": "rule_brightline",
+        "name": "Flag Brightline mail",
+        "enabled": true,
+        "priority": 2,
+        "match": "all",
+        "conditions": [
+          {
+            "field": "from",
+            "operator": "contains",
+            "value": "brightline.example"
+          }
+        ],
+        "action": {
+          "type": "star"
+        }
+      },
+      {
+        "id": "rule_offers",
+        "name": "Discard obvious offers",
+        "enabled": false,
+        "priority": 3,
+        "match": "all",
+        "conditions": [
+          {
+            "field": "subject",
+            "operator": "contains",
+            "value": "70% off"
+          }
+        ],
+        "action": {
+          "type": "discard"
+        }
+      }
+    ],
+    "vacation": {
+      "enabled": false,
+      "start": "",
+      "end": "",
+      "days": 7,
+      "internal": {
+        "subject": "Out of office",
+        "message": "I'm away from the office and will reply when I return. For urgent matters, contact product@meridian.test."
+      },
+      "external": {
+        "enabled": true,
+        "subject": "Away from the office",
+        "message": "Thanks for your message. I'm away and will reply when I return. For urgent matters, please contact product@meridian.test."
+      }
+    },
+    "script": "# Generated by Meridian Mail — manage this ruleset in the webmail.\n# Owner: avery.chen@meridian.test · revision 1\n# Updated: 2026-10-26T04:56:09.395Z\n\nrequire \"body\", \"fileinto\", \"imap4flags\";\n\n# Archive invoices\nif anyof (header :contains \"subject\" \"invoice\", body :contains \"invoice\") {\n  fileinto \"archive\";\n  stop;\n}\n\n# Flag Brightline mail\nif address :contains \"from\" \"brightline.example\" {\n  addflag \"\\\\Flagged\";\n}\n\n# [disabled] Discard obvious offers\n# End of ruleset"
+  },
+  "audit": [
+    {
+      "id": "aud_QCRrENRwJgfk",
+      "ts": "2026-10-28T04:58:05.052Z",
+      "action": "auth.2fa",
+      "target": "avery.chen@meridian.test",
+      "actor": "Avery Chen",
+      "detail": "Second factor verified · totp",
+      "ip": "95.174.68.249",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36"
+    },
+    {
+      "id": "aud_bOi7p_0_fmjA",
+      "ts": "2026-10-28T04:58:05.051Z",
+      "action": "auth.login",
+      "target": "avery.chen@meridian.test",
+      "actor": "Avery Chen",
+      "detail": "Password + authenticator code",
+      "ip": "95.174.68.249",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36"
+    },
+    {
+      "id": "aud_1GeQB1Tdi7SK",
+      "ts": "2026-10-28T04:58:04.597Z",
+      "action": "auth.challenge",
+      "target": "avery.chen@meridian.test",
+      "actor": "Avery Chen",
+      "detail": "Password verified · second factor required",
+      "ip": "95.174.68.249",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36"
+    },
+    {
+      "id": "aud_aLngRlWmoGOn",
+      "ts": "2026-10-28T04:56:36.476Z",
+      "action": "auth.2fa",
+      "target": "avery.chen@meridian.test",
+      "actor": "Avery Chen",
+      "detail": "Second factor verified · totp",
+      "ip": "95.174.68.249",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36"
+    },
+    {
+      "id": "aud_rQlxfyKke9E4",
+      "ts": "2026-10-28T04:56:36.476Z",
+      "action": "auth.login",
+      "target": "avery.chen@meridian.test",
+      "actor": "Avery Chen",
+      "detail": "Password + authenticator code",
+      "ip": "95.174.68.249",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36"
+    },
+    {
+      "id": "aud_joqaUuz2jdZ8",
+      "ts": "2026-10-28T04:56:36.014Z",
+      "action": "auth.challenge",
+      "target": "avery.chen@meridian.test",
+      "actor": "Avery Chen",
+      "detail": "Password verified · second factor required",
+      "ip": "95.174.68.249",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36"
+    },
+    {
+      "id": "aud_seed_1",
+      "ts": "2026-10-28T02:46:09.395Z",
+      "action": "auth.login",
+      "target": "avery.chen@meridian.test",
+      "actor": "Avery Chen",
+      "detail": "Single sign-on · Chrome on Windows",
+      "ip": "203.0.113.24",
+      "userAgent": "Mozilla/5.0"
+    },
+    {
+      "id": "aud_seed_2",
+      "ts": "2026-10-28T01:26:09.395Z",
+      "action": "send.committed",
+      "target": "Brightline — signed order form and next steps",
+      "actor": "Avery Chen",
+      "detail": "Delivered via MX · 1 recipient",
+      "ip": "203.0.113.24",
+      "userAgent": "Mozilla/5.0"
+    },
+    {
+      "id": "aud_seed_3",
+      "ts": "2026-10-27T02:56:09.395Z",
+      "action": "rule.saved",
+      "target": "Archive invoices",
+      "actor": "Avery Chen",
+      "detail": "Sieve ruleset saved · revision 1",
+      "ip": "203.0.113.24",
+      "userAgent": "Mozilla/5.0"
+    },
+    {
+      "id": "aud_seed_4",
+      "ts": "2026-10-26T00:56:09.395Z",
+      "action": "message.archive",
+      "target": "3 conversations",
+      "actor": "Avery Chen",
+      "detail": "Conversations archived from Inbox",
+      "ip": "203.0.113.24",
+      "userAgent": "Mozilla/5.0"
+    }
+  ],
+  "outbox": [],
+  "calendarEvents": [
+    {
+      "id": "cal1",
+      "date": "2026-10-28",
+      "start": "09:00",
+      "end": "09:30",
+      "title": "Inbox triage",
+      "color": "var(--cat-analytics)",
+      "where": "Focus time",
+      "attendees": 1
+    },
+    {
+      "id": "cal2",
+      "date": "2026-10-28",
+      "start": "10:00",
+      "end": "11:00",
+      "title": "Roadmap prep",
+      "color": "var(--cat-decision)",
+      "where": "Conference Room B · Teams",
+      "attendees": 6
+    },
+    {
+      "id": "cal3",
+      "date": "2026-10-28",
+      "start": "14:30",
+      "end": "15:00",
+      "title": "1:1 with Nora",
+      "color": "var(--cat-people)",
+      "where": "Teams",
+      "attendees": 2
+    },
+    {
+      "id": "cal4",
+      "date": "2026-10-29",
+      "start": "09:30",
+      "end": "10:00",
+      "title": "Finance review",
+      "color": "var(--cat-finance)",
+      "where": "Room 12A",
+      "attendees": 4
+    },
+    {
+      "id": "cal5",
+      "date": "2026-10-29",
+      "start": "13:00",
+      "end": "14:00",
+      "title": "Brightline customer call",
+      "color": "var(--cat-sales)",
+      "where": "Teams",
+      "attendees": 5
+    },
+    {
+      "id": "cal6",
+      "date": "2026-10-30",
+      "start": "10:00",
+      "end": "11:00",
+      "title": "Q4 roadmap review",
+      "color": "var(--cat-decision)",
+      "where": "Conference Room B · Teams",
+      "attendees": 6
+    },
+    {
+      "id": "cal7",
+      "date": "2026-10-30",
+      "start": "11:30",
+      "end": "12:00",
+      "title": "Product all-hands",
+      "color": "var(--cat-product)",
+      "where": "Auditorium",
+      "attendees": 38
+    },
+    {
+      "id": "cal8",
+      "date": "2026-10-31",
+      "start": "15:00",
+      "end": "15:45",
+      "title": "Offsite planning",
+      "color": "var(--cat-people)",
+      "where": "Teams",
+      "attendees": 4
+    },
+    {
+      "id": "cal9",
+      "date": "2026-11-03",
+      "start": "10:00",
+      "end": "11:30",
+      "title": "Board metrics review",
+      "color": "var(--cat-finance)",
+      "where": "Boardroom",
+      "attendees": 9
+    },
+    {
+      "id": "cal10",
+      "date": "2026-11-11",
+      "start": "09:00",
+      "end": "17:00",
+      "title": "Product offsite",
+      "color": "var(--cat-product)",
+      "where": "Meridian HQ",
+      "attendees": 24
+    },
+    {
+      "id": "cal11",
+      "date": "2026-10-26",
+      "start": "10:00",
+      "end": "10:30",
+      "title": "Weekly product sync",
+      "color": "var(--cat-product)",
+      "where": "Teams",
+      "attendees": 8
+    },
+    {
+      "id": "cal12",
+      "date": "2026-10-23",
+      "start": "14:00",
+      "end": "15:00",
+      "title": "Design review",
+      "color": "var(--cat-product)",
+      "where": "Studio 2",
+      "attendees": 5
+    },
+    {
+      "id": "cal13",
+      "date": "2026-10-21",
+      "start": "11:00",
+      "end": "12:00",
+      "title": "Company all-hands",
+      "color": "var(--cat-people)",
+      "where": "Auditorium",
+      "attendees": 64
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task_invoice",
+      "title": "Approve invoice #4821",
+      "notes": "Route to AP after approval. The PO reference is on page two of the PDF.",
+      "status": "open",
+      "priority": "high",
+      "due": "2026-10-28",
+      "dueTime": "16:00",
+      "assignee": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "createdBy": "avery.chen@meridian.test",
+      "tags": [
+        "Finance",
+        "AP"
+      ],
+      "linkedThreadId": "t5",
+      "linkedSubject": "Invoice #4821 is ready for approval",
+      "source": "email",
+      "createdAt": "2026-10-27T20:56:09.395Z",
+      "updatedAt": "2026-10-27T20:56:09.395Z",
+      "completedAt": null
+    },
+    {
+      "id": "task_board_deck",
+      "title": "Prepare the board metrics review",
+      "notes": "Pull the week 43 cohort numbers and add the shared-inbox retention view.",
+      "status": "open",
+      "priority": "urgent",
+      "due": "2026-10-30",
+      "dueTime": "09:00",
+      "assignee": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "createdBy": "avery.chen@meridian.test",
+      "tags": [
+        "Board",
+        "Analytics"
+      ],
+      "linkedThreadId": "t8",
+      "linkedSubject": "Weekly metrics — week 43",
+      "source": "email",
+      "createdAt": "2026-10-26T22:56:09.395Z",
+      "updatedAt": "2026-10-27T23:56:09.395Z",
+      "completedAt": null
+    },
+    {
+      "id": "task_vendor_security",
+      "title": "Finish the Brightline security review",
+      "notes": "Confirm the security contact and file the countersigned order form in the vendor folder.",
+      "status": "open",
+      "priority": "high",
+      "due": "2026-10-29",
+      "dueTime": "12:00",
+      "assignee": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "createdBy": "avery.chen@meridian.test",
+      "tags": [
+        "Vendor",
+        "Security"
+      ],
+      "linkedThreadId": "t2",
+      "linkedSubject": "Brightline — signed order form and next steps",
+      "source": "email",
+      "createdAt": "2026-10-28T01:56:09.395Z",
+      "updatedAt": "2026-10-28T04:06:09.395Z",
+      "completedAt": null
+    },
+    {
+      "id": "task_offsite",
+      "title": "Confirm offsite dietary notes",
+      "notes": "Collect responses from the product team and send the final headcount to Lena.",
+      "status": "open",
+      "priority": "normal",
+      "due": "2026-10-27",
+      "dueTime": "",
+      "assignee": {
+        "name": "Lena Fischer",
+        "email": "lena.fischer@meridian.test",
+        "initials": "LF",
+        "color": "#3f6570"
+      },
+      "createdBy": "avery.chen@meridian.test",
+      "tags": [
+        "People",
+        "Offsite"
+      ],
+      "linkedThreadId": "t7",
+      "linkedSubject": "You're invited: Product offsite — Nov 14",
+      "source": "email",
+      "createdAt": "2026-10-27T00:56:09.395Z",
+      "updatedAt": "2026-10-27T02:56:09.395Z",
+      "completedAt": null
+    },
+    {
+      "id": "task_design",
+      "title": "Merge permission prompt into step three",
+      "notes": "Nora to share the updated prototype after the design review.",
+      "status": "open",
+      "priority": "normal",
+      "due": "2026-10-31",
+      "dueTime": "",
+      "assignee": {
+        "name": "Nora Patel",
+        "email": "nora.patel@meridian.test",
+        "initials": "NP",
+        "color": "#5b4a7e"
+      },
+      "createdBy": "avery.chen@meridian.test",
+      "tags": [
+        "Design",
+        "Product"
+      ],
+      "linkedThreadId": "t4",
+      "linkedSubject": "Design review notes + updated flows",
+      "source": "email",
+      "createdAt": "2026-10-27T22:56:09.395Z",
+      "updatedAt": "2026-10-28T03:56:09.395Z",
+      "completedAt": null
+    },
+    {
+      "id": "task_contract",
+      "title": "Update the vendor record for the contract renewal",
+      "notes": "File the executed agreement under REF-2026-1019.",
+      "status": "open",
+      "priority": "normal",
+      "due": "2026-11-01",
+      "dueTime": "",
+      "assignee": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "createdBy": "avery.chen@meridian.test",
+      "tags": [
+        "Legal",
+        "Vendor"
+      ],
+      "linkedThreadId": "t3",
+      "linkedSubject": "Contract renewal — legal has signed off",
+      "source": "email",
+      "createdAt": "2026-10-28T00:56:09.395Z",
+      "updatedAt": "2026-10-28T02:56:09.395Z",
+      "completedAt": null
+    },
+    {
+      "id": "task_done_agenda",
+      "title": "Send the Q4 roadmap agenda",
+      "notes": "Agenda sent to the product leads on Wednesday morning.",
+      "status": "done",
+      "priority": "normal",
+      "due": "2026-10-26",
+      "dueTime": "",
+      "assignee": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "createdBy": "avery.chen@meridian.test",
+      "tags": [
+        "Product"
+      ],
+      "linkedThreadId": "t1",
+      "linkedSubject": "Q4 roadmap review — Thursday 10:00",
+      "source": "email",
+      "createdAt": "2026-10-26T04:56:09.395Z",
+      "updatedAt": "2026-10-27T04:56:09.395Z",
+      "completedAt": "2026-10-27T04:56:09.395Z"
+    },
+    {
+      "id": "task_done_onboarding",
+      "title": "Complete the design walkthrough with Nora",
+      "notes": "Walkthrough completed; follow-up notes added to the onboarding doc.",
+      "status": "done",
+      "priority": "low",
+      "due": "2026-10-25",
+      "dueTime": "",
+      "assignee": {
+        "name": "Nora Patel",
+        "email": "nora.patel@meridian.test",
+        "initials": "NP",
+        "color": "#5b4a7e"
+      },
+      "createdBy": "avery.chen@meridian.test",
+      "tags": [
+        "Onboarding",
+        "Design"
+      ],
+      "linkedThreadId": null,
+      "linkedSubject": null,
+      "source": "manual",
+      "createdAt": "2026-10-24T04:56:09.395Z",
+      "updatedAt": "2026-10-25T04:56:09.395Z",
+      "completedAt": "2026-10-25T04:56:09.395Z"
+    }
+  ],
+  "files": [
+    {
+      "id": "file_roadmap",
+      "name": "Q4-roadmap-v3.pdf",
+      "type": "PDF",
+      "mime": "application/pdf",
+      "size": "2.4 MB",
+      "sizeBytes": 2516582,
+      "providerId": "meridian",
+      "path": "Product / Q4 planning",
+      "owner": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "modifiedAt": "2026-10-28T02:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": true,
+      "sharedWith": [
+        "elena.vasquez@meridian.test",
+        "nora.patel@meridian.test",
+        "aisha.bello@meridian.test"
+      ],
+      "locked": false,
+      "version": "1",
+      "previewable": true,
+      "contentUrl": "/samples/Q4-roadmap-v3.pdf",
+      "description": "Revised scope, launch checklist and open decisions."
+    },
+    {
+      "id": "file_invoice",
+      "name": "invoice-4821.pdf",
+      "type": "PDF",
+      "mime": "application/pdf",
+      "size": "312 KB",
+      "sizeBytes": 319488,
+      "providerId": "meridian",
+      "path": "Finance / 2026 / AP",
+      "owner": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "modifiedAt": "2026-10-27T20:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [
+        "priya.shah@meridian.test"
+      ],
+      "locked": true,
+      "version": "1",
+      "previewable": true,
+      "contentUrl": "/samples/invoice-4821.pdf",
+      "description": "Northstar Research invoice awaiting approval."
+    },
+    {
+      "id": "file_flows",
+      "name": "first-run-flows.pdf",
+      "type": "PDF",
+      "mime": "application/pdf",
+      "size": "1.1 MB",
+      "sizeBytes": 1153434,
+      "providerId": "meridian",
+      "path": "Design / Onboarding",
+      "owner": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "modifiedAt": "2026-10-27T22:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [
+        "nora.patel@meridian.test"
+      ],
+      "locked": false,
+      "version": "1",
+      "previewable": true,
+      "contentUrl": "/samples/first-run-flows.pdf",
+      "description": "Updated first-run flows for the design review."
+    },
+    {
+      "id": "file_brightline",
+      "name": "Brightline-order-form.pdf",
+      "type": "PDF",
+      "mime": "application/pdf",
+      "size": "1.8 MB",
+      "sizeBytes": 1887437,
+      "providerId": "meridian",
+      "path": "Legal / Vendors / Brightline",
+      "owner": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "modifiedAt": "2026-10-28T01:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [
+        "marcus.webb@meridian.test",
+        "priya.shah@meridian.test"
+      ],
+      "locked": false,
+      "version": "1",
+      "previewable": true,
+      "contentUrl": "/samples/Brightline-order-form.pdf",
+      "description": "Countersigned annual order form."
+    },
+    {
+      "id": "file_retro",
+      "name": "q3-retro.pdf",
+      "type": "PDF",
+      "mime": "application/pdf",
+      "size": "920 KB",
+      "sizeBytes": 942080,
+      "providerId": "meridian",
+      "path": "Product / Retrospectives",
+      "owner": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "modifiedAt": "2026-10-19T04:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [],
+      "locked": false,
+      "version": "1",
+      "previewable": true,
+      "contentUrl": "/samples/q3-retro.pdf",
+      "description": "Q3 retrospective actions and owners."
+    },
+    {
+      "id": "file_offsite_svg",
+      "name": "offsite-team.svg",
+      "type": "IMG",
+      "mime": "image/svg+xml",
+      "size": "1.8 MB",
+      "sizeBytes": 1887437,
+      "providerId": "meridian",
+      "path": "People / Offsite 2026",
+      "owner": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "modifiedAt": "2026-10-23T04:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [
+        "lena.fischer@meridian.test"
+      ],
+      "locked": false,
+      "version": "1",
+      "previewable": true,
+      "contentUrl": "/samples/offsite-team.svg",
+      "description": "Offsite visual for the team recap."
+    },
+    {
+      "id": "file_brand",
+      "name": "Meridian-brand-library.zip",
+      "type": "ZIP",
+      "mime": "application/zip",
+      "size": "248 MB",
+      "sizeBytes": 260046848,
+      "providerId": "meridian",
+      "path": "Brand / Library",
+      "owner": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "modifiedAt": "2026-10-16T04:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [],
+      "locked": false,
+      "version": "1",
+      "previewable": false,
+      "contentUrl": null,
+      "description": "Logos, fonts and brand guidelines."
+    },
+    {
+      "id": "file_offsite_plan",
+      "name": "Product-offsite-plan.docx",
+      "type": "DOC",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size": "2.2 MB",
+      "sizeBytes": 2306867,
+      "providerId": "meridian",
+      "path": "People / Offsite 2026",
+      "owner": {
+        "name": "Avery Chen",
+        "email": "avery.chen@meridian.test",
+        "initials": "AC",
+        "color": "#34557a",
+        "role": "VP Product",
+        "company": "Meridian",
+        "team": "Product",
+        "phone": "+1 (415) 555-0101",
+        "location": "San Francisco",
+        "reportsTo": "Dana Whitfield, CEO"
+      },
+      "modifiedAt": "2026-10-24T04:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [
+        "lena.fischer@meridian.test"
+      ],
+      "locked": false,
+      "version": "1",
+      "previewable": false,
+      "contentUrl": null,
+      "description": "Travel, agenda and dietary notes."
+    },
+    {
+      "id": "file_board_pptx",
+      "name": "Board-metrics-Q4.pptx",
+      "type": "PPT",
+      "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "size": "8.4 MB",
+      "sizeBytes": 8808038,
+      "providerId": "onedrive",
+      "path": "Board / 2026",
+      "owner": {
+        "name": "Elena Vasquez",
+        "email": "elena.vasquez@meridian.test",
+        "initials": "EV",
+        "color": "#34557a"
+      },
+      "modifiedAt": "2026-10-27T08:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [
+        "avery.chen@meridian.test"
+      ],
+      "locked": false,
+      "version": "1",
+      "previewable": false,
+      "contentUrl": null,
+      "description": "Board deck outline with cohort metrics."
+    },
+    {
+      "id": "file_model",
+      "name": "Finance-model-2027.xlsx",
+      "type": "XLS",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "size": "1.4 MB",
+      "sizeBytes": 1468006,
+      "providerId": "onedrive",
+      "path": "Finance / Planning",
+      "owner": {
+        "name": "Priya Shah",
+        "email": "priya.shah@meridian.test",
+        "initials": "PS",
+        "color": "#7a4a5c"
+      },
+      "modifiedAt": "2026-10-26T04:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [
+        "avery.chen@meridian.test",
+        "elena.vasquez@meridian.test"
+      ],
+      "locked": true,
+      "version": "1",
+      "previewable": false,
+      "contentUrl": null,
+      "description": "Departmental planning model."
+    },
+    {
+      "id": "file_contract",
+      "name": "Contract-renewal-signed.pdf",
+      "type": "PDF",
+      "mime": "application/pdf",
+      "size": "640 KB",
+      "sizeBytes": 655360,
+      "providerId": "onedrive",
+      "path": "Legal / Contracts",
+      "owner": {
+        "name": "Marcus Webb",
+        "email": "marcus.webb@meridian.test",
+        "initials": "MW",
+        "color": "#3d6b62"
+      },
+      "modifiedAt": "2026-10-26T04:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [
+        "avery.chen@meridian.test"
+      ],
+      "locked": false,
+      "version": "1",
+      "previewable": false,
+      "contentUrl": null,
+      "description": "Executed renewal agreement, REF-2026-1019."
+    },
+    {
+      "id": "file_customer_notes",
+      "name": "Brightline-call-notes.docx",
+      "type": "DOC",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "size": "840 KB",
+      "sizeBytes": 860160,
+      "providerId": "onedrive",
+      "path": "Customer success / Brightline",
+      "owner": {
+        "name": "Tomás Ribeiro",
+        "email": "tomas.ribeiro@meridian.test",
+        "initials": "TR",
+        "color": "#7a5a3a"
+      },
+      "modifiedAt": "2026-10-27T02:56:09.395Z",
+      "createdAt": "2026-10-23T04:56:09.395Z",
+      "starred": false,
+      "sharedWith": [
+        "avery.chen@meridian.test"
+      ],
+      "locked": false,
+      "version": "1",
+      "previewable": false,
+      "contentUrl": null,
+      "description": "Recap and themes from the customer call."
+    }
+  ],
+  "storageProviders": [
+    {
+      "id": "meridian",
+      "name": "Meridian Drive",
+      "kind": "internal",
+      "connected": true,
+      "account": "avery.chen@meridian.test",
+      "usedBytes": 13314398617.6,
+      "limitBytes": 107374182400,
+      "color": "#0f6cbd",
+      "status": "synced",
+      "lastSyncAt": "2026-10-28T04:52:09.395Z",
+      "description": "Company-managed, encrypted at rest."
+    },
+    {
+      "id": "onedrive",
+      "name": "Microsoft OneDrive",
+      "kind": "oauth",
+      "connected": true,
+      "account": "avery.chen@meridian.test",
+      "usedBytes": 307090161664,
+      "limitBytes": 1099511627776,
+      "color": "#0364b8",
+      "status": "synced",
+      "lastSyncAt": "2026-10-28T04:54:09.395Z",
+      "description": "Business account · Microsoft 365 tenant."
+    },
+    {
+      "id": "dropbox",
+      "name": "Dropbox Business",
+      "kind": "oauth",
+      "connected": false,
+      "account": "",
+      "usedBytes": 0,
+      "limitBytes": 2199023255552,
+      "color": "#0061ff",
+      "status": "disconnected",
+      "lastSyncAt": null,
+      "description": "Connect a Dropbox Business team folder."
+    },
+    {
+      "id": "gdrive",
+      "name": "Google Drive",
+      "kind": "oauth",
+      "connected": false,
+      "account": "",
+      "usedBytes": 0,
+      "limitBytes": 2199023255552,
+      "color": "#188038",
+      "status": "disconnected",
+      "lastSyncAt": null,
+      "description": "Connect Google Workspace shared drives."
+    },
+    {
+      "id": "s3",
+      "name": "AWS S3",
+      "kind": "s3",
+      "connected": false,
+      "account": "",
+      "usedBytes": 0,
+      "limitBytes": 0,
+      "color": "#d97706",
+      "status": "disconnected",
+      "lastSyncAt": null,
+      "description": "Bring your own bucket with IAM role access."
+    }
+  ],
+  "attachments": {}
+}

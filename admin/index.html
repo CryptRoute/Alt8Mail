@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="light dark">
+  <title>Meridian Admin</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f1b33'/%3E%3Cpath d='M8 22V10l8 7 8-7v12' fill='none' stroke='%2378a9ff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./admin.css?v=0.8.0">
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M3.5 20c.5-3.4 2.6-5.2 5.5-5.2s5 1.8 5.5 5.2"/><path d="M16 5.2a3.4 3.4 0 0 1 0 6.6M17.5 14.9c2 .5 3.2 2.1 3.5 4.6"/></symbol>
+    <symbol id="i-group" viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M2.5 19c.4-3 2.3-4.7 5.5-4.7s5.1 1.7 5.5 4.7M14 14.8c2.7-.3 4.6 1.1 5 3.7"/></symbol>
+    <symbol id="i-tree" viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="5" rx="1.4"/><rect x="2.5" y="16" width="7" height="5" rx="1.4"/><rect x="14.5" y="16" width="7" height="5" rx="1.4"/><path d="M12 8v4M6 16v-4h12v4"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.4 3.8 5.4 3.8 9S14.5 18.6 12 21c-2.5-2.4-3.8-5.4-3.8-9S9.5 5.4 12 3Z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5.4c0 4.4 2.7 8 7 9.6 4.3-1.6 7-5.2 7-9.6V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8.5" cy="9" r="4.5"/><path d="m12 12 8 8M17 17l2-2M14 14l2-2"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3.5 13.7 9l5.5 1.7-5.5 1.7L12 18l-1.7-5.6L4.8 10.7 10.3 9 12 3.5Z"/><path d="M19 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V5.5A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5V21M15 9h3.5A1.5 1.5 0 0 1 20 10.5V21M2 21h20M7 8h4M7 12h4M7 16h4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.7M20 5v6h-6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4M18 12H9"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m3 11 18-7-7 18-2.5-7.5L3 11Z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 11a8 8 0 1 1 2.3 6.7M4 5v6h6"/></symbol>
+    <symbol id="i-devices" viewBox="0 0 24 24"><rect x="3" y="4" width="13" height="10" rx="1.5"/><path d="M7 18h5M9.5 14v4M18 8h3v12h-3z"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v5M12 17.5v.5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+  </svg>
+
+  <div id="loginView" class="login-shell" hidden>
+    <div class="login-brand">
+      <div class="brand-lockup">
+        <span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 23V9l9 8 9-8v14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>Meridian <b>Admin</b></span>
+      </div>
+      <div class="login-hero-copy">
+        <span class="eyebrow">Enterprise control plane</span>
+        <h1>Run your organization with confidence.</h1>
+        <p>Identity, access, mail policy and audit for every user — in one secure administration console.</p>
+        <div class="login-proof">
+          <div><svg class="icon"><use href="#i-shield"/></svg><span><b>Policy-first</b><small>Security defaults enforced in PostgreSQL</small></span></div>
+          <div><svg class="icon"><use href="#i-users"/></svg><span><b>Role-based</b><small>Granular delegated administration</small></span></div>
+          <div><svg class="icon"><use href="#i-list"/></svg><span><b>Auditable</b><small>Every change recorded with actor and IP</small></span></div>
+        </div>
+      </div>
+      <p class="login-foot">Meridian Mail · Staging control plane</p>
+    </div>
+    <div class="login-panel">
+      <div class="login-card">
+        <div id="loginStep">
+          <span class="eyebrow dark">Administration console</span>
+          <h2>Sign in</h2>
+          <p class="muted">Use your Meridian account. Admin access requires an owner, admin or delegated role.</p>
+          <form id="adminLoginForm" autocomplete="on">
+            <label class="field"><span>Work email</span><input id="adminEmail" type="email" name="email" autocomplete="username" placeholder="you@company.com" required></label>
+            <label class="field"><span>Password</span><input id="adminPassword" type="password" name="password" autocomplete="current-password" placeholder="Your web password" required></label>
+            <p id="loginError" class="form-error" hidden></p>
+            <button class="btn primary wide" id="loginSubmit" type="submit">Continue <svg class="icon"><use href="#i-chevron-right"/></svg></button>
+          </form>
+          <p class="legal">Protected by tenant policy, rate limits and audit. Need access? Contact an organization owner.</p>
+        </div>
+        <div id="mfaStep" hidden>
+          <button class="back-link" id="mfaBack" type="button">← Back to sign in</button>
+          <span class="eyebrow dark">Second factor</span>
+          <h2>Verify it’s you</h2>
+          <p class="muted" id="mfaCopy">Enter the six-digit code from your authenticator app.</p>
+          <form id="mfaForm">
+            <label class="field"><span>Authenticator code</span><input id="mfaCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" required></label>
+            <p id="mfaError" class="form-error" hidden></p>
+            <button class="btn primary wide" id="mfaSubmit" type="submit">Verify and open console</button>
+          </form>
+          <button class="text-button" id="useRecoveryBtn" type="button">Use a recovery code instead</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="adminApp" class="app-shell" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <div class="brand-lockup compact">
+          <span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 23V9l9 8 9-8v14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span>Meridian <b>Admin</b></span>
+        </div>
+        <button class="icon-button sidebar-close" id="sidebarClose" type="button" aria-label="Close navigation"><svg class="icon"><use href="#i-x"/></svg></button>
+      </div>
+      <div class="tenant-mini">
+        <span class="tenant-avatar" id="tenantAvatar">M</span>
+        <span class="tenant-mini-copy"><small>Organization</small><b id="tenantNameMini">Meridian</b></span>
+        <button class="tenant-switch" id="tenantSwitchMini" type="button" aria-label="Switch organization"><svg class="icon"><use href="#i-chevron-down"/></svg></button>
+      </div>
+      <nav class="nav" aria-label="Administration sections">
+        <div class="nav-group">
+          <span class="nav-label">Workspace</span>
+          <a class="nav-link" href="#/overview" data-view="overview" data-permission="tenant.read"><svg class="icon"><use href="#i-grid"/></svg><span>Overview</span></a>
+          <a class="nav-link" href="#/users" data-view="users" data-permission="users.read"><svg class="icon"><use href="#i-users"/></svg><span>Users</span><em id="navUserCount"></em></a>
+          <a class="nav-link" href="#/groups" data-view="groups" data-permission="groups.read"><svg class="icon"><use href="#i-group"/></svg><span>Groups</span></a>
+          <a class="nav-link" href="#/org-units" data-view="org-units" data-permission="orgunits.read"><svg class="icon"><use href="#i-tree"/></svg><span>Org units</span></a>
+          <a class="nav-link" href="#/domains" data-view="domains" data-permission="domains.read"><svg class="icon"><use href="#i-globe"/></svg><span>Domains</span><em id="navDomainState"></em></a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-label">Governance</span>
+          <a class="nav-link" href="#/roles" data-view="roles" data-permission="roles.read"><svg class="icon"><use href="#i-key"/></svg><span>Roles &amp; access</span></a>
+          <a class="nav-link" href="#/policies" data-view="policies" data-permission="policies.read"><svg class="icon"><use href="#i-sliders"/></svg><span>Policies</span></a>
+          <a class="nav-link" href="#/ai" data-view="ai" data-permission="policies.read"><svg class="icon"><use href="#i-sparkles"/></svg><span>AI assistant</span></a>
+          <a class="nav-link" href="#/quarantine" data-view="quarantine" data-permission="users.security"><svg class="icon"><use href="#i-alert"/></svg><span>Quarantine</span></a>
+          <a class="nav-link" href="#/audit" data-view="audit" data-permission="audit.read"><svg class="icon"><use href="#i-list"/></svg><span>Audit log</span></a>
+        </div>
+        <div class="nav-group" id="systemNav" hidden>
+          <span class="nav-label">System</span>
+          <a class="nav-link" href="#/tenants" data-view="tenants"><svg class="icon"><use href="#i-building"/></svg><span>Organizations</span></a>
+        </div>
+      </nav>
+      <div class="sidebar-foot">
+        <a class="nav-link" href="#/settings" data-view="settings" data-permission="tenant.read"><svg class="icon"><use href="#i-building"/></svg><span>Organization settings</span></a>
+        <div class="admin-chip">
+          <span class="avatar" id="adminAvatar">A</span>
+          <span class="admin-chip-copy"><b id="adminName">Admin</b><small id="adminEmail">admin@meridian.test</small></span>
+          <button class="icon-button" id="profileMenuBtn" type="button" aria-label="Account menu"><svg class="icon"><use href="#i-more"/></svg></button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="app-main">
+      <header class="topbar">
+        <button class="icon-button menu-button" id="menuButton" type="button" aria-label="Open navigation"><svg class="icon"><use href="#i-list"/></svg></button>
+        <div class="topbar-tenant">
+          <span class="eyebrow">Administration</span>
+          <button class="tenant-picker" id="tenantPicker" type="button"><span id="topTenantName">Meridian</span><span class="status-dot" id="tenantStatusDot"></span><svg class="icon"><use href="#i-chevron-down"/></svg></button>
+        </div>
+        <div class="topbar-actions">
+          <div class="command-search" id="commandSearch"><svg class="icon"><use href="#i-search"/></svg><input id="globalSearch" type="search" placeholder="Search users, groups…" aria-label="Global search"><kbd>⌘K</kbd></div>
+          <button class="icon-button" id="themeToggle" type="button" aria-label="Toggle theme"><svg class="icon theme-sun"><use href="#i-sun"/></svg><svg class="icon theme-moon"><use href="#i-moon"/></svg></button>
+          <button class="icon-button" id="securityButton" type="button" aria-label="My security"><svg class="icon"><use href="#i-shield"/></svg></button>
+        </div>
+      </header>
+      <main id="viewRoot" class="view-root" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="drawerRoot"></div>
+  <div id="toastRoot" class="toast-root" aria-live="polite"></div>
+  <div id="commandPalette" class="command-palette" hidden></div>
+
+  <script src="./admin.js?v=0.8.0" defer></script>
+</body>
+</html>

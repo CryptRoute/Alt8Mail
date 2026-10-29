@@ -1,0 +1,51 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 1248 >>
+stream
+q
+0.058823529411764705 0.4235294117647059 0.7411764705882353 rg
+0 742 612 50 re f
+Q
+BT /F1 24 Tf 48 714 Td (Q4 Roadmap Review) Tj ET
+BT /F1 11 Tf 48 688 Td 0.42 0.47 0.55 rg (Meridian Product · Thursday 10:00 · Conference Room B) Tj 0 0 0 rg ET
+BT /F1 13 Tf 48 636 Td (Overview) Tj ET
+BT /F1 11 Tf 48 612 Td (The revised scope trims the wish list to what we can ship before the holidays.) Tj ET
+BT /F1 13 Tf 48 582 Td (Open questions) Tj ET
+BT /F1 11 Tf 48 558 Td (1. Keep the shared-inbox beta in Q4, or move it to January?) Tj ET
+BT /F1 11 Tf 48 540 Td (2. Is the analytics export a launch blocker, or can it follow a week later?) Tj ET
+BT /F1 13 Tf 48 510 Td (Launch scope) Tj ET
+BT /F1 11 Tf 48 486 Td (Shared inbox beta       Keep in Q4) Tj ET
+BT /F1 11 Tf 48 468 Td (Analytics export         Week 1, January) Tj ET
+BT /F1 11 Tf 48 450 Td (Mobile reader polish     In scope) Tj ET
+BT /F1 11 Tf 48 432 Td (Admin audit export       Follow-up) Tj ET
+BT /F1 11 Tf 48 402 Td (Owner: Elena Vasquez · Product) Tj ET
+BT /F1 11 Tf 48 384 Td (Reviewers: Avery Chen, Nora Patel, Aisha Bello) Tj ET
+q 0.82 0.85 0.89 rg 48 64 516 1 re f Q
+BT /F1 8 Tf 48 48 Td 0.48 0.52 0.58 rg (Meridian Mail - demo attachment - generated for the Aurora template) Tj ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1611
+%%EOF

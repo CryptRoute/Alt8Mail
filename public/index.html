@@ -1,0 +1,2179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meridian Mail</title>
+<meta name="description" content="Meridian Mail — an enterprise webmail template with two-factor sign-in, threaded conversations, instant search, scheduled send, tasks, files, attachment preview and sender trust.">
+<meta name="theme-color" content="#093256">
+<meta name="color-scheme" content="light dark">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="/styles.css?v=0.9.0-r2">
+<link rel="stylesheet" href="/features.css?v=0.9.0-r2">
+<link rel="stylesheet" href="/workspace.css?v=0.9.0-r2">
+<link rel="stylesheet" href="/features-0.7.css?v=0.9.0-r2">
+</head>
+<body>
+<svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs>
+    <symbol id="i-mark" viewBox="0 0 24 24"><path d="M4 19.5 12 4.2l8 15.3"/><path d="M7.6 14.4h8.8"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m4 7.2 8 5.8 8-5.8"/></symbol>
+    <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5c.5-3.3 2.7-5.3 5.5-5.3s5 2 5.5 5.3"/><path d="M16 5.6a3 3 0 0 1 0 5.6"/><path d="M17.4 14.7c1.9.7 3.1 2.4 3.4 4.8"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9.1a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-compose" viewBox="0 0 24 24"><path d="M13.5 5.3 18.7 10.5"/><path d="M4.5 19.5 5.7 14.7 15.9 4.5a2.1 2.1 0 0 1 3 3L8.7 17.7Z"/></symbol>
+    <symbol id="i-reply" viewBox="0 0 24 24"><path d="M9.5 7 4.5 12l5 5"/><path d="M4.5 12h9a5.5 5.5 0 0 1 5.5 5.5v1"/></symbol>
+    <symbol id="i-reply-all" viewBox="0 0 24 24"><path d="m9 7-5 5 5 5"/><path d="m14 7-5 5 5 5"/><path d="M9 12h4.5a5.5 5.5 0 0 1 5.5 5.5v1"/></symbol>
+    <symbol id="i-forward" viewBox="0 0 24 24"><path d="m14.5 7 5 5-5 5"/><path d="M19.5 12h-9A5.5 5.5 0 0 0 5 17.5v1"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="4" rx="1.2"/><path d="M5 8.5v10a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-10"/><path d="M10 12.5h4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15"/><path d="M9 7V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7"/><path d="M6.5 7 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/><path d="M10 11v5.5M14 11v5.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 13.5h4l1.5 2.5h5l1.5-2.5h4"/><path d="M5.6 5h12.8l2.1 8.5v4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2v-4Z"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.8 2.5 5.1 5.6.8-4 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4-4 5.6-.8Z"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m9.5 12.5 5.7-5.7a2.6 2.6 0 1 1 3.7 3.7l-7.2 7.2a4.2 4.2 0 0 1-6-6l7.4-7.4"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M4.3 4.3l1.4 1.4M18.3 18.3l1.4 1.4M2.5 12h2M19.5 12h2M4.3 19.7l1.4-1.4M18.3 5.7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.8 9.3a2.3 2.3 0 1 1 3.6 2c-.8.6-1.4 1.1-1.4 2.2"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M13 4.5h4.5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H13"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h8"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24"><path d="M8 5v14M5 8l3-3 3 3M16 19V5M13 16l3 3 3-3"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M20.5 3.5 3.5 10l7 2.5 2.5 7Z"/><path d="M10.5 12.5 20.5 3.5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M20 12H4M10 6l-6 6 6 6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v10M8 10l4 4 4-4"/><path d="M4.5 17.5v1a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-1"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.5 21V4.5M5.5 5h11l-1.5 3 1.5 3h-11"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 3.5h6l-1 6 4.5 3.5v2H5.5v-2L10 9.5Z"/><path d="M12 15v5.5"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3.5h7l5 5V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19Z"/><path d="M13 3.5V9h5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><circle cx="12" cy="8" r=".9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5"/><circle cx="12" cy="16.2" r=".9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2 5.5"/><path d="M20 5v6h-6"/></symbol>
+    <symbol id="i-envelope-open" viewBox="0 0 24 24"><path d="m3.5 9.5 8.5 6 8.5-6"/><path d="M4.5 6.5h15a1 1 0 0 1 1 1v10a1.5 1.5 0 0 1-1.5 1.5h-14A1.5 1.5 0 0 1 3.5 17.5v-10a1 1 0 0 1 1-1Z"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 15.5H6c1-1.2 1.5-2.6 1.5-4.5V10a4.5 4.5 0 1 1 9 0v1c0 1.9.5 3.3 1.5 4.5Z"/><path d="M10 18.5a2.2 2.2 0 0 0 4 0"/></symbol>
+    <symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M12 3.5 19 6v5.5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6Z"/><path d="m9 11.8 2 2 4-4.2"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M8 3v4M16 3v4M3.5 9.5h17"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="2"/><path d="m15 10 5-3v10l-5-3"/></symbol>
+    <symbol id="i-location" viewBox="0 0 24 24"><path d="M12 21s7-5.2 7-11a7 7 0 1 0-14 0c0 5.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M4 4.5h6.5L20 14l-6 6L4.5 10.5Z"/><circle cx="8.5" cy="8.5" r="1.2"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><circle cx="6" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></symbol>
+    <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M17 7 7 17"/><path d="M16 17H7V8"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h7M15 17h5"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="13" cy="17" r="2"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8.5 10V7.4a3.5 3.5 0 0 1 7 0V10"/><circle cx="12" cy="15" r="1.1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-task" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3.2"/><path d="m8 12.2 2.5 2.5L16.2 9"/></symbol>
+    <symbol id="i-files" viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/><path d="M8 12.5h8M8 15.5h5"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18.5a4 4 0 0 1-.5-7.97A5.5 5.5 0 0 1 17.2 9.4a4.6 4.6 0 0 1 .8 9.1Z"/><path d="M12 11v6M9.5 14.5 12 17l2.5-2.5"/></symbol>
+    <symbol id="i-fingerprint" viewBox="0 0 24 24"><path d="M6.5 10.2a5.5 5.5 0 0 1 11 0v2.3"/><path d="M8.5 11.3a3.5 3.5 0 0 1 7 0v3.2"/><path d="M10.6 12.4a1.5 1.5 0 0 1 3 0V17"/><path d="M5.2 13.8c.2 3 1 5.2 2.2 6.5"/><path d="M18.8 13.8c-.2 3-1 5.2-2.2 6.5"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8.2" cy="14.8" r="3.7"/><path d="m10.9 12.1 8.3-8.3M16.2 6.8l2.1 2.1M18.3 4.7l2.1 2.1"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.7 12h16.6M12 3.5c2.2 2.3 3.3 5.1 3.3 8.5S14.2 18.2 12 20.5C9.8 18.2 8.7 15.4 8.7 12S9.8 5.8 12 3.5Z"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M13 5h6v6M19 5l-8 8"/><path d="M18 14v4a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 18V8a1.5 1.5 0 0 1 1.5-1.5H10"/></symbol>
+    <symbol id="i-calendar-clock" viewBox="0 0 24 24"><rect x="3.5" y="5" width="15" height="15" rx="2"/><path d="M7.5 3v4M14.5 3v4M3.5 9.5h15"/><circle cx="17.5" cy="17" r="4"/><path d="M17.5 15v2.2l1.5 1"/></symbol>
+    <symbol id="i-shield-alert" viewBox="0 0 24 24"><path d="M12 3.5 19 6v5.5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6Z"/><path d="M12 7.8v4.4"/><circle cx="12" cy="15.2" r=".9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-flag-outline" viewBox="0 0 24 24"><path d="M5.5 21V4.5M5.5 5h11l-1.5 3 1.5 3h-11"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3.5 13.7 9l5.5 1.7-5.5 1.7L12 18l-1.7-5.6L4.8 10.7 10.3 9 12 3.5Z"/><path d="m19 15.5.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></symbol>
+    <symbol id="i-translate" viewBox="0 0 24 24"><path d="M4 5h8M8 5v2.5c0 3-2 5.5-4.5 7"/><path d="M5.5 10.5c1.4 2 3.4 3.4 5.5 4"/><path d="M13 19l3.5-9 3.5 9M14.4 16h4.2"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 5v5h5"/><path d="M4.8 10a8 8 0 1 1 1.2 5.4"/><path d="M12 8v4.5l3 2"/></symbol>
+  </defs>
+</svg>
+
+<div class="boot-splash" id="bootSplash" role="status" aria-live="polite" aria-label="Opening Meridian Mail">
+  <div class="boot-splash-inner">
+    <div class="boot-envelope" aria-hidden="true">
+      <span class="boot-envelope-letter"></span>
+      <span class="boot-envelope-body"></span>
+      <span class="boot-envelope-flap"></span>
+      <span class="boot-spark boot-spark-1"></span>
+      <span class="boot-spark boot-spark-2"></span>
+      <span class="boot-spark boot-spark-3"></span>
+    </div>
+    <p class="eyebrow">Meridian Mail</p>
+    <h1>Opening your workspace</h1>
+    <p>Restoring your secure session and mailbox…</p>
+    <div class="boot-progress" aria-hidden="true"><span></span></div>
+  </div>
+</div>
+
+<div class="login-screen" id="loginScreen" hidden>
+  <section class="login-brand">
+    <span class="login-watermark" aria-hidden="true">M</span>
+    <div class="login-brand-top">
+      <span class="login-mark" aria-hidden="true">M</span>
+      <div>
+        <strong>Meridian</strong>
+        <span>Enterprise workspace</span>
+      </div>
+    </div>
+    <div class="login-brand-main">
+      <p class="eyebrow">Secure workspace</p>
+      <h1>Mail that means business.</h1>
+      <p class="login-lead">Mail, calendar, tasks and files in one place — protected by Alt8Mail.</p>
+      <div class="login-features">
+        <div>
+          <span class="login-feature-icon"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg></span>
+          <div><strong>Verified senders</strong><span>SSO, DMARC checks and internal verification.</span></div>
+        </div>
+        <div>
+          <span class="login-feature-icon"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg></span>
+          <div><strong>One workspace</strong><span>Mail, calendar, tasks and files, together.</span></div>
+        </div>
+        <div>
+          <span class="login-feature-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span>
+          <div><strong>Policy protected</strong><span>TLS in transit and seven-year retention.</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="login-brand-foot">
+      <span class="status-dot" aria-hidden="true"></span>All systems operational
+      <span class="login-foot-sep" aria-hidden="true"></span>TLS 1.3 · SSO · 7-year retention
+    </div>
+  </section>
+
+  <section class="login-panel">
+    <form class="login-card" id="loginForm" novalidate>
+      <div class="login-heading">
+        <p class="eyebrow">Meridian Mail</p>
+        <h2>Sign in</h2>
+        <p>Use your Meridian account to continue.</p>
+      </div>
+      <button class="sso-btn" id="ssoBtn" type="button">
+        <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
+        Continue with single sign-on
+      </button>
+      <div class="login-divider"><span>or sign in with your work email</span></div>
+      <div class="login-field">
+        <label for="loginEmail">Work email</label>
+        <input id="loginEmail" type="email" value="avery.chen@meridian.example" autocomplete="username" spellcheck="false">
+      </div>
+      <div class="login-field">
+        <label for="loginPassword">Password</label>
+        <div class="password-wrap">
+          <input id="loginPassword" type="password" value="meridian-demo" autocomplete="current-password">
+          <button id="passwordToggle" type="button">Show</button>
+        </div>
+      </div>
+      <div class="login-options">
+        <label class="login-check"><input id="rememberMe" type="checkbox" checked>Remember me</label>
+        <button class="login-link" id="forgotPassword" type="button">Forgot password?</button>
+      </div>
+      <p class="login-error" id="loginError" hidden></p>
+      <p class="login-hint" id="loginHint" hidden></p>
+      <button class="login-submit" id="loginSubmit" type="submit">Sign in</button>
+      <p class="login-demo">Staging environment — prefilled test credentials. Mail is read live from Dovecot.</p>
+      <div class="login-card-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Protected by Alt8Mail · TLS 1.3</div>
+    </form>
+
+    <form class="login-card two-factor-card" id="twoFactorForm" hidden novalidate>
+      <div class="login-progress" aria-label="Sign-in progress">
+        <span class="login-step is-done"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Password</span>
+        <span class="login-step-line" aria-hidden="true"></span>
+        <span class="login-step is-current">Verify</span>
+      </div>
+      <div class="login-heading">
+        <p class="eyebrow">Two-factor authentication</p>
+        <h2>Verify it’s you</h2>
+        <p>Your password was accepted. Confirm this sign-in with a passkey or authenticator code.</p>
+      </div>
+      <div class="two-factor-user">
+        <span class="avatar avatar-md" id="twoFactorAvatar" style="--av:#34557a">AC</span>
+        <div><strong id="twoFactorName">Avery Chen</strong><span id="twoFactorEmail">avery.chen@meridian.example</span></div>
+        <span class="policy-chip"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Secure</span>
+      </div>
+      <div class="passkey-panel" id="passkeyPanel">
+        <span class="passkey-art"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></span>
+        <div class="passkey-copy">
+          <strong>Use a passkey</strong>
+          <span id="passkeyName">Windows Hello or your device passkey</span>
+        </div>
+        <button class="btn-primary" id="usePasskeyBtn" type="button">Continue with passkey</button>
+      </div>
+      <div class="login-divider"><span>or enter a verification code</span></div>
+      <div class="otp-block" id="otpBlock">
+        <div class="otp-inputs" id="otpInputs" aria-label="Six-digit verification code">
+          <input id="otp0" data-otp-index="0" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="Digit 1">
+          <input id="otp1" data-otp-index="1" inputmode="numeric" maxlength="1" aria-label="Digit 2">
+          <input id="otp2" data-otp-index="2" inputmode="numeric" maxlength="1" aria-label="Digit 3">
+          <input id="otp3" data-otp-index="3" inputmode="numeric" maxlength="1" aria-label="Digit 4">
+          <input id="otp4" data-otp-index="4" inputmode="numeric" maxlength="1" aria-label="Digit 5">
+          <input id="otp5" data-otp-index="5" inputmode="numeric" maxlength="1" aria-label="Digit 6">
+        </div>
+        <div class="otp-help">
+          <button class="login-link" id="recoveryModeBtn" type="button">Use a recovery code</button>
+          <span id="twoFactorDemo" hidden>Demo code <code id="twoFactorDemoCode">123456</code> <button id="fillDemoCode" type="button">Fill</button></span>
+        </div>
+      </div>
+      <div class="recovery-block" id="recoveryBlock" hidden>
+        <label class="login-field">
+          <span>Recovery code</span>
+          <input id="recoveryCode" type="text" placeholder="MRDN-XXXX-XXXX" autocomplete="one-time-code" spellcheck="false">
+        </label>
+        <button class="login-link" id="otpModeBtn" type="button">Use authenticator code instead</button>
+      </div>
+      <p class="login-error" id="twoFactorError" hidden></p>
+      <button class="login-submit" id="twoFactorSubmit" type="submit">Verify and sign in</button>
+      <label class="login-check two-factor-trust"><input id="trustDevice" type="checkbox">Trust this device for 30 days</label>
+      <div class="login-actions-row">
+        <button class="login-link" id="twoFactorBack" type="button">Back to sign in</button>
+        <span>Protected by Alt8Mail · FIDO2 passkeys supported</span>
+      </div>
+      <div class="login-card-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Password · Passkey · TOTP · Recovery code</div>
+    </form>
+    <form class="login-card two-factor-card" id="enrollmentForm" hidden novalidate>
+      <div class="login-progress" aria-label="Enrollment progress">
+        <span class="login-step is-done"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Password</span>
+        <span class="login-step-line" aria-hidden="true"></span>
+        <span class="login-step is-current">Enroll</span>
+      </div>
+      <div class="login-heading">
+        <p class="eyebrow">Required security setup</p>
+        <h2>Protect your account</h2>
+        <p>Your organization requires a second factor before this mailbox opens. Set up an authenticator app or a passkey now.</p>
+      </div>
+      <div class="two-factor-user">
+        <span class="avatar avatar-md" id="enrollmentAvatar" style="--av:#34557a">AC</span>
+        <div><strong id="enrollmentName">Avery Chen</strong><span id="enrollmentEmail">avery.chen@meridian.test</span></div>
+        <span class="policy-chip"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Required</span>
+      </div>
+      <div class="enrollment-methods">
+        <button class="btn-primary" id="enrollmentTotpBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Use an authenticator app</button>
+        <button class="btn-secondary" id="enrollmentPasskeyBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg>Create a passkey</button>
+      </div>
+      <div class="enrollment-totp" id="enrollmentTotpBlock" hidden>
+        <p class="settings-note">Add this secret to your authenticator app, then enter the six-digit code.</p>
+        <div class="totp-secret-row"><code id="enrollmentTotpSecret">—</code><button class="link-btn" id="enrollmentCopySecret" type="button">Copy secret</button></div>
+        <label class="login-field"><span>Six-digit code</span><input id="enrollmentTotpCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456"></label>
+        <button class="login-submit" id="enrollmentTotpVerify" type="button">Verify and continue</button>
+      </div>
+      <p class="login-error" id="enrollmentError" hidden></p>
+      <div class="login-actions-row">
+        <button class="login-link" id="enrollmentCancel" type="button">Back to sign in</button>
+        <span>Second factor is stored and verified by Meridian.</span>
+      </div>
+      <div class="login-card-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>First-time enrollment · TOTP or WebAuthn</div>
+    </form>
+    <div class="login-legal">Meridian Mail · staging environment</div>
+  </section>
+</div>
+
+<div class="app" id="app" data-task="mail" data-density="comfortable" hidden>
+  <div class="offline-banner" id="offlineBanner" hidden role="status">
+    <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+    <span>You’re offline. The app shell is cached; sending and mailbox changes will resume when the connection returns.</span>
+  </div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">M</span>
+      <span class="brand-name">Meridian</span>
+      <span class="brand-chip">Mail</span>
+      <svg class="icon brand-shield" aria-hidden="true" title="Verified organization"><use href="#i-shield-check"/></svg>
+    </div>
+
+    <div class="search" id="searchWrap" role="search">
+      <button class="search-back" id="searchBack" type="button" aria-label="Close search">
+        <svg class="icon" style="width:16px;height:16px"><use href="#i-arrow-left"/></svg>
+      </button>
+      <svg class="icon search-icon" style="width:17px;height:17px" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="searchInput" type="search" placeholder="Search mail" autocomplete="off" spellcheck="false" aria-label="Search">
+      <button class="search-clear" id="searchClear" type="button" aria-label="Clear search">
+        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+      <kbd>Ctrl K</kbd>
+      <div class="search-hints" id="searchHints" hidden>
+        <div class="search-hints-head">
+          <strong>Search all mail</strong>
+          <span id="searchScope">Instant local index</span>
+        </div>
+        <div class="search-op-grid">
+          <button type="button" data-search-op="from:"><code>from:</code><span>sender</span></button>
+          <button type="button" data-search-op="subject:"><code>subject:</code><span>subject text</span></button>
+          <button type="button" data-search-op="has:attachment"><code>has:attachment</code><span>with files</span></button>
+          <button type="button" data-search-op="before:"><code>before:</code><span>date (YYYY-MM-DD)</span></button>
+          <button type="button" data-search-op="after:"><code>after:</code><span>date (YYYY-MM-DD)</span></button>
+          <button type="button" data-search-op="is:unread"><code>is:unread</code><span>unread only</span></button>
+          <button type="button" data-search-op="in:"><code>in:</code><span>folder</span></button>
+          <button type="button" data-search-op="filename:"><code>filename:</code><span>attachment name</span></button>
+        </div>
+        <div class="search-hints-foot">
+          <span>Try</span>
+          <button type="button" data-search-example="from:elena has:attachment">from:elena has:attachment</button>
+          <button type="button" data-search-example="before:2026-11-01 subject:review">before:2026-11-01 subject:review</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <button class="top-btn mobile-search-btn" id="openSearch" type="button" aria-label="Search" title="Search">
+        <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+      </button>
+      <button class="top-btn notify-btn" id="notifyBtn" type="button" aria-label="Notifications" title="Notifications">
+        <svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg>
+        <span class="notify-dot" id="notifyDot" aria-hidden="true"></span>
+        <span class="notify-count" id="notifyCount" hidden>0</span>
+      </button>
+      <button class="top-btn top-help" id="helpBtn" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">
+        <svg class="icon" aria-hidden="true"><use href="#i-help"/></svg>
+      </button>
+      <button class="top-btn top-settings" id="settingsBtn" type="button" aria-label="Settings" title="Settings">
+        <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>
+      </button>
+      <span class="top-divider" aria-hidden="true"></span>
+      <span class="top-account">
+        <button class="top-avatar" id="accountBtn" type="button" aria-label="Account settings" title="Avery Chen — account settings">AC</button>
+        <span class="presence-dot" aria-hidden="true" title="Available"></span>
+      </span>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <nav class="rail" aria-label="Workspace">
+      <button class="rail-btn has-label is-active" data-task="mail" type="button" aria-label="Mail" title="Mail">
+        <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span class="rail-label">Mail</span>
+      </button>
+      <button class="rail-btn has-label" data-task="calendar" type="button" aria-label="Calendar" title="Calendar">
+        <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg><span class="rail-label">Calendar</span>
+      </button>
+      <button class="rail-btn has-label" data-task="people" type="button" aria-label="People" title="People">
+        <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg><span class="rail-label">People</span>
+      </button>
+      <button class="rail-btn has-label" data-task="tasks" type="button" aria-label="Tasks" title="Tasks">
+        <svg class="icon" aria-hidden="true"><use href="#i-task"/></svg><span class="rail-label">Tasks</span>
+      </button>
+      <button class="rail-btn has-label" data-task="files" type="button" aria-label="Files" title="Files">
+        <svg class="icon" aria-hidden="true"><use href="#i-files"/></svg><span class="rail-label">Files</span>
+      </button>
+      <div class="rail-rule" aria-hidden="true"></div>
+      <div class="rail-spacer"></div>
+      <button class="rail-btn" data-task="settings" type="button" aria-label="Settings" title="Settings">
+        <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>
+      </button>
+      <button class="rail-btn theme-btn" id="themeBtn" type="button" aria-label="Switch theme" title="Switch theme">
+        <svg class="icon icon-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        <svg class="icon icon-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+      </button>
+      <button class="rail-btn" id="railHelp" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">
+        <svg class="icon" aria-hidden="true"><use href="#i-help"/></svg>
+      </button>
+      <button class="rail-btn" id="railLogout" type="button" aria-label="Sign out" title="Sign out">
+        <svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg>
+      </button>
+    </nav>
+
+    <main class="main-area">
+      <div class="mail-view" id="mailView">
+        <div class="commandbar" aria-label="Message actions">
+          <div class="cmd-split">
+            <button class="cmd-primary" id="cmdCompose" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New mail
+            </button>
+            <button class="cmd-chevron" id="cmdNewMenuBtn" type="button" aria-label="New item options" title="New item">
+              <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+            </button>
+          </div>
+          <span class="cmd-divider" aria-hidden="true"></span>
+          <button class="cmd-btn" data-action="reply" type="button" aria-label="Reply" title="Reply">
+            <svg class="icon" aria-hidden="true"><use href="#i-reply"/></svg><span>Reply</span>
+          </button>
+          <button class="cmd-btn" data-action="reply-all" type="button" aria-label="Reply all" title="Reply all">
+            <svg class="icon" aria-hidden="true"><use href="#i-reply-all"/></svg><span>Reply all</span>
+          </button>
+          <button class="cmd-btn" data-action="forward" type="button" aria-label="Forward" title="Forward">
+            <svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg><span>Forward</span>
+          </button>
+          <div class="ai-reader-split cmd-ai-split" id="cmdAiWrap" data-ai-wrap hidden>
+            <button class="ai-reader-primary" id="cmdAiBtn" data-ai-toggle type="button" aria-label="AI options for this email" title="AI options for this email" aria-haspopup="menu" aria-expanded="false">
+              <svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span>AI</span>
+            </button>
+            <button class="ai-reader-chevron" id="cmdAiChevron" data-ai-toggle type="button" aria-label="Show AI options" title="Show AI options" aria-haspopup="menu" aria-expanded="false">
+              <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+            </button>
+            <div class="ai-reader-menu" id="cmdAiMenu" data-ai-menu role="menu" aria-label="AI email actions" hidden>
+              <button type="button" role="menuitem" data-ai-action="summary"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><span><strong>Summarise this email</strong><small>Recent conversation, in your language</small></span></button>
+              <button type="button" role="menuitem" data-ai-action="translate"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-translate"/></svg></span><span><strong>Translate Email</strong><small>Read the latest message in your language</small></span></button>
+            </div>
+          </div>
+          <button class="cmd-btn ai-reply-action" data-action="ai-reply" id="cmdAiReply" type="button" aria-label="Reply with AI" title="Reply with AI" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span>Reply with AI</span>
+          </button>
+          <span class="cmd-divider" aria-hidden="true"></span>
+          <button class="cmd-btn" data-action="archive" type="button" aria-label="Archive" title="Archive">
+            <svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg><span>Archive</span>
+          </button>
+          <button class="cmd-btn" data-action="delete" type="button" aria-label="Delete" title="Delete">
+            <svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span>Delete</span>
+          </button>
+          <button class="cmd-btn" id="cmdMove" type="button" aria-label="Move to folder" title="Move to folder">
+            <svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span>Move</span>
+          </button>
+          <span class="cmd-divider" aria-hidden="true"></span>
+          <button class="cmd-btn" data-action="mark-unread" type="button" aria-label="Mark as unread" title="Mark as unread">
+            <svg class="icon" aria-hidden="true"><use href="#i-envelope-open"/></svg><span>Unread</span>
+          </button>
+          <div class="cmd-right">
+            <button class="cmd-btn" id="cmdRefresh" type="button" aria-label="Refresh mailbox" title="Refresh">
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><span>Refresh</span>
+            </button>
+          </div>
+        </div>
+        <aside class="folders" id="folders" aria-label="Mailboxes">
+          <div class="drawer-head">
+            <span>Mailboxes</span>
+            <button class="drawer-close" id="drawerClose" type="button" aria-label="Close folders">
+              <svg class="icon" style="width:17px;height:17px"><use href="#i-close"/></svg>
+            </button>
+          </div>
+          <div class="folders-top">
+            <button class="compose-btn drawer-compose" id="drawerCompose" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+              New mail
+            </button>
+            <div class="tenant">
+              <span class="tenant-mark" aria-hidden="true">M</span>
+              <div class="tenant-id">
+                <strong>Meridian</strong>
+                <span><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Enterprise workspace</span>
+              </div>
+            </div>
+            <div class="account-line">
+              <span class="avatar avatar-sm" style="--av:#3f5d7a">AC</span>
+              <div class="account-id">
+                <strong>Avery Chen</strong>
+                <span>avery.chen@meridian.example</span>
+              </div>
+            </div>
+          </div>
+          <div class="folder-scroll" id="folderList"></div>
+          <button class="quota" id="quotaButton" type="button" title="Storage usage from Alt8Mail">
+            <div class="quota-line"><span id="quotaLabel">2.4 GB of 15 GB</span><span id="quotaPct">16%</span></div>
+            <div class="quota-bar"><span id="quotaBarFill" style="width:16%"></span></div>
+            <div class="quota-source"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span id="quotaSource">Alt8Mail live</span></div>
+          </button>
+        </aside>
+
+        <section class="list-pane" aria-label="Message list">
+          <div class="list-head">
+            <div class="list-title-row">
+              <label class="select-all-wrap" title="Select all conversations">
+                <input type="checkbox" id="selectAll" aria-label="Select all conversations">
+                <span class="check-visual" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
+              </label>
+              <button class="icon-btn folder-toggle" id="folderToggle" type="button" aria-label="Show folders" title="Show folders">
+                <svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>
+              </button>
+              <h1 id="listTitle">Inbox</h1>
+              <span class="list-count" id="listCount"></span>
+              <div class="list-actions">
+                <button class="icon-btn" id="sortBtn" type="button" aria-label="Sort messages" title="Sort newest first">
+                  <svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="chips" role="group" aria-label="Filter messages">
+              <button class="chip is-active" data-filter="all" type="button">All</button>
+              <button class="chip" data-filter="unread" type="button">Unread</button>
+              <button class="chip" data-filter="starred" type="button">Starred</button>
+              <button class="chip" data-filter="attachments" type="button"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg>Files</button>
+            </div>
+            <div class="search-scope-row" id="searchScopeRow" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+              <span id="searchSummary"></span>
+              <button type="button" id="searchClearInline">Clear</button>
+            </div>
+          </div>
+          <div class="bulk-bar" id="bulkBar" hidden aria-live="polite">
+            <span class="bulk-count" id="bulkCount">1 selected</span>
+            <span class="bulk-divider" aria-hidden="true"></span>
+            <button type="button" data-bulk-action="archive"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+            <button type="button" data-bulk-move="open"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>Move</button>
+            <button type="button" data-bulk-action="markRead"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Read</button>
+            <button type="button" data-bulk-action="markUnread"><svg class="icon" aria-hidden="true"><use href="#i-envelope-open"/></svg>Unread</button>
+            <button type="button" data-bulk-action="delete"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+            <button type="button" class="bulk-clear" data-bulk-action="clear" aria-label="Clear selection"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+            <div class="bulk-move-menu" id="bulkMoveMenu" hidden>
+              <button type="button" data-bulk-move-folder="inbox"><svg class="icon" aria-hidden="true"><use href="#i-inbox"/></svg>Inbox</button>
+              <button type="button" data-bulk-move-folder="archive"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+              <button type="button" data-bulk-move-folder="spam"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>Junk</button>
+              <button type="button" data-bulk-move-folder="trash"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Trash</button>
+            </div>
+          </div>
+          <div class="list-scroll" id="messageList" role="listbox" aria-label="Conversations" aria-multiselectable="true"></div>
+        </section>
+
+        <section class="reader is-empty" id="reader" aria-label="Reading pane">
+          <div class="reader-toolbar" id="readerToolbar" role="toolbar" aria-label="Message actions">
+            <button class="tool-btn icon-only reader-back" id="readerBack" type="button" aria-label="Back to messages">
+              <svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg>
+            </button>
+            <button class="tool-btn" data-action="reply" type="button" aria-label="Reply" title="Reply">
+              <svg class="icon" aria-hidden="true"><use href="#i-reply"/></svg><span class="tool-label">Reply</span>
+            </button>
+            <button class="tool-btn" data-action="reply-all" type="button" aria-label="Reply all" title="Reply all">
+              <svg class="icon" aria-hidden="true"><use href="#i-reply-all"/></svg><span class="tool-label">Reply all</span>
+            </button>
+            <button class="tool-btn" data-action="forward" type="button" aria-label="Forward" title="Forward">
+              <svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg><span class="tool-label">Forward</span>
+            </button>
+            <button class="tool-btn ai-reply-action" data-action="ai-reply" id="readerAiReplyBtn" type="button" aria-label="Reply with AI" title="Reply with AI" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span class="tool-label">Reply with AI</span>
+            </button>
+            <span class="tool-divider" aria-hidden="true"></span>
+            <button class="tool-btn" data-action="archive" type="button" aria-label="Archive" title="Archive">
+              <svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg><span class="tool-label">Archive</span>
+            </button>
+            <button class="tool-btn" data-action="delete" type="button" aria-label="Delete" title="Delete">
+              <svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span class="tool-label">Delete</span>
+            </button>
+            <span class="tool-divider" aria-hidden="true"></span>
+            <button class="tool-btn tool-flag" id="readerFlagBtn" data-action="flag" type="button" aria-label="Flag for follow-up" title="Flag for follow-up" aria-pressed="false">
+              <svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg><span class="tool-label">Flag</span>
+            </button>
+            <button class="tool-btn tool-pin" id="readerPinBtn" data-action="pin" type="button" aria-label="Pin email" title="Pin email" aria-pressed="false">
+              <svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg><span class="tool-label" id="readerPinLabel">Pin</span>
+            </button>
+            <button class="tool-btn" id="readerSpamBtn" data-action="spam" type="button" aria-label="Mark as spam" title="Mark as spam">
+              <svg class="icon" aria-hidden="true"><use id="readerSpamIcon" href="#i-alert"/></svg><span class="tool-label" id="readerSpamLabel">Junk</span>
+            </button>
+            <button class="tool-btn tool-report" id="readerReportBtn" data-action="report" type="button" aria-label="Report email" title="Report email to security">
+              <svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg><span class="tool-label">Report</span>
+            </button>
+            <div class="ai-reader-split" id="readerAiWrap" data-ai-wrap hidden>
+              <button class="ai-reader-primary" id="readerAiBtn" data-ai-toggle type="button" aria-label="AI options for this email" title="AI options for this email" aria-haspopup="menu" aria-expanded="false">
+                <svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span>AI</span>
+              </button>
+              <button class="ai-reader-chevron" id="readerAiChevron" data-ai-toggle type="button" aria-label="Show AI options" title="Show AI options" aria-haspopup="menu" aria-expanded="false">
+                <svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+              </button>
+              <div class="ai-reader-menu" id="readerAiMenu" data-ai-menu role="menu" aria-label="AI email actions" hidden>
+                <button type="button" role="menuitem" data-ai-action="summary"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><span><strong>Summarise this email</strong><small>Recent conversation, in your language</small></span></button>
+                <button type="button" role="menuitem" data-ai-action="translate"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-translate"/></svg></span><span><strong>Translate Email</strong><small>Read the latest message in your language</small></span></button>
+              </div>
+            </div>
+            <span class="tool-spacer"></span>
+            <button class="tool-btn icon-only" id="threadExpandAll" type="button" aria-label="Expand all messages" title="Expand all messages">
+              <svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg>
+            </button>
+            <button class="tool-btn icon-only" id="threadCollapseAll" type="button" aria-label="Collapse all messages" title="Collapse all messages">
+              <svg class="icon" aria-hidden="true"><use href="#i-collapse"/></svg>
+            </button>
+            <button class="tool-btn icon-only" data-action="mark-unread" type="button" aria-label="Mark as unread" title="Mark as unread (U)">
+              <svg class="icon" aria-hidden="true"><use href="#i-envelope-open"/></svg>
+            </button>
+            <button class="tool-btn icon-only" id="readerPopout" type="button" aria-label="Open in a new window" title="Open in a new window">
+              <svg class="icon" aria-hidden="true"><use href="#i-external"/></svg>
+            </button>
+          </div>
+          <div class="reader-scroll" id="readerScroll">
+            <div class="reader-doc" id="readerContent"></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="people-view" id="peopleView" hidden>
+        <aside class="people-list" aria-label="Contacts">
+          <div class="people-head">
+            <p class="eyebrow">Meridian directory</p>
+            <div class="people-title-row">
+              <h1>People</h1>
+              <span class="people-count" id="peopleCount">8 contacts</span>
+              <button class="btn-secondary small people-add" id="newContactBtn" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add contact
+              </button>
+            </div>
+            <div class="dept-chips" role="group" aria-label="Filter by department">
+              <button class="chip is-active" data-dept="All" type="button">All</button>
+              <button class="chip" data-dept="Product" type="button">Product</button>
+              <button class="chip" data-dept="Finance" type="button">Finance</button>
+              <button class="chip" data-dept="Legal" type="button">Legal</button>
+              <button class="chip" data-dept="People" type="button">People</button>
+              <button class="chip" data-dept="Engineering" type="button">Engineering</button>
+              <button class="chip" data-dept="Data" type="button">Data</button>
+              <button class="chip" data-dept="Customer Success" type="button">Success</button>
+            </div>
+          </div>
+          <div class="people-scroll" id="peopleList"></div>
+        </aside>
+        <section class="person-pane" id="personPane" aria-label="Contact details">
+          <div class="person-toolbar">
+            <button class="icon-btn person-back" id="personBack" type="button" aria-label="Back to contacts">
+              <svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg>
+            </button>
+          </div>
+          <div class="person-scroll">
+            <div class="person-doc" id="personDetail"></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="tasks-view" id="tasksView" hidden>
+        <header class="workspace-page-head">
+          <div>
+            <p class="eyebrow">Meridian workspace</p>
+            <div class="workspace-title-row">
+              <h1>Tasks</h1>
+              <span class="workspace-meta" id="tasksMeta">My tasks and team follow-ups</span>
+            </div>
+          </div>
+          <div class="workspace-head-actions">
+            <button class="btn-secondary" id="tasksRefreshBtn" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh
+            </button>
+            <button class="btn-primary" id="newTaskBtn" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New task
+            </button>
+          </div>
+        </header>
+        <div class="task-stats" id="taskStats"></div>
+        <div class="tasks-body">
+          <aside class="task-list-pane">
+            <div class="task-filters" id="taskFilters" role="group" aria-label="Filter tasks"></div>
+            <div class="task-scroll" id="taskList"></div>
+          </aside>
+          <section class="task-detail" id="taskDetail" aria-label="Task details"></section>
+        </div>
+      </div>
+
+      <div class="files-view" id="filesView" hidden>
+        <header class="workspace-page-head">
+          <div>
+            <p class="eyebrow">Meridian workspace</p>
+            <div class="workspace-title-row">
+              <h1>Files</h1>
+              <span class="workspace-meta" id="filesMeta">Company storage and connected drives</span>
+            </div>
+          </div>
+          <div class="workspace-head-actions">
+            <button class="btn-secondary" id="connectStorageBtn" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg>Connect storage
+            </button>
+            <button class="btn-primary" id="uploadFileBtn" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Upload file
+            </button>
+          </div>
+        </header>
+        <div class="storage-strip" id="storageStrip"></div>
+        <div class="files-body">
+          <section class="files-list-pane">
+            <div class="files-toolbar">
+              <div class="files-filters" id="fileFilters" role="group" aria-label="Filter files"></div>
+              <select id="fileProviderFilter" class="pref-select" aria-label="Filter by storage provider"></select>
+            </div>
+            <div class="file-scroll" id="fileList"></div>
+          </section>
+          <aside class="file-detail" id="fileDetail" aria-label="File details"></aside>
+        </div>
+        <input type="file" id="fileUploadInput" multiple hidden>
+      </div>
+
+      <div class="scheduled-view" id="scheduledView" hidden>
+        <header class="workspace-page-head">
+          <div>
+            <p class="eyebrow">Meridian outbox</p>
+            <div class="workspace-title-row">
+              <h1>Scheduled</h1>
+              <span class="workspace-meta" id="scheduledMeta">Messages waiting for their send time</span>
+            </div>
+          </div>
+          <div class="workspace-head-actions">
+            <button class="btn-secondary" id="scheduledBack" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg>Back to mail
+            </button>
+            <button class="btn-secondary" id="scheduledRefresh" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh
+            </button>
+            <button class="btn-primary" id="scheduledCompose" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New message
+            </button>
+          </div>
+        </header>
+        <div class="scheduled-body">
+          <div class="scheduled-summary" id="scheduledSummary"></div>
+          <div class="scheduled-center-head">
+            <div>
+              <h2>Upcoming sends</h2>
+              <p id="scheduledQueueNote">Scheduled messages stay on the server and send in your time zone.</p>
+            </div>
+            <span class="scheduled-zone-chip"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span id="scheduledZoneLabel">Time zone</span></span>
+          </div>
+          <div class="scheduled-list" id="scheduledList"></div>
+          <div class="scheduled-policy">
+            <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
+            <div><strong>Server-backed schedule</strong><span>Scheduled mail is held in the Meridian outbox, survives sign-out and restarts, and can be sent now, edited or cancelled until its send time.</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="calendar-view" id="calendarView" hidden>
+        <header class="calendar-head">
+          <div class="calendar-title">
+            <p class="eyebrow">Meridian workspace</p>
+            <h1>Calendar</h1>
+          </div>
+          <div class="calendar-actions">
+            <button class="btn-secondary" id="calToday" type="button">Today</button>
+            <div class="cal-nav" aria-label="Month navigation">
+              <button class="icon-btn" id="calPrev" type="button" aria-label="Previous month" title="Previous month">
+                <svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg>
+              </button>
+              <button class="icon-btn" id="calNext" type="button" aria-label="Next month" title="Next month">
+                <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+            </div>
+            <button class="btn-primary" id="calNew" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New event
+            </button>
+          </div>
+        </header>
+        <div class="calendar-body">
+          <section class="cal-month" aria-label="Month view">
+            <div class="cal-month-head">
+              <h2 id="calMonthLabel">October 2026</h2>
+              <span id="calWeekLabel">Week 44</span>
+            </div>
+            <div class="cal-weekdays" aria-hidden="true">
+              <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+            </div>
+            <div class="cal-grid" id="calGrid" role="grid" aria-label="Month"></div>
+          </section>
+          <aside class="cal-agenda" aria-label="Agenda">
+            <div class="cal-agenda-head">
+              <div>
+                <span class="eyebrow">Agenda</span>
+                <h2 id="agendaDate">Tuesday, October 27</h2>
+              </div>
+              <span class="cal-agenda-count" id="agendaCount">3 events</span>
+            </div>
+            <div class="cal-agenda-list" id="agendaList"></div>
+            <div class="cal-agenda-foot">
+              <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
+              Calendar data stays within Meridian.
+            </div>
+          </aside>
+        </div>
+      </div>
+
+      <div class="settings-view" id="settingsView" hidden>
+        <div class="settings-layout">
+          <aside class="settings-nav">
+            <div class="settings-nav-head">
+              <p class="eyebrow">Meridian workspace</p>
+              <h1>Settings</h1>
+            </div>
+            <nav class="settings-nav-list" aria-label="Settings sections">
+              <button class="settings-nav-item is-active" data-settings-tab="appearance" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg><span>Appearance</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="mail" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span>Mail &amp; reading</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="compose" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-compose"/></svg><span>Compose</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="identities" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-key"/></svg><span>Identities &amp; forwarding</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="notifications" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><span>Notifications</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="regional" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>Language &amp; time</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="rules" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg><span>Rules</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="autoreply" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg><span>Automatic replies</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="audit" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Audit log</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="security" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span>Security &amp; privacy</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="account" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg><span>Account</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="about" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>About</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+            </nav>
+            <div class="settings-nav-foot">
+              <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
+              Managed by Alt8Mail
+            </div>
+          </aside>
+
+          <div class="settings-main">
+            <header class="settings-topbar">
+              <div>
+                <p class="eyebrow" id="settingsEyebrow">Workspace preferences</p>
+                <h2 id="settingsTitle">Appearance</h2>
+              </div>
+              <button class="btn-secondary" id="settingsDone" type="button">Done</button>
+            </header>
+            <div class="settings-scroll" id="settingsScroll">
+              <div class="settings-panels">
+                <section class="settings-panel is-active" data-settings-panel="appearance">
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Theme</h3>
+                      <p>Pick a theme, or follow the operating system.</p>
+                    </div>
+                    <div class="settings-block-body">
+                      <div class="theme-grid" role="radiogroup" aria-label="Theme">
+                        <button class="theme-card" data-set-theme="light" type="button" role="radio" aria-checked="false">
+                          <span class="theme-thumb" data-variant="light"><span class="tt-bar"></span><span class="tt-body"><span class="tt-side"></span><span class="tt-main"><i></i><i></i><i></i></span></span></span>
+                          <span class="theme-card-label">Light<span class="theme-check"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span></span>
+                        </button>
+                        <button class="theme-card" data-set-theme="dark" type="button" role="radio" aria-checked="false">
+                          <span class="theme-thumb" data-variant="dark"><span class="tt-bar"></span><span class="tt-body"><span class="tt-side"></span><span class="tt-main"><i></i><i></i><i></i></span></span></span>
+                          <span class="theme-card-label">Dark<span class="theme-check"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span></span>
+                        </button>
+                        <button class="theme-card" data-set-theme="system" type="button" role="radio" aria-checked="false">
+                          <span class="theme-thumb" data-variant="system"><span class="tt-bar"></span><span class="tt-body"><span class="tt-side"></span><span class="tt-main"><i></i><i></i><i></i></span></span></span>
+                          <span class="theme-card-label">System<span class="theme-check"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span></span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Accent</h3>
+                      <p>One color across buttons, selection and links.</p>
+                    </div>
+                    <div class="settings-block-body">
+                      <div class="accent-row" role="radiogroup" aria-label="Accent color">
+                        <button class="accent-option" data-set-accent="blue" type="button" role="radio" aria-checked="false">
+                          <span class="accent-dot" style="--sw:#0f6cbd"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>Blue
+                        </button>
+                        <button class="accent-option" data-set-accent="teal" type="button" role="radio" aria-checked="false">
+                          <span class="accent-dot" style="--sw:#0f766e"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>Teal
+                        </button>
+                        <button class="accent-option" data-set-accent="violet" type="button" role="radio" aria-checked="false">
+                          <span class="accent-dot" style="--sw:#6346d8"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>Violet
+                        </button>
+                        <button class="accent-option" data-set-accent="rose" type="button" role="radio" aria-checked="false">
+                          <span class="accent-dot" style="--sw:#b8336a"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>Rose
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Message list</h3>
+                      <p>Choose how much of each message to show.</p>
+                    </div>
+                    <div class="settings-block-body">
+                      <div class="segmented" role="radiogroup" aria-label="Message list density">
+                        <button data-set-density="comfortable" type="button" role="radio" aria-checked="true">Comfortable</button>
+                        <button data-set-density="compact" type="button" role="radio" aria-checked="false">Compact</button>
+                      </div>
+                      <p class="density-hint" id="densityHint">Three-line rows with a subject and preview line.</p>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="mail" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Reading</h3>
+                      <p>How messages open and get marked as read.</p>
+                    </div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Inbox view</strong>
+                          <span>Group replies into conversations, or show every message as its own row.</span>
+                        </div>
+                        <select class="pref-select" id="inboxViewSelect" aria-label="Inbox view">
+                          <option value="grouped">Group by conversation</option>
+                          <option value="individual">Individual view</option>
+                        </select>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Mark messages as read when opened</strong>
+                          <span>Leave off if you prefer to mark messages read manually.</span>
+                        </div>
+                        <button class="switch" data-pref="markReadOnOpen" type="button" role="switch" aria-checked="true" aria-label="Mark messages as read when opened"><span></span></button>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Auto-advance after archive or delete</strong>
+                          <span>Open the next conversation automatically, like Outlook’s reading pane.</span>
+                        </div>
+                        <button class="switch" data-server-pref="autoAdvance" type="button" role="switch" aria-checked="false" aria-label="Auto-advance after archive or delete"><span></span></button>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Default importance for new mail</strong>
+                          <span>Applied to every new message you compose.</span>
+                        </div>
+                        <select class="pref-select" id="defaultPrioritySelect" aria-label="Default importance for new mail">
+                          <option value="low">Low</option>
+                          <option value="normal" selected>Normal</option>
+                          <option value="high">High</option>
+                        </select>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Request return receipts by default</strong>
+                          <span>New messages ask the recipient to confirm delivery.</span>
+                        </div>
+                        <button class="switch" data-pref="defaultReceipt" type="button" role="switch" aria-checked="false" aria-label="Request return receipts by default"><span></span></button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Composing</h3>
+                      <p>Defaults applied to new messages from this device.</p>
+                    </div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Save a copy in Sent</strong>
+                          <span>Every sent message is stored in the Sent folder.</span>
+                        </div>
+                        <span class="policy-chip">Enabled</span>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Spell check before sending</strong>
+                          <span>Roundcube checks the message as you type.</span>
+                        </div>
+                        <span class="policy-chip">Enabled</span>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Undo send window</strong>
+                          <span>Messages wait in a server-side queue before delivery.</span>
+                        </div>
+                        <select class="pref-select" id="undoSendSelect" aria-label="Undo send window">
+                          <option value="5">5 seconds</option>
+                          <option value="8" selected>8 seconds</option>
+                          <option value="10">10 seconds</option>
+                        </select>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Default From identity</strong>
+                          <span>Used when you start a new message. Replies keep the receiving alias.</span>
+                        </div>
+                        <select class="pref-select" id="defaultFromSelect" aria-label="Default From identity"></select>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Signature on new messages</strong>
+                          <span>Insert your signature when you start a new message.</span>
+                        </div>
+                        <button class="switch" data-server-pref="signatureEnabled" type="button" role="switch" aria-checked="true" aria-label="Signature on new messages"><span></span></button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Signature</h3>
+                      <p>Plain text signature inserted beneath new messages. Replies and forwards are left clean.</p>
+                    </div>
+                    <div class="signature-editor">
+                      <textarea id="signatureInput" rows="4" placeholder="Your name, role and contact details"></textarea>
+                      <div class="signature-editor-foot">
+                        <span id="signatureStatus">Server-backed signature</span>
+                        <button class="btn-primary" id="saveSignatureBtn" type="button">Save signature</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="compose" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Message editor</h3>
+                      <p>Choose how new messages open. You can switch between HTML and plain text inside any compose window.</p>
+                    </div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Default compose format</strong>
+                          <span>Rich HTML keeps formatting, links and lists. Plain text sends only text.</span>
+                        </div>
+                        <select class="pref-select" id="composeModeSelect" aria-label="Default compose format">
+                          <option value="html">Rich HTML</option>
+                          <option value="plain">Plain text</option>
+                        </select>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Compose window size</strong>
+                          <span>Wide opens at twice the classic width. Manual resize is remembered for the window.</span>
+                        </div>
+                        <select class="pref-select" id="composeWidthSelect" aria-label="Compose window size">
+                          <option value="standard">Classic</option>
+                          <option value="wide">Wide · 2×</option>
+                          <option value="full">Full width</option>
+                        </select>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Compose window position</strong>
+                          <span>Where a new compose window opens on this screen.</span>
+                        </div>
+                        <select class="pref-select" id="composePositionSelect" aria-label="Compose window position">
+                          <option value="center">Exact center</option>
+                          <option value="bottom-right">Bottom right</option>
+                          <option value="bottom-left">Bottom left</option>
+                        </select>
+                      </div>
+                    </div>
+                    <p class="settings-note">The editor sanitizes formatting on the server before a draft or message is stored. HTML is rendered in a restricted viewer; scripts and remote content are never allowed.</p>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="identities" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Sending identities</h3>
+                      <p>Choose which verified addresses can appear in the From line. Your primary account and organization aliases are managed by IT.</p>
+                    </div>
+                    <div class="identity-list" id="identityList"><div class="settings-note">Loading identities…</div></div>
+                    <div class="identity-add-grid">
+                      <label class="form-field"><span>Display name</span><input id="identityName" maxlength="120" placeholder="Avery Chen · Product"></label>
+                      <label class="form-field"><span>Email address</span><input id="identityEmail" type="email" placeholder="you@partner.com"></label>
+                      <label class="form-field"><span>Reply-to <small class="muted">optional</small></span><input id="identityReplyTo" type="email" placeholder="replies@partner.com"></label>
+                      <label class="form-field"><span>Signature <small class="muted">optional</small></span><textarea id="identitySignature" rows="2" maxlength="4000" placeholder="Signature for this identity"></textarea></label>
+                    </div>
+                    <div class="settings-actions">
+                      <button class="btn-secondary" id="addIdentityBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add identity</button>
+                      <span class="settings-note" id="identityNote">External addresses receive a verification email before they can send.</span>
+                    </div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Mail forwarding</h3>
+                      <p>Forward incoming mail to another address. Forwarding is applied by Dovecot Sieve before your other rules.</p>
+                    </div>
+                    <div class="setting-list">
+                      <div class="setting-row">
+                        <div class="setting-copy"><strong>Enable forwarding</strong><span>Send a copy of incoming mail to the address below.</span></div>
+                        <button class="switch" id="forwardingEnabled" type="button" role="switch" aria-checked="false" aria-label="Enable mail forwarding"><span></span></button>
+                      </div>
+                      <label class="form-field"><span>Forward to</span><input id="forwardingTarget" type="email" placeholder="archive@example.com"></label>
+                      <div class="setting-row">
+                        <div class="setting-copy"><strong>Permanent</strong><span>Keep forwarding until you turn it off.</span></div>
+                        <button class="switch" id="forwardingPermanent" type="button" role="switch" aria-checked="true" aria-label="Permanent forwarding"><span></span></button>
+                      </div>
+                      <div class="forwarding-date-grid" id="forwardingDates" hidden>
+                        <label class="form-field"><span>Start date <small class="muted">DD/MM/YYYY</small></span><input id="forwardingStart" inputmode="numeric" placeholder="31/10/2026"></label>
+                        <label class="form-field"><span>End date <small class="muted">DD/MM/YYYY</small></span><input id="forwardingEnd" inputmode="numeric" placeholder="31/12/2026"></label>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-copy"><strong>Keep a copy in this mailbox</strong><span>When off, forwarded mail leaves no copy in the inbox or other folders.</span></div>
+                        <button class="switch" id="forwardingKeepCopy" type="button" role="switch" aria-checked="true" aria-label="Keep a copy when forwarding"><span></span></button>
+                      </div>
+                    </div>
+                    <div class="settings-actions">
+                      <button class="btn-primary" id="saveForwardingBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save forwarding</button>
+                      <span class="settings-note" id="forwardingNote">Policy-controlled by your organization.</span>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="notifications" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Delivery</h3>
+                      <p>Choose which signals reach this device.</p>
+                    </div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Desktop notifications</strong>
+                          <span>Show an alert when new mail arrives while Meridian Mail is open.</span>
+                        </div>
+                        <button class="switch" data-pref="notifyDesktop" type="button" role="switch" aria-checked="true" aria-label="Desktop notifications"><span></span></button>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>New mail sound</strong>
+                          <span>Play a short tone for new messages.</span>
+                        </div>
+                        <button class="switch" data-pref="notifySound" type="button" role="switch" aria-checked="false" aria-label="New mail sound"><span></span></button>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Calendar reminders</strong>
+                          <span>Show an alert ten minutes before a meeting.</span>
+                        </div>
+                        <button class="switch" data-pref="notifyCalendar" type="button" role="switch" aria-checked="true" aria-label="Calendar reminders"><span></span></button>
+                      </div>
+                    </div>
+                    <p class="settings-note">Preferences are stored in PostgreSQL. Desktop alerts require browser notification permission; sound and calendar reminders always fall back to an in-app notice.</p>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="regional" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Language &amp; region</h3>
+                      <p>Controls dates, times, numbers, scheduled sends and calendar labels across the workspace.</p>
+                    </div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Language</strong><span>Locale for dates, times and number formatting.</span></div>
+                        <select class="pref-select" id="languageSelect" aria-label="Language">
+                          <option value="en-US">English (United States)</option>
+                          <option value="en-GB">English (United Kingdom)</option>
+                          <option value="de-DE">Deutsch</option>
+                          <option value="fr-FR">Français</option>
+                          <option value="es-ES">Español</option>
+                          <option value="pt-BR">Português (Brasil)</option>
+                          <option value="nl-NL">Nederlands</option>
+                          <option value="it-IT">Italiano</option>
+                        </select>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Time format</strong><span>Applied to the message list, reader, tasks, audit log and scheduled sends.</span></div>
+                        <div class="segmented" role="radiogroup" aria-label="Time format">
+                          <button id="timeFormat12" data-time-format="12h" type="button" role="radio" aria-checked="true">12-hour</button>
+                          <button id="timeFormat24" data-time-format="24h" type="button" role="radio" aria-checked="false">24-hour</button>
+                        </div>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Date format</strong><span>Used for message dates, task due dates and schedule previews.</span></div>
+                        <select class="pref-select" id="dateFormatSelect" aria-label="Date format">
+                          <option value="auto">Language default</option>
+                          <option value="mdy">Oct 28, 2026</option>
+                          <option value="dmy">28 Oct 2026</option>
+                          <option value="ymd">2026-10-28</option>
+                        </select>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Time zone</strong><span id="timeZoneHint">All timestamps and scheduled sends use this zone.</span></div>
+                        <div class="pref-inline-controls">
+                          <select class="pref-select" id="timeZoneSelect" aria-label="Time zone"></select>
+                          <button class="link-btn" id="useDeviceZone" type="button">Use device</button>
+                        </div>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Week starts on</strong><span>Calendar grid and work-hour planning.</span></div>
+                        <select class="pref-select" id="weekStartSelect" aria-label="Week starts on">
+                          <option value="monday">Monday</option>
+                          <option value="sunday">Sunday</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="regional-preview" id="regionalPreview"></div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Work hours</h3>
+                      <p>Schedule send uses these hours to recommend a delivery time and warn about quiet hours.</p>
+                    </div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Working hours</strong><span>From</span></div>
+                        <div class="pref-inline-controls">
+                          <input class="pref-time" id="workStartInput" type="time" value="09:00" aria-label="Work start">
+                          <span class="pref-dash">to</span>
+                          <input class="pref-time" id="workEndInput" type="time" value="17:00" aria-label="Work end">
+                        </div>
+                      </div>
+                      <div class="pref-row pref-row-wrap">
+                        <div class="pref-copy"><strong>Working days</strong><span>Used to find the next available work slot.</span></div>
+                        <div class="workday-row" id="workdayRow" role="group" aria-label="Working days">
+                          <button type="button" data-work-day="1" aria-pressed="true">M</button>
+                          <button type="button" data-work-day="2" aria-pressed="true">T</button>
+                          <button type="button" data-work-day="3" aria-pressed="true">W</button>
+                          <button type="button" data-work-day="4" aria-pressed="true">T</button>
+                          <button type="button" data-work-day="5" aria-pressed="true">F</button>
+                          <button type="button" data-work-day="6" aria-pressed="false">S</button>
+                          <button type="button" data-work-day="7" aria-pressed="false">S</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="autoreply" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Automatic replies</h3>
+                      <p>Outlook-style out-of-office replies, backed by the Sieve <code>vacation</code> extension.</p>
+                    </div>
+                    <div class="auto-reply-status" id="autoReplyStatus">
+                      <span class="auto-reply-dot" aria-hidden="true"></span>
+                      <div><strong>Automatic replies are off</strong><span>Your colleagues and external senders receive normal mail delivery.</span></div>
+                    </div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Turn on automatic replies</strong><span>Send an automatic reply while you are away.</span></div>
+                        <button class="switch" id="autoReplyToggle" type="button" role="switch" aria-checked="false" aria-label="Turn on automatic replies"><span></span></button>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Send replies only during a time period</strong><span>Leave off to keep replying until you turn it off manually.</span></div>
+                        <button class="switch" id="autoReplyRangeToggle" type="button" role="switch" aria-checked="false" aria-label="Send replies only during a time period"><span></span></button>
+                      </div>
+                      <div class="auto-reply-range" id="autoReplyRangeFields">
+                        <label class="form-field"><span>Starts</span><input id="autoReplyStart" type="date"></label>
+                        <label class="form-field"><span>Ends</span><input id="autoReplyEnd" type="date"></label>
+                        <label class="form-field"><span>Reply every (days)</span><input id="autoReplyDays" type="number" min="1" max="30" value="7"></label>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="auto-reply-audience">
+                    <section class="auto-reply-card">
+                      <div class="auto-reply-card-head">
+                        <span class="auto-reply-icon"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></span>
+                        <div><strong>Inside Meridian</strong><span>Sent to colleagues in your organization.</span></div>
+                        <span class="policy-chip">Always on with automatic replies</span>
+                      </div>
+                      <label class="form-field"><span>Subject</span><input id="autoReplyInternalSubject" type="text" placeholder="Out of office"></label>
+                      <label class="form-field"><span>Message</span><textarea id="autoReplyInternalMessage" rows="4" placeholder="I’m away until…"></textarea></label>
+                    </section>
+                    <section class="auto-reply-card">
+                      <div class="auto-reply-card-head">
+                        <span class="auto-reply-icon external"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span>
+                        <div><strong>Outside Meridian</strong><span>Different wording for customers and partners.</span></div>
+                        <button class="switch" id="autoReplyExternalToggle" type="button" role="switch" aria-checked="true" aria-label="Reply to external senders"><span></span></button>
+                      </div>
+                      <label class="form-field"><span>Subject</span><input id="autoReplyExternalSubject" type="text" placeholder="Away from the office"></label>
+                      <label class="form-field"><span>Message</span><textarea id="autoReplyExternalMessage" rows="4" placeholder="Thanks for your message…"></textarea></label>
+                    </section>
+                  </div>
+                  <div class="auto-reply-preview" id="autoReplyPreview"></div>
+                  <div class="auto-reply-actions">
+                    <span class="auto-reply-note"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Generated by the server and applied through Sieve.</span>
+                    <button class="btn-primary" id="saveAutoReplyBtn" type="button">Save automatic replies</button>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="rules" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Server-side Sieve rules</h3>
+                      <p>Rules run in Dovecot’s Sieve interpreter before mail reaches your inbox.</p>
+                    </div>
+                    <div class="rules-toolbar">
+                      <button class="btn-primary" id="addRuleBtn" type="button">
+                        <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New rule
+                      </button>
+                      <span class="rules-meta" id="ruleCount">Loading rules…</span>
+                      <span class="rules-toolbar-spacer"></span>
+                      <button class="btn-secondary" id="refreshRulesBtn" type="button">
+                        <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh
+                      </button>
+                    </div>
+                    <div class="rule-list" id="ruleList"></div>
+                  </div>
+
+                  <div class="settings-block rule-editor-block" id="ruleEditorBlock" hidden>
+                    <div class="settings-block-head">
+                      <h3 id="ruleEditorTitle">New rule</h3>
+                      <p>Conditions are evaluated in order. The first matching rule wins unless the action is “Keep going”.</p>
+                    </div>
+                    <form class="rule-form" id="ruleForm">
+                      <div class="rule-form-row">
+                        <label class="form-field grow">
+                          <span>Rule name</span>
+                          <input id="ruleName" type="text" placeholder="e.g. Invoices to Finance" autocomplete="off" required>
+                        </label>
+                        <label class="form-field">
+                          <span>Match</span>
+                          <select id="ruleMatch">
+                            <option value="all">All conditions</option>
+                            <option value="any">Any condition</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div class="rule-conditions-head">
+                        <span>Conditions</span>
+                        <button class="link-btn" id="addConditionBtn" type="button">+ Add condition</button>
+                      </div>
+                      <div class="rule-conditions" id="ruleConditions"></div>
+                      <div class="rule-form-row">
+                        <label class="form-field grow">
+                          <span>Action</span>
+                          <select id="ruleAction">
+                            <option value="move">Move to folder</option>
+                            <option value="markRead">Mark as read</option>
+                            <option value="star">Star message</option>
+                            <option value="discard">Discard silently</option>
+                            <option value="redirect">Redirect to address</option>
+                            <option value="keep">Keep in Inbox</option>
+                          </select>
+                        </label>
+                        <label class="form-field" id="ruleActionValueWrap">
+                          <span id="ruleActionValueLabel">Folder</span>
+                          <input id="ruleActionValue" type="text" placeholder="archive" autocomplete="off">
+                        </label>
+                      </div>
+                      <div class="rule-form-actions">
+                        <button class="btn-secondary" id="cancelRuleBtn" type="button">Cancel</button>
+                        <button class="btn-primary" id="saveRuleBtn" type="submit">Save rule</button>
+                      </div>
+                    </form>
+                  </div>
+
+                  <div class="settings-block">
+                    <details class="script-details">
+                      <summary>
+                        <span><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>Generated Sieve script</span>
+                        <span class="policy-chip">Managed by Alt8Mail</span>
+                      </summary>
+                      <pre id="sieveScript" class="sieve-script">Loading…</pre>
+                    </details>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="audit" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Audit log</h3>
+                      <p>Every security-relevant action on this account. Retained for seven years.</p>
+                    </div>
+                    <div class="audit-toolbar">
+                      <select id="auditFilter" class="pref-select" aria-label="Filter audit actions">
+                        <option value="">All actions</option>
+                        <option value="login">Sign-in</option>
+                        <option value="send">Sending</option>
+                        <option value="message">Message changes</option>
+                        <option value="rule">Rule changes</option>
+                        <option value="draft">Drafts</option>
+                        <option value="task">Tasks</option>
+                        <option value="files">Files</option>
+                        <option value="preferences">Preferences</option>
+                        <option value="security">Security</option>
+                      </select>
+                      <span class="rules-toolbar-spacer"></span>
+                      <button class="btn-secondary" id="exportAuditBtn" type="button">
+                        <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export CSV
+                      </button>
+                      <button class="btn-secondary" id="refreshAuditBtn" type="button">
+                        <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh
+                      </button>
+                    </div>
+                    <div class="audit-table-wrap">
+                      <table class="audit-table">
+                        <thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Actor</th><th>Details</th></tr></thead>
+                        <tbody id="auditTableBody"><tr><td colspan="5" class="audit-empty">Loading audit log…</td></tr></tbody>
+                      </table>
+                    </div>
+                    <p class="settings-note">Audit entries are written by the server for sign-in, send, delete, rule changes and other mailbox mutations.</p>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="security" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Sign-in protection</h3>
+                      <p>Two-factor authentication is required for password sign-in. SSO is handled by Alt8Mail.</p>
+                    </div>
+                    <div class="two-factor-panel" id="twoFactorCard">
+                      <span class="two-factor-art"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></span>
+                      <div class="two-factor-copy">
+                        <strong id="twoFactorStatus">Checking security settings…</strong>
+                        <span id="twoFactorDetail">Passkeys and authenticator codes protect this account.</span>
+                        <div class="two-factor-methods" id="twoFactorMethods"></div>
+                      </div>
+                      <button class="btn-secondary" id="viewRecoveryCodes" type="button"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>Recovery codes</button>
+                    </div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Second-factor setup</h3>
+                      <p>Enroll an authenticator app or a WebAuthn passkey. Secrets are encrypted at rest; recovery codes are hashed.</p>
+                    </div>
+                    <div class="pref-list" id="passkeySettingsList"></div>
+                    <div class="settings-actions">
+                      <button class="btn-secondary" id="setupTotpBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Set up authenticator</button>
+                      <button class="btn-secondary" id="addPasskeyBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg>Add passkey</button>
+                      <button class="btn-secondary danger-btn" id="disableTotpBtn" type="button" hidden>Remove authenticator</button>
+                    </div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>App passwords</h3>
+                      <p>Use a revocable app password for CalDAV/CardDAV clients that cannot complete two-factor sign-in. Tokens are shown once; expired and revoked entries remain in your security history.</p>
+                    </div>
+                    <div class="app-password-layout">
+                      <div class="app-password-history">
+                        <div class="app-password-subhead"><strong>Active &amp; previous credentials</strong><span id="appPasswordCount">—</span></div>
+                        <div class="pref-list app-password-list" id="appPasswordList"><div class="settings-note">No app passwords.</div></div>
+                      </div>
+                      <form class="app-password-create" id="appPasswordForm" autocomplete="off">
+                        <div class="app-password-create-head"><span class="app-password-art"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></span><div><strong>New app password</strong><span>Works with CalDAV, CardDAV and legacy clients.</span></div></div>
+                        <label class="form-field"><span>Device label</span><input id="appPasswordLabel" placeholder="Thunderbird on laptop" maxlength="80" autocomplete="off"></label>
+                        <label class="form-field"><span>Expiry</span><select id="appPasswordExpiry"><option value="0">Permanent until revoked</option><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="custom">Custom date</option></select></label>
+                        <label class="form-field" id="appPasswordCustomWrap" hidden><span>Expires on</span><input id="appPasswordCustomDate" type="date"></label>
+                        <label class="form-field"><span>Current account password</span><input id="appPasswordCurrent" type="password" autocomplete="current-password" placeholder="Confirm it’s you"></label>
+                        <button class="btn-primary" id="createAppPasswordBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>Create app password</button>
+                        <p class="settings-note">Use an app password instead of your main password. Revoke it immediately if a device is lost.</p>
+                      </form>
+                    </div>
+                    <div class="app-password-token" id="appPasswordToken" hidden></div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>First-time sign-in policy</h3>
+                      <p>Require an unenrolled user to set up a second factor before the mailbox opens.</p>
+                    </div>
+                    <div class="setting-list">
+                      <div class="setting-row">
+                        <div class="setting-copy">
+                          <strong>Prompt enrollment at next sign-in</strong>
+                          <span>Stored in PostgreSQL for this account. Disabled in staging until you enable it.</span>
+                        </div>
+                        <button class="switch" id="enrollmentPolicyToggle" type="button" role="switch" aria-checked="false" aria-label="Require first-time enrollment"><span></span></button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Sender protection</h3>
+                      <p>Policy controls for mail entering the workspace.</p>
+                    </div>
+                    <div class="setting-list">
+                      <div class="setting-row">
+                        <div class="setting-copy">
+                          <strong>External sender warnings</strong>
+                          <span>Show a warning banner on mail from outside meridian.test.</span>
+                        </div>
+                        <button class="switch" id="externalWarningToggle" type="button" role="switch" aria-checked="true" aria-label="External sender warnings"><span></span></button>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-copy">
+                          <strong>Message encryption</strong>
+                          <span>TLS is enforced for mail leaving the workspace.</span>
+                        </div>
+                        <span class="policy-chip"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Enforced</span>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-copy">
+                          <strong>Retention</strong>
+                          <span>Mail is retained for seven years under Meridian policy.</span>
+                        </div>
+                        <span class="policy-chip">7 years</span>
+                      </div>
+                      <div class="setting-row">
+                        <div class="setting-copy">
+                          <strong>Attachment scanning</strong>
+                          <span>Inbound files are scanned before they reach your inbox.</span>
+                        </div>
+                        <span class="policy-chip"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Active</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Outbound sending</h3>
+                      <p>Enforced per user by postfwd. Usage is live for the current rolling window.</p>
+                    </div>
+                    <div class="usage-card" id="outboundUsageCard">
+                      <div class="usage-card-top">
+                        <div>
+                          <span class="usage-value" id="outboundUsedValue">—</span>
+                          <span class="usage-label">messages sent</span>
+                        </div>
+                        <span class="policy-chip" id="outboundLimitChip">—</span>
+                      </div>
+                      <div class="usage-bar"><span id="outboundBarFill" style="width:0%"></span></div>
+                      <div class="usage-meta">
+                        <span id="outboundResetText">Rolling 24-hour window</span>
+                        <span id="outboundPercentText">—</span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="account" hidden>
+                  <div class="account-profile">
+                    <span class="avatar avatar-xl" style="--av:#34557a">AC</span>
+                    <div class="account-profile-copy">
+                      <h3>Avery Chen</h3>
+                      <p>VP Product · Meridian</p>
+                      <span class="directory-badge"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Internal directory</span>
+                    </div>
+                    <button class="btn-secondary" data-copy-email="avery.chen@meridian.example" type="button">Copy email</button>
+                  </div>
+
+                  <div class="settings-block" id="profileEditBlock">
+                    <div class="settings-block-head"><h3>Profile</h3><p>Details shown in the organization directory and on messages you send.</p></div>
+                    <div class="profile-edit-grid">
+                      <label class="form-field"><span>Full name</span><input id="profileName" type="text" maxlength="120" autocomplete="name"></label>
+                      <label class="form-field"><span>Job title</span><input id="profileTitle" type="text" maxlength="160" autocomplete="organization-title"></label>
+                      <label class="form-field"><span>Department</span><input id="profileDepartment" type="text" maxlength="160"></label>
+                    </div>
+                    <div class="settings-actions">
+                      <button class="btn-secondary" id="saveProfileBtn" type="button">Save profile</button>
+                      <span class="settings-note" id="profileEditNote"></span>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-block-head"><h3>Workspace</h3><p>Your Meridian account and storage.</p></div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Work email</strong><span id="accountEmail">avery.chen@meridian.example</span></div>
+                        <span class="policy-chip">Verified</span>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Mailbox storage</strong><span id="accountStorageText">2.4 GB of 15 GB used across mail and attachments.</span></div>
+                        <span class="storage-inline"><span><i id="accountStorageBar" style="width:16%"></i></span><span id="accountStoragePct">16%</span></span>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Retention policy</strong><span>Seven years for all workspace mail.</span></div>
+                        <span class="policy-chip">7 years</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Send-as identities</h3>
+                      <p>Aliases you can choose in the From field. Managed in the internal directory store.</p>
+                    </div>
+                    <div class="alias-list" id="aliasList"></div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-block-head"><h3>Sign-in sessions</h3><p>Devices currently signed in to this account.</p></div>
+                    <div class="pref-list" id="accountSessions">
+                      <div class="settings-note">Loading sign-in sessions…</div>
+                    </div>
+                    <div class="settings-actions">
+                      <button class="btn-secondary" id="signOutOtherSessions" type="button">Sign out other sessions</button>
+                      <button class="btn-secondary" id="signOutSettings" type="button">Sign out of Meridian Mail</button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="about" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head"><h3>About Alt8Mail</h3><p>One secure workspace for email, calendars, tasks and files.</p></div>
+                    <p class="about-text">Alt8Mail brings your inbox, calendar, tasks and files together in one focused workspace. AI assistance helps you summarize long conversations, draft a reply in your own voice, translate messages and surface what needs attention — without sending your mail anywhere it should not go. Advanced security runs quietly in the background: passkeys and two-factor sign-in, phishing and impersonation checks, SPF/DKIM/DMARC verification, attachment scanning, encrypted transport, server-side rules and a complete audit trail.</p>
+                    <div class="about-highlights">
+                      <div class="about-highlight">
+                        <span class="about-highlight-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span>
+                        <div><strong>AI that works with you</strong><span>Summaries, reply drafts and translation stay inside your workspace, with tenant-controlled AI settings.</span></div>
+                      </div>
+                      <div class="about-highlight">
+                        <span class="about-highlight-icon"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg></span>
+                        <div><strong>Security by default</strong><span>Passkeys, TOTP, app passwords, sender authentication and malware scanning protect every sign-in and message.</span></div>
+                      </div>
+                      <div class="about-highlight">
+                        <span class="about-highlight-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span>
+                        <div><strong>Your mail, anywhere</strong><span>Real IMAP, POP3 and SMTP access works with Outlook, Apple Mail, Thunderbird and any standards-based client.</span></div>
+                      </div>
+                    </div>
+                    <div class="about-actions">
+                      <button class="btn-primary" id="installApp" type="button" hidden>
+                        <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+                        Install app
+                      </button>
+                      <button class="btn-secondary" id="resetDemo" type="button">
+                        <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>
+                        Reset preferences
+                      </button>
+                      <button class="btn-secondary danger-btn" id="resetData" type="button">
+                        <svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>
+                        Resync mailbox
+                      </button>
+                      <span class="about-note">Server-backed · API responses are never cached.</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-block" id="mailClientSetup">
+                    <div class="settings-block-head"><h3>Connect another email client</h3><p>Use these settings in Outlook, Apple Mail, Thunderbird or any standard IMAP, POP3 or SMTP client.</p></div>
+                    <div class="mail-client-grid" id="mailClientDetails">
+                      <div class="settings-note">Sign in to load your server settings.</div>
+                    </div>
+                    <ol class="mail-client-steps">
+                      <li><strong>Add an account.</strong> In your email app choose <em>Add account → Other</em> (or <em>IMAP</em>), then enter your name and full Alt8Mail address.</li>
+                      <li><strong>Choose the protocol.</strong> IMAP is recommended so folders and read state stay in sync across devices. Choose POP3 only if you deliberately want mail downloaded to one device.</li>
+                      <li><strong>Enter the server details.</strong> Use your full email address as the username and your normal mailbox password. Turn on SSL/TLS and require authentication for outgoing mail.</li>
+                      <li><strong>Using two-factor authentication?</strong> Create an app password in <strong>Settings → Security &amp; privacy</strong> and use that instead of your sign-in password.</li>
+                      <li><strong>Test both directions.</strong> Send a message to another address and ask for a reply. If sending fails, confirm that your network allows outbound SMTP on port 587.</li>
+                    </ol>
+                    <p class="mail-client-note" id="mailClientNote">Use the full email address as the username. Your administrator can confirm the exact hostname if your organization uses a custom mail domain.</p>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-block-head"><h3>Application</h3><p>Offline shell, installability and version information.</p></div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>App shell cache</strong><span id="swStatus">Checking registration…</span></div>
+                        <span class="policy-chip" id="swChip">—</span>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy"><strong>Version</strong><span>Alt8Mail Email System</span></div>
+                        <span class="policy-chip">2026.10</span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="compose-dock" id="composeDock" hidden>
+    <div class="compose-dock-tabs" id="composeDockTabs"></div>
+  </div>
+
+  <footer class="statusbar">
+    <span class="status-left"><span class="status-dot" id="connDot" aria-hidden="true"></span><span id="connText">Connected</span></span>
+    <span class="status-mid" id="statusMid">Synced just now</span>
+    <span class="status-right">
+      <button class="status-chip" id="scheduledChip" type="button" hidden title="Scheduled messages">
+        <svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg><span id="scheduledText">Scheduled</span>
+      </button>
+      <button class="status-chip" id="pendingChip" type="button" hidden>
+        <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span id="pendingText">Sending…</span>
+      </button>
+      <button class="status-chip" id="outboundChip" type="button" title="Outbound usage enforcement">
+        <svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span id="outboundText">— sent today</span>
+      </button>
+      <span id="statusRange">1–12 of 12</span>
+      <button class="status-quota" id="quotaButtonStatus" type="button" title="Storage usage">
+        <span class="status-quota-bar"><span id="statusQuotaFill" style="width:16%"></span></span><span id="statusQuotaLabel">2.4 GB of 15 GB</span>
+      </button>
+    </span>
+  </footer>
+  <div class="status-pop" id="statusPop" hidden>
+    <div class="status-pop-head">
+      <strong id="statusPopTitle">Mailbox status</strong>
+      <button class="icon-btn" id="statusPopClose" type="button" aria-label="Close status panel"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="status-pop-body" id="statusPopBody"></div>
+  </div>
+
+  <nav class="mobile-tabs" aria-label="Workspace">
+    <button class="mobile-tab is-active" data-task="mail" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>Mail
+    </button>
+    <button class="mobile-tab" data-task="calendar" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>Calendar
+    </button>
+    <button class="mobile-tab" data-task="people" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>People
+    </button>
+    <button class="mobile-tab" data-task="tasks" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-task"/></svg>Tasks
+    </button>
+    <button class="mobile-tab" data-task="files" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-files"/></svg>Files
+    </button>
+    <button class="mobile-tab" data-task="settings" type="button">
+      <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Settings
+    </button>
+  </nav>
+</div>
+
+<button class="compose-fab" id="composeFab" type="button" aria-label="New mail">
+  <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+</button>
+
+<div class="notify-pop" id="notifyPop" hidden>
+  <div class="notify-head">
+    <div><h2>Notifications</h2><span id="notifySubtitle">Live workspace activity</span></div>
+    <button class="icon-btn" id="notifyClose" type="button" aria-label="Close notifications">
+      <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+    </button>
+  </div>
+  <div class="notify-list" id="notifyList"></div>
+  <div class="notify-foot">
+    <button class="link-btn" id="notifyMarkAll" type="button">Mark all as read</button>
+    <button class="notify-viewall" id="notifyViewAll" type="button">View all notifications <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+  </div>
+</div>
+
+<div class="notice-layer" id="noticeLayer" hidden>
+  <section class="notice-window" role="dialog" aria-modal="true" aria-labelledby="noticeTitle">
+    <header class="notice-window-head">
+      <div class="notice-window-title">
+        <span class="notice-window-icon"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg></span>
+        <div><p class="eyebrow">Meridian workspace</p><h2 id="noticeTitle">Notification center</h2></div>
+      </div>
+      <div class="notice-window-actions">
+        <button class="btn-secondary small" id="noticeMarkAll" type="button">Mark all read</button>
+        <button class="icon-btn" id="noticeClose" type="button" aria-label="Close notification center"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+    </header>
+    <div class="notice-toolbar">
+      <div class="notice-filters" role="tablist" aria-label="Filter notifications">
+        <button class="notice-filter is-active" data-notice-filter="all" type="button" role="tab" aria-selected="true">All</button>
+        <button class="notice-filter" data-notice-filter="unread" type="button" role="tab" aria-selected="false">Unread</button>
+        <button class="notice-filter" data-notice-filter="mail" type="button" role="tab" aria-selected="false">Mail</button>
+        <button class="notice-filter" data-notice-filter="system" type="button" role="tab" aria-selected="false">System</button>
+      </div>
+      <span class="notice-count" id="noticeCount"></span>
+    </div>
+    <div class="notice-window-body" id="noticeBody"></div>
+    <footer class="notice-window-foot">
+      <span><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Notifications reflect real mailbox, calendar and security activity.</span>
+      <button class="btn-primary small" id="noticeDone" type="button">Done</button>
+    </footer>
+  </section>
+</div>
+
+<div class="cmd-newmenu" id="newMenu" hidden>
+  <button data-new="message" type="button"><svg class="icon" aria-hidden="true"><use href="#i-compose"/></svg>New mail</button>
+  <button data-new="event" type="button"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>New event</button>
+</div>
+
+<div class="cmd-newmenu" id="moveMenu" hidden>
+  <button data-move-folder="inbox" type="button"><svg class="icon" aria-hidden="true"><use href="#i-inbox"/></svg>Inbox</button>
+  <button data-move-folder="archive" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+  <button data-move-folder="spam" type="button"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>Junk</button>
+  <button data-move-folder="trash" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Trash</button>
+</div>
+
+<div class="overlay" id="detailsOverlay" hidden>
+  <div class="dialog details-dialog" role="dialog" aria-modal="true" aria-labelledby="detailsTitle">
+    <div class="dialog-head">
+      <h2 id="detailsTitle">Message details</h2>
+      <button class="icon-btn" id="detailsClose" type="button" aria-label="Close details">
+        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body" id="detailsBody"></div>
+  </div>
+</div>
+
+<div class="overlay" id="contactOverlay" hidden>
+  <div class="dialog event-dialog" role="dialog" aria-modal="true" aria-labelledby="contactDialogTitle">
+    <div class="dialog-head">
+      <h2 id="contactDialogTitle">New contact</h2>
+      <button class="icon-btn" id="contactClose" type="button" aria-label="Close">
+        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <div class="form-row">
+        <div class="form-field grow"><label for="contactName">Name</label><input id="contactName" type="text" autocomplete="name"></div>
+        <div class="form-field grow"><label for="contactEmailField">Email</label><input id="contactEmailField" type="email" autocomplete="email"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-field grow"><label for="contactCompany">Company</label><input id="contactCompany" type="text" autocomplete="organization"></div>
+        <div class="form-field grow"><label for="contactTitle">Job title</label><input id="contactTitle" type="text" autocomplete="organization-title"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-field grow"><label for="contactPhone">Phone</label><input id="contactPhone" type="tel" autocomplete="tel"></div>
+        <div class="form-field grow"><label for="contactLocation">Location</label><input id="contactLocation" type="text"></div>
+      </div>
+      <div class="form-field"><label for="contactNotes">Notes</label><textarea id="contactNotes" rows="3" maxlength="4000"></textarea></div>
+      <div class="dialog-actions">
+        <button class="btn-secondary danger-btn" id="contactDelete" type="button" hidden>Delete contact</button>
+        <button class="btn-secondary" id="contactCancel" type="button">Cancel</button>
+        <button class="btn-primary" id="contactSave" type="button">
+          <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Save contact
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="eventOverlay" hidden>
+  <div class="dialog event-dialog" role="dialog" aria-modal="true" aria-labelledby="eventDialogTitle">
+    <div class="dialog-head">
+      <h2 id="eventDialogTitle">New event</h2>
+      <button class="icon-btn" id="eventClose" type="button" aria-label="Close">
+        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <div class="form-field">
+        <label for="eventName">Title</label>
+        <input id="eventName" type="text" placeholder="Event title" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <div class="form-field grow">
+          <label for="eventDate">Date</label>
+          <input id="eventDate" type="date" value="2026-10-27">
+        </div>
+        <div class="form-field">
+          <label for="eventStart">Start</label>
+          <input id="eventStart" type="time" value="10:00">
+        </div>
+        <div class="form-field">
+          <label for="eventEnd">End</label>
+          <input id="eventEnd" type="time" value="10:30">
+        </div>
+      </div>
+      <div class="form-field">
+        <label for="eventWhere">Location</label>
+        <input id="eventWhere" type="text" placeholder="Room or Teams" autocomplete="off">
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-secondary danger-btn" id="eventDelete" type="button" hidden>Delete event</button>
+        <button class="btn-secondary" id="eventCancel" type="button">Cancel</button>
+        <button class="btn-primary" id="eventSave" type="button">
+          <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add event
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="reportOverlay" hidden>
+  <div class="dialog report-dialog" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon report-icon"><svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg></span>
+        <div><h2 id="reportTitle">Report email</h2><p>Send this message to Meridian Security for review.</p></div>
+      </div>
+      <button class="icon-btn" id="reportClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="report-message" id="reportMessageCard"></div>
+      <fieldset class="report-reasons">
+        <legend>Why are you reporting this message?</legend>
+        <label class="report-reason">
+          <input type="radio" name="reportReason" value="phishing" checked>
+          <span class="report-radio" aria-hidden="true"></span>
+          <span class="report-reason-copy"><strong>Phishing or impersonation</strong><span>Deceptive sender, credential request or lookalike domain.</span></span>
+        </label>
+        <label class="report-reason">
+          <input type="radio" name="reportReason" value="spam">
+          <span class="report-radio" aria-hidden="true"></span>
+          <span class="report-reason-copy"><strong>Unwanted spam</strong><span>Unsolicited marketing or bulk mail you did not sign up for.</span></span>
+        </label>
+        <label class="report-reason">
+          <input type="radio" name="reportReason" value="malware">
+          <span class="report-radio" aria-hidden="true"></span>
+          <span class="report-reason-copy"><strong>Malware or suspicious attachment</strong><span>Unexpected files, macros or links that install software.</span></span>
+        </label>
+        <label class="report-reason">
+          <input type="radio" name="reportReason" value="other">
+          <span class="report-radio" aria-hidden="true"></span>
+          <span class="report-reason-copy"><strong>Something else</strong><span>Harassment, policy violation or another security concern.</span></span>
+        </label>
+      </fieldset>
+      <label class="form-field report-note"><span>Notes for the security team <em>optional</em></span><textarea id="reportNote" rows="3" maxlength="500" placeholder="Add context that will help the analyst investigate."></textarea></label>
+      <div class="report-policy">
+        <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
+        <span>Attachments and headers are included with the report. The sender is <strong>not</strong> notified. Reported mail moves to Junk and stays available for review.</span>
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn-secondary" id="reportCancel" type="button">Cancel</button>
+      <button class="btn-primary" id="reportSubmit" type="button"><svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg>Report to security</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="scheduledEditOverlay" hidden>
+  <div class="dialog scheduled-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="scheduledEditTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg></span>
+        <div><h2 id="scheduledEditTitle">Edit scheduled message</h2><p>Change the message or move its send time.</p></div>
+      </div>
+      <button class="icon-btn" id="scheduledEditClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="scheduled-edit-original" id="scheduledEditOriginal"></div>
+      <div class="form-row">
+        <label class="form-field grow"><span>To</span><input id="scheduledEditTo" type="text" autocomplete="off" spellcheck="false" placeholder="name@company.com"></label>
+        <label class="form-field"><span>Cc <em>optional</em></span><input id="scheduledEditCc" type="text" autocomplete="off" spellcheck="false" placeholder="Copy recipients"></label>
+      </div>
+      <label class="form-field"><span>Subject</span><input id="scheduledEditSubject" type="text" maxlength="500" autocomplete="off"></label>
+      <label class="form-field"><span>Message</span><textarea id="scheduledEditBody" rows="5"></textarea></label>
+      <div class="scheduled-edit-presets" id="scheduledEditPresets" aria-label="Quick reschedule options"></div>
+      <div class="scheduled-fields">
+        <label class="form-field"><span>Send date</span><input id="scheduledEditDate" type="date"></label>
+        <label class="form-field"><span>Send time</span><input id="scheduledEditTime" type="time"></label>
+      </div>
+      <div class="scheduled-edit-insight" id="scheduledEditInsight"></div>
+      <p class="scheduled-edit-error" id="scheduledEditError" hidden></p>
+      <div class="scheduled-edit-attachments" id="scheduledEditAttachments"></div>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn-secondary" id="scheduledEditCancel" type="button">Cancel</button>
+      <button class="btn-primary" id="scheduledEditSave" type="button"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save changes</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="sendNowOverlay" hidden>
+  <div class="dialog send-now-dialog" role="dialog" aria-modal="true" aria-labelledby="sendNowTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon send-now-icon"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></span>
+        <div><h2 id="sendNowTitle">Send this message now?</h2><p>Delivery starts immediately instead of at the scheduled time.</p></div>
+      </div>
+      <button class="icon-btn" id="sendNowClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="send-now-summary" id="sendNowSummary"></div>
+      <div class="send-now-warning">
+        <svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>
+        <span>The original schedule will be removed. Sent mail remains in the Sent folder and cannot be recalled from here.</span>
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn-secondary" id="sendNowCancel" type="button">Keep scheduled</button>
+      <button class="btn-primary" id="sendNowConfirm" type="button"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Send now</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="scheduleOverlay" hidden>
+  <div class="dialog schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="scheduleTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg></span>
+        <div><h2 id="scheduleTitle">Schedule send</h2><p>Choose when this message leaves your outbox.</p></div>
+      </div>
+      <button class="icon-btn" id="scheduleClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="schedule-message" id="scheduleMessageCard"></div>
+      <div class="schedule-presets" id="schedulePresets" role="radiogroup" aria-label="Quick schedule options"></div>
+      <div class="schedule-custom">
+        <div class="schedule-custom-head">
+          <strong>Pick a date and time</strong>
+          <span id="scheduleZoneInfo">Time zone</span>
+        </div>
+        <div class="schedule-fields">
+          <label class="form-field"><span>Date</span><input id="scheduleDate" type="date"></label>
+          <label class="form-field"><span>Time</span><input id="scheduleTime" type="time"></label>
+        </div>
+        <div class="schedule-zone-actions">
+          <span id="scheduleZoneHint">Scheduled times use your region setting.</span>
+          <button class="link-btn" id="scheduleEditRegion" type="button">Change time zone</button>
+        </div>
+      </div>
+      <div class="schedule-insight" id="scheduleInsight"></div>
+      <div class="schedule-warning" id="scheduleWarning" hidden></div>
+    </div>
+    <div class="dialog-actions schedule-actions">
+      <button class="btn-secondary" id="scheduleCancel" type="button">Cancel</button>
+      <button class="btn-secondary" id="scheduleSendNow" type="button">Send now</button>
+      <button class="btn-primary" id="scheduleConfirm" type="button"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Schedule send</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay compose-attach-overlay" id="composeAttachOverlay" hidden>
+  <div class="compose-attach-dialog" role="dialog" aria-modal="true" aria-labelledby="composeAttachTitle">
+    <header class="compose-attach-head">
+      <div class="compose-attach-title">
+        <span class="compose-attach-icon"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></span>
+        <div><p class="eyebrow">Compose attachments</p><h2 id="composeAttachTitle">Add files to your message</h2></div>
+      </div>
+      <button class="icon-btn" id="composeAttachClose" type="button" aria-label="Close attachment picker"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="compose-attach-body">
+      <div class="compose-dropzone" id="composeAttachDrop" tabindex="0" role="button" aria-label="Drop files here or browse">
+        <span class="compose-dropzone-art"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg></span>
+        <strong>Drag &amp; drop files here</strong>
+        <span>Attach multiple documents, images or archives · up to <span id="composeAttachLimit">8 MB</span> each</span>
+        <button class="btn-secondary small" id="composeAttachBrowse" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Browse this device</button>
+      </div>
+      <div class="compose-attach-files">
+        <div class="compose-attach-files-head"><div class="compose-attach-tabs" role="tablist"><button class="is-active" data-attach-tab="files" type="button" role="tab" aria-selected="true">From Files</button><button data-attach-tab="recent" type="button" role="tab" aria-selected="false">Recent uploads</button></div><span id="composeAttachFileCount"></span></div>
+        <div class="compose-attach-file-list" id="composeAttachFileList"><div class="settings-note">Loading your Files…</div></div>
+      </div>
+      <div class="compose-attach-current">
+        <div class="compose-attach-current-head"><strong>Attached to this message</strong><span id="composeAttachCurrentCount">0 files</span></div>
+        <div class="compose-attach-current-list" id="composeAttachCurrentList"><div class="settings-note">No attachments yet.</div></div>
+      </div>
+    </div>
+    <footer class="compose-attach-foot">
+      <span class="compose-attach-footnote"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Files are scanned by ClamAV before upload completes.</span>
+      <button class="btn-primary" id="composeAttachDone" type="button">Done</button>
+    </footer>
+  </div>
+</div>
+
+<div class="overlay" id="previewOverlay" hidden>
+  <div class="dialog preview-dialog" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+    <div class="dialog-head preview-head">
+      <div class="preview-file-id">
+        <span class="preview-file-icon"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></span>
+        <div><h2 id="previewTitle">Attachment</h2><p id="previewMeta">Preview</p></div>
+      </div>
+      <div class="preview-actions">
+        <a class="icon-btn" id="previewOpen" href="#" target="_blank" rel="noopener" aria-label="Open in a new tab" title="Open in a new tab"><svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>
+        <a class="icon-btn" id="previewDownload" href="#" download aria-label="Download" title="Download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg></a>
+        <button class="icon-btn" id="previewClose" type="button" aria-label="Close preview"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+    </div>
+    <div class="preview-toolbar" id="previewToolbar" hidden>
+      <button type="button" data-preview-zoom="out" aria-label="Zoom out">−</button>
+      <span id="previewZoomLabel">100%</span>
+      <button type="button" data-preview-zoom="in" aria-label="Zoom in">+</button>
+      <button type="button" data-preview-zoom="reset">Fit</button>
+      <span class="preview-toolbar-spacer"></span>
+      <span id="previewDimensions"></span>
+    </div>
+    <div class="preview-body" id="previewBody"></div>
+    <div class="preview-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span id="previewFootNote">Scanned by Meridian attachment protection</span></div>
+  </div>
+</div>
+
+<div class="overlay" id="storageOverlay" hidden>
+  <div class="dialog storage-dialog" role="dialog" aria-modal="true" aria-labelledby="storageTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg></span>
+        <div><h2 id="storageTitle">Connect storage</h2><p>Bring your existing drives into one enterprise file workspace.</p></div>
+      </div>
+      <button class="icon-btn" id="storageClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="storage-connect-list" id="storageConnectList"></div>
+      <p class="dialog-note">This template simulates the OAuth consent step. In production, use the provider’s OAuth app with least-privilege scopes and store refresh tokens encrypted.</p>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="shareOverlay" hidden>
+  <div class="dialog share-dialog" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></span>
+        <div><h2 id="shareTitle">Share file</h2><p id="shareFileName">Create a secure external link.</p></div>
+      </div>
+      <button class="icon-btn" id="shareClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="form-row">
+        <label class="form-field grow"><span>Access</span><select id="shareAccess"><option value="view">Can view</option><option value="edit">Can edit</option></select></label>
+        <label class="form-field"><span>Link expires</span><select id="shareExpiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option><option value="90">90 days</option></select></label>
+      </div>
+      <label class="form-field"><span>Recipient email <small class="muted">(required for domain-restricted sharing)</small></span><input id="shareRecipient" type="email" placeholder="partner@example.com"></label>
+      <div class="share-result" id="shareResult" hidden>
+        <label class="form-field grow"><span>External link</span><input id="shareUrl" type="text" readonly></label>
+        <button class="btn-primary" id="copyShareLink" type="button">Copy link</button>
+      </div>
+      <p class="dialog-note">Links are revocable, expire automatically, and respect your organization's sharing policy.</p>
+      <div class="dialog-actions">
+        <button class="btn-secondary" id="shareCancel" type="button">Close</button>
+        <button class="btn-primary" id="createShare" type="button">Create link</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="recoveryOverlay" hidden>
+  <div class="dialog recovery-dialog" role="dialog" aria-modal="true" aria-labelledby="recoveryTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></span>
+        <div><h2 id="recoveryTitle">Recovery codes</h2><p>Use each code once if you lose access to your passkey or authenticator.</p></div>
+      </div>
+      <button class="icon-btn" id="recoveryClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="recovery-code-list" id="recoveryCodeList"></div>
+      <p class="dialog-note">Store these codes somewhere safe. Generating new codes invalidates the old set.</p>
+      <div class="dialog-actions">
+        <button class="btn-secondary" id="regenerateRecovery" type="button">Generate new codes</button>
+        <button class="btn-primary" id="copyRecoveryCodes" type="button">Copy all</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="totpSetupOverlay" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="totpSetupTitle">
+    <div class="settings-block-head"><h3 id="totpSetupTitle">Set up authenticator</h3><p>Scan or copy the secret into your authenticator app, then enter the current six-digit code.</p></div>
+    <div class="totp-secret-row"><code id="totpSetupSecret">—</code><button class="link-btn" id="totpCopySecret" type="button">Copy secret</button></div>
+    <p class="settings-note" id="totpSetupUri">—</p>
+    <label class="form-field"><span>Six-digit code</span><input id="totpSetupCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456"></label>
+    <p class="login-error" id="totpSetupError" hidden></p>
+    <div class="settings-actions">
+      <button class="btn-secondary" id="totpSetupCancel" type="button">Cancel</button>
+      <button class="btn-primary" id="totpSetupVerify" type="button">Verify and enable</button>
+    </div>
+  </div>
+</div>
+<div class="overlay" id="passkeyOverlay" hidden>
+  <div class="dialog passkey-dialog" role="dialog" aria-modal="true" aria-labelledby="passkeyPromptTitle">
+    <div class="passkey-prompt-art"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></div>
+    <h2 id="passkeyPromptTitle">Verify with your passkey</h2>
+    <p id="passkeyPromptText">Windows Hello is asking for your fingerprint, face or device PIN.</p>
+    <div class="passkey-prompt-status" id="passkeyPromptStatus"><span class="passkey-spinner" aria-hidden="true"></span>Waiting for your device…</div>
+    <button class="btn-secondary" id="passkeyCancel" type="button">Cancel</button>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" aria-hidden="true"></div>
+
+<div class="compose-layer" id="composeLayer"></div>
+
+<div class="overlay" id="helpOverlay" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <div class="dialog-head">
+      <h2 id="helpTitle">Keyboard shortcuts</h2>
+      <button class="icon-btn" id="helpClose" type="button" aria-label="Close">
+        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <div class="shortcut-list">
+        <div class="shortcut-row"><span>Next / previous conversation</span><span class="shortcut-keys"><kbd>J</kbd><kbd>K</kbd></span></div>
+        <div class="shortcut-row"><span>Select conversation</span><span class="shortcut-keys"><kbd>X</kbd></span></div>
+        <div class="shortcut-row"><span>Extend selection</span><span class="shortcut-keys"><kbd>Shift</kbd><kbd>J</kbd><kbd>K</kbd></span></div>
+        <div class="shortcut-row"><span>New message</span><span class="shortcut-keys"><kbd>C</kbd></span></div>
+        <div class="shortcut-row"><span>Reply / reply all / forward</span><span class="shortcut-keys"><kbd>R</kbd><kbd>A</kbd><kbd>F</kbd></span></div>
+        <div class="shortcut-row"><span>Archive conversation</span><span class="shortcut-keys"><kbd>E</kbd></span></div>
+        <div class="shortcut-row"><span>Delete conversation</span><span class="shortcut-keys"><kbd>#</kbd></span></div>
+        <div class="shortcut-row"><span>Mark unread</span><span class="shortcut-keys"><kbd>U</kbd></span></div>
+        <div class="shortcut-row"><span>Star conversation</span><span class="shortcut-keys"><kbd>S</kbd></span></div>
+        <div class="shortcut-row"><span>Search all mail</span><span class="shortcut-keys"><kbd>/</kbd><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
+        <div class="shortcut-row"><span>This dialog</span><span class="shortcut-keys"><kbd>?</kbd></span></div>
+        <div class="shortcut-row"><span>Close a panel</span><span class="shortcut-keys"><kbd>Esc</kbd></span></div>
+      </div>
+      <p class="dialog-note">Shortcuts are ignored while you are typing. J and K move through the conversation list that is currently visible. Use X or the row checkboxes to start a multi-select; bulk actions appear above the list.</p>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="passwordChangeOverlay" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="passwordChangeTitle">
+    <div class="dialog-head">
+      <h2 id="passwordChangeTitle">Update your password</h2>
+    </div>
+    <div class="dialog-body">
+      <p class="dialog-note" id="passwordChangeReason">Your organization requires a new password before you continue. Use at least the length and character rules configured by your administrator.</p>
+      <label class="form-field"><span>Current password</span><input id="passwordCurrent" type="password" autocomplete="current-password"></label>
+      <label class="form-field"><span>New password</span><input id="passwordNew" type="password" autocomplete="new-password"></label>
+      <label class="form-field"><span>Confirm new password</span><input id="passwordConfirm" type="password" autocomplete="new-password"></label>
+      <p class="login-error" id="passwordChangeError" hidden></p>
+      <div class="settings-actions">
+        <button class="btn-primary" id="passwordChangeSubmit" type="button">Save new password</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="attachInput" multiple hidden>
+<script type="module" src="/app.js?v=0.9.0-r2"></script>
+</body>
+</html>

@@ -1,0 +1,90 @@
+{
+  "name": "Meridian Mail",
+  "short_name": "Meridian",
+  "description": "Enterprise webmail template with two-factor sign-in, threaded conversations, scheduled send, tasks, files and attachment preview.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#dfe4eb",
+  "theme_color": "#093256",
+  "categories": ["business", "productivity", "utilities"],
+  "lang": "en",
+  "dir": "ltr",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/inbox-wide.png",
+      "sizes": "1440x1000",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Threaded inbox with security status and compose dock"
+    },
+    {
+      "src": "/screenshots/thread-wide.png",
+      "sizes": "1440x1000",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Threaded conversation with collapse and expand"
+    },
+    {
+      "src": "/screenshots/inbox-narrow.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Mobile inbox with folder drawer and compose"
+    },
+    {
+      "src": "/screenshots/thread-narrow.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Mobile threaded reader"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New mail",
+      "short_name": "Compose",
+      "description": "Start a new message",
+      "url": "/?compose=1",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Search mail",
+      "short_name": "Search",
+      "description": "Search the local message index",
+      "url": "/?search=has%3Aattachment",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Sieve rules",
+      "short_name": "Rules",
+      "description": "Manage server-side rules",
+      "url": "/?settings=rules",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

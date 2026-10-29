@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="Meridian offsite in Berlin">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b3260"/>
+      <stop offset=".52" stop-color="#2d6fa8"/>
+      <stop offset="1" stop-color="#f4b183"/>
+    </linearGradient>
+    <linearGradient id="hill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17324c"/>
+      <stop offset="1" stop-color="#0a1826"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#sky)"/>
+  <circle cx="910" cy="210" r="74" fill="#ffe1ad" opacity=".9"/>
+  <path d="M0 590 180 430 320 560 470 390 660 590Z" fill="#28506f" opacity=".8"/>
+  <path d="M380 620 610 430 770 580 930 450 1200 650 1200 800 380 800Z" fill="url(#hill)"/>
+  <path d="M0 680 170 560 300 660 520 560 720 700 930 610 1200 720 1200 800 0 800Z" fill="#07121d"/>
+  <g fill="#7fb6e8" opacity=".55">
+    <circle cx="160" cy="170" r="3"/><circle cx="250" cy="120" r="2.2"/><circle cx="370" cy="200" r="2.6"/>
+    <circle cx="520" cy="130" r="2"/><circle cx="690" cy="190" r="2.4"/><circle cx="1080" cy="160" r="2.8"/>
+    <circle cx="800" cy="110" r="1.8"/><circle cx="1020" cy="90" r="2.2"/>
+  </g>
+  <text x="70" y="110" fill="#f6fbff" font-family="Segoe UI, Arial, sans-serif" font-size="54" font-weight="600" letter-spacing="-2">Meridian offsite</text>
+  <text x="72" y="158" fill="#c7ddf2" font-family="Segoe UI, Arial, sans-serif" font-size="22">Berlin · Product team · 2026</text>
+  <g fill="#f6fbff" opacity=".82" font-family="Segoe UI, Arial, sans-serif" font-size="15">
+    <text x="72" y="720">Photo placeholder for the Aurora template attachment preview.</text>
+  </g>
+</svg>
