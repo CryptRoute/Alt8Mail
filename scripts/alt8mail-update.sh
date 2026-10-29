@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Tag-based Alt8Mail release updater.
 #
-# It fetches signed/annotated Git tags from the configured private repository,
-# builds a release from the selected tag, applies migrations, performs an
-# atomic symlink switch and rolls back the application symlink if health checks
-# fail. Database backups are written under /var/backups/alt8mail before any
-# migration runs.
+# It fetches release tags from the configured private repository, builds the
+# selected tag, takes a database/configuration backup, applies migrations,
+# performs an atomic symlink switch and rolls back the application and database
+# if readiness checks fail.
 set -Eeuo pipefail
 
 CONFIG=/etc/a8m/update.conf
@@ -45,7 +44,6 @@ done
 
 mkdir -p "$(dirname "$LOG")"
 exec > >(tee -a "$LOG") 2>&1
-trap 'die "update failed at line $LINENO"' ERR
 
 CURRENT_VERSION="$(tr -d '[:space:]' < "$CURRENT/VERSION")"
 [[ -n "$CURRENT_VERSION" ]] || die "cannot read the installed version"
@@ -116,7 +114,56 @@ if [[ ! -d "$TARGET_RELEASE" ]]; then
   chmod 0755 "$TARGET_RELEASE/bin/"* 2>/dev/null || true
 fi
 
-# Install any updated unit files before restarting. Custom site configuration is
+switch_release() {
+  local target="$1"
+  [[ -x "$target/bin/a8m-server" ]] || die "release $target has no server binary"
+  ln -sfn "$target" "$CURRENT"
+  ln -sfn "$target/bin" "$INSTALL_ROOT/bin"
+  ln -sfn "$target/admin" "$INSTALL_ROOT/admin"
+  ln -sfn "$target" "$INSTALL_ROOT/app"
+  rm -rf "$WEB_ROOT"
+  ln -s "$target/public" "$WEB_ROOT"
+  install -d -m 0755 "$(dirname "$CONTROL_LINK")"
+  ln -sfn "$target/bin/alt8mail-control" "$CONTROL_LINK"
+}
+
+rollback() {
+  local reason="$1"
+  local restored=0 restore_copy
+  trap - ERR
+  log "rolling back to $OLD_TARGET ($reason)"
+  for svc in $A8M_SERVICES; do
+    systemctl stop "$svc" || true
+  done
+  switch_release "$OLD_TARGET"
+  restore_copy="/tmp/a8m-restore-$$.dump"
+  if install -m 0600 -o postgres -g postgres "$BACKUP_DIR/database.dump" "$restore_copy"; then
+    if runuser -u postgres -- pg_restore --clean --if-exists --no-owner --no-privileges -d a8m "$restore_copy"; then
+      restored=1
+    fi
+  fi
+  rm -f "$restore_copy"
+  for svc in $A8M_SERVICES; do
+    systemctl start "$svc" || true
+  done
+  if [[ "$restored" -ne 1 ]]; then
+    die "rollback incomplete: application restored to $OLD_TARGET but the database restore failed; backup is in $BACKUP_DIR"
+  fi
+  die "update failed ($reason); application and database restored to $OLD_TARGET (backup: $BACKUP_DIR)"
+}
+
+UPDATE_ACTIVE=0
+on_error() {
+  local line="$1"
+  trap - ERR
+  if [[ "$UPDATE_ACTIVE" -eq 1 ]]; then
+    rollback "unexpected error at line $line"
+  fi
+  die "update failed at line $line"
+}
+trap 'on_error $LINENO' ERR
+
+# Install updated unit files before restarting. Custom site configuration is
 # intentionally not overwritten by an application update.
 for unit in "$TARGET_RELEASE"/deploy/systemd/*.service "$TARGET_RELEASE"/deploy/systemd/*.timer; do
   [[ -e "$unit" ]] || continue
@@ -124,6 +171,7 @@ for unit in "$TARGET_RELEASE"/deploy/systemd/*.service "$TARGET_RELEASE"/deploy/
 done
 systemctl daemon-reload
 
+UPDATE_ACTIVE=1
 log "applying migrations for $LATEST_VERSION"
 MIGRATION_TMP="$WORK/migrations"
 install -d -m 0755 "$MIGRATION_TMP"
@@ -154,41 +202,41 @@ GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO a8m_app;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO a8m_app;
 SQL
 
-switch_release() {
-  local target="$1"
-  ln -sfn "$target" "$CURRENT"
-  ln -sfn "$CURRENT/bin" "$INSTALL_ROOT/bin"
-  ln -sfn "$CURRENT/admin" "$INSTALL_ROOT/admin"
-  ln -sfn "$CURRENT" "$INSTALL_ROOT/app"
-  rm -rf "$WEB_ROOT"
-  ln -s "$CURRENT/public" "$WEB_ROOT"
-  ln -sfn "$CURRENT/bin/alt8mail-control" "$CONTROL_LINK"
-}
-
 switch_release "$TARGET_RELEASE"
 log "restarting services"
 for svc in $A8M_SERVICES; do
   systemctl restart "$svc"
 done
 
-health() {
-  local failed=0
-  curl -fsS --max-time 10 http://127.0.0.1:8080/api/health >/dev/null || failed=1
-  curl -fsS --max-time 10 http://127.0.0.1:8081/api/health >/dev/null || failed=1
-  curl -kfsS --max-time 10 https://127.0.0.1:8808/healthz >/dev/null || failed=1
-  return "$failed"
+health_once() {
+  local body
+  body="$(curl -fsS --max-time 3 http://127.0.0.1:8080/api/health 2>/dev/null)" || return 1
+  [[ "$body" == *"\"version\":\"$LATEST_VERSION\""* ]] || return 1
+  body="$(curl -fsS --max-time 3 http://127.0.0.1:8081/api/health 2>/dev/null)" || return 1
+  [[ "$body" == *"\"version\":\"$LATEST_VERSION\""* ]] || return 1
+  body="$(curl -kfsS --max-time 3 https://127.0.0.1:8808/healthz 2>/dev/null)" || return 1
+  [[ "$body" == *"\"version\":\"$LATEST_VERSION\""* ]] || return 1
 }
 
-if ! health; then
-  log "health checks failed; rolling back to $OLD_TARGET"
-  switch_release "$OLD_TARGET"
-  for svc in $A8M_SERVICES; do
-    systemctl restart "$svc" || true
-  done
-  runuser -u postgres -- pg_restore --clean --if-exists --no-owner --no-privileges -d a8m "$BACKUP_DIR/database.dump" || true
-  die "update failed health checks; application symlink and database restored from $BACKUP_DIR"
+ready=0
+for attempt in $(seq 1 30); do
+  if health_once; then
+    ready=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$ready" -ne 1 ]]; then
+  rollback "readiness checks did not pass within 60 seconds"
 fi
 
+# Refresh the installed updater atomically. The running shell keeps its open
+# inode, so replacing the file here is safe.
+updater_tmp="$(mktemp /usr/local/bin/.alt8mail-update.XXXXXX)"
+install -m 0755 "$CURRENT/scripts/alt8mail-update.sh" "$updater_tmp"
+mv -f "$updater_tmp" /usr/local/bin/alt8mail-update
+
+UPDATE_ACTIVE=0
 log "update complete: $CURRENT_VERSION -> $LATEST_VERSION"
 echo "updated $CURRENT_VERSION -> $LATEST_VERSION"
 echo "backup=$BACKUP_DIR"
