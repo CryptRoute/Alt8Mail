@@ -534,12 +534,30 @@ chmod 0600 "$CONFIG_ROOT/control.env"
 # TLS
 # ---------------------------------------------------------------------------
 tls_ready=0
-if [[ "$TLS_MODE" == "letsencrypt" && "$SKIP_CERTBOT" -eq 0 ]]; then
+LE_LIVE="/etc/letsencrypt/live/$MAIL_HOSTNAME"
+copy_letsencrypt_cert() {
+  install -d -m 0755 /etc/ssl/a8m /etc/ssl/alt8mail
+  install -m 0644 "$LE_LIVE/fullchain.pem" /etc/ssl/a8m/mail.crt
+  install -m 0640 "$LE_LIVE/privkey.pem" /etc/ssl/a8m/mail.key
+  chown root:postfix /etc/ssl/a8m/mail.key
+  tls_ready=1
+}
+le_cert_usable() {
+  [[ -s "$LE_LIVE/fullchain.pem" && -s "$LE_LIVE/privkey.pem" ]] &&
+    openssl x509 -checkend 86400 -noout -in "$LE_LIVE/fullchain.pem" >/dev/null 2>&1
+}
+tls_attempt=0
+if [[ "$TLS_MODE" == "letsencrypt" && "$SKIP_CERTBOT" -eq 0 && "$tls_ready" -eq 0 ]] && le_cert_usable; then
+  log "reusing the existing Let's Encrypt certificate"
+  copy_letsencrypt_cert
+fi
+if [[ "$TLS_MODE" == "letsencrypt" && "$SKIP_CERTBOT" -eq 0 && "$tls_ready" -eq 0 ]]; then
   dns_mail="$(dig +short A "$MAIL_HOSTNAME" | awk 'NF && $1 ~ /^[0-9.]+$/ {print $1; exit}')"
   dns_domain="$(dig +short A "$DOMAIN" | awk 'NF && $1 ~ /^[0-9.]+$/ {print $1; exit}')"
-  if [[ "$dns_mail" != "$PUBLIC_IP" || "$dns_domain" != "$PUBLIC_IP" ]]; then
+  if [[ "$dns_mail" == "$PUBLIC_IP" && "$dns_domain" == "$PUBLIC_IP" ]]; then
+    tls_attempt=1
+  else
     warn "DNS for $MAIL_HOSTNAME/$DOMAIN does not both point to $PUBLIC_IP; using a self-signed certificate"
-    TLS_MODE=selfsigned
   fi
 fi
 
@@ -564,20 +582,21 @@ write_http_nginx
 systemctl enable --now nginx >/dev/null
 systemctl reload nginx
 
-if [[ "$TLS_MODE" == "letsencrypt" ]]; then
+if [[ "$tls_attempt" -eq 1 ]]; then
   log "requesting a Let's Encrypt certificate for $MAIL_HOSTNAME and $DOMAIN"
   if certbot certonly --webroot -w /var/www/certbot \
       -d "$MAIL_HOSTNAME" -d "$DOMAIN" --cert-name "$MAIL_HOSTNAME" \
       --email "$TLS_EMAIL" --agree-tos --no-eff-email --non-interactive; then
-    LE_LIVE="/etc/letsencrypt/live/$MAIL_HOSTNAME"
-    install -d -m 0755 /etc/ssl/a8m /etc/ssl/alt8mail
-    install -m 0644 "$LE_LIVE/fullchain.pem" /etc/ssl/a8m/mail.crt
-    install -m 0640 "$LE_LIVE/privkey.pem" /etc/ssl/a8m/mail.key
-    chown root:postfix /etc/ssl/a8m/mail.key
-    tls_ready=1
+    copy_letsencrypt_cert
   else
-    warn "Let's Encrypt failed; using a self-signed certificate"
-    TLS_MODE=selfsigned
+    warn "Let's Encrypt failed"
+    if le_cert_usable; then
+      log "keeping the existing, still-valid Let's Encrypt certificate"
+      copy_letsencrypt_cert
+    else
+      warn "using a self-signed certificate"
+      TLS_MODE=selfsigned
+    fi
   fi
 fi
 if [[ "$tls_ready" -eq 0 ]]; then
@@ -788,9 +807,25 @@ for svc in postgresql redis-server dovecot postfix rspamd clamav-daemon nginx a8
     failed=1
   fi
 done
-curl -fsS --max-time 8 http://127.0.0.1:8080/api/health >/dev/null || { warn "webmail API health failed"; failed=1; }
-curl -fsS --max-time 8 http://127.0.0.1:8081/api/health >/dev/null || { warn "admin API health failed"; failed=1; }
-curl -kfsS --max-time 8 https://127.0.0.1:8808/healthz >/dev/null || { warn "control health failed"; failed=1; }
+health_ready() {
+  curl -fsS --max-time 3 http://127.0.0.1:8080/api/health >/dev/null 2>&1 || return 1
+  curl -fsS --max-time 3 http://127.0.0.1:8081/api/health >/dev/null 2>&1 || return 1
+  curl -kfsS --max-time 3 https://127.0.0.1:8808/healthz >/dev/null 2>&1 || return 1
+}
+ready=0
+for attempt in $(seq 1 30); do
+  if health_ready; then
+    ready=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$ready" -eq 1 ]]; then
+  log "API readiness checks passed"
+else
+  warn "API health checks did not pass within 60 seconds"
+  failed=1
+fi
 nginx -t >/dev/null 2>&1 || { warn "nginx configuration check failed"; failed=1; }
 postfix check >/dev/null 2>&1 || { warn "postfix check failed"; failed=1; }
 

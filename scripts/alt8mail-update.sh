@@ -108,9 +108,19 @@ log "backing up the database and configuration"
 runuser -u postgres -- pg_dump -Fc -d a8m > "$BACKUP_DIR/database.dump"
 tar -C /etc -czf "$BACKUP_DIR/config.tar.gz" a8m 2>/dev/null || true
 tar -C /opt -czf "$BACKUP_DIR/control-config.tar.gz" alt8mail 2>/dev/null || true
+tar -C /etc/systemd/system -czf "$BACKUP_DIR/units.tar.gz" \
+  a8m-server.service a8m-admin.service alt8mail-control.service \
+  a8m-mailprovision.service a8m-mailprovision.timer \
+  a8m-dkimprovision.service a8m-dkimprovision.timer 2>/dev/null || true
 printf '%s\n' "$CURRENT_VERSION" > "$BACKUP_DIR/previous-version"
 
 TARGET_RELEASE="$INSTALL_ROOT/releases/$LATEST_VERSION"
+# Replace a stale staging directory left by an earlier failed attempt, but never
+# rewrite the release that is currently serving traffic.
+if [[ -d "$TARGET_RELEASE" && "$(readlink -f "$TARGET_RELEASE")" != "$OLD_TARGET" ]]; then
+  log "refreshing staged release $TARGET_RELEASE"
+  rm -rf "$TARGET_RELEASE"
+fi
 if [[ ! -d "$TARGET_RELEASE" ]]; then
   install -d -m 0755 "$TARGET_RELEASE"
   cp -a "$NEW_RELEASE/." "$TARGET_RELEASE/"
@@ -138,6 +148,10 @@ rollback() {
   for svc in $A8M_SERVICES; do
     systemctl stop "$svc" || true
   done
+  if [[ -s "$BACKUP_DIR/units.tar.gz" ]]; then
+    tar -C /etc/systemd/system -xzf "$BACKUP_DIR/units.tar.gz" 2>/dev/null || true
+    systemctl daemon-reload || true
+  fi
   switch_release "$OLD_TARGET"
   restore_copy="/tmp/a8m-restore-$$.dump"
   if install -m 0600 -o postgres -g postgres "$BACKUP_DIR/database.dump" "$restore_copy"; then

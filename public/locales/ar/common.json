@@ -1,4 +1,7 @@
 {
+  "app.name": "Alt8Mail",
+  "app.mail": "البريد",
+  "app.workspace": "مساحة العمل",
   "app.secureWorkspace": "مساحة عمل آمنة",
   "app.tagline": "بريد يستحق اهتمامك.",
   "app.description": "البريد والتقويم والمهام والملفات في مساحة واحدة محمية.",

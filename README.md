@@ -43,9 +43,10 @@ sudo alt8mail-update
 ```
 
 The updater uses the read-only deploy key in `/etc/a8m/github_readonly`, builds
-the selected tag, backs up the database and configuration under
-`/var/backups/alt8mail`, applies new migrations and rolls back the application
-release if health checks fail. Release artifacts are built by
+the selected tag, backs up the database, configuration and systemd units under
+`/var/backups/alt8mail`, applies new migrations and waits up to 60 seconds for
+all three services to report the target version. If readiness fails, it restores
+the previous release, database and unit files. Release artifacts are built by
 `.github/workflows/release.yml`.
 
 ## Localization
@@ -54,9 +55,10 @@ UI catalogs live under `public/locales/<language>/`. JSON files are the source
 of truth so translations are versioned with releases. User and tenant locale
 preferences are stored in PostgreSQL; Redis is only a cache. The webmail loader
 supports fallback-to-English, interpolation, `Intl.PluralRules`, RTL direction,
-and date/number/time formatting. English, French, Spanish and Arabic catalogs
-ship in this release; additional languages can be added without application
-changes.
+and date/number/time formatting. English, German, French, Spanish, Portuguese,
+Dutch, Italian and Arabic catalogs ship in this release; additional languages
+can be added without application changes. Run `npm run test:i18n` to validate
+manifest entries, key coverage and UI key references.
 
 
 The staging webmail release (**0.9.0-staging**) additionally has normalized mail,

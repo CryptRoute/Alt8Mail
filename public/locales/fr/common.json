@@ -1,4 +1,7 @@
 {
+  "app.name": "Alt8Mail",
+  "app.mail": "Courrier",
+  "app.workspace": "Espace de travail",
   "app.secureWorkspace": "Espace sécurisé",
   "app.tagline": "Une messagerie qui compte.",
   "app.description": "Courrier, agenda, tâches et fichiers dans un seul espace protégé.",
