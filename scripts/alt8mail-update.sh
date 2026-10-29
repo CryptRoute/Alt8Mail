@@ -44,6 +44,9 @@ done
 
 mkdir -p "$(dirname "$LOG")"
 exec > >(tee -a "$LOG") 2>&1
+# runuser changes into the caller's directory before dropping privileges; keep
+# that directory world-executable so PostgreSQL client tools do not warn.
+cd /tmp
 
 CURRENT_VERSION="$(tr -d '[:space:]' < "$CURRENT/VERSION")"
 [[ -n "$CURRENT_VERSION" ]] || die "cannot read the installed version"
@@ -93,7 +96,7 @@ cleanup() {
 trap cleanup EXIT
 
 log "fetching $LATEST_TAG"
-git clone --quiet --depth 1 --branch "$LATEST_TAG" "$A8M_REPO" "$WORK/src"
+git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$LATEST_TAG" "$A8M_REPO" "$WORK/src"
 [[ -r "$WORK/src/scripts/build-release.sh" ]] || die "tag $LATEST_TAG has no build-release.sh"
 
 log "building $LATEST_VERSION"
