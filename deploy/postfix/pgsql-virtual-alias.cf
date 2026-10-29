@@ -1,0 +1,5 @@
+user = a8m_mail
+password = __DB_PASSWORD__
+hosts = 127.0.0.1
+dbname = a8m
+query = SELECT public.postfix_alias_lookup('%s') AS target

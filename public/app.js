@@ -1,4 +1,5 @@
 import { MailIndex, buildThreads, parseQuery, stripHtml } from "./search.mjs";
+import { initI18n, setLocale, t, applyStaticTranslations, populateLanguageSelect } from "./i18n.mjs";
 
 "use strict";
 
@@ -983,6 +984,10 @@ function applyServerPreferences() {
   setTheme(p.theme || "system", false);
   setAccent(p.accent || "blue", false);
   setDensity(p.density || "comfortable", false);
+  if (p.language) {
+    prefs.set("language", p.language);
+    setLocale(p.language).catch(() => {});
+  }
   for (const key of ["markReadOnOpen", "defaultReceipt", "notifyDesktop", "notifySound", "notifyCalendar", "externalWarnings"]) {
     setPreference(key, p[key] !== false, false);
   }
@@ -1045,7 +1050,10 @@ function syncPreferencesUi() {
   if (composePositionControl) composePositionControl.value = preferences.composePosition || "center";
   const inboxViewControl = document.getElementById("inboxViewSelect");
   if (inboxViewControl) inboxViewControl.value = preferences.inboxView === "individual" ? "individual" : "grouped";
-  if (languageSelect) languageSelect.value = preferences.language || "en-US";
+  if (languageSelect) {
+    populateLanguageSelect(languageSelect);
+    languageSelect.value = preferences.language || "en-US";
+  }
   if (dateFormatSelect) dateFormatSelect.value = preferences.dateFormat || "auto";
   if (weekStartSelect) weekStartSelect.value = preferences.weekStart || "monday";
   if (timeZoneSelect) {
@@ -1230,8 +1238,8 @@ function showBootSplash(note = "Restoring your secure session and mailbox…") {
 
 function resetLoginButtons() {
   loginBusy = false;
-  if (loginSubmit) { loginSubmit.disabled = false; loginSubmit.textContent = "Sign in"; }
-  if (ssoBtn) { ssoBtn.disabled = false; ssoBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Continue with single sign-on'; }
+  if (loginSubmit) { loginSubmit.disabled = false; loginSubmit.textContent = t("login.signIn"); }
+  if (ssoBtn) { ssoBtn.disabled = false; ssoBtn.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span data-i18n="login.sso">${esc(t("login.sso"))}</span>`; }
   if (twoFactorSubmit) { twoFactorSubmit.disabled = false; twoFactorSubmit.textContent = "Verify and sign in"; }
   if (usePasskeyBtn) usePasskeyBtn.disabled = false;
 }
@@ -1322,20 +1330,20 @@ async function submitLogin() {
   loginError.hidden = true;
   loginHint.hidden = true;
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    loginError.textContent = "Enter a valid Alt8Mail work email address.";
+    loginError.textContent = t("login.invalidEmail");
     loginError.hidden = false;
     loginEmail.focus();
     return;
   }
   if (!password) {
-    loginError.textContent = "Enter your password to continue.";
+    loginError.textContent = t("login.passwordRequired");
     loginError.hidden = false;
     loginPassword.focus();
     return;
   }
   loginBusy = true;
   loginSubmit.disabled = true;
-  loginSubmit.textContent = "Signing in…";
+  loginSubmit.textContent = t("login.signingIn");
   ssoBtn.disabled = true;
   try {
     const remember = document.getElementById("rememberMe").checked;
@@ -1971,7 +1979,7 @@ function showNewMailNotification(message, count) {
   const sender = message.from ? (message.from.name || message.from.email) : "New sender";
   const body = count > 1 ? `${count} new messages · ${sender}: ${subject}` : `${sender}: ${subject}`;
   if (state.notifySound) playNotificationTone();
-  if (!showBrowserNotification("New Alt8Mail", body, "a8m-new-mail")) {
+  if (!showBrowserNotification(t("notify.newMail"), body, "a8m-new-mail")) {
     showToast(`New mail from ${sender}: ${subject}`, "Open", () => { setTask("mail"); setFolder("inbox"); });
   }
 }
@@ -9149,7 +9157,12 @@ function bindEvents() {
   /* regional, task, file and schedule inputs */
   document.addEventListener("change", (event) => {
     const target = event.target;
-    if (target.id === "languageSelect") { patchPreferences({ language: target.value }, "Language updated"); return; }
+    if (target.id === "languageSelect") {
+      prefs.set("language", target.value);
+      setLocale(target.value).catch(() => {});
+      patchPreferences({ language: target.value }, "Language updated");
+      return;
+    }
     if (target.id === "dateFormatSelect") { patchPreferences({ dateFormat: target.value }, "Date format updated"); return; }
     if (target.id === "weekStartSelect") { patchPreferences({ weekStart: target.value }, "Calendar week updated"); return; }
     if (target.id === "timeZoneSelect") { patchPreferences({ timeZone: target.value }, "Time zone updated"); return; }
@@ -9566,6 +9579,8 @@ document.addEventListener("visibilitychange", () => {
 
 async function boot() {
   document.getElementById("passwordChangeSubmit")?.addEventListener("click", submitPasswordChange);
+  await initI18n(prefs.get("language") || navigator.language || "en-US");
+  applyStaticTranslations(document);
   applySavedPreferences();
   bindEvents();
   registerServiceWorker();

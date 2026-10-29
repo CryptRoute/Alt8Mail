@@ -1,0 +1,6 @@
+driver = pgsql
+connect = host=127.0.0.1 dbname=a8m user=a8m_mail password=__DB_PASSWORD__
+default_pass_scheme = SHA512-CRYPT
+password_query = SELECT m.email AS user, u.mail_password_hash AS password FROM mailboxes m JOIN users u ON u.id = m.user_id JOIN tenants t ON t.id = u.tenant_id JOIN mail_domains d ON d.tenant_id = m.tenant_id AND d.domain = m.domain WHERE m.email = '%u' AND m.active = true AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active' AND d.status IN ('verified','manual') AND (('%s' <> 'pop3') OR COALESCE((t.settings->'mail'->>'popAccess')::boolean, false)) AND (('%s' <> 'imap') OR COALESCE((t.settings->'mail'->>'imapAccess')::boolean, true)) AND (('%s' <> 'smtp') OR COALESCE((t.settings->'mail'->>'smtpAccess')::boolean, true))
+user_query = SELECT '/var/vmail/' || m.domain || '/' || m.local_part AS home, 5000 AS uid, 5000 AS gid FROM mailboxes m JOIN users u ON u.id = m.user_id JOIN tenants t ON t.id = u.tenant_id WHERE m.email = '%u' AND m.active = true AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'
+iterate_query = SELECT m.email AS user FROM mailboxes m JOIN users u ON u.id = m.user_id JOIN tenants t ON t.id = u.tenant_id WHERE m.active = true AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'

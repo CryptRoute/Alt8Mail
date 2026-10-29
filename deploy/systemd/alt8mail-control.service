@@ -1,0 +1,28 @@
+[Unit]
+Description=Alt8Mail System Control
+Documentation=https://github.com/CryptRoute/Alt8Mail
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/alt8mail
+EnvironmentFile=/etc/a8m/control.env
+ExecStart=/opt/alt8mail/bin/alt8mail-control serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=25
+KillSignal=SIGTERM
+LimitNOFILE=65535
+ProtectSystem=full
+ReadWritePaths=/etc/postfix /etc/dovecot /etc/nginx /etc/letsencrypt /etc/ssl/alt8mail /etc/cron.d /etc/ufw /etc/hostname /etc/hosts /etc/localtime /etc/timezone /usr/local/bin /var/backups/alt8mail /var/vmail /var/lib/rspamd/dkim /var/lib/letsencrypt /var/log /var/spool/postfix /opt/a8m /opt/alt8mail
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

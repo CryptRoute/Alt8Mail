@@ -358,7 +358,7 @@ export async function createApp(options = {}) {
     return factor ? factor.passkeys || [] : [];
   }
 
-  const PREFERENCE_LANGUAGES = new Set(["en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "pt-BR", "nl-NL", "it-IT"]);
+  const PREFERENCE_LANGUAGES = new Set(["en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "pt-BR", "nl-NL", "it-IT", "ar"]);
 
   function validTimeZone(value) {
     try {

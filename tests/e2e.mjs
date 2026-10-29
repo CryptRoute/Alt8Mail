@@ -41,6 +41,13 @@ const equal = (actual, expected, message) => {
   }
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const DEMO_EMAIL = "avery.chen@a8m.example";
+const DEMO_PASSWORD = "a8m-demo";
+
+async function fillDemoLogin() {
+  await page.setValue("#loginEmail", DEMO_EMAIL);
+  await page.setValue("#loginPassword", DEMO_PASSWORD);
+}
 
 async function waitForApp() {
   await page.waitFor(() => document.readyState === "complete", 10000);
@@ -98,6 +105,7 @@ try {
 
   console.log("\n[1] Two-factor sign-in and initial mailbox");
   check(await page.eval("!document.getElementById('loginScreen').hidden"), "login screen is shown");
+  await fillDemoLogin();
   await page.click("#loginSubmit");
   await page.waitFor(() => !document.getElementById("twoFactorForm").hidden, 8000);
   check(await page.eval("!document.getElementById('twoFactorForm').hidden"), "password sign-in opens the two-factor challenge");
@@ -343,6 +351,9 @@ try {
   await sleep(450);
   await page.setValue("#timeZoneSelect", "Europe/Berlin");
   await sleep(450);
+  await page.setValue("#languageSelect", "fr-FR");
+  await sleep(550);
+  check(await page.eval("document.querySelector('.rail-label[data-i18n=\"nav.mail\"]')?.textContent === 'Courrier'"), "French catalog translates the workspace navigation");
   await page.setValue("#languageSelect", "en-GB");
   await sleep(450);
   await page.setValue("#dateFormatSelect", "dmy");
@@ -703,6 +714,8 @@ try {
   await mobile.goto(base + "/");
   await mobile.waitFor(() => document.readyState === "complete", 10000);
   if (await mobile.eval("!document.getElementById('loginScreen').hidden")) {
+    await mobile.setValue("#loginEmail", DEMO_EMAIL);
+    await mobile.setValue("#loginPassword", DEMO_PASSWORD);
     await mobile.click("#loginSubmit");
     await mobile.waitFor(() => !document.getElementById("twoFactorForm").hidden || !document.getElementById("app").hidden, 10000);
     if (await mobile.eval("!document.getElementById('twoFactorForm').hidden")) {
@@ -740,6 +753,7 @@ try {
   console.log("\n[11b] Passkey sign-in");
   await page.click("#railLogout");
   await page.waitFor(() => !document.getElementById("loginScreen").hidden, 5000);
+  await fillDemoLogin();
   await page.click("#loginSubmit");
   await page.waitFor(() => !document.getElementById("twoFactorForm").hidden, 8000);
   const passkeyEndpoint = await page.eval(`fetch('/api/session/2fa/webauthn/begin', {

@@ -12,7 +12,7 @@ import (
 )
 
 var workTimePattern = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
-var preferenceLanguages = map[string]bool{"en-US": true, "en-GB": true, "de-DE": true, "fr-FR": true, "es-ES": true, "pt-BR": true, "nl-NL": true, "it-IT": true}
+var preferenceLanguages = map[string]bool{"en-US": true, "en-GB": true, "de-DE": true, "fr-FR": true, "es-ES": true, "pt-BR": true, "nl-NL": true, "it-IT": true, "ar": true}
 
 func (s *Server) getSieve(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)

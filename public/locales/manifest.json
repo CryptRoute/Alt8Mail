@@ -1,0 +1,14 @@
+{
+  "default": "en",
+  "locales": [
+    { "code": "en", "value": "en-US", "label": "English (United States)", "dir": "ltr" },
+    { "code": "en", "value": "en-GB", "label": "English (United Kingdom)", "dir": "ltr" },
+    { "code": "de", "value": "de-DE", "label": "Deutsch", "dir": "ltr" },
+    { "code": "fr", "value": "fr-FR", "label": "Français", "dir": "ltr" },
+    { "code": "es", "value": "es-ES", "label": "Español", "dir": "ltr" },
+    { "code": "pt", "value": "pt-BR", "label": "Português (Brasil)", "dir": "ltr" },
+    { "code": "nl", "value": "nl-NL", "label": "Nederlands", "dir": "ltr" },
+    { "code": "it", "value": "it-IT", "label": "Italiano", "dir": "ltr" },
+    { "code": "ar", "value": "ar", "label": "العربية", "dir": "rtl" }
+  ]
+}

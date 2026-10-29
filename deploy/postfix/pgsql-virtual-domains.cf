@@ -1,0 +1,5 @@
+user = a8m_mail
+password = __DB_PASSWORD__
+hosts = 127.0.0.1
+dbname = a8m
+query = SELECT d.domain FROM mail_domains d JOIN tenants t ON t.id = d.tenant_id WHERE d.domain = '%s' AND d.status IN ('verified','manual') AND t.status = 'active'

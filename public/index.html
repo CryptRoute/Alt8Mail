@@ -103,18 +103,18 @@
 
 <div class="login-screen" id="loginScreen" hidden>
   <section class="login-brand">
-    <span class="login-watermark" aria-hidden="true">M</span>
+    <span class="login-watermark" aria-hidden="true">A8</span>
     <div class="login-brand-top">
-      <span class="login-mark" aria-hidden="true">M</span>
+      <span class="login-mark" aria-hidden="true">A8</span>
       <div>
         <strong>Alt8Mail</strong>
-        <span>Enterprise workspace</span>
+        <span data-i18n="app.workspace">Enterprise workspace</span>
       </div>
     </div>
     <div class="login-brand-main">
-      <p class="eyebrow">Secure workspace</p>
-      <h1>Mail that means business.</h1>
-      <p class="login-lead">Mail, calendar, tasks and files in one place — protected by Alt8Mail.</p>
+      <p class="eyebrow" data-i18n="app.secureWorkspace">Secure workspace</p>
+      <h1 data-i18n="app.tagline">Mail that means business.</h1>
+      <p class="login-lead" data-i18n="app.description">Mail, calendar, tasks and files in one place — protected by Alt8Mail.</p>
       <div class="login-features">
         <div>
           <span class="login-feature-icon"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg></span>
@@ -140,7 +140,7 @@
     <form class="login-card" id="loginForm" novalidate>
       <div class="login-heading">
         <p class="eyebrow">Alt8Mail</p>
-        <h2>Sign in</h2>
+        <h2 data-i18n="login.signIn">Sign in</h2>
         <p>Use your Alt8Mail account to continue.</p>
       </div>
       <button class="sso-btn" id="ssoBtn" type="button">
@@ -149,25 +149,25 @@
       </button>
       <div class="login-divider"><span>or sign in with your work email</span></div>
       <div class="login-field">
-        <label for="loginEmail">Work email</label>
-        <input id="loginEmail" type="email" value="avery.chen@a8m.example" autocomplete="username" spellcheck="false">
+        <label for="loginEmail" data-i18n="login.email">Work email</label>
+        <input id="loginEmail" type="email" placeholder="you@company.com" autocomplete="username" spellcheck="false" data-i18n-placeholder="login.emailPlaceholder">
       </div>
       <div class="login-field">
-        <label for="loginPassword">Password</label>
+        <label for="loginPassword" data-i18n="login.password">Password</label>
         <div class="password-wrap">
-          <input id="loginPassword" type="password" value="a8m-demo" autocomplete="current-password">
+          <input id="loginPassword" type="password" placeholder="Your password" autocomplete="current-password" data-i18n-placeholder="login.passwordPlaceholder">
           <button id="passwordToggle" type="button">Show</button>
         </div>
       </div>
       <div class="login-options">
-        <label class="login-check"><input id="rememberMe" type="checkbox" checked>Remember me</label>
+        <label class="login-check"><input id="rememberMe" type="checkbox" checked><span data-i18n="login.remember">Remember me</span></label>
         <button class="login-link" id="forgotPassword" type="button">Forgot password?</button>
       </div>
       <p class="login-error" id="loginError" hidden></p>
       <p class="login-hint" id="loginHint" hidden></p>
       <button class="login-submit" id="loginSubmit" type="submit">Sign in</button>
-      <p class="login-demo">Staging environment — prefilled test credentials. Mail is read live from Dovecot.</p>
-      <div class="login-card-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Protected by Alt8Mail · TLS 1.3</div>
+      <p class="login-demo">Secure workspace — use your organization credentials. Mail is read live from Dovecot.</p>
+      <div class="login-card-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span data-i18n="login.legal">Protected by Alt8Mail · TLS 1.3</span></div>
     </form>
 
     <form class="login-card two-factor-card" id="twoFactorForm" hidden novalidate>
@@ -269,7 +269,7 @@
   </div>
   <header class="topbar">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true">M</span>
+      <span class="brand-mark" aria-hidden="true">A8</span>
       <span class="brand-name">Alt8Mail</span>
       <span class="brand-chip">Mail</span>
       <svg class="icon brand-shield" aria-hidden="true" title="Verified organization"><use href="#i-shield-check"/></svg>
@@ -280,7 +280,7 @@
         <svg class="icon" style="width:16px;height:16px"><use href="#i-arrow-left"/></svg>
       </button>
       <svg class="icon search-icon" style="width:17px;height:17px" aria-hidden="true"><use href="#i-search"/></svg>
-      <input id="searchInput" type="search" placeholder="Search mail" autocomplete="off" spellcheck="false" aria-label="Search">
+      <input id="searchInput" type="search" placeholder="Search mail" data-i18n-placeholder="search.placeholder" autocomplete="off" spellcheck="false" aria-label="Search">
       <button class="search-clear" id="searchClear" type="button" aria-label="Clear search">
         <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
       </button>
@@ -334,19 +334,19 @@
   <div class="workspace">
     <nav class="rail" aria-label="Workspace">
       <button class="rail-btn has-label is-active" data-task="mail" type="button" aria-label="Mail" title="Mail">
-        <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span class="rail-label">Mail</span>
+        <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span class="rail-label" data-i18n="nav.mail">Mail</span>
       </button>
       <button class="rail-btn has-label" data-task="calendar" type="button" aria-label="Calendar" title="Calendar">
-        <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg><span class="rail-label">Calendar</span>
+        <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg><span class="rail-label" data-i18n="nav.calendar">Calendar</span>
       </button>
       <button class="rail-btn has-label" data-task="people" type="button" aria-label="People" title="People">
-        <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg><span class="rail-label">People</span>
+        <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg><span class="rail-label" data-i18n="nav.people">People</span>
       </button>
       <button class="rail-btn has-label" data-task="tasks" type="button" aria-label="Tasks" title="Tasks">
-        <svg class="icon" aria-hidden="true"><use href="#i-task"/></svg><span class="rail-label">Tasks</span>
+        <svg class="icon" aria-hidden="true"><use href="#i-task"/></svg><span class="rail-label" data-i18n="nav.tasks">Tasks</span>
       </button>
       <button class="rail-btn has-label" data-task="files" type="button" aria-label="Files" title="Files">
-        <svg class="icon" aria-hidden="true"><use href="#i-files"/></svg><span class="rail-label">Files</span>
+        <svg class="icon" aria-hidden="true"><use href="#i-files"/></svg><span class="rail-label" data-i18n="nav.files">Files</span>
       </button>
       <div class="rail-rule" aria-hidden="true"></div>
       <div class="rail-spacer"></div>
@@ -434,7 +434,7 @@
               New mail
             </button>
             <div class="tenant">
-              <span class="tenant-mark" aria-hidden="true">M</span>
+              <span class="tenant-mark" aria-hidden="true">A8</span>
               <div class="tenant-id">
                 <strong>Alt8Mail</strong>
                 <span><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Enterprise workspace</span>
@@ -1134,12 +1134,12 @@
                 <section class="settings-panel" data-settings-panel="regional" hidden>
                   <div class="settings-block">
                     <div class="settings-block-head">
-                      <h3>Language &amp; region</h3>
-                      <p>Controls dates, times, numbers, scheduled sends and calendar labels across the workspace.</p>
+                      <h3 data-i18n="settings.languageRegion">Language &amp; region</h3>
+                      <p data-i18n="settings.languageRegionHint">Controls dates, times, numbers, scheduled sends and calendar labels across the workspace.</p>
                     </div>
                     <div class="pref-list">
                       <div class="pref-row">
-                        <div class="pref-copy"><strong>Language</strong><span>Locale for dates, times and number formatting.</span></div>
+                        <div class="pref-copy"><strong data-i18n="settings.language">Language</strong><span data-i18n="settings.languageHint">Locale for dates, times and number formatting.</span></div>
                         <select class="pref-select" id="languageSelect" aria-label="Language">
                           <option value="en-US">English (United States)</option>
                           <option value="en-GB">English (United Kingdom)</option>
@@ -1149,17 +1149,18 @@
                           <option value="pt-BR">Português (Brasil)</option>
                           <option value="nl-NL">Nederlands</option>
                           <option value="it-IT">Italiano</option>
+                          <option value="ar">العربية</option>
                         </select>
                       </div>
                       <div class="pref-row">
-                        <div class="pref-copy"><strong>Time format</strong><span>Applied to the message list, reader, tasks, audit log and scheduled sends.</span></div>
+                        <div class="pref-copy"><strong data-i18n="settings.timeFormat">Time format</strong><span>Applied to the message list, reader, tasks, audit log and scheduled sends.</span></div>
                         <div class="segmented" role="radiogroup" aria-label="Time format">
                           <button id="timeFormat12" data-time-format="12h" type="button" role="radio" aria-checked="true">12-hour</button>
                           <button id="timeFormat24" data-time-format="24h" type="button" role="radio" aria-checked="false">24-hour</button>
                         </div>
                       </div>
                       <div class="pref-row">
-                        <div class="pref-copy"><strong>Date format</strong><span>Used for message dates, task due dates and schedule previews.</span></div>
+                        <div class="pref-copy"><strong data-i18n="settings.dateFormat">Date format</strong><span>Used for message dates, task due dates and schedule previews.</span></div>
                         <select class="pref-select" id="dateFormatSelect" aria-label="Date format">
                           <option value="auto">Language default</option>
                           <option value="mdy">Oct 28, 2026</option>
@@ -1168,7 +1169,7 @@
                         </select>
                       </div>
                       <div class="pref-row">
-                        <div class="pref-copy"><strong>Time zone</strong><span id="timeZoneHint">All timestamps and scheduled sends use this zone.</span></div>
+                        <div class="pref-copy"><strong data-i18n="settings.timeZone">Time zone</strong><span id="timeZoneHint">All timestamps and scheduled sends use this zone.</span></div>
                         <div class="pref-inline-controls">
                           <select class="pref-select" id="timeZoneSelect" aria-label="Time zone"></select>
                           <button class="link-btn" id="useDeviceZone" type="button">Use device</button>
@@ -1672,22 +1673,22 @@
 
   <nav class="mobile-tabs" aria-label="Workspace">
     <button class="mobile-tab is-active" data-task="mail" type="button">
-      <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>Mail
+      <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span data-i18n="nav.mail">Mail</span>
     </button>
     <button class="mobile-tab" data-task="calendar" type="button">
-      <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>Calendar
+      <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg><span data-i18n="nav.calendar">Calendar</span>
     </button>
     <button class="mobile-tab" data-task="people" type="button">
-      <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>People
+      <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg><span data-i18n="nav.people">People</span>
     </button>
     <button class="mobile-tab" data-task="tasks" type="button">
-      <svg class="icon" aria-hidden="true"><use href="#i-task"/></svg>Tasks
+      <svg class="icon" aria-hidden="true"><use href="#i-task"/></svg><span data-i18n="nav.tasks">Tasks</span>
     </button>
     <button class="mobile-tab" data-task="files" type="button">
-      <svg class="icon" aria-hidden="true"><use href="#i-files"/></svg>Files
+      <svg class="icon" aria-hidden="true"><use href="#i-files"/></svg><span data-i18n="nav.files">Files</span>
     </button>
     <button class="mobile-tab" data-task="settings" type="button">
-      <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Settings
+      <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span data-i18n="nav.settings">Settings</span>
     </button>
   </nav>
 </div>

@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Build release bundle
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          bash scripts/build-release.sh "$version" dist
+          test -s "dist/alt8mail-$version.tar.gz"
+          test -s "dist/alt8mail-$version.tar.gz.sha256"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/alt8mail-$version.tar.gz" \
+            "dist/alt8mail-$version.tar.gz.sha256" \
+            --title "Alt8Mail $version" \
+            --generate-notes

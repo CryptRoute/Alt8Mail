@@ -15,6 +15,50 @@ customer/system administration console for tenants, users, groups, org units,
 custom RBAC roles, domains, policy, audit and system administrators, plus a
 separate root-level **System Control** plane for the host and mail stack.
 
+## Installation and updates
+
+The supported deployment target is Debian 12. A fresh host can be installed
+from a source checkout or an extracted release bundle:
+
+```bash
+sudo bash install.sh \
+  --domain a8m.example.com \
+  --hostname mail.a8m.example.com \
+  --admin-email owner@a8m.example.com \
+  --non-interactive
+```
+
+The installer prompts for missing values when run interactively. It creates the
+first tenant owner, mailbox, administration credentials and System Control
+superadmin, installs PostgreSQL, Redis, Postfix, Dovecot, Rspamd, ClamAV and
+nginx, obtains a Let's Encrypt certificate when DNS is ready, configures the
+firewall and writes root-only credentials to
+`/root/alt8mail-initial-credentials.txt`.
+
+Release updates use Git tags and are applied transactionally:
+
+```bash
+sudo alt8mail-update --check
+sudo alt8mail-update
+```
+
+The updater uses the read-only deploy key in `/etc/a8m/github_readonly`, builds
+the selected tag, backs up the database and configuration under
+`/var/backups/alt8mail`, applies new migrations and rolls back the application
+release if health checks fail. Release artifacts are built by
+`.github/workflows/release.yml`.
+
+## Localization
+
+UI catalogs live under `public/locales/<language>/`. JSON files are the source
+of truth so translations are versioned with releases. User and tenant locale
+preferences are stored in PostgreSQL; Redis is only a cache. The webmail loader
+supports fallback-to-English, interpolation, `Intl.PluralRules`, RTL direction,
+and date/number/time formatting. English, French, Spanish and Arabic catalogs
+ship in this release; additional languages can be added without application
+changes.
+
+
 The staging webmail release (**0.9.0-staging**) additionally has normalized mail,
 attachment, outbox and undo tables, PostgreSQL full-text search, IMAP IDLE
 push, normalized Tasks/Files/Calendar/Contacts, public guest-share pages,
@@ -405,8 +449,9 @@ decisions and audit entries.
   From identity, signature (inserted into new mail), and auto-advance after
   archive/delete/junk. These values drive list/reader dates, task due labels,
   schedule presets and the full date/time shown in the schedule dialog.
-  *Language currently controls `Intl` locale/date/number formatting; the UI
-  copy remains English until translation packs are added (see the roadmap).*
+  *Language controls the JSON UI catalogs under `public/locales/` as well as
+  `Intl` locale, date, number and time formatting. English, French, Spanish and
+  Arabic catalogs ship with this release; missing keys fall back to English.*
 - **PWA + mobile** — manifest with 192/512/maskable icons and shortcuts, a
   service worker app-shell cache (API responses are never cached), install
   prompt handling, offline banner, installability passing Chrome checks, a

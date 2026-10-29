@@ -1,0 +1,5 @@
+user = a8m_mail
+password = __DB_PASSWORD__
+hosts = 127.0.0.1
+dbname = a8m
+query = SELECT m.maildir_path FROM mailboxes m JOIN users u ON u.id = m.user_id JOIN tenants t ON t.id = m.tenant_id JOIN mail_domains d ON d.tenant_id = m.tenant_id AND d.domain = m.domain WHERE m.email = '%s' AND m.active = true AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active' AND d.status IN ('verified','manual')
