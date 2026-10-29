@@ -885,9 +885,29 @@ func mergeFetchedMail(state map[string]any, user userRecord, fetched []fetchedMa
 	return mergeFetchedMailAdvanced(state, user, fetched, uploadDir, coveredFolders, nil, nil, nil)
 }
 
+func repairEncodedSubjects(state map[string]any) {
+	for _, raw := range stateMessages(state) {
+		message, _ := raw.(map[string]any)
+		if message == nil {
+			continue
+		}
+		subject := stateString(message, "subject")
+		if subject == "" || !strings.Contains(subject, "=?") {
+			continue
+		}
+		if decoded := decodeHeader(subject); decoded != subject {
+			message["subject"] = decoded
+			if stateString(message, "snippet") == subject {
+				message["snippet"] = decoded
+			}
+		}
+	}
+}
+
 func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []fetchedMail, uploadDir string,
 	coveredFolders map[string]bool, liveKeys map[string]bool, flagUpdates []imapFlagUpdate,
 	resetFolders map[string]bool) (int, int, int) {
+	repairEncodedSubjects(state)
 	imported, updated, removed := 0, 0, 0
 	userDomain := domainOf(user.Email)
 	if len(resetFolders) > 0 {

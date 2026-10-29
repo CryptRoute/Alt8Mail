@@ -90,3 +90,17 @@ func TestIncrementalFlagAndUIDValidityReconciliation(t *testing.T) {
 		t.Fatalf("post-reset message is wrong: %#v", message)
 	}
 }
+
+func TestRepairEncodedSubjects(t *testing.T) {
+	state := map[string]any{"messages": []any{
+		map[string]any{
+			"id": "m1", "subject": "=?Windows-1252?Q?Je_suis_vraiment_d=E9sol=E9,_mon_amour?=",
+			"snippet": "=?Windows-1252?Q?Je_suis_vraiment_d=E9sol=E9,_mon_amour?=",
+		},
+	}}
+	repairEncodedSubjects(state)
+	message := stateMessages(state)[0].(map[string]any)
+	if got := stateString(message, "subject"); got != "Je suis vraiment désolé, mon amour" {
+		t.Fatalf("unexpected repaired subject %q", got)
+	}
+}

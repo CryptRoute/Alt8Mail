@@ -78,6 +78,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
+	repairEncodedSubjects(state)
 	folder := r.URL.Query().Get("folder")
 	if folder == "" {
 		folder = "inbox"

@@ -493,6 +493,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ensureStateCollections(state)
+	repairEncodedSubjects(state)
 	s.attachOutbox(ctx, sess.User.ID, state)
 	user, preferences := s.publicUserWithState(ctx, sess.User)
 	identities, err := s.mailIdentities(ctx, sess.User)
