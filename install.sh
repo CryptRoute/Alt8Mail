@@ -147,7 +147,7 @@ fi
 cd /tmp
 PUBLIC_IP="$(curl -4fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
 if [[ -z "$PUBLIC_IP" ]]; then
-  PUBLIC_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+  PUBLIC_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if (!found && $i=="src") {print $(i+1); found=1}}' || true)"
 fi
 [[ -n "$PUBLIC_IP" ]] || die "could not determine the public IPv4 address"
 
@@ -208,7 +208,7 @@ install_go() {
     aarch64|arm64) arch=arm64 ;;
     *) die "unsupported architecture: $arch" ;;
   esac
-  if command -v go >/dev/null 2>&1 && go version | awk '{print $3}' | grep -qE '^go1\.(2[6-9]|[3-9][0-9])'; then
+  if command -v go >/dev/null 2>&1 && go version | awk '{print $3}' | grep -E '^go1\.(2[6-9]|[3-9][0-9])' >/dev/null; then
     log "using existing $(go version)"
     return
   fi
@@ -217,7 +217,7 @@ install_go() {
   [[ -n "$go_version" && "$go_version" != "null" ]] || die "could not determine the current Go release"
   go_sha="$(printf '%s' "$go_json" | jq -r --arg v "$go_version" --arg a "$arch" '
     .[] | select(.version == $v) | .files[] |
-    select(.os == "linux" and .arch == $a and .kind == "archive") | .sha256' | head -1)"
+    select(.os == "linux" and .arch == $a and .kind == "archive") | .sha256' | awk 'NR==1')"
   [[ -n "$go_sha" && "$go_sha" != "null" ]] || die "could not find a Go SHA-256 for $go_version/$arch"
   archive="/tmp/${go_version}.linux-${arch}.tar.gz"
   log "downloading $go_version"
@@ -312,7 +312,7 @@ ALTER ROLE a8m_app WITH LOGIN PASSWORD '$APP_DB_PASSWORD';
 ALTER ROLE a8m_mail WITH LOGIN PASSWORD '$MAIL_DB_PASSWORD';
 ALTER ROLE alt8mail_control WITH LOGIN PASSWORD '$CONTROL_DB_PASSWORD';
 SQL
-if ! runuser -u postgres -- psql -Atqc "SELECT 1 FROM pg_database WHERE datname='a8m'" | grep -qx 1; then
+if ! runuser -u postgres -- psql -Atqc "SELECT 1 FROM pg_database WHERE datname='a8m'" | grep -x 1 >/dev/null; then
   runuser -u postgres -- createdb -O a8m_app a8m
 fi
 runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -c 'CREATE EXTENSION IF NOT EXISTS citext; CREATE EXTENSION IF NOT EXISTS pgcrypto;'
@@ -361,7 +361,7 @@ fi
 systemctl enable --now redis-server >/dev/null
 systemctl restart redis-server
 
-ML_HASH="$(printf '%s\n%s\n' "$IMAP_MASTER_PASSWORD" "$IMAP_MASTER_PASSWORD" | doveadm pw -s SHA512-CRYPT | tr -d '\r' | awk '/^\{SHA512-CRYPT\}/ {print; exit}')"
+ML_HASH="$(printf '%s\n%s\n' "$IMAP_MASTER_PASSWORD" "$IMAP_MASTER_PASSWORD" | doveadm pw -s SHA512-CRYPT | tr -d '\r' | awk '/^\{SHA512-CRYPT\}/ && !found {print; found=1}')"
 [[ -n "$ML_HASH" ]] || die "could not create the Dovecot master-user hash"
 umask 077
 printf 'a8m-worker:%s\n' "$ML_HASH" > /etc/dovecot/master-users
@@ -552,8 +552,8 @@ if [[ "$TLS_MODE" == "letsencrypt" && "$SKIP_CERTBOT" -eq 0 && "$tls_ready" -eq 
   copy_letsencrypt_cert
 fi
 if [[ "$TLS_MODE" == "letsencrypt" && "$SKIP_CERTBOT" -eq 0 && "$tls_ready" -eq 0 ]]; then
-  dns_mail="$(dig +short A "$MAIL_HOSTNAME" | awk 'NF && $1 ~ /^[0-9.]+$/ {print $1; exit}')"
-  dns_domain="$(dig +short A "$DOMAIN" | awk 'NF && $1 ~ /^[0-9.]+$/ {print $1; exit}')"
+  dns_mail="$(dig +short A "$MAIL_HOSTNAME" | awk 'NF && $1 ~ /^[0-9.]+$/ && !ip {ip=$1} END {print ip}')"
+  dns_domain="$(dig +short A "$DOMAIN" | awk 'NF && $1 ~ /^[0-9.]+$/ && !ip {ip=$1} END {print ip}')"
   if [[ "$dns_mail" == "$PUBLIC_IP" && "$dns_domain" == "$PUBLIC_IP" ]]; then
     tls_attempt=1
   else
@@ -710,7 +710,7 @@ if [[ "$(runuser -u postgres -- psql -d a8m -Atqc "SELECT COALESCE(password_hash
 ' "$OWNER_WEB_PASSWORD" | "$INSTALL_ROOT/current/bin/a8m-admin" -email "$ADMIN_EMAIL" >/dev/null
 fi
 if [[ "$(runuser -u postgres -- psql -d a8m -Atqc "SELECT COALESCE(mail_password_hash,'') = '' FROM users WHERE email='$ADMIN_EMAIL'")" == "t" ]]; then
-  OWNER_MAIL_HASH="$(printf '%s\n%s\n' "$OWNER_MAIL_PASSWORD" "$OWNER_MAIL_PASSWORD" | doveadm pw -s SHA512-CRYPT | tr -d '\r' | awk '/^\{SHA512-CRYPT\}/ {print; exit}')"
+  OWNER_MAIL_HASH="$(printf '%s\n%s\n' "$OWNER_MAIL_PASSWORD" "$OWNER_MAIL_PASSWORD" | doveadm pw -s SHA512-CRYPT | tr -d '\r' | awk '/^\{SHA512-CRYPT\}/ && !found {print; found=1}')"
   [[ -n "$OWNER_MAIL_HASH" ]] || die "could not create the owner mailbox password hash"
   runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -v hash="$OWNER_MAIL_HASH" -v email="$ADMIN_EMAIL" <<'SQL'
 UPDATE users SET mail_password_hash = :'hash' WHERE email = :'email';
@@ -745,7 +745,7 @@ systemctl try-restart rspamd >/dev/null 2>&1 || true
 # ---------------------------------------------------------------------------
 # Firewall and credentials
 # ---------------------------------------------------------------------------
-SSH_PORT="$(sshd -T 2>/dev/null | awk '/^port / {print $2; exit}')"
+SSH_PORT="$(sshd -T 2>/dev/null | awk '/^port / && !port {port=$2} END {print port}')"
 if [[ -n "${SSH_CONNECTION:-}" ]]; then
   CONNECTED_PORT="$(awk '{print $4}' <<<"$SSH_CONNECTION")"
   [[ "$CONNECTED_PORT" =~ ^[0-9]+$ ]] && SSH_PORT="$CONNECTED_PORT"

@@ -63,7 +63,7 @@ LATEST_VERSION="$(printf '%s\n' "$TAG_REFS" | sed 's#refs/tags/v##' | sort -V | 
 LATEST_TAG="v$LATEST_VERSION"
 if [[ -n "$TARGET_TAG" ]]; then
   [[ "$TARGET_TAG" == v* ]] || TARGET_TAG="v$TARGET_TAG"
-  if ! printf '%s\n' "$TAG_REFS" | grep -qx "refs/tags/$TARGET_TAG"; then
+  if ! printf '%s\n' "$TAG_REFS" | grep -x "refs/tags/$TARGET_TAG" >/dev/null; then
     die "tag $TARGET_TAG does not exist"
   fi
   LATEST_TAG="$TARGET_TAG"
