@@ -201,7 +201,7 @@ for migration in "$MIGRATION_TMP"/*.sql; do
     continue
   fi
   log "applying migration $version"
-  runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -f "$migration"
+  runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -f - < "$migration"
 done
 runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q <<'SQL'
 DO $$
