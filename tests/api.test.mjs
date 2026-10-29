@@ -665,6 +665,27 @@ test("bootstrap contains mailbox, aliases, quota, senders and no secret", async 
   assert.ok(["pass", "fail", "softfail", "none"].includes(external.auth.spf));
 });
 
+test("recipients auto-save to contacts exactly once", async () => {
+  const first = await client.request("/api/contacts/auto", {
+    method: "POST",
+    body: { email: "external.person@example.com", name: "External Person" }
+  });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.contact.email, "external.person@example.com");
+  assert.equal(first.body.contact.name, "External Person");
+  assert.equal(first.body.contact.source, "auto");
+  const second = await client.request("/api/contacts/auto", {
+    method: "POST",
+    body: { email: "EXTERNAL.PERSON@example.com", name: "Ignored replacement" }
+  });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.contact.name, "External Person");
+  const bootstrap = await client.request("/api/bootstrap");
+  const matches = bootstrap.body.people.filter((person) => person.email === "external.person@example.com");
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].source, "auto");
+});
+
 test("thread grouping: inbox conversations have full message histories", async () => {
   const bootstrap = (await client.request("/api/bootstrap")).body;
   const inbox = bootstrap.messages.filter((message) => message.folder === "inbox");

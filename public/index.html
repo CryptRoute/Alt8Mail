@@ -575,25 +575,25 @@
       </div>
 
       <div class="people-view" id="peopleView" hidden>
-        <aside class="people-list" aria-label="Contacts">
+        <aside class="people-list" aria-label="People directory">
           <div class="people-head">
             <p class="eyebrow">Alt8Mail directory</p>
             <div class="people-title-row">
               <h1>People</h1>
-              <span class="people-count" id="peopleCount">8 contacts</span>
+              <span class="people-count" id="peopleCount"></span>
               <button class="btn-secondary small people-add" id="newContactBtn" type="button">
                 <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add contact
               </button>
             </div>
-            <div class="dept-chips" role="group" aria-label="Filter by department">
-              <button class="chip is-active" data-dept="All" type="button">All</button>
-              <button class="chip" data-dept="Product" type="button">Product</button>
-              <button class="chip" data-dept="Finance" type="button">Finance</button>
-              <button class="chip" data-dept="Legal" type="button">Legal</button>
-              <button class="chip" data-dept="People" type="button">People</button>
-              <button class="chip" data-dept="Engineering" type="button">Engineering</button>
-              <button class="chip" data-dept="Data" type="button">Data</button>
-              <button class="chip" data-dept="Customer Success" type="button">Success</button>
+            <p class="people-subtitle">Internal directory and the contacts you have saved.</p>
+            <label class="people-search">
+              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+              <input id="peopleSearch" type="search" placeholder="Search people or contacts" autocomplete="off" aria-label="Search people or contacts">
+            </label>
+            <div class="people-filters" role="tablist" aria-label="Filter people">
+              <button class="people-filter is-active" data-people-filter="all" type="button" role="tab" aria-selected="true">Everyone</button>
+              <button class="people-filter" data-people-filter="directory" type="button" role="tab" aria-selected="false">Directory</button>
+              <button class="people-filter" data-people-filter="contacts" type="button" role="tab" aria-selected="false">My contacts</button>
             </div>
           </div>
           <div class="people-scroll" id="peopleList"></div>

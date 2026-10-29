@@ -86,13 +86,11 @@ func (s *Server) directoryPeople(ctx context.Context, sess *sessionRecord, inclu
 		}
 		rows.Close()
 	}
-	includeExternal := policy.Directory.ExternalDirectory || webmailAdminRole(sess.User.Role)
-	internalDomains := map[string]bool{}
-	if !includeExternal {
-		internalDomains = s.tenantMailDomains(ctx, sess.User.TenantID)
-	}
+	// Personal contacts always belong to the signed-in user, independent of the
+	// organization directory policy. Auto-saved recipients must remain available
+	// for compose autocomplete and the People page.
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT email::text, name, company, title, phone, location
+		SELECT email::text, name, company, title, phone, location, source
 		FROM contacts WHERE user_id = $1 ORDER BY name, email
 	`, sess.User.ID)
 	if err != nil {
@@ -100,21 +98,21 @@ func (s *Server) directoryPeople(ctx context.Context, sess *sessionRecord, inclu
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var email, name, company, title, phone, location string
-		if rows.Scan(&email, &name, &company, &title, &phone, &location) == nil {
+		var email, name, company, title, phone, location, source string
+		if rows.Scan(&email, &name, &company, &title, &phone, &location, &source) == nil {
 			email = strings.ToLower(email)
-			if !includeExternal && !internalDomains[domainOf(email)] {
-				continue
-			}
 			if seen[email] {
 				continue
 			}
 			seen[email] = true
+			if source == "" {
+				source = "contact"
+			}
 			people = append(people, map[string]any{
 				"name": firstNonEmpty(name, email), "email": email, "role": "Contact", "company": company,
 				"team": "", "title": title, "phone": phone, "location": location, "reportsTo": "",
 				"initials": initialsForName(firstNonEmpty(name, email)), "color": colorForString(email),
-				"source": "contact",
+				"source": source,
 			})
 		}
 	}

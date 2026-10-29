@@ -19,10 +19,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
+	"github.com/go-webauthn/webauthn/webauthn"
 )
 
 const (
@@ -166,6 +166,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/directory", s.requireUser(s.getDirectory))
 	mux.HandleFunc("GET /api/contacts", s.requireUser(s.getContacts))
 	mux.HandleFunc("POST /api/contacts", s.requireUser(s.createContact))
+	mux.HandleFunc("POST /api/contacts/auto", s.requireUser(s.autoSaveContact))
 	mux.HandleFunc("PATCH /api/contacts/{id}", s.requireUser(s.updateContact))
 	mux.HandleFunc("DELETE /api/contacts/{id}", s.requireUser(s.deleteContact))
 	mux.HandleFunc("GET /api/workspace/audit", s.requireUser(s.getWorkspaceAudit))
@@ -546,6 +547,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 				"contactSharing":    policy.Directory.ContactSharing || webmailAdminRole(sess.User.Role),
 				"externalDirectory": policy.Directory.ExternalDirectory,
 				"profileEditing":    policy.Directory.ProfileEditing,
+				"autoAddExternal":   policy.Directory.AutoAddExternal,
 			},
 			"sharing": map[string]any{
 				"externalSharing": policy.Sharing.ExternalSharing,

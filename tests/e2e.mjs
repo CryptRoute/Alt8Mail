@@ -265,6 +265,47 @@ try {
   const restoredBadge = await page.eval("[...document.querySelectorAll('.compose')].find(e=>e.querySelector('[data-compose-field=\"subject\"]')?.value==='E2E draft')?.querySelector('[data-compose-identity]')?.textContent");
   check((restoredBadge || "").includes("Product Team"), "restored compose shows the alias badge");
 
+  console.log("\n[6b] Recipient chips, autocomplete and auto-saved contacts");
+  const restoredChipText = await page.eval(`(() => {
+    const compose = [...document.querySelectorAll('.compose')].find(e=>e.querySelector('[data-compose-field="subject"]')?.value==='E2E draft');
+    return compose ? [...compose.querySelectorAll('.recipient-chip-name')].map(e=>e.textContent).join(' ') : '';
+  })()`);
+  check(restoredChipText.includes("Elena Vasquez"), "restored draft renders its recipient as a chip");
+  await page.eval("window.confirm = () => true");
+  await page.click("#cmdCompose");
+  await sleep(350);
+  const chipComposeId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
+  const chipComposeSel = `[data-compose-id="${chipComposeId}"]`;
+  await page.click(`${chipComposeSel} [data-recipient-input="to"]`);
+  await page.typeText("pri");
+  await sleep(450);
+  check(await page.eval(`document.querySelector('${chipComposeSel} [data-recipient-suggest="to"]')?.textContent.includes('Priya Shah')`), "typing in To opens address-book autocomplete");
+  await page.click(`${chipComposeSel} [data-recipient-suggest-email="priya.shah@a8m.example"]`);
+  await sleep(350);
+  check(await page.eval(`[...document.querySelectorAll('${chipComposeSel} .recipient-chip-name')].some(e=>e.textContent.includes('Priya Shah'))`), "selecting a directory result creates a recipient chip");
+  await page.click(`${chipComposeSel} [data-recipient-input="to"]`);
+  await page.typeText("external.person@example.com");
+  await page.pressKey(",");
+  await sleep(750);
+  check(await page.eval(`Boolean(document.querySelector('${chipComposeSel} .recipient-chip[title="external.person@example.com"]'))`), "comma commits a typed external recipient as a chip");
+  const savedContact = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>d.people.find(p=>p.email==='external.person@example.com'))");
+  check(savedContact && savedContact.source === "auto", "composed external recipient is auto-saved to contacts");
+  await page.click('button[data-task="people"]');
+  await sleep(450);
+  check(await page.eval("document.getElementById('peopleList').textContent.includes('External Person')"), "People page lists the auto-saved external contact");
+  check(await page.eval("document.getElementById('peopleList').textContent.includes('Auto-saved')"), "People page marks auto-saved contacts");
+  await page.setValue("#peopleSearch", "External");
+  await sleep(250);
+  check(await page.eval("document.getElementById('peopleList').textContent.includes('External Person') && !document.getElementById('peopleList').textContent.includes('Elena Vasquez')"), "People search filters names, email and company");
+  await page.click("[data-people-filter='contacts']");
+  await sleep(250);
+  check(await page.eval("document.getElementById('peopleList').textContent.includes('External Person') && !document.getElementById('peopleList').textContent.includes('Internal directory')"), "My contacts filter shows personal contacts only");
+  await page.screenshot(path.join(artifacts, "05c-people-contacts.png"));
+  await page.click('button[data-task="mail"]');
+  await sleep(250);
+  await page.click(`${chipComposeSel} [data-compose-action="discard"]`);
+  await sleep(350);
+
   console.log("\n[7] Undo send and committed delivery");
   const restoredId = await openComposeBySubject("E2E draft");
   await page.click(`[data-compose-id="${restoredId}"] [data-compose-action="send"]`);
@@ -413,7 +454,8 @@ try {
   await page.screenshot(path.join(artifacts, "15-calendar.png"));
   await page.click(".rail-btn[data-task='people']");
   await sleep(400);
-  equal(await page.eval("document.querySelectorAll('.contact').length"), 8, "directory lists the eight seeded contacts");
+  equal(await page.eval("document.querySelectorAll('.people-section[aria-label=\"Internal directory\"] .contact').length"), 8, "directory lists the eight seeded contacts");
+  equal(await page.eval("document.querySelectorAll('.people-section[aria-label=\"Your contacts\"] .contact').length"), 1, "personal contacts group holds the auto-saved recipient");
   await page.click(".contact");
   await sleep(250);
   check(await page.eval("document.querySelector('.person-hero h2')?.textContent.length > 0"), "person detail renders");

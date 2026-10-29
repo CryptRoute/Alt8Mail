@@ -930,7 +930,7 @@ export async function createApp(options = {}) {
       user: publicUser(db.user),
       aliases: db.user.aliases,
       folders: db.folders,
-      people: db.people,
+      people: db.people.map((person) => ({ ...person, source: person.source || "directory" })),
       messages: db.messages.map(publicMessage),
       calendarEvents: db.calendarEvents,
       tasks: db.tasks,
@@ -1170,6 +1170,23 @@ export async function createApp(options = {}) {
       }
       if (pathname === "/api/bootstrap" && req.method === "GET") {
         sendJson(res, 200, bootstrapPayload(session));
+        return;
+      }
+      if (pathname === "/api/contacts/auto" && req.method === "POST") {
+        const body = await readJson(req);
+        const email = normalizeEmail(body.email);
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError(400, "CONTACT_EMAIL", "Enter a valid recipient email");
+        let person = db.people.find((item) => normalizeEmail(item.email) === email);
+        if (!person) {
+          const name = String(body.name || "").trim().slice(0, 240) || displayNameFromEmail(email);
+          person = {
+            name, email, role: "Contact", company: "", team: "", title: "", phone: "", location: "",
+            reportsTo: "", initials: initialsFrom(name, email), color: colorForEmail(email), source: "auto"
+          };
+          db.people.push(person);
+          await store.save();
+        }
+        sendJson(res, 200, { ok: true, contact: { ...person, id: `contact_${email.replace(/[^a-z0-9]/g, "_")}`, source: person.source || "directory" } });
         return;
       }
       if (pathname === "/api/folders" && req.method === "GET") {

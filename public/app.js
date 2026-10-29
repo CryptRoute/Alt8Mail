@@ -506,6 +506,8 @@ const state = {
   remindedEventIds: new Set(),
   contactEmail: null,
   contactDept: "All",
+  peopleQuery: "",
+  peopleFilter: "all",
   calendarYear: new Date().getFullYear(),
   calendarMonth: new Date().getMonth(),
   calendarSelected: null,
@@ -1893,6 +1895,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   if (!quiet && previousThread && !threadById(previousThread)) state.selectedThreadId = null;
   renderReader();
   if (state.task === "tasks") renderTasks();
+  if (state.task === "people") renderPeople();
   if (state.task === "files") renderFiles();
   const inboxIds = state.messages.filter((message) => message.folder === "inbox").map((message) => message.id);
   if (!state.knownInboxIds) state.knownInboxIds = new Set(inboxIds);
@@ -3696,12 +3699,343 @@ function sessionById(id) {
   return composeSessions.find((session) => session.id === id) || null;
 }
 
+const RECIPIENT_FIELDS = ["to", "cc", "bcc"];
+
+function splitRecipientText(value) {
+  const parts = [];
+  let current = "";
+  let quote = false;
+  let angle = 0;
+  for (const ch of String(value || "")) {
+    if (ch === '"' && angle === 0) { quote = !quote; current += ch; continue; }
+    if (!quote) {
+      if (ch === "<") angle += 1;
+      else if (ch === ">" && angle > 0) angle -= 1;
+    }
+    if (!quote && angle === 0 && (ch === "," || ch === ";")) {
+      parts.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
+function parseRecipientEntry(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  let name = "";
+  let email = raw;
+  const angled = raw.match(/^(?:"([^"]*)"|([^<]*?))\s*<([^>\s]+)>\s*$/);
+  if (angled) {
+    name = String(angled[1] || angled[2] || "").trim();
+    email = angled[3];
+  } else {
+    const comment = raw.match(/^([^\s()]+@[^\s()]+)\s*\(([^)]*)\)\s*$/);
+    if (comment) {
+      email = comment[1];
+      name = comment[2].trim();
+    }
+  }
+  email = normalizeEmail(email);
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return { raw, name, email, valid };
+}
+
+function parseRecipientList(value) {
+  const seen = new Set();
+  const entries = [];
+  for (const part of splitRecipientText(value)) {
+    const entry = parseRecipientEntry(part);
+    if (!entry) continue;
+    const key = normalizeEmail(entry.email);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    entries.push(entry);
+  }
+  return entries;
+}
+
+function formatRecipientName(name) {
+  const value = String(name || "").trim();
+  if (!value || value.includes(",") || value.includes("<") || value.includes(">")) {
+    return value ? `"${value.replace(/"/g, '\\"')}"` : "";
+  }
+  return value;
+}
+
+function formatRecipientEntry(entry) {
+  if (!entry) return "";
+  if (entry.name && normalizeEmail(entry.name) !== normalizeEmail(entry.email)) {
+    return `${formatRecipientName(entry.name)} <${entry.email}>`;
+  }
+  return entry.email;
+}
+
+function recipientTextFromEntries(entries) {
+  return entries.map(formatRecipientEntry).filter(Boolean).join(", ");
+}
+
+function recipientTextWithPending(session, field) {
+  const base = String(session[field] || "").trim();
+  const pending = String(session.recipientInput?.[field] || "").trim();
+  if (!pending) return base;
+  return base ? `${base}, ${pending}` : pending;
+}
+
+function recipientEntriesFor(session, field) {
+  return parseRecipientList(session[field] || "");
+}
+
+function recipientPersonFor(entry) {
+  return state.people.find((person) => normalizeEmail(person.email) === normalizeEmail(entry.email)) || null;
+}
+
+function recipientChipsMarkup(session, field) {
+  return recipientEntriesFor(session, field).map((entry, index) => {
+    const person = recipientPersonFor(entry);
+    const label = entry.name || (person && person.name) || entry.email;
+    const showEmail = Boolean(entry.name && normalizeEmail(entry.name) !== normalizeEmail(entry.email));
+    return `<span class="recipient-chip${entry.valid ? "" : " is-invalid"}" title="${esc(entry.email || entry.raw)}">
+      ${person ? avatar(person, "xs") : ""}
+      <span class="recipient-chip-copy"><span class="recipient-chip-name">${esc(label)}</span>${showEmail ? `<span class="recipient-chip-email">${esc(entry.email)}</span>` : ""}</span>
+      <button type="button" class="recipient-chip-remove" data-recipient-remove="${field}" data-recipient-index="${index}" aria-label="Remove ${esc(entry.email || entry.raw)}"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </span>`;
+  }).join("");
+}
+
+function recipientInputPlaceholder(session, field) {
+  return recipientEntriesFor(session, field).length ? "Add another recipient" : "name@example.com";
+}
+
+function recipientCandidates(session, field) {
+  const query = String(session.recipientInput?.[field] || "").trim().toLowerCase();
+  const selected = new Set(recipientEntriesFor(session, field).map((entry) => normalizeEmail(entry.email)));
+  const candidates = [];
+  const seen = new Set();
+  for (const person of state.people) {
+    const email = normalizeEmail(person.email);
+    if (!email || selected.has(email) || seen.has(email)) continue;
+    if (query) {
+      const haystack = [person.name, person.email, person.company, person.title, person.team, person.role].join(" ").toLowerCase();
+      if (!haystack.includes(query)) continue;
+    }
+    seen.add(email);
+    candidates.push(person);
+  }
+  candidates.sort((a, b) => {
+    const aName = String(a.name || "").toLowerCase();
+    const bName = String(b.name || "").toLowerCase();
+    const aEmail = normalizeEmail(a.email);
+    const bEmail = normalizeEmail(b.email);
+    const score = (person, name, email) => {
+      if (!query) return person.source === "directory" ? 0 : 1;
+      if (name.startsWith(query) || email.startsWith(query)) return 0;
+      if (name.split(/\s+/).some((part) => part.startsWith(query))) return 1;
+      return 2;
+    };
+    return score(a, aName, aEmail) - score(b, bName, bEmail) || aName.localeCompare(bName);
+  });
+  return candidates.slice(0, 8);
+}
+
+function recipientSuggestionMarkup(session, field) {
+  const people = recipientCandidates(session, field);
+  const queryEntry = parseRecipientEntry(session.recipientInput?.[field] || "");
+  const selected = new Set(recipientEntriesFor(session, field).map((entry) => normalizeEmail(entry.email)));
+  const rows = people.map((person, index) => `
+    <button type="button" class="recipient-suggestion${session.recipientHighlight === index ? " is-active" : ""}" role="option" data-recipient-suggest-email="${esc(person.email)}" data-recipient-suggest-name="${esc(person.name || "")}">
+      ${avatar(person, "sm")}
+      <span class="recipient-suggestion-copy"><strong>${esc(person.name || person.email)}</strong><span>${esc(person.email)}${person.company ? ` · ${esc(person.company)}` : ""}</span></span>
+      <span class="recipient-suggestion-source">${person.source === "directory" ? "Directory" : person.source === "auto" ? "Auto-saved" : "Contact"}</span>
+    </button>`).join("");
+  const addRow = queryEntry?.valid && !selected.has(queryEntry.email) && !people.some((person) => normalizeEmail(person.email) === queryEntry.email)
+    ? `<button type="button" class="recipient-suggestion recipient-suggestion-add" role="option" data-recipient-add="${esc(queryEntry.email)}" data-recipient-add-name="${esc(queryEntry.name || "")}">
+        <span class="recipient-suggestion-add-icon"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></span>
+        <span class="recipient-suggestion-copy"><strong>Add ${esc(queryEntry.email)}</strong><span>Save to your contacts and add as a recipient</span></span>
+      </button>`
+    : "";
+  if (!rows && !addRow) return `<div class="recipient-suggest-empty">No matching people or contacts.</div>`;
+  return rows + addRow;
+}
+
+function updateRecipientSuggestions(session, field) {
+  const input = session.el?.querySelector(`[data-recipient-input="${field}"]`);
+  const panel = session.el?.querySelector(`[data-recipient-suggest="${field}"]`);
+  if (!input || !panel) return;
+  if (document.activeElement !== input) { panel.hidden = true; input.setAttribute("aria-expanded", "false"); return; }
+  panel.innerHTML = recipientSuggestionMarkup(session, field);
+  panel.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
+
+function closeRecipientSuggestions(session, field) {
+  for (const name of field ? [field] : RECIPIENT_FIELDS) {
+    const panel = session.el?.querySelector(`[data-recipient-suggest="${name}"]`);
+    const input = session.el?.querySelector(`[data-recipient-input="${name}"]`);
+    if (panel) panel.hidden = true;
+    if (input) input.setAttribute("aria-expanded", "false");
+  }
+  if (session) session.recipientHighlight = -1;
+}
+
+function updateRecipientField(session, field) {
+  const chips = session.el?.querySelector(`[data-recipient-chips="${field}"]`);
+  const input = session.el?.querySelector(`[data-recipient-input="${field}"]`);
+  const wrap = session.el?.querySelector(`[data-compose-field-wrap="${field}"]`);
+  if (chips) chips.innerHTML = recipientChipsMarkup(session, field);
+  if (input) {
+    input.placeholder = recipientInputPlaceholder(session, field);
+    input.value = session.recipientInput?.[field] || "";
+  }
+  if (wrap) wrap.classList.remove("is-error");
+}
+
+function autoSaveRecipient(entry) {
+  if (!entry?.valid) return;
+  const existing = state.people.find((person) => normalizeEmail(person.email) === normalizeEmail(entry.email));
+  if (existing && existing.source === "directory") return;
+  if (existing && existing.source !== "auto") return;
+  api("/api/contacts/auto", { method: "POST", body: { email: entry.email, name: entry.name || "" } })
+    .then((data) => {
+      if (!data?.contact) return;
+      mergeContactPerson(data.contact);
+      for (const session of composeSessions) {
+        for (const field of RECIPIENT_FIELDS) {
+          if (recipientEntriesFor(session, field).some((item) => normalizeEmail(item.email) === normalizeEmail(data.contact.email))) {
+            updateRecipientField(session, field);
+          }
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+function addRecipientEntry(session, field, entry, { focus = true } = {}) {
+  if (!entry?.valid) return false;
+  const entries = recipientEntriesFor(session, field);
+  if (entries.some((item) => normalizeEmail(item.email) === normalizeEmail(entry.email))) {
+    session.recipientInput[field] = "";
+    updateRecipientField(session, field);
+    closeRecipientSuggestions(session, field);
+    return true;
+  }
+  entries.push(entry);
+  session[field] = recipientTextFromEntries(entries);
+  session.recipientInput[field] = "";
+  session.dirty = true;
+  session.error = null;
+  updateRecipientField(session, field);
+  closeRecipientSuggestions(session, field);
+  autoSaveRecipient(entry);
+  scheduleComposeSave(session);
+  if (focus) session.el?.querySelector(`[data-recipient-input="${field}"]`)?.focus();
+  return true;
+}
+
+function commitRecipientInput(session, field, { focus = true } = {}) {
+  const input = session.el?.querySelector(`[data-recipient-input="${field}"]`);
+  const text = String(session.recipientInput?.[field] || "").trim();
+  if (!text) { closeRecipientSuggestions(session, field); return true; }
+  const entries = parseRecipientList(text);
+  const valid = entries.filter((entry) => entry.valid);
+  if (!valid.length) {
+    const wrap = session.el?.querySelector(`[data-compose-field-wrap="${field}"]`);
+    if (wrap) wrap.classList.add("is-error");
+    if (input) input.setAttribute("aria-invalid", "true");
+    return false;
+  }
+  for (const entry of valid) addRecipientEntry(session, field, entry, { focus: false });
+  session.recipientInput[field] = "";
+  if (input) { input.value = ""; input.removeAttribute("aria-invalid"); }
+  updateRecipientField(session, field);
+  if (focus) input?.focus();
+  return true;
+}
+
+function flushRecipientInputs(session, { schedule = false } = {}) {
+  if (!session) return;
+  for (const field of RECIPIENT_FIELDS) {
+    if (String(session.recipientInput?.[field] || "").trim()) {
+      commitRecipientInput(session, field, { focus: false });
+    }
+  }
+  if (schedule) scheduleComposeSave(session);
+}
+
+function recipientKeydown(event, session, input) {
+  const field = input.getAttribute("data-recipient-input");
+  if (!field) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (input.getAttribute("aria-expanded") !== "true") updateRecipientSuggestions(session, field);
+    const count = session.el?.querySelectorAll(`[data-recipient-suggest="${field}"] .recipient-suggestion`).length || 0;
+    if (!count) return;
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    session.recipientHighlight = ((Number(session.recipientHighlight) || 0) + step + count) % count;
+    updateRecipientSuggestions(session, field);
+    return;
+  }
+  if (event.key === "Escape") { closeRecipientSuggestions(session, field); return; }
+  if (event.key === "Backspace" && !input.value && !session.recipientInput?.[field]) {
+    const entries = recipientEntriesFor(session, field);
+    if (entries.length) {
+      event.preventDefault();
+      entries.pop();
+      session[field] = recipientTextFromEntries(entries);
+      session.dirty = true;
+      updateRecipientField(session, field);
+      scheduleComposeSave(session);
+    }
+    return;
+  }
+  if (event.key === "Enter" || event.key === "Tab" || event.key === "," || event.key === ";") {
+    if ((event.key === "," || event.key === ";") && !input.value.trim()) return;
+    const highlighted = session.el?.querySelector(`[data-recipient-suggest="${field}"] .recipient-suggestion.is-active`);
+    if (event.key === "Enter" && highlighted) {
+      event.preventDefault();
+      const entry = parseRecipientEntry(highlighted.getAttribute("data-recipient-suggest-email") || highlighted.getAttribute("data-recipient-add") || "");
+      if (entry?.valid) {
+        entry.name = highlighted.getAttribute("data-recipient-suggest-name") || highlighted.getAttribute("data-recipient-add-name") || entry.name;
+        addRecipientEntry(session, field, entry);
+      }
+      return;
+    }
+    if (event.key === "Tab" && !input.value.trim()) return;
+    event.preventDefault();
+    commitRecipientInput(session, field);
+  }
+}
+
+function recipientPaste(event, session, input) {
+  const field = input.getAttribute("data-recipient-input");
+  const text = event.clipboardData?.getData("text/plain") || "";
+  if (!field || !text.trim()) return;
+  event.preventDefault();
+  const parts = splitRecipientText(text);
+  const endsDelimited = /[;,]\s*$/.test(text);
+  const tail = endsDelimited ? "" : parts.pop();
+  for (const part of parts) {
+    const entry = parseRecipientEntry(part);
+    if (entry?.valid) addRecipientEntry(session, field, entry, { focus: false });
+  }
+  if (tail) {
+    session.recipientInput[field] = tail.trim();
+    updateRecipientField(session, field);
+    updateRecipientSuggestions(session, field);
+  }
+  input.value = session.recipientInput?.[field] || "";
+}
+
 function draftMessageFromSession(session) {
   return state.messages.find((message) => message.id === session.draftId) || null;
 }
 
 function isComposeEmpty(session) {
   return !session.to.trim() && !session.cc.trim() && !session.bcc.trim()
+    && !Object.values(session.recipientInput || {}).some((value) => String(value).trim())
     && !session.subject.trim() && !session.body.trim() && !session.files.length;
 }
 
@@ -3807,18 +4141,30 @@ function composeTemplate(session) {
       </div>
     </div>
     <div class="compose-body">
-      <div class="compose-field" data-compose-field-wrap="to">
+      <div class="compose-field recipient-field" data-compose-field-wrap="to">
         <label for="compose-${esc(session.id)}-to">To</label>
-        <input id="compose-${esc(session.id)}-to" data-compose-field="to" type="text" value="${esc(session.to)}" placeholder="name@example.com" autocomplete="off">
+        <div class="recipient-control" data-recipient-control="to">
+          <div class="recipient-chips" data-recipient-chips="to">${recipientChipsMarkup(session, "to")}</div>
+          <input id="compose-${esc(session.id)}-to" data-compose-field="to" data-recipient-input="to" type="text" value="" placeholder="${esc(recipientInputPlaceholder(session, "to"))}" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false">
+          <div class="recipient-suggest" data-recipient-suggest="to" role="listbox" hidden></div>
+        </div>
         <button class="cc-toggle" data-compose-action="cc" type="button">Cc Bcc</button>
       </div>
-      <div class="compose-field" data-compose-cc ${session.ccOpen ? "" : "hidden"}>
+      <div class="compose-field recipient-field" data-compose-cc data-compose-field-wrap="cc" ${session.ccOpen ? "" : "hidden"}>
         <label for="compose-${esc(session.id)}-cc">Cc</label>
-        <input id="compose-${esc(session.id)}-cc" data-compose-field="cc" type="text" value="${esc(session.cc)}" placeholder="name@example.com" autocomplete="off">
+        <div class="recipient-control" data-recipient-control="cc">
+          <div class="recipient-chips" data-recipient-chips="cc">${recipientChipsMarkup(session, "cc")}</div>
+          <input id="compose-${esc(session.id)}-cc" data-compose-field="cc" data-recipient-input="cc" type="text" value="" placeholder="${esc(recipientInputPlaceholder(session, "cc"))}" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false">
+          <div class="recipient-suggest" data-recipient-suggest="cc" role="listbox" hidden></div>
+        </div>
       </div>
-      <div class="compose-field" data-compose-cc ${session.ccOpen ? "" : "hidden"}>
+      <div class="compose-field recipient-field" data-compose-cc data-compose-field-wrap="bcc" ${session.ccOpen ? "" : "hidden"}>
         <label for="compose-${esc(session.id)}-bcc">Bcc</label>
-        <input id="compose-${esc(session.id)}-bcc" data-compose-field="bcc" type="text" value="${esc(session.bcc)}" placeholder="name@example.com" autocomplete="off">
+        <div class="recipient-control" data-recipient-control="bcc">
+          <div class="recipient-chips" data-recipient-chips="bcc">${recipientChipsMarkup(session, "bcc")}</div>
+          <input id="compose-${esc(session.id)}-bcc" data-compose-field="bcc" data-recipient-input="bcc" type="text" value="" placeholder="${esc(recipientInputPlaceholder(session, "bcc"))}" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false">
+          <div class="recipient-suggest" data-recipient-suggest="bcc" role="listbox" hidden></div>
+        </div>
       </div>
       <div class="compose-field">
         <label for="compose-${esc(session.id)}-subject">Subject</label>
@@ -3883,6 +4229,8 @@ function openCompose(prefill = {}, options = {}) {
     to: data.toText != null ? data.toText : (data.to || ""),
     cc: data.ccText != null ? data.ccText : (data.cc || ""),
     bcc: data.bccText != null ? data.bccText : (data.bcc || ""),
+    recipientInput: { to: "", cc: "", bcc: "" },
+    recipientHighlight: -1,
     subject: data.subject || "",
     body: bodyText,
     bodyHtml,
@@ -4060,6 +4408,7 @@ function reRenderCompose(session) {
   updateComposeFiles(session);
   updateComposeStatus(session);
   updateComposeOptions(session);
+  for (const field of RECIPIENT_FIELDS) updateRecipientField(session, field);
   layoutComposeSessions();
   const aiPanel = session.el.querySelector("[data-compose-ai-panel]");
   if (aiPanel) aiPanel.hidden = !session.aiOpen;
@@ -4706,10 +5055,11 @@ async function closeComposeSession(id, { discard = false } = {}) {
 }
 
 function composePayload(session) {
+  flushRecipientInputs(session);
   return {
-    toText: session.to,
-    ccText: session.cc,
-    bccText: session.bcc,
+    toText: recipientTextWithPending(session, "to"),
+    ccText: recipientTextWithPending(session, "cc"),
+    bccText: recipientTextWithPending(session, "bcc"),
     subject: session.subject,
     bodyText: session.body,
     bodyHtml: session.htmlMode ? session.bodyHtml : "",
@@ -4865,19 +5215,25 @@ async function cancelQueuedSend(queueId) {
 
 function validateComposeRecipients(session) {
   if (!session || !session.el) return "Compose window is no longer open";
-  const to = session.to.trim();
+  flushRecipientInputs(session);
+  const entries = parseRecipientList(session.to);
   const fieldWrap = session.el.querySelector('[data-compose-field-wrap="to"]');
   session.error = null;
   updateComposeStatus(session);
-  if (!to) {
+  if (!entries.length) {
     if (fieldWrap) fieldWrap.classList.add("is-error");
-    session.el.querySelector('[data-compose-field="to"]')?.focus();
+    session.el.querySelector('[data-recipient-input="to"]')?.focus();
     session.error = "Add at least one recipient.";
     updateComposeStatus(session);
     return session.error;
   }
-  const addresses = to.split(/[,;]+/).map((value) => value.trim()).filter(Boolean);
-  if (addresses.some((address) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address) && !/^.*<[^>]+>$/.test(address))) {
+  const pendingInvalid = RECIPIENT_FIELDS.some((field) => {
+    const pending = String(session.recipientInput?.[field] || "").trim();
+    if (!pending) return false;
+    const parsed = parseRecipientList(pending);
+    return !parsed.length || parsed.some((entry) => !entry.valid);
+  });
+  if (entries.some((entry) => !entry.valid) || pendingInvalid) {
     if (fieldWrap) fieldWrap.classList.add("is-error");
     session.error = "One or more recipient addresses look incomplete.";
     updateComposeStatus(session);
@@ -4889,6 +5245,7 @@ function validateComposeRecipients(session) {
 }
 
 function composeSendPayload(session, extra = {}) {
+  flushRecipientInputs(session);
   return {
     draftId: session.draftId,
     fromEmail: session.fromEmail,
@@ -5107,6 +5464,16 @@ function closeScheduleDialog() {
 function updateComposeField(session, target) {
   const field = target.getAttribute("data-compose-field");
   if (!field) return;
+  if (RECIPIENT_FIELDS.includes(field)) {
+    session.recipientInput[field] = target.value;
+    session.dirty = true;
+    session.error = null;
+    target.removeAttribute("aria-invalid");
+    const wrap = target.closest("[data-compose-field-wrap]");
+    if (wrap) wrap.classList.remove("is-error");
+    updateRecipientSuggestions(session, field);
+    return;
+  }
   const value = target.type === "checkbox" ? target.checked : target.value;
   session[field] = value;
   session.dirty = true;
@@ -7295,27 +7662,90 @@ async function refreshScheduled() {
 /* ============================================================
    people
    ============================================================ */
-function renderPeople() {
-  if (!state.people.length) return;
-  const q = state.query.toLowerCase();
-  const contacts = state.people.filter((person) => {
-    const matchesDept = state.contactDept === "All" || person.team === state.contactDept;
-    const matchesQuery = [person.name, person.role, person.company, person.team, person.email].join(" ").toLowerCase().includes(q);
-    return matchesDept && matchesQuery;
-  });
-  peopleCount.textContent = `${contacts.length} ${contacts.length === 1 ? "contact" : "contacts"}`;
-  $$("button[data-dept]").forEach((button) => {
-    button.classList.toggle("is-active", button.getAttribute("data-dept") === state.contactDept);
-  });
-  if (!contacts.some((person) => person.email === state.contactEmail)) {
-    state.contactEmail = contacts[0] ? contacts[0].email : null;
+function peopleSourceLabel(person) {
+  if (person.source === "directory") return "Directory";
+  if (person.source === "auto") return "Auto-saved";
+  return "Contact";
+}
+
+function peopleSourceClass(person) {
+  if (person.source === "directory") return "directory";
+  if (person.source === "auto") return "auto";
+  return "contact";
+}
+
+function peopleRoleLine(person) {
+  const primary = String(person.title || (person.source === "directory" ? person.role : "Contact") || "").trim();
+  const company = String(person.company || "").trim();
+  if (primary && company && primary !== company) return `${primary} · ${company}`;
+  return primary || company || "Saved contact";
+}
+
+function peopleListDeduped() {
+  const seen = new Set();
+  const result = [];
+  for (const person of state.people) {
+    const key = normalizeEmail(person.email);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(person);
   }
-  peopleList.innerHTML = contacts.length
-    ? contacts.map((person) => `<button class="contact${person.email === state.contactEmail ? " is-active" : ""}" data-contact="${esc(person.email)}" type="button">
-        ${avatar(person, "md")}
-        <span class="contact-id"><span class="contact-name">${esc(person.name)}</span><span class="contact-role">${esc(person.role)} · ${esc(person.company)}</span></span>
-      </button>`).join("")
-    : `<div class="people-empty">No contacts match this filter.</div>`;
+  return result;
+}
+
+function renderPeople() {
+  const list = document.getElementById("peopleList");
+  if (!list) return;
+  const everyone = peopleListDeduped();
+  const query = state.peopleQuery.trim().toLowerCase();
+  const filter = state.peopleFilter || "all";
+  const matches = (person) => {
+    if (filter === "directory" && person.source !== "directory") return false;
+    if (filter === "contacts" && person.source === "directory") return false;
+    if (!query) return true;
+    return [person.name, person.email, person.company, person.title, person.team, person.role]
+      .join(" ").toLowerCase().includes(query);
+  };
+  const visible = everyone.filter(matches).sort((a, b) => {
+    if (a.source === "directory" && b.source !== "directory") return -1;
+    if (a.source !== "directory" && b.source === "directory") return 1;
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+  const internal = everyone.filter((person) => person.source === "directory").length;
+  const contacts = everyone.length - internal;
+  const count = document.getElementById("peopleCount");
+  if (count) count.textContent = `${visible.length} shown · ${internal} directory · ${contacts} saved`;
+  document.querySelectorAll("[data-people-filter]").forEach((button) => {
+    const active = button.getAttribute("data-people-filter") === filter;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  if (!visible.some((person) => normalizeEmail(person.email) === normalizeEmail(state.contactEmail))) {
+    state.contactEmail = visible[0] ? visible[0].email : null;
+  }
+  if (!visible.length) {
+    list.innerHTML = `<div class="people-empty-rich">
+      <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></div>
+      <strong>${query ? "No people found" : "No contacts here yet"}</strong>
+      <span>${query ? "Try a different name, email or company." : "Recipients you email are saved automatically and appear here."}</span>
+    </div>`;
+    renderPersonDetail();
+    syncStatusRange();
+    return;
+  }
+  const row = (person) => `<button class="contact${normalizeEmail(person.email) === normalizeEmail(state.contactEmail) ? " is-active" : ""}" data-contact="${esc(person.email)}" type="button">
+      ${avatar(person, "md")}
+      <span class="contact-id"><span class="contact-name">${esc(person.name || person.email)}</span><span class="contact-role">${esc(peopleRoleLine(person))}</span><span class="contact-email">${esc(person.email)}</span></span>
+      <span class="people-source ${peopleSourceClass(person)}">${peopleSourceLabel(person)}</span>
+    </button>`;
+  const groups = [];
+  if (filter !== "contacts") groups.push({ key: "directory", label: "Internal directory", people: visible.filter((person) => person.source === "directory") });
+  if (filter !== "directory") groups.push({ key: "contacts", label: "Your contacts", people: visible.filter((person) => person.source !== "directory") });
+  list.innerHTML = groups.filter((group) => group.people.length).map((group) => `
+    <section class="people-section" aria-label="${esc(group.label)}">
+      <div class="people-section-head"><span>${esc(group.label)}</span><span>${group.people.length}</span></div>
+      ${group.people.map(row).join("")}
+    </section>`).join("");
   renderPersonDetail();
   syncStatusRange();
 }
@@ -7359,12 +7789,22 @@ function closeContactDialog() {
 }
 
 function contactToPerson(contact) {
+  const source = contact.source || "contact";
   return {
-    name: contact.name, email: contact.email, role: "Contact", company: contact.company || "",
-    team: "", title: contact.title || "", phone: contact.phone || "", location: contact.location || "",
-    reportsTo: "", initials: contact.initials || initialsFrom(contact.name), color: contact.color || "#3d6b62",
-    source: "contact"
+    name: contact.name, email: contact.email, role: source === "directory" ? contact.role || "Contact" : "Contact",
+    company: contact.company || "", team: "", title: contact.title || "", phone: contact.phone || "",
+    location: contact.location || "", reportsTo: "", initials: contact.initials || initialsFrom(contact.name),
+    color: contact.color || "#3d6b62", source
   };
+}
+
+function mergeContactPerson(contact) {
+  if (!contact?.email) return;
+  const person = contactToPerson(contact);
+  const index = state.people.findIndex((item) => normalizeEmail(item.email) === normalizeEmail(person.email));
+  if (index >= 0) state.people[index] = { ...state.people[index], ...person };
+  else state.people.push(person);
+  if (state.task === "people") renderPeople();
 }
 
 async function saveContact() {
@@ -7410,37 +7850,48 @@ async function deleteContactByEmail(email) {
 }
 
 function renderPersonDetail() {
-  const person = state.people.find((item) => item.email === state.contactEmail);
+  const person = state.people.find((item) => normalizeEmail(item.email) === normalizeEmail(state.contactEmail));
   if (!person) {
-    personDetail.innerHTML = `<div class="people-empty">Choose a contact to see their details.</div>`;
+    personDetail.innerHTML = `<div class="people-empty-rich">
+      <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></div>
+      <strong>Choose a person</strong>
+      <span>Select someone from the directory or your saved contacts to see their details.</span>
+    </div>`;
     return;
   }
   const recent = state.messages
-    .filter((message) => message.from.email === person.email || (message.to || []).some((recipient) => recipient.email === person.email))
+    .filter((message) => normalizeEmail(message.from?.email) === normalizeEmail(person.email) || (message.to || []).some((recipient) => normalizeEmail(recipient.email) === normalizeEmail(person.email)))
     .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
     .slice(0, 3);
+  const sourceClass = peopleSourceClass(person);
+  const sourceLabel = person.source === "directory" ? "Internal directory" : person.source === "auto" ? "Auto-saved recipient" : "Personal contact";
+  const contactActions = person.source !== "directory"
+    ? `<button class="btn-secondary" data-edit-contact="${esc(person.email)}" type="button">Edit contact</button><button class="btn-secondary danger-btn" data-delete-contact="${esc(person.email)}" type="button">Delete</button>`
+    : "";
   personDetail.innerHTML = `
     <div class="person-hero">
       ${avatar(person, "xl")}
       <div class="person-hero-id">
-        <h2>${esc(person.name)}</h2>
-        <p>${esc(person.role)} · ${esc(person.company)}</p>
-        <span class="directory-badge"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Internal directory</span>
+        <h2>${esc(person.name || person.email)}</h2>
+        <p>${esc(peopleRoleLine(person))}</p>
+        <span class="directory-badge ${sourceClass}"><svg class="icon" aria-hidden="true"><use href="#${person.source === "directory" ? "i-shield-check" : "i-people"}"/></svg>${sourceLabel}</span>
       </div>
       <div class="person-actions">
         <button class="btn-primary" data-message-contact="${esc(person.email)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-compose"/></svg>New message</button>
         <button class="btn-secondary" data-copy-email="${esc(person.email)}" type="button">Copy email</button>
-        ${person.source === "contact" ? `<button class="btn-secondary" data-edit-contact="${esc(person.email)}" type="button">Edit contact</button><button class="btn-secondary danger-btn" data-delete-contact="${esc(person.email)}" type="button">Delete</button>` : ""}
+        ${contactActions}
       </div>
     </div>
     <div class="info-card">
       <div class="info-row"><span class="info-label">Email</span><span class="info-value">${esc(person.email)}</span></div>
-      <div class="info-row"><span class="info-label">Phone</span><span class="info-value">${esc(person.phone)}</span></div>
-      <div class="info-row"><span class="info-label">Company</span><span class="info-value">${esc(person.company)}</span></div>
-      <div class="info-row"><span class="info-label">Team</span><span class="info-value">${esc(person.team)}</span></div>
+      <div class="info-row"><span class="info-label">Phone</span><span class="info-value">${esc(person.phone || "—")}</span></div>
+      <div class="info-row"><span class="info-label">Company</span><span class="info-value">${esc(person.company || "—")}</span></div>
+      <div class="info-row"><span class="info-label">Title</span><span class="info-value">${esc(person.title || "—")}</span></div>
+      <div class="info-row"><span class="info-label">Team</span><span class="info-value">${esc(person.team || "—")}</span></div>
       <div class="info-row"><span class="info-label">Location</span><span class="info-value">${esc(person.location || "—")}</span></div>
       <div class="info-row"><span class="info-label">Reports to</span><span class="info-value">${esc(person.reportsTo || "—")}</span></div>
     </div>
+    ${person.notes ? `<div class="person-notes"><h3>Notes</h3><p>${esc(person.notes)}</p></div>` : ""}
     <div class="recent-block">
       <h3>Recent conversations</h3>
       ${recent.length ? recent.map((message) => `<button class="recent-item" data-recent="${esc(message.id)}" type="button">
@@ -7804,7 +8255,13 @@ function setTask(task) {
   closeSearchHints();
   document.body.classList.remove("reader-open", "person-open", "search-open", "file-open", "task-detail-open");
   if (task === "calendar") renderCalendar();
-  if (task === "people") renderPeople();
+  if (task === "people") {
+    state.peopleQuery = "";
+    state.peopleFilter = "all";
+    const peopleSearch = document.getElementById("peopleSearch");
+    if (peopleSearch) peopleSearch.value = "";
+    renderPeople();
+  }
   if (task === "tasks") renderTasks();
   if (task === "files") renderFiles();
   if (task === "scheduled") renderScheduled();
@@ -8757,8 +9214,13 @@ function bindEvents() {
       return;
     }
 
-    const deptButton = target.closest("[data-dept]");
-    if (deptButton) { event.preventDefault(); state.contactDept = deptButton.getAttribute("data-dept"); renderPeople(); return; }
+    const peopleFilter = target.closest("[data-people-filter]");
+    if (peopleFilter) {
+      event.preventDefault();
+      state.peopleFilter = peopleFilter.getAttribute("data-people-filter") || "all";
+      renderPeople();
+      return;
+    }
     const calDate = target.closest("[data-cal-date]");
     if (calDate) { event.preventDefault(); selectCalendarDate(calDate.getAttribute("data-cal-date")); return; }
     const editEvent = target.closest("[data-edit-event]");
@@ -9045,6 +9507,10 @@ function bindEvents() {
     renderCalendar();
   });
   document.getElementById("newContactBtn")?.addEventListener("click", () => openContactDialog());
+  document.getElementById("peopleSearch")?.addEventListener("input", (event) => {
+    state.peopleQuery = event.target.value;
+    renderPeople();
+  });
   document.getElementById("contactClose")?.addEventListener("click", closeContactDialog);
   document.getElementById("contactCancel")?.addEventListener("click", closeContactDialog);
   document.getElementById("contactSave")?.addEventListener("click", saveContact);
@@ -9239,6 +9705,36 @@ function bindEvents() {
     if (!section) return;
     const session = sessionById(section.getAttribute("data-compose-id"));
     if (!session) return;
+    const recipientRemove = event.target.closest("[data-recipient-remove]");
+    if (recipientRemove) {
+      event.preventDefault();
+      const field = recipientRemove.getAttribute("data-recipient-remove");
+      const index = Number(recipientRemove.getAttribute("data-recipient-index"));
+      const entries = recipientEntriesFor(session, field);
+      if (entries[index]) {
+        entries.splice(index, 1);
+        session[field] = recipientTextFromEntries(entries);
+        session.dirty = true;
+        updateRecipientField(session, field);
+        scheduleComposeSave(session);
+        session.el.querySelector(`[data-recipient-input="${field}"]`)?.focus();
+      }
+      return;
+    }
+    const recipientSuggestion = event.target.closest("[data-recipient-suggest-email], [data-recipient-add]");
+    if (recipientSuggestion) {
+      event.preventDefault();
+      const panel = recipientSuggestion.closest("[data-recipient-suggest]");
+      const field = panel?.getAttribute("data-recipient-suggest");
+      const email = recipientSuggestion.getAttribute("data-recipient-suggest-email") || recipientSuggestion.getAttribute("data-recipient-add");
+      const name = recipientSuggestion.getAttribute("data-recipient-suggest-name") || recipientSuggestion.getAttribute("data-recipient-add-name") || "";
+      const entry = parseRecipientEntry(email);
+      if (entry?.valid) {
+        entry.name = name || entry.name;
+        addRecipientEntry(session, field, entry);
+      }
+      return;
+    }
     const remove = event.target.closest("[data-compose-remove]");
     if (remove) {
       session.files.splice(Number(remove.getAttribute("data-compose-remove")), 1);
@@ -9321,9 +9817,49 @@ function bindEvents() {
   };
   composeLayer.addEventListener("input", handleComposeFieldEvent);
   composeLayer.addEventListener("change", handleComposeFieldEvent);
+  composeLayer.addEventListener("pointerdown", (event) => {
+    if (event.target.closest(".recipient-suggestion")) event.preventDefault();
+  }, true);
+  composeLayer.addEventListener("keydown", (event) => {
+    const input = event.target.closest("[data-recipient-input]");
+    if (!input) return;
+    const section = input.closest(".compose[data-compose-id]");
+    const session = sessionById(section?.getAttribute("data-compose-id"));
+    if (session) recipientKeydown(event, session, input);
+  });
+  composeLayer.addEventListener("paste", (event) => {
+    const input = event.target.closest("[data-recipient-input]");
+    if (!input) return;
+    const section = input.closest(".compose[data-compose-id]");
+    const session = sessionById(section?.getAttribute("data-compose-id"));
+    if (session) recipientPaste(event, session, input);
+  });
+  composeLayer.addEventListener("focusout", (event) => {
+    const input = event.target.closest("[data-recipient-input]");
+    if (!input) return;
+    const field = input.getAttribute("data-recipient-input");
+    const section = input.closest(".compose[data-compose-id]");
+    const session = sessionById(section?.getAttribute("data-compose-id"));
+    if (!session) return;
+    setTimeout(() => {
+      if (document.activeElement === input) return;
+      const text = String(session.recipientInput?.[field] || "").trim();
+      const parsed = parseRecipientList(text);
+      if (text && parsed.length && parsed.every((entry) => entry.valid)) {
+        commitRecipientInput(session, field, { focus: false });
+      } else {
+        closeRecipientSuggestions(session, field);
+      }
+    }, 180);
+  });
   composeLayer.addEventListener("focusin", (event) => {
     const section = event.target.closest(".compose[data-compose-id]");
     if (section) setActiveCompose(section.getAttribute("data-compose-id"));
+    const input = event.target.closest("[data-recipient-input]");
+    if (input) {
+      const session = sessionById(section?.getAttribute("data-compose-id"));
+      if (session) updateRecipientSuggestions(session, input.getAttribute("data-recipient-input"));
+    }
   });
   composeLayer.addEventListener("mousedown", (event) => {
     if (event.target.closest(".compose-editor-toolbar button")) event.preventDefault();

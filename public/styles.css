@@ -3748,3 +3748,155 @@ button.agenda-event:hover { border-color: var(--brand); }
 
 .people-title-row .people-add { margin-left: auto; flex: none; }
 .person-actions .danger-btn { color: var(--danger, #b42318); }
+
+/* ---------- recipient chips and autocomplete ---------- */
+.avatar-xs { width: 18px; height: 18px; font-size: 0.5rem; }
+.compose-field.recipient-field {
+  align-items: flex-start;
+  min-height: 44px;
+  padding: 7px 14px;
+  gap: 6px;
+}
+.recipient-field > label { padding-top: 8px; }
+.recipient-control {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 1px 0;
+}
+.recipient-chips { display: contents; }
+.recipient-control > input {
+  flex: 1 1 150px;
+  min-width: 140px;
+  height: 28px;
+  padding: 0 2px;
+  font-size: 0.8125rem;
+}
+.recipient-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 2px 3px 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.recipient-chip.is-invalid { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
+.recipient-chip-copy { min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
+.recipient-chip-name { font-size: 0.75rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recipient-chip-email { font-size: 0.625rem; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recipient-chip-remove {
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+}
+.recipient-chip-remove:hover { background: color-mix(in srgb, var(--accent) 15%, var(--surface)); color: var(--text); }
+.recipient-chip-remove svg { width: 12px; height: 12px; }
+.recipient-suggest {
+  position: absolute;
+  z-index: 90;
+  left: -6px;
+  right: -6px;
+  top: calc(100% + 5px);
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  max-height: 300px;
+  overflow-y: auto;
+}
+.recipient-suggestion {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  text-align: left;
+}
+.recipient-suggestion:hover, .recipient-suggestion.is-active { background: var(--accent-soft); }
+.recipient-suggestion-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.recipient-suggestion-copy strong { font-size: 0.75rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipient-suggestion-copy span { font-size: 0.625rem; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipient-suggestion-source { flex: none; font-size: 0.5625rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--accent-ink); }
+.recipient-suggestion-add-icon { width: 26px; height: 26px; display: grid; place-items: center; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); }
+.recipient-suggestion-add-icon svg { width: 14px; height: 14px; }
+.recipient-suggest-empty { padding: 12px 10px; font-size: 0.75rem; color: var(--text-3); }
+
+/* ---------- people workspace enhancements ---------- */
+.people-subtitle { margin-top: 3px !important; font-size: 0.6875rem !important; }
+.people-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  margin-top: 11px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-3);
+}
+.people-search svg { width: 14px; height: 14px; flex: none; }
+.people-search input { flex: 1; min-width: 0; height: 30px; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 0.75rem; }
+.people-filters { display: flex; gap: 4px; margin-top: 9px; overflow-x: auto; padding-bottom: 1px; }
+.people-filter {
+  flex: none;
+  height: 25px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.people-filter:hover { background: var(--surface-3); color: var(--text); }
+.people-filter.is-active { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); background: var(--accent-soft); color: var(--accent-ink); }
+.people-section { margin: 0 0 12px; }
+.people-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 5px;
+  color: var(--text-3);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.people-section-head span:last-child { font-weight: 500; letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+.people-source { flex: none; font-size: 0.5rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-3); }
+.people-source.directory { color: var(--success); }
+.people-source.auto { color: var(--accent-ink); }
+.contact { min-height: 52px; }
+.contact-email { font-size: 0.625rem; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.contact-id { gap: 2px; }
+.contact-role { line-height: 1.2; }
+.people-empty-rich { padding: 44px 24px; text-align: center; color: var(--text-3); }
+.people-empty-rich .empty-icon { width: 42px; height: 42px; margin: 0 auto 10px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); }
+.people-empty-rich .empty-icon svg { width: 20px; height: 20px; }
+.people-empty-rich strong { display: block; color: var(--text-2); font-size: 0.8125rem; margin-bottom: 3px; }
+.people-empty-rich span { font-size: 0.6875rem; }
+.directory-badge.contact { color: var(--accent-ink); }
+.directory-badge.auto { color: var(--warning); }
+.person-notes { margin-top: 18px; }
+.person-notes p { margin: 5px 0 0; color: var(--text-2); font-size: 0.75rem; line-height: 1.55; white-space: pre-wrap; }

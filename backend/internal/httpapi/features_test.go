@@ -81,6 +81,17 @@ func TestBuildMIMEMessage(t *testing.T) {
 	}
 }
 
+func TestDecodeHeaderWindows1252(t *testing.T) {
+	got := decodeHeader("=?Windows-1252?Q?Je_suis_vraiment_d=E9sol=E9_mon_amour?=")
+	if got != "Je suis vraiment désolé mon amour" {
+		t.Fatalf("unexpected decoded subject %q", got)
+	}
+	utf8 := decodeHeader("=?UTF-8?Q?R=C3=A9union_plan?=")
+	if utf8 != "Réunion plan" {
+		t.Fatalf("unexpected UTF-8 decoded subject %q", utf8)
+	}
+}
+
 func TestApplyAuthenticationResultsFolded(t *testing.T) {
 	fetched := &fetchedMail{Auth: map[string]any{}}
 	applyAuthenticationResults(fetched, `mail.a8m.test;

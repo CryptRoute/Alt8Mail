@@ -32,6 +32,7 @@ func (s *Server) getDirectory(w http.ResponseWriter, r *http.Request) {
 			"contactSharing":    policy.Directory.ContactSharing || webmailAdminRole(sess.User.Role),
 			"externalDirectory": policy.Directory.ExternalDirectory,
 			"profileEditing":    policy.Directory.ProfileEditing,
+			"autoAddExternal":   policy.Directory.AutoAddExternal,
 		},
 	})
 }
@@ -102,6 +103,53 @@ func (s *Server) createContact(w http.ResponseWriter, r *http.Request) {
 	s.recordWorkspaceAudit(r.Context(), sess, "contact.created", firstNonEmpty(name, email), "Contact saved")
 	contact, _ := s.loadContact(r.Context(), sess.User.ID, id)
 	writeJSON(w, http.StatusCreated, map[string]any{"contact": contact})
+}
+
+// autoSaveContact records a compose recipient in the user's personal address
+// book. It is intentionally upsert-only: manual contacts keep their names and
+// notes, and repeated recipients do not create duplicates.
+func (s *Server) autoSaveContact(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	var body struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	}
+	if !s.decodeBody(w, r, &body, 64*1024) {
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if !calendarEmailPattern.MatchString(email) {
+		writeError(w, http.StatusBadRequest, "CONTACT_EMAIL", "Enter a valid recipient email")
+		return
+	}
+	policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
+	if !policy.Directory.AutoAddExternal {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "skipped": true, "reason": "directory.autoAddExternal is disabled"})
+		return
+	}
+	name := truncate(strings.TrimSpace(body.Name), 240)
+	if name == "" {
+		name = email
+	}
+	id := newID("contact")
+	etag := newID("etag")
+	err := s.store.DB.QueryRow(r.Context(), `
+		INSERT INTO contacts (id, tenant_id, user_id, email, name, source, uid, resource_name, etag)
+		VALUES ($1, $2, $3, $4, $5, 'auto', $1, $1 || '.vcf', $6)
+		ON CONFLICT (user_id, email) DO UPDATE
+		SET name = CASE
+			WHEN contacts.name = '' OR lower(contacts.name) = lower(contacts.email) THEN EXCLUDED.name
+			ELSE contacts.name
+		END,
+		updated_at = now()
+		RETURNING id
+	`, id, sess.User.TenantID, sess.User.ID, email, name, etag).Scan(&id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "CONTACT", "Could not save the recipient")
+		return
+	}
+	contact, _ := s.loadContact(r.Context(), sess.User.ID, id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "contact": contact})
 }
 
 func (s *Server) updateContact(w http.ResponseWriter, r *http.Request) {

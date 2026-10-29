@@ -25,6 +25,7 @@ import (
 
 	"github.com/emersion/go-imap"
 	imapclient "github.com/emersion/go-imap/client"
+	"golang.org/x/text/encoding/ianaindex"
 )
 
 const (
@@ -996,6 +997,12 @@ func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []f
 			existing["draft"] = item.Folder == "drafts"
 			existing["date"] = item.Date.UTC().Format(time.RFC3339)
 			existing["sizeBytes"] = item.Size
+			// Header decoding improves across releases (for example Windows-1252
+			// encoded words). Refresh the stored subject when IMAP supplies a
+			// better-decoded value so old imports self-heal on the next sync.
+			if item.Subject != "" && stateString(existing, "subject") != item.Subject {
+				existing["subject"] = item.Subject
+			}
 			existingByFolderMessageID[folderMessageKey] = existing
 			updated++
 			continue
@@ -1223,11 +1230,24 @@ func imapMessageID(userID, messageID, folder string) string {
 	return "msg_imap_" + hashShort(userID+"|"+folder+"|"+messageID)
 }
 
+var mailHeaderDecoder = &mime.WordDecoder{
+	CharsetReader: func(charset string, input io.Reader) (io.Reader, error) {
+		enc, err := ianaindex.MIME.Encoding(charset)
+		if err != nil {
+			return nil, err
+		}
+		if enc == nil {
+			return nil, fmt.Errorf("unsupported header charset %q", charset)
+		}
+		return enc.NewDecoder().Reader(input), nil
+	},
+}
+
 func decodeHeader(value string) string {
 	if value == "" {
 		return ""
 	}
-	decoded, err := new(mime.WordDecoder).DecodeHeader(value)
+	decoded, err := mailHeaderDecoder.DecodeHeader(value)
 	if err != nil {
 		return value
 	}

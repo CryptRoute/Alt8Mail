@@ -232,9 +232,9 @@ What is live:
   reconciliation and UIDVALIDITY resets are handled without re-downloading
   existing bodies.
 - Directory policies are applied to presentation: external-sender labels can be
-  disabled, external personal contacts can be hidden from the directory,
-  self-service profile editing can be locked, and external recipients can be
-  auto-added as contacts. MTA-STS policy state, `_mta-sts` records and the
+  disabled, self-service profile editing can be locked, and recipients can be
+  auto-added as personal contacts. Personal contacts always remain visible to
+  their owner, independently of the organization directory policy. MTA-STS policy state, `_mta-sts` records and the
   public policy endpoint are implemented; public validation requires a
   customer-owned domain and `mta-sts.<domain>` TLS certificate.
 - Login, aliases and directory are read from PostgreSQL users and
@@ -393,6 +393,10 @@ decisions and audit entries.
   autosaved on a debounce and flushed on tab hide. Reload/navigate and the
   compose windows come back with recipient, subject, body, attachments and the
   selected From identity. Drafts persist across restarts.
+- **Recipient chips and address-book autocomplete** — To, Cc and Bcc tokens are
+  committed on Enter, comma or semicolon; autocomplete searches the internal
+  directory and personal contacts as you type; external recipients are saved
+  once as auto-saved contacts and appear in People under **Your contacts**.
 - **Keyboard-first navigation** — `J/K`, `C`, `/`, `?`, `X`, `E` archive,
   `#` delete, `U` unread, `R` reply, `A` reply-all, `F` forward, `S` star.
   Shortcuts are suppressed while typing or in a visible compose window.
@@ -464,10 +468,11 @@ decisions and audit entries.
   drawer, single-pane reader and full-screen compose.
 - **Dark mode + accents** — the Alt8Mail token system with Light / Dark / System,
   four accent colors and comfortable/compact density, persisted per browser.
-- **Calendar + directory** — the Alt8Mail month grid, agenda, person detail and
-  department filters are wired to the Go API. The live staging build stores
-  calendar events, attendees and personal contacts in normalized tables, with
-  create/edit/delete UI plus CalDAV/CardDAV access. The standalone Node template
+- **Calendar + directory** — the Alt8Mail month grid and agenda are wired to the
+  Go API. People groups the internal directory and personal contacts, with
+  search, source badges, filters and contact detail/editing. The live staging
+  build stores calendar events, attendees and personal contacts in normalized
+  tables, with create/edit/delete UI plus CalDAV/CardDAV access. The standalone Node template
   still uses its demo fixtures.
 
 ### Deliberately deferred

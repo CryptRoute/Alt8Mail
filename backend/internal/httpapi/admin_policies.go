@@ -193,7 +193,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 			RetentionDays: 0, Quarantine: true, ExternalTag: true,
 		},
 		Sharing:   adminSharingPolicy{ExternalSharing: false, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
-		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: false},
+		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: true},
 		Branding:  adminBrandingPolicy{ProductName: "Alt8Mail", PrimaryColor: "#0f6cbd", SupportEmail: "", LoginMessage: ""},
 	}
 }
