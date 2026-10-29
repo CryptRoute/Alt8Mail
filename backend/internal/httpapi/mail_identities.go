@@ -345,14 +345,14 @@ func (s *Server) sendIdentityVerification(ctx context.Context, user userRecord, 
 	link := strings.TrimRight(s.cfg.PublicURL, "/") + "/api/identities/verify?token=" + token
 	bodyText := fmt.Sprintf(`Hello%s,
 
-Verify that you want to send email from %s through Meridian Mail.
+Verify that you want to send email from %s through Alt8Mail.
 
 Open this link to confirm:
 %s
 
 The link expires in 48 hours. If you did not request this, ignore this email.
 
-— Meridian Mail`, func() string {
+— Alt8Mail`, func() string {
 		if name == "" {
 			return ""
 		}
@@ -364,14 +364,14 @@ The link expires in 48 hours. If you did not request this, ignore this email.
 		}
 		return " " + name
 	}()) + ",</p><p>Verify that you want to send email from <strong>" + html.EscapeString(email) +
-		"</strong> through Meridian Mail.</p><p><a href=\"" + html.EscapeString(link) +
-		"\">Confirm this sending address</a></p><p>The link expires in 48 hours. If you did not request this, ignore this email.</p><p>— Meridian Mail</p>"
+		"</strong> through Alt8Mail.</p><p><a href=\"" + html.EscapeString(link) +
+		"\">Confirm this sending address</a></p><p>The link expires in 48 hours. If you did not request this, ignore this email.</p><p>— Alt8Mail</p>"
 	item := map[string]any{
 		"from":      map[string]any{"name": user.Name, "email": user.Email},
 		"to":        []any{map[string]any{"name": name, "email": email}},
 		"cc":        []any{},
 		"bcc":       []any{},
-		"subject":   "Verify your Meridian sending address",
+		"subject":   "Verify your Alt8Mail sending address",
 		"bodyText":  bodyText,
 		"bodyHtml":  bodyHTML,
 		"saveCopy":  false,
@@ -388,7 +388,7 @@ func (s *Server) identityVerifyPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.identityVerifyHTML(w, http.StatusOK, "Confirm your sending address",
-		`<p>Confirm that this address belongs to you and may be used as a From identity in Meridian Mail.</p>
+		`<p>Confirm that this address belongs to you and may be used as a From identity in Alt8Mail.</p>
 		 <form method="post" action="/api/identities/verify">
 		   <input type="hidden" name="token" value="`+html.EscapeString(token)+`">
 		   <button type="submit" class="primary">Verify sending address</button>
@@ -427,8 +427,8 @@ func (s *Server) identityVerifyHTML(w http.ResponseWriter, status int, title, bo
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s · Meridian Mail</title>
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f1ea;color:#1f2a36;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(520px,calc(100%% - 40px));background:#fff;border:1px solid #ded8cc;border-radius:18px;padding:34px;box-shadow:0 22px 60px rgba(31,42,54,.12)}h1{font-size:23px;margin:0 0 10px}.mark{width:46px;height:46px;border-radius:13px;background:#16324f;color:#fff;display:grid;place-items:center;margin-bottom:18px;font-weight:700}p{color:#53606d;margin:0 0 16px}.primary{border:0;border-radius:10px;background:#1b6b5f;color:#fff;padding:12px 18px;font:inherit;font-weight:650;cursor:pointer}.primary:hover{background:#15564c}.note{font-size:12px;color:#7b8792;margin-top:22px}</style></head><body><main class="card"><div class="mark">M</div><h1>%s</h1>%s<p class="note">Meridian Mail · enterprise sending identity verification</p></main></body></html>`,
+	_, _ = fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s · Alt8Mail</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f1ea;color:#1f2a36;font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(520px,calc(100%% - 40px));background:#fff;border:1px solid #ded8cc;border-radius:18px;padding:34px;box-shadow:0 22px 60px rgba(31,42,54,.12)}h1{font-size:23px;margin:0 0 10px}.mark{width:46px;height:46px;border-radius:13px;background:#16324f;color:#fff;display:grid;place-items:center;margin-bottom:18px;font-weight:700}p{color:#53606d;margin:0 0 16px}.primary{border:0;border-radius:10px;background:#1b6b5f;color:#fff;padding:12px 18px;font:inherit;font-weight:650;cursor:pointer}.primary:hover{background:#15564c}.note{font-size:12px;color:#7b8792;margin-top:22px}</style></head><body><main class="card"><div class="mark">M</div><h1>%s</h1>%s<p class="note">Alt8Mail · enterprise sending identity verification</p></main></body></html>`,
 		html.EscapeString(title), html.EscapeString(title), body)
 }
 

@@ -5,17 +5,17 @@ import { launchBrowser } from "./cdp.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const artifacts = path.resolve(__dirname, "..", "artifacts");
-const base = process.env.MERIDIAN_UI_URL || "https://130-94-46-22.sslip.io/";
-const email = process.env.MERIDIAN_UI_EMAIL || "avery.chen@meridian.test";
-const password = process.env.MERIDIAN_UI_PASSWORD || "";
+const base = process.env.ALT8MAIL_UI_URL || "https://130-94-46-22.sslip.io/";
+const email = process.env.ALT8MAIL_UI_EMAIL || "avery.chen@a8m.test";
+const password = process.env.ALT8MAIL_UI_PASSWORD || "";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-if (!password) throw new Error("MERIDIAN_UI_PASSWORD is required");
+if (!password) throw new Error("ALT8MAIL_UI_PASSWORD is required");
 
 const browser = await launchBrowser({ headless: true, width: 1440, height: 1000, ignoreCertificateErrors: false });
 const page = await browser.newPage(base);
 
 const apiFetch = (method, url, body) => page.eval(`(async () => {
-  const match = document.cookie.match(/(?:^|; )meridian_system_csrf=([^;]+)/);
+  const match = document.cookie.match(/(?:^|; )a8m_system_csrf=([^;]+)/);
   const headers = { "Content-Type": "application/json" };
   if (match) headers["X-CSRF-Token"] = decodeURIComponent(match[1]);
   const response = await fetch(${JSON.stringify(url)}, {

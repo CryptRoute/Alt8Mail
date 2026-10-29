@@ -5,9 +5,9 @@ import { launchBrowser } from "./cdp.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const artifacts = path.resolve(__dirname, "..", "artifacts");
-const base = process.env.MERIDIAN_UI_URL || "https://130-94-46-22.sslip.io/";
-const email = process.env.MERIDIAN_UI_EMAIL || "avery.chen@meridian.test";
-const password = process.env.MERIDIAN_UI_PASSWORD || "";
+const base = process.env.ALT8MAIL_UI_URL || "https://130-94-46-22.sslip.io/";
+const email = process.env.ALT8MAIL_UI_EMAIL || "avery.chen@a8m.test";
+const password = process.env.ALT8MAIL_UI_PASSWORD || "";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const browser = await launchBrowser({ headless: true, width: 1440, height: 1000, ignoreCertificateErrors: false });
@@ -29,7 +29,7 @@ try {
   await sleep(700);
   const messageCount = await page.eval("document.querySelectorAll('.msg').length");
   assert.equal(messageCount >= 1, true, "real Dovecot conversations are rendered");
-  assert.equal(await page.eval("document.querySelector('.account-id span').textContent"), "avery.chen@meridian.test", "Go identity is rendered");
+  assert.equal(await page.eval("document.querySelector('.account-id span').textContent"), "avery.chen@a8m.test", "Go identity is rendered");
   assert.equal(await page.eval("document.getElementById('resetData').textContent.trim()"), "Resync from Dovecot", "UI is in real IMAP mode");
 
   const sender = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>d.messages[0].from.email)");

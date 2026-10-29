@@ -10,9 +10,9 @@ class Session {
 }
 const main = new Session();
 await main.login();
-const server = await main.req('/control/api/server/settings', { method: 'PUT', body: { hostname: 'mail.meridian.test', mailHostname: 'mail.meridian.test', webmailUrl: 'https://130-94-46-22.sslip.io', dnsResolver: '1.1.1.1:53', publicIpv4: '130.94.46.22', publicIpv6: '', mailFrom: 'postmaster@meridian.test', applyHostname: false } });
+const server = await main.req('/control/api/server/settings', { method: 'PUT', body: { hostname: 'mail.a8m.test', mailHostname: 'mail.a8m.test', webmailUrl: 'https://130-94-46-22.sslip.io', dnsResolver: '1.1.1.1:53', publicIpv4: '130.94.46.22', publicIpv6: '', mailFrom: 'postmaster@a8m.test', applyHostname: false } });
 console.log('server settings', JSON.stringify(server));
-const tls = await main.req('/control/api/tls/settings', { method: 'PUT', body: { adminEmail: 'postmaster@meridian.test', warnDays: 14 } });
+const tls = await main.req('/control/api/tls/settings', { method: 'PUT', body: { adminEmail: 'postmaster@a8m.test', warnDays: 14 } });
 console.log('tls settings', JSON.stringify(tls));
 const wrapper = await main.req('/control/api/tls/renewal-wrapper', { method: 'POST' });
 console.log('renewal wrapper', JSON.stringify(wrapper));

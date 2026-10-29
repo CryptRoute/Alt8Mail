@@ -763,13 +763,13 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 	}
 	now := nowISO()
 	createdAt := now
-	messageID := fmt.Sprintf("<%s@meridian.test>", newID("draft"))
+	messageID := fmt.Sprintf("<%s@a8m.test>", newID("draft"))
 	threadID := newID("t")
 	inReplyTo := any(nil)
 	priority := "normal"
 	windowMode := "floating"
 	saveCopy := true
-	auth := map[string]any{"spf": "pass", "dkim": "pass", "dmarc": "pass", "tls": "TLS 1.3", "ip": "127.0.0.1", "signer": "meridian.test", "firstContact": false, "warnings": []any{}}
+	auth := map[string]any{"spf": "pass", "dkim": "pass", "dmarc": "pass", "tls": "TLS 1.3", "ip": "127.0.0.1", "signer": "a8m.test", "firstContact": false, "warnings": []any{}}
 	if existing != nil {
 		createdAt = stateString(existing, "createdAt")
 		messageID = stateString(existing, "messageId")
@@ -907,9 +907,9 @@ func (s *Server) messageTrust(w http.ResponseWriter, r *http.Request) {
 		if ip == "" {
 			ip = "—"
 		}
-		policy := "Internal sender · verified by Meridian directory"
+		policy := "Internal sender · verified by Alt8Mail directory"
 		if stateBool(message, "external") {
-			policy = "External sender · verified against Meridian DMARC policy"
+			policy = "External sender · verified against Alt8Mail DMARC policy"
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"messageId": stateString(message, "id"), "sender": from, "external": stateBool(message, "external"),

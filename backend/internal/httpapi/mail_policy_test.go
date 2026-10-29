@@ -7,30 +7,30 @@ import (
 )
 
 func TestSieveForwardingPolicyDecision(t *testing.T) {
-	domains := map[string]bool{"meridian.test": true, "meridian.example": true}
+	domains := map[string]bool{"a8m.test": true, "a8m.example": true}
 	externalOnly := defaultTenantPolicy().Mail
 	externalOnly.AutoForwarding = false
 	externalOnly.ExternalForwarding = true
 
 	rules := []any{map[string]any{
 		"name": "Forward", "enabled": true,
-		"action": map[string]any{"type": "redirect", "value": "ops@meridian.example"},
+		"action": map[string]any{"type": "redirect", "value": "ops@a8m.example"},
 	}}
-	if errors := validateSieveForwarding(rules, "avery.chen@meridian.test", domains, externalOnly); len(errors) != 1 {
+	if errors := validateSieveForwarding(rules, "avery.chen@a8m.test", domains, externalOnly); len(errors) != 1 {
 		t.Fatalf("internal forwarding should be blocked, got %v", errors)
 	}
 	rules[0].(map[string]any)["action"].(map[string]any)["value"] = "partner@example.test"
-	if errors := validateSieveForwarding(rules, "avery.chen@meridian.test", domains, externalOnly); len(errors) != 0 {
+	if errors := validateSieveForwarding(rules, "avery.chen@a8m.test", domains, externalOnly); len(errors) != 0 {
 		t.Fatalf("external forwarding should be allowed, got %v", errors)
 	}
 
 	internalOnly := externalOnly
 	internalOnly.ExternalForwarding = false
 	internalOnly.AutoForwarding = true
-	if errors := validateSieveForwarding(rules, "avery.chen@meridian.test", domains, internalOnly); len(errors) != 1 {
+	if errors := validateSieveForwarding(rules, "avery.chen@a8m.test", domains, internalOnly); len(errors) != 1 {
 		t.Fatalf("external forwarding should be blocked, got %v", errors)
 	}
-	filtered := sieveWithForwardingPolicy(map[string]any{"rules": rules}, "avery.chen@meridian.test", domains, internalOnly)
+	filtered := sieveWithForwardingPolicy(map[string]any{"rules": rules}, "avery.chen@a8m.test", domains, internalOnly)
 	rule := filtered["rules"].([]any)[0].(map[string]any)
 	if rule["enabled"] != false {
 		t.Fatal("blocked redirect was not disabled in the generated ruleset")
@@ -76,7 +76,7 @@ func TestSieveCommentCannotInjectStatements(t *testing.T) {
 		"conditions": []any{map[string]any{"field": "subject", "operator": "contains", "value": "x"}},
 		"action":     map[string]any{"type": "keep"},
 	}}}
-	script := renderSieve(stored, "avery.chen@meridian.test")
+	script := renderSieve(stored, "avery.chen@a8m.test")
 	for _, line := range strings.Split(script, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "redirect ") {
 			t.Fatalf("rule name injected a Sieve statement:\n%s", script)

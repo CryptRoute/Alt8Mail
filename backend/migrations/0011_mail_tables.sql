@@ -104,7 +104,7 @@ CREATE INDEX IF NOT EXISTS mail_message_attachments_file_idx
   ON mail_message_attachments (attachment_id);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON mail_messages, attachments, mail_message_attachments
-  TO meridian_app;
+  TO a8m_app;
 
 -- Backfill messages from the transitional per-user document.
 INSERT INTO mail_messages (

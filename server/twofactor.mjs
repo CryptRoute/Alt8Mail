@@ -55,7 +55,7 @@ export function generateRecoveryCodes(count = 6) {
   const groups = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const codes = new Set();
   while (codes.size < count) {
-    let code = "MRDN-";
+    let code = "A8M-";
     for (let group = 0; group < 2; group += 1) {
       if (group) code += "-";
       for (let i = 0; i < 4; i += 1) code += groups[randomInt(0, groups.length)];
@@ -65,7 +65,7 @@ export function generateRecoveryCodes(count = 6) {
   return Array.from(codes);
 }
 
-export function otpAuthUri({ secret, account, issuer = "Meridian Mail" }) {
+export function otpAuthUri({ secret, account, issuer = "Alt8Mail" }) {
   const label = encodeURIComponent(`${issuer}:${account}`);
   const params = new URLSearchParams({ secret, issuer, algorithm: "SHA1", digits: "6", period: "30" });
   return `otpauth://totp/${label}?${params.toString()}`;

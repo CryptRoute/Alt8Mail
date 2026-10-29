@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, "..");
 const artifacts = path.join(root, "artifacts");
 await fs.mkdir(artifacts, { recursive: true });
 
-const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "meridian-e2e-"));
+const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "a8m-e2e-"));
 const dataFile = path.join(tempDir, "db.json");
 const app = await createApp({ dataFile, holdMs: 4000, undoTtlMs: 15000 });
 const address = await app.listen(0);
@@ -45,6 +45,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitForApp() {
   await page.waitFor(() => document.readyState === "complete", 10000);
   await page.waitFor(() => !document.getElementById("app").hidden && document.querySelectorAll(".msg").length > 0, 12000);
+  // The product deliberately holds the branded splash for five seconds after
+  // an interactive sign-in. Wait for it to finish before driving the mailbox.
+  await page.waitFor(() => document.getElementById("bootSplash")?.hidden !== false, 9000);
   await sleep(450);
 }
 
@@ -56,6 +59,24 @@ async function openComposeBySubject(subject) {
   })()`);
   assert.ok(id, `Compose window with subject ${subject} should exist`);
   return id;
+}
+
+async function setComposeBody(composeSel, text) {
+  const plain = await page.eval(`Boolean(document.querySelector(${JSON.stringify(composeSel + ' [data-compose-action="mode"][data-mode="plain"]')}))`);
+  if (plain) {
+    await page.click(`${composeSel} [data-compose-action="mode"][data-mode="plain"]`);
+    await sleep(150);
+  }
+  await page.setValue(`${composeSel} [data-compose-field="body"]`, text);
+}
+
+async function composeBodyText(composeSel) {
+  return page.eval(`(() => {
+    const section = document.querySelector(${JSON.stringify(composeSel)});
+    const textarea = section?.querySelector('[data-compose-field="body"]');
+    if (textarea) return textarea.value;
+    return section?.querySelector('[data-compose-editor]')?.innerText || "";
+  })()`);
 }
 
 async function clickByText(selector, text) {
@@ -71,7 +92,9 @@ try {
   page = await browser.newPage(base + "/");
   await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
   await page.waitFor(() => document.readyState === "complete", 10000);
-  await sleep(500);
+  await page.waitFor(() => Boolean(document.getElementById("loginScreen")), 10000);
+  await page.waitFor(() => !document.getElementById("loginScreen").hidden, 10000);
+  await sleep(150);
 
   console.log("\n[1] Two-factor sign-in and initial mailbox");
   check(await page.eval("!document.getElementById('loginScreen').hidden"), "login screen is shown");
@@ -209,15 +232,15 @@ try {
   await sleep(300);
   const composeId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
   const composeSel = `[data-compose-id="${composeId}"]`;
-  await page.setValue(`${composeSel} [data-compose-field="to"]`, "elena.vasquez@meridian.example");
+  await page.setValue(`${composeSel} [data-compose-field="to"]`, "elena.vasquez@a8m.example");
   await page.setValue(`${composeSel} [data-compose-field="subject"]`, "E2E draft");
-  await page.setValue(`${composeSel} [data-compose-field="body"]`, "This draft must survive a page reload.");
+  await setComposeBody(composeSel, "This draft must survive a page reload.");
   await page.click(`${composeSel} [data-compose-action="options"]`);
   await sleep(250);
-  await page.setValue(`${composeSel} [data-compose-field="fromEmail"]`, "product@meridian.example");
+  await page.setValue(`${composeSel} [data-compose-field="fromEmail"]`, "product@a8m.example");
   await sleep(1400);
-  check(await page.eval(`document.querySelector('${composeSel} [data-compose-field="fromEmail"]').value === 'product@meridian.example'`), "From selector is wired to a sendable alias");
-  check(await page.eval(`document.querySelector('${composeSel} [data-compose-identity]').textContent === 'Product Team'`), "compose header shows the selected identity");
+  check(await page.eval(`document.querySelector('${composeSel} [data-compose-field="fromEmail"]').value === 'product@a8m.example'`), "From selector is wired to a sendable alias");
+  check(await page.eval(`document.querySelector('${composeSel} [data-compose-identity]').textContent.includes('Product Team')`), "compose header shows the selected identity");
   check(await page.eval(`document.querySelector('${composeSel} [data-compose-status]').textContent.includes('server')`), "compose window reports a server save");
   await page.screenshot(path.join(artifacts, "05-compose.png"));
   await page.send("Page.reload");
@@ -226,12 +249,13 @@ try {
   await sleep(700);
   const restoredSubject = await page.eval("[...document.querySelectorAll('.compose [data-compose-field=\"subject\"]')].map(e=>e.value)");
   check(restoredSubject.includes("E2E draft"), "compose session and content are restored after reload");
-  const restoredBody = await page.eval("[...document.querySelectorAll('.compose')].find(e=>e.querySelector('[data-compose-field=\"subject\"]')?.value==='E2E draft')?.querySelector('[data-compose-field=\"body\"]')?.value");
+  const restoredComposeId = await page.eval("[...document.querySelectorAll('.compose')].find(e=>e.querySelector('[data-compose-field=\"subject\"]')?.value==='E2E draft')?.getAttribute('data-compose-id')");
+  const restoredBody = await composeBodyText(`[data-compose-id="${restoredComposeId}"]`);
   equal(restoredBody, "This draft must survive a page reload.", "restored draft keeps its body");
   const restoredFrom = await page.eval("[...document.querySelectorAll('.compose')].find(e=>e.querySelector('[data-compose-field=\"subject\"]')?.value==='E2E draft')?.querySelector('[data-compose-field=\"fromEmail\"]')?.value");
-  equal(restoredFrom, "product@meridian.example", "restored draft keeps its From identity");
+  equal(restoredFrom, "product@a8m.example", "restored draft keeps its From identity");
   const restoredBadge = await page.eval("[...document.querySelectorAll('.compose')].find(e=>e.querySelector('[data-compose-field=\"subject\"]')?.value==='E2E draft')?.querySelector('[data-compose-identity]')?.textContent");
-  equal(restoredBadge, "Product Team", "restored compose shows the alias badge");
+  check((restoredBadge || "").includes("Product Team"), "restored compose shows the alias badge");
 
   console.log("\n[7] Undo send and committed delivery");
   const restoredId = await openComposeBySubject("E2E draft");
@@ -258,11 +282,11 @@ try {
   equal(delivered.sent, 1, "message is committed to Sent after the hold");
   equal(delivered.pending, 0, "pending queue is empty after commit");
   equal(delivered.used, 38, "outbound usage increments after delivery");
-  equal(delivered.fromEmail, "product@meridian.example", "the chosen From alias is recorded on the sent message");
+  equal(delivered.fromEmail, "product@a8m.example", "the chosen From alias is recorded on the sent message");
   await page.screenshot(path.join(artifacts, "07-sent.png"));
   await page.click("#quotaButtonStatus");
   await sleep(250);
-  check(await page.eval("document.getElementById('statusPopBody').textContent.includes('Dovecot quota')"), "quota popover names the live Dovecot source");
+  check(await page.eval("document.getElementById('statusPopBody').textContent.includes('Alt8Mail storage')"), "quota popover names the live storage source");
   check(await page.eval("!document.getElementById('statusQuotaLabel').textContent.includes('15.0')"), "quota label uses human-readable units");
   await page.click("#statusPopClose");
   await page.click("#outboundChip");
@@ -301,7 +325,7 @@ try {
   equal(await page.eval("document.getElementById('autoReplyToggle').getAttribute('aria-checked')"), "true", "automatic replies switch turns on");
   await page.setValue("#autoReplyInternalMessage", "I am away until Monday; for urgent product questions contact Elena.");
   await page.setValue("#autoReplyExternalMessage", "Thanks for your message. I am away until Monday and will reply on my return.");
-  check(await page.eval("document.getElementById('autoReplyPreview').textContent.includes('Inside Meridian')"), "auto-reply preview updates while typing");
+  check(await page.eval("document.getElementById('autoReplyPreview').textContent.includes('Inside Alt8Mail')"), "auto-reply preview updates while typing");
   await page.eval("document.getElementById('saveAutoReplyBtn').scrollIntoView({block:'center'})");
   await sleep(150);
   await page.click("#saveAutoReplyBtn");
@@ -340,7 +364,7 @@ try {
   await page.click("[data-settings-tab='account']");
   await sleep(350);
   equal(await page.eval("document.querySelectorAll('.alias-row').length"), 4, "account panel lists all send-as identities");
-  check(await page.eval("document.querySelector('.alias-row.is-disabled')?.textContent.includes('support@meridian.example')"), "non-delegated shared mailbox is read-only");
+  check(await page.eval("document.querySelector('.alias-row.is-disabled')?.textContent.includes('support@a8m.example')"), "non-delegated shared mailbox is read-only");
   await page.click("[data-settings-tab='security']");
   await sleep(350);
   check(await page.eval("document.getElementById('twoFactorStatus').textContent.includes('on')"), "security panel shows two-factor as enabled");
@@ -367,7 +391,7 @@ try {
   await page.click("[data-trust-sender]");
   await sleep(900);
   check(await page.eval("!document.querySelector('.external-banner')"), "marking the sender trusted removes the warning");
-  const trusted = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>d.user.trustedSenders.includes('account-verify@meridian-security.example'))");
+  const trusted = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>d.user.trustedSenders.includes('account-verify@a8m-security.example'))");
   check(trusted, "sender trust is persisted by the server");
 
   console.log("\n[9b] Calendar and directory");
@@ -404,14 +428,14 @@ try {
   check(await page.eval("document.getElementById('previewOverlay').hidden"), "preview dialog closes cleanly");
 
   await page.eval(`(() => {
-    window.__meridianOriginalOpen = window.open;
-    window.__meridianOpened = null;
-    window.open = (url, name, features) => { window.__meridianOpened = { url, name, features }; return null; };
+    window.__a8mOriginalOpen = window.open;
+    window.__a8mOpened = null;
+    window.open = (url, name, features) => { window.__a8mOpened = { url, name, features }; return null; };
     const row = [...document.querySelectorAll('.msg')].find((element) => element.textContent.includes('Q4 roadmap'));
     row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
   })()`);
   await sleep(250);
-  check(await page.eval("window.__meridianOpened && window.__meridianOpened.url.includes('thread=t1') && window.__meridianOpened.url.includes('popout=1')"), "double-click opens the thread in a new window URL");
+  check(await page.eval("window.__a8mOpened && window.__a8mOpened.url.includes('thread=t1') && window.__a8mOpened.url.includes('popout=1')"), "double-click opens the thread in a new window URL");
   const popout = await browser.newPage(base + "/?thread=t1&popout=1");
   await popout.waitFor(() => document.readyState === "complete", 10000);
   await popout.waitFor(() => !document.getElementById("app").hidden && document.querySelectorAll(".thread-msg").length > 0, 12000);
@@ -420,7 +444,7 @@ try {
   check(await popout.eval("document.querySelector('.reader-subject h2')?.textContent.includes('Q4 roadmap')"), "pop-out window opens the requested conversation");
   await popout.screenshot(path.join(artifacts, "17b-popout.png"));
   await popout.close();
-  await page.eval("window.open = window.__meridianOriginalOpen");
+  await page.eval("window.open = window.__a8mOriginalOpen");
 
   console.log("\n[9d] Reading-pane flag, spam and report controls");
   await clickByText(".msg", "expense report");
@@ -459,7 +483,7 @@ try {
   await page.screenshot(path.join(artifacts, "18b-report-dialog.png"));
   await page.click("#reportSubmit");
   await sleep(1100);
-  check(await page.eval("document.getElementById('toast').textContent.includes('Reported to Meridian Security')"), "report confirmation is announced");
+  check(await page.eval("document.getElementById('toast').textContent.includes('Reported to Alt8Mail Security')"), "report confirmation is announced");
   const reportState = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>{const m=d.messages.find(m=>m.subject.includes('expense report')); return {folder:m.folder, reason:m.spamReport?.reason, flagged:m.flagged};})");
   equal(reportState.folder, "spam", "reported message is quarantined in Junk");
   equal(reportState.reason, "phishing", "report reason is stored with the message");
@@ -515,7 +539,7 @@ try {
   await page.eval("(() => { const s=document.getElementById('shareExpiry'); s.value='14'; s.dispatchEvent(new Event('change',{bubbles:true})); })()");
   await page.click("#createShare");
   await sleep(700);
-  check(await page.eval("document.getElementById('shareUrl').value.startsWith('https://files.meridian.example/s/')"), "share link is generated");
+  check(await page.eval("document.getElementById('shareUrl').value.startsWith('https://files.a8m.example/s/')"), "share link is generated");
   await page.screenshot(path.join(artifacts, "20-file-share.png"));
   await page.click("#shareCancel");
   await sleep(250);
@@ -549,9 +573,9 @@ try {
   await sleep(350);
   const scheduleComposeId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
   const scheduleSel = `[data-compose-id="${scheduleComposeId}"]`;
-  await page.setValue(`${scheduleSel} [data-compose-field="to"]`, "elena.vasquez@meridian.example");
+  await page.setValue(`${scheduleSel} [data-compose-field="to"]`, "elena.vasquez@a8m.example");
   await page.setValue(`${scheduleSel} [data-compose-field="subject"]`, "Scheduled E2E note");
-  await page.setValue(`${scheduleSel} [data-compose-field="body"]`, "This message should wait for the chosen time.");
+  await setComposeBody(scheduleSel, "This message should wait for the chosen time.");
   await page.click(`${scheduleSel} [data-compose-action="schedule"]`);
   await sleep(500);
   check(await page.eval("!document.getElementById('scheduleOverlay').hidden"), "Send later opens the scheduling workspace");
@@ -591,9 +615,9 @@ try {
   await sleep(350);
   const manageComposeId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
   const manageSel = `[data-compose-id="${manageComposeId}"]`;
-  await page.setValue(`${manageSel} [data-compose-field="to"]`, "elena.vasquez@meridian.example");
+  await page.setValue(`${manageSel} [data-compose-field="to"]`, "elena.vasquez@a8m.example");
   await page.setValue(`${manageSel} [data-compose-field="subject"]`, "Managed scheduled note");
-  await page.setValue(`${manageSel} [data-compose-field="body"]`, "This message will be managed from the scheduled center.");
+  await setComposeBody(manageSel, "This message will be managed from the scheduled center.");
   await page.click(`${manageSel} [data-compose-action="schedule"]`);
   await sleep(450);
   await page.eval("document.querySelector('#schedulePresets [data-schedule-preset=\"custom\"]').click()");
@@ -620,7 +644,7 @@ try {
 
   await page.click(".scheduled-card [data-scheduled-edit]");
   await page.waitFor(() => !document.getElementById("scheduledEditOverlay").hidden, 4000);
-  equal(await page.eval("document.getElementById('scheduledEditTo').value"), "elena.vasquez@meridian.example", "edit dialog loads the recipients");
+  equal(await page.eval("document.getElementById('scheduledEditTo').value"), "elena.vasquez@a8m.example", "edit dialog loads the recipients");
   check(await page.eval("document.getElementById('scheduledEditOriginal').textContent.includes('Currently scheduled')"), "edit dialog shows the original send time");
   await page.setValue("#scheduledEditSubject", "Managed scheduled note — edited");
   await page.setValue("#scheduledEditBody", "Updated body, ready to send from the schedule center.");

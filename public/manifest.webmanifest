@@ -1,6 +1,6 @@
 {
-  "name": "Meridian Mail",
-  "short_name": "Meridian",
+  "name": "Alt8Mail",
+  "short_name": "Alt8Mail",
   "description": "Enterprise webmail template with two-factor sign-in, threaded conversations, scheduled send, tasks, files and attachment preview.",
   "id": "/",
   "start_url": "/?source=pwa",

@@ -218,7 +218,7 @@ func (s *Server) expungeRetainedMessages(ctx context.Context, user userRecord, c
 		if removedState > 0 {
 			appendStateAudit(state, "mail.retention", fmt.Sprintf("%d message", removedState), user.Name,
 				fmt.Sprintf("Retention policy removed %d message(s) older than %d days", removedState, retentionDays),
-				"127.0.0.1", "meridian-retention-worker")
+				"127.0.0.1", "a8m-retention-worker")
 		}
 		return nil
 	})

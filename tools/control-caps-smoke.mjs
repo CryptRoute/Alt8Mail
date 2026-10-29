@@ -5,7 +5,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const BASE = 'https://130.94.46.22:8808';
 const PASSWORD = fs.readFileSync(process.env.CONTROL_PASSWORD_FILE, 'utf8').trim();
 const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 4)}`.toLowerCase();
-const domain = `cap-${suffix}.meridian.test`;
+const domain = `cap-${suffix}.a8m.test`;
 let domainId = '';
 let mailboxId = '';
 let mailboxEmail = '';
@@ -58,12 +58,12 @@ try {
   mailboxEmail = mailbox.email;
   const first = await main.req('/control/api/delivery/smtp-tests', {
     method: 'POST',
-    body: { from: mailboxEmail, recipient: 'postmaster@meridian.test', subject: `Cap test first ${suffix}`, body: 'First message inside the rolling allowance.' },
+    body: { from: mailboxEmail, recipient: 'postmaster@a8m.test', subject: `Cap test first ${suffix}`, body: 'First message inside the rolling allowance.' },
   });
   if (!first.ok) throw new Error(`first SMTP test failed: ${first.error || first.status}`);
   const second = await main.req('/control/api/delivery/smtp-tests', {
     method: 'POST',
-    body: { from: mailboxEmail, recipient: 'postmaster@meridian.test', subject: `Cap test second ${suffix}`, body: 'Second message should be deferred by the rolling cap.' },
+    body: { from: mailboxEmail, recipient: 'postmaster@a8m.test', subject: `Cap test second ${suffix}`, body: 'Second message should be deferred by the rolling cap.' },
   });
   console.log('cap first', JSON.stringify({ ok: first.ok, status: first.status }));
   console.log('cap second', JSON.stringify({ ok: second.ok, status: second.status, error: second.error || '' }));

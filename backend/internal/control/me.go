@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {

@@ -180,8 +180,8 @@ CREATE INDEX IF NOT EXISTS workspace_audit_user_idx ON workspace_audit (user_id,
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON tasks, files, file_shares, calendar_events,
   calendar_attendees, contacts, storage_accounts, storage_oauth_states, workspace_audit
-  TO meridian_app;
-GRANT USAGE, SELECT ON SEQUENCE workspace_audit_id_seq TO meridian_app;
+  TO a8m_app;
+GRANT USAGE, SELECT ON SEQUENCE workspace_audit_id_seq TO a8m_app;
 
 -- Backfill normalized workspace rows from the transitional per-user documents.
 INSERT INTO tasks (id, tenant_id, user_id, title, notes, status, priority, due_date, due_time,
@@ -211,7 +211,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO files (id, tenant_id, user_id, provider_id, external_id, name, mime, path, description,
                    size_bytes, storage_key, attachment_id, external_url, starred, locked, version,
                    previewable, checksum, metadata, created_at, updated_at)
-SELECT f.elem->>'id', s.tenant_id, s.user_id, COALESCE(NULLIF(f.elem->>'providerId',''), 'meridian'),
+SELECT f.elem->>'id', s.tenant_id, s.user_id, COALESCE(NULLIF(f.elem->>'providerId',''), 'a8m'),
        COALESCE(f.elem->>'externalId',''), COALESCE(NULLIF(f.elem->>'name',''), 'File'),
        COALESCE(NULLIF(f.elem->>'mime',''), 'application/octet-stream'),
        COALESCE(f.elem->>'path',''), COALESCE(f.elem->>'description',''),

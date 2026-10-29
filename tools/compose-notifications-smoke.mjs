@@ -5,9 +5,9 @@ import { launchBrowser } from "./cdp.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const artifacts = path.resolve(__dirname, "..", "artifacts");
-const base = process.env.MERIDIAN_UI_URL || "https://130-94-46-22.sslip.io/";
-const email = process.env.MERIDIAN_UI_EMAIL || "avery.chen@meridian.test";
-const password = process.env.MERIDIAN_UI_PASSWORD || "";
+const base = process.env.ALT8MAIL_UI_URL || "https://130-94-46-22.sslip.io/";
+const email = process.env.ALT8MAIL_UI_EMAIL || "avery.chen@a8m.test";
+const password = process.env.ALT8MAIL_UI_PASSWORD || "";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const subject = `Compose close smoke ${Date.now()}`;
 
@@ -47,7 +47,7 @@ try {
   await sleep(350);
   assert.equal(await page.eval("document.querySelectorAll('.compose [data-compose-editor]').length"), 1, "rich HTML editor is present");
   assert.equal(await page.eval("document.querySelectorAll('.compose [data-compose-priority]').length"), 3, "priority is a three-way radio group");
-  assert.equal(await page.eval("document.querySelector('.compose [data-compose-field=\"fromEmail\"]').value"), "avery.chen@meridian.test", "compose From is the real signed-in address");
+  assert.equal(await page.eval("document.querySelector('.compose [data-compose-field=\"fromEmail\"]').value"), "avery.chen@a8m.test", "compose From is the real signed-in address");
   assert.equal(await page.eval("document.querySelectorAll('.compose .compose-editor-toolbar button').length >= 10"), true, "WYSIWYG toolbar is present");
   const aiEnabled = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>Boolean(d.ai && d.ai.enabled))");
   assert.equal(await page.eval("document.querySelectorAll('.compose [data-compose-action=\"ai\"]').length"), aiEnabled ? 1 : 0, "AI compose button follows the tenant assistant setting");
@@ -57,7 +57,7 @@ try {
   assert.equal(await page.eval("!!document.getElementById('composeAttachFileList')"), true, "Files picker surface is present");
   await page.click("#composeAttachClose");
 
-  await page.setValue('.compose [data-compose-field="to"]', "jordan.lee@meridian.test");
+  await page.setValue('.compose [data-compose-field="to"]', "jordan.lee@a8m.test");
   await page.setValue('.compose [data-compose-field="subject"]', subject);
   await page.eval(`(() => {
     const editor = document.querySelector('.compose [data-compose-editor]');
@@ -90,7 +90,7 @@ try {
   await page.click('[data-settings-tab="identities"]');
   await page.waitFor(() => document.querySelectorAll("#identityList .identity-card").length >= 3, 6000);
   assert.equal(await page.eval("document.querySelectorAll('#identityList .identity-card').length >= 3"), true, "real sending identities render");
-  assert.equal(await page.eval("document.getElementById('identityList').textContent.includes('avery.chen@meridian.test')"), true, "primary identity is real");
+  assert.equal(await page.eval("document.getElementById('identityList').textContent.includes('avery.chen@a8m.test')"), true, "primary identity is real");
   await page.click('[data-settings-tab="security"]');
   await sleep(300);
   assert.equal(await page.eval("!!document.getElementById('appPasswordExpiry')"), true, "app-password expiry control is present");

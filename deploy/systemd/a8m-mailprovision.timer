@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Alt8Mail mailbox provisioning every minute
+Documentation=https://github.com/CryptRoute/Alt8Mail
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=a8m-mailprovision.service
+
+[Install]
+WantedBy=timers.target

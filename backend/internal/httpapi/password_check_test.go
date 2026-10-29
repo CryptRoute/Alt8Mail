@@ -3,8 +3,8 @@ package httpapi
 import (
 	"testing"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
-	"github.com/meridian-mail/meridian/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
 )
 
 func TestVerifyAccountPasswordDemoFallback(t *testing.T) {
@@ -14,11 +14,11 @@ func TestVerifyAccountPasswordDemoFallback(t *testing.T) {
 	}
 	server := &Server{cfg: config.Config{
 		DemoMode:      true,
-		DemoEmail:     "avery.chen@meridian.example",
+		DemoEmail:     "avery.chen@a8m.example",
 		DemoPassword:  "demo-password",
-		DemoUserEmail: "avery.chen@meridian.test",
+		DemoUserEmail: "avery.chen@a8m.test",
 	}}
-	sess := &sessionRecord{User: userRecord{Email: "avery.chen@meridian.test", PasswordHash: hash}}
+	sess := &sessionRecord{User: userRecord{Email: "avery.chen@a8m.test", PasswordHash: hash}}
 	if !server.verifyAccountPassword(sess, "account-password") {
 		t.Fatal("real account password was rejected")
 	}
@@ -28,7 +28,7 @@ func TestVerifyAccountPasswordDemoFallback(t *testing.T) {
 	if server.verifyAccountPassword(sess, "wrong-password") {
 		t.Fatal("wrong password was accepted")
 	}
-	other := &sessionRecord{User: userRecord{Email: "jordan.lee@meridian.test", PasswordHash: hash}}
+	other := &sessionRecord{User: userRecord{Email: "jordan.lee@a8m.test", PasswordHash: hash}}
 	if server.verifyAccountPassword(other, "demo-password") {
 		t.Fatal("demo password was accepted for a non-demo account")
 	}

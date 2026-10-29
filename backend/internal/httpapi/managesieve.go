@@ -62,7 +62,7 @@ func (s *Server) pushSieveScript(ctx context.Context, user userRecord, script st
 		return fmt.Errorf("ManageSieve authentication rejected: %w", err)
 	}
 
-	literal := fmt.Sprintf("PUTSCRIPT \"meridian\" {%d+}\r\n", len(script))
+	literal := fmt.Sprintf("PUTSCRIPT \"a8m\" {%d+}\r\n", len(script))
 	if _, err := tlsConn.Write([]byte(literal)); err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func (s *Server) pushSieveScript(ctx context.Context, user userRecord, script st
 	if err := readSieveResponse(reader); err != nil {
 		return fmt.Errorf("ManageSieve rejected the script: %w", err)
 	}
-	if err := writeSieveCommand(tlsConn, `SETACTIVE "meridian"`); err != nil {
+	if err := writeSieveCommand(tlsConn, `SETACTIVE "a8m"`); err != nil {
 		return err
 	}
 	if err := readSieveResponse(reader); err != nil {

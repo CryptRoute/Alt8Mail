@@ -218,7 +218,7 @@ func (s *Server) callAI(ctx context.Context, settings aiSettings, system, user s
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
-	req.Header.Set("User-Agent", "Meridian-Mail-AI/1.0")
+	req.Header.Set("User-Agent", "Alt8Mail-AI/1.0")
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("AI request failed: %w", err)
@@ -464,7 +464,7 @@ func (s *Server) adminTestAI(w http.ResponseWriter, r *http.Request) {
 	}
 	start := time.Now()
 	reply, err := s.callAI(r.Context(), settings, "You are a connectivity test. Reply exactly as instructed.",
-		"Reply with exactly: Meridian AI connection OK.", 32, 0)
+		"Reply with exactly: Alt8Mail AI connection OK.", 32, 0)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "AI_TEST", "AI provider test failed: "+err.Error())
 		return

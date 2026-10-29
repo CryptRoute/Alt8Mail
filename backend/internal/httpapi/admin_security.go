@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 func (s *Server) adminSecurityOverview(w http.ResponseWriter, r *http.Request) {
@@ -33,8 +33,8 @@ func (s *Server) adminBeginTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"secret": secret, "issuer": "Meridian Admin", "account": sess.User.Email,
-		"otpauth":   auth.TOTPURI(secret, sess.User.Email, "Meridian Admin"),
+		"secret": secret, "issuer": "Alt8Mail Admin", "account": sess.User.Email,
+		"otpauth":   auth.TOTPURI(secret, sess.User.Email, "Alt8Mail Admin"),
 		"expiresAt": time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339),
 	})
 }

@@ -372,8 +372,8 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.postfix_alias_lookup(text) FROM PUBLIC;
-GRANT SELECT ON public.postfix_alias_targets TO meridian_mail;
-GRANT EXECUTE ON FUNCTION public.postfix_alias_lookup(text) TO meridian_mail;
+GRANT SELECT ON public.postfix_alias_targets TO a8m_mail;
+GRANT EXECUTE ON FUNCTION public.postfix_alias_lookup(text) TO a8m_mail;
 
 -- The panel manages the shared mail tables. Existing webmail/admin services
 -- remain the source of truth for their own tables.
@@ -392,9 +392,9 @@ GRANT SELECT, INSERT ON public.password_history TO alt8mail_control;
 GRANT SELECT, INSERT, UPDATE ON public.app_states TO alt8mail_control;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO alt8mail_control;
 
--- Postfix/Dovecot read aliases, domains and mailboxes through meridian_mail.
-GRANT USAGE ON SCHEMA control TO meridian_mail;
-GRANT SELECT ON control.mail_aliases TO meridian_mail;
+-- Postfix/Dovecot read aliases, domains and mailboxes through a8m_mail.
+GRANT USAGE ON SCHEMA control TO a8m_mail;
+GRANT SELECT ON control.mail_aliases TO a8m_mail;
 
 INSERT INTO schema_migrations (version) VALUES ('0016_control_mail')
 ON CONFLICT (version) DO NOTHING;

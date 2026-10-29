@@ -16,8 +16,8 @@ UPDATE mail_domains
 SET verification_token = encode(gen_random_bytes(18), 'hex')
 WHERE COALESCE(verification_token, '') = '';
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON mail_domains TO meridian_app;
-GRANT SELECT ON mail_domains TO meridian_mail;
+GRANT SELECT, INSERT, UPDATE, DELETE ON mail_domains TO a8m_app;
+GRANT SELECT ON mail_domains TO a8m_mail;
 
 INSERT INTO schema_migrations (version) VALUES ('0006_dkim_keys')
 ON CONFLICT (version) DO NOTHING;

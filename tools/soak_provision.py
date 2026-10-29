@@ -59,7 +59,7 @@ def create_one(session, email, name, password, csrf):
 def main():
     count = int(sys.argv[1]) if len(sys.argv) > 1 else 1000
     prefix = sys.argv[2] if len(sys.argv) > 2 else "soak-" + time.strftime("%Y%m%d")
-    email = os.environ.get("SOAK_ADMIN_EMAIL", "avery.chen@meridian.test")
+    email = os.environ.get("SOAK_ADMIN_EMAIL", "avery.chen@a8m.test")
     password = os.environ.get("SOAK_ADMIN_PASS", "")
     user_password = os.environ.get("SOAK_PASSWORD", "")
     if not password or not user_password:
@@ -78,7 +78,7 @@ def main():
         s, csrf = sessions[batch_index % workers]
         local = []
         for index in batch:
-            local_email = f"{prefix}-{index:04d}@meridian.test"
+            local_email = f"{prefix}-{index:04d}@a8m.test"
             result = create_one(s, local_email, f"Soak User {index:04d}", user_password, csrf)
             local.append(result)
         return local

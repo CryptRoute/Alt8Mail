@@ -1,5 +1,5 @@
 /* ============================================================
-   Meridian Mail — shared search + thread index
+   Alt8Mail — shared search + thread index
    Runs unchanged in the browser and in Node (server).
    No DOM access; safe to import from both environments.
    ============================================================ */
@@ -330,7 +330,7 @@ export function buildThreads(scope, allMessages) {
     const participants = [];
     const seenPeople = new Set();
     for (const message of members) {
-      const people = message.from && message.from.email !== "avery.chen@meridian.example"
+      const people = message.from && message.from.email !== "avery.chen@a8m.example"
         ? [message.from]
         : Array.isArray(message.to) ? message.to : message.to ? [message.to] : [];
       for (const person of people) {

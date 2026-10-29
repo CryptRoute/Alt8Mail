@@ -10,9 +10,9 @@ import (
 
 func TestParseRecipientsDeduplicatesAndRejectsInvalid(t *testing.T) {
 	state := map[string]any{"people": []any{
-		map[string]any{"name": "Elena Vasquez", "email": "elena.vasquez@meridian.test"},
+		map[string]any{"name": "Elena Vasquez", "email": "elena.vasquez@a8m.test"},
 	}}
-	people, invalid := parseRecipients("Elena Vasquez <elena.vasquez@meridian.test>, not-an-email, elena.vasquez@meridian.test", state)
+	people, invalid := parseRecipients("Elena Vasquez <elena.vasquez@a8m.test>, not-an-email, elena.vasquez@a8m.test", state)
 	if len(invalid) != 1 || invalid[0] != "not-an-email" {
 		t.Fatalf("expected one invalid recipient, got %#v", invalid)
 	}
@@ -20,7 +20,7 @@ func TestParseRecipientsDeduplicatesAndRejectsInvalid(t *testing.T) {
 		t.Fatalf("expected one deduplicated recipient, got %#v", people)
 	}
 	person := people[0].(map[string]any)
-	if person["email"] != "elena.vasquez@meridian.test" {
+	if person["email"] != "elena.vasquez@a8m.test" {
 		t.Fatalf("unexpected email: %#v", person)
 	}
 }
@@ -44,8 +44,8 @@ func TestSieveNormalizeRenderAndValidation(t *testing.T) {
 	if len(errors) != 0 {
 		t.Fatalf("unexpected Sieve errors: %v", errors)
 	}
-	script := renderSieve(map[string]any{"rules": rules, "vacation": vacation, "revision": 2}, "avery.chen@meridian.test")
-	for _, expected := range []string{`require ["date", "fileinto", "relational", "vacation"];`, `fileinto "Archive";`, `vacation :days 7`, `address :domain :is "from" "meridian.test"`} {
+	script := renderSieve(map[string]any{"rules": rules, "vacation": vacation, "revision": 2}, "avery.chen@a8m.test")
+	for _, expected := range []string{`require ["date", "fileinto", "relational", "vacation"];`, `fileinto "Archive";`, `vacation :days 7`, `address :domain :is "from" "a8m.test"`} {
 		if !strings.Contains(script, expected) {
 			t.Fatalf("script missing %q:\n%s", expected, script)
 		}
@@ -61,17 +61,17 @@ func TestSieveNormalizeRenderAndValidation(t *testing.T) {
 
 func TestBuildMIMEMessage(t *testing.T) {
 	item := map[string]any{
-		"from": map[string]any{"name": "Avery Chen", "email": "avery.chen@meridian.test"},
-		"to":   []any{map[string]any{"name": "Nora Patel", "email": "nora.patel@meridian.test"}},
+		"from": map[string]any{"name": "Avery Chen", "email": "avery.chen@a8m.test"},
+		"to":   []any{map[string]any{"name": "Nora Patel", "email": "nora.patel@a8m.test"}},
 		"cc":   []any{}, "bcc": []any{},
 		"subject": "Quarterly plan — review", "bodyText": "Hello Nora,\nThe plan is attached.",
 	}
-	raw, err := buildMIMEMessage(item, "<test@meridian.test>", []outboundAttachment{{Name: "plan.pdf", MIMEType: "application/pdf", Data: []byte("%PDF-1.4")}})
+	raw, err := buildMIMEMessage(item, "<test@a8m.test>", []outboundAttachment{{Name: "plan.pdf", MIMEType: "application/pdf", Data: []byte("%PDF-1.4")}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	message := string(raw)
-	for _, expected := range []string{"From: ", "<avery.chen@meridian.test>", "To: ", "<nora.patel@meridian.test>", "Subject: =?utf-8?", "Content-Type: multipart/mixed", `filename=plan.pdf`, "Message-ID: <test@meridian.test>"} {
+	for _, expected := range []string{"From: ", "<avery.chen@a8m.test>", "To: ", "<nora.patel@a8m.test>", "Subject: =?utf-8?", "Content-Type: multipart/mixed", `filename=plan.pdf`, "Message-ID: <test@a8m.test>"} {
 		if !strings.Contains(message, expected) {
 			t.Fatalf("message missing %q:\n%s", expected, message)
 		}
@@ -83,12 +83,12 @@ func TestBuildMIMEMessage(t *testing.T) {
 
 func TestParseIMAPMessageBodiesAndAttachments(t *testing.T) {
 	raw := strings.Join([]string{
-		"From: Elena Vasquez <elena.vasquez@meridian.test>",
-		"To: Avery Chen <avery.chen@meridian.test>",
+		"From: Elena Vasquez <elena.vasquez@a8m.test>",
+		"To: Avery Chen <avery.chen@a8m.test>",
 		"Subject: =?UTF-8?Q?Quarterly_plan_=E2=80=94_review?=",
-		"Message-ID: <mail-1@meridian.test>",
+		"Message-ID: <mail-1@a8m.test>",
 		"Date: Wed, 28 Oct 2026 09:00:00 +0000",
-		"Authentication-Results: mx.meridian.test; spf=pass smtp.mailfrom=meridian.test; dkim=pass header.d=meridian.test; dmarc=pass",
+		"Authentication-Results: mx.a8m.test; spf=pass smtp.mailfrom=a8m.test; dkim=pass header.d=a8m.test; dmarc=pass",
 		"MIME-Version: 1.0",
 		`Content-Type: multipart/mixed; boundary="mix"`,
 		"",
@@ -138,17 +138,17 @@ func TestParseIMAPMessageBodiesAndAttachments(t *testing.T) {
 func TestMergeFetchedMailKeepsSelfSentAndInboxCopies(t *testing.T) {
 	state := map[string]any{"messages": []any{
 		map[string]any{
-			"id": "local_sent", "folder": "sent", "subject": "Self message", "messageId": "<self@meridian.test>",
+			"id": "local_sent", "folder": "sent", "subject": "Self message", "messageId": "<self@a8m.test>",
 			"threadId": "t_local", "imapUid": 8, "imapFolder": "sent", "imapUidValidity": 99,
-			"from": map[string]any{"name": "Avery", "email": "avery.chen@meridian.test"},
+			"from": map[string]any{"name": "Avery", "email": "avery.chen@a8m.test"},
 			"to":   []any{}, "cc": []any{}, "bcc": []any{}, "date": "2026-10-28T10:40:34Z", "sizeBytes": 100,
 		},
 	}, "attachments": map[string]any{}, "people": []any{}}
-	user := userRecord{Email: "avery.chen@meridian.test", Name: "Avery Chen", Initials: "AC", Color: "#34557a"}
+	user := userRecord{Email: "avery.chen@a8m.test", Name: "Avery Chen", Initials: "AC", Color: "#34557a"}
 	inboxCopy := fetchedMail{
-		UID: 11, UIDValidity: 99, Folder: "inbox", Subject: "Self message", MessageID: "<self@meridian.test>",
-		Date: time.Now(), From: []map[string]any{{"name": "Avery", "email": "avery.chen@meridian.test"}},
-		To:       []map[string]any{{"name": "Avery", "email": "avery.chen@meridian.test"}},
+		UID: 11, UIDValidity: 99, Folder: "inbox", Subject: "Self message", MessageID: "<self@a8m.test>",
+		Date: time.Now(), From: []map[string]any{{"name": "Avery", "email": "avery.chen@a8m.test"}},
+		To:       []map[string]any{{"name": "Avery", "email": "avery.chen@a8m.test"}},
 		BodyText: "Self message", BodyHTML: "<p>Self message</p>", Size: 120,
 	}
 	if imported, _, removed := mergeFetchedMail(state, user, []fetchedMail{inboxCopy}, t.TempDir(), nil); imported != 1 || removed != 0 {
@@ -187,10 +187,10 @@ func TestMergeFetchedMailReconcilesOrphanSentCopy(t *testing.T) {
 	oldDate := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)
 	recentDate := time.Now().UTC().Format(time.RFC3339)
 	state := map[string]any{"messages": []any{
-		map[string]any{"id": "old_sent", "folder": "sent", "subject": "Old", "messageId": "<old@meridian.test>", "date": oldDate},
-		map[string]any{"id": "new_sent", "folder": "sent", "subject": "New", "messageId": "<new@meridian.test>", "date": recentDate},
+		map[string]any{"id": "old_sent", "folder": "sent", "subject": "Old", "messageId": "<old@a8m.test>", "date": oldDate},
+		map[string]any{"id": "new_sent", "folder": "sent", "subject": "New", "messageId": "<new@a8m.test>", "date": recentDate},
 	}, "attachments": map[string]any{}, "people": []any{}}
-	user := userRecord{Email: "avery.chen@meridian.test", Name: "Avery Chen"}
+	user := userRecord{Email: "avery.chen@a8m.test", Name: "Avery Chen"}
 	_, _, removed := mergeFetchedMail(state, user, nil, t.TempDir(), map[string]bool{"sent": true})
 	if removed != 1 || len(stateSlice(state, "messages")) != 1 {
 		t.Fatalf("expected only the old orphan Sent copy to be removed, got removed=%d messages=%d", removed, len(stateSlice(state, "messages")))
@@ -204,16 +204,16 @@ func TestMergeFetchedMailReconcilesOrphanSentCopy(t *testing.T) {
 func TestMergeFetchedMailUpdatesMovedMessageInPlace(t *testing.T) {
 	state := map[string]any{"messages": []any{
 		map[string]any{
-			"id": "inbox_copy", "folder": "inbox", "subject": "Move me", "messageId": "<move@meridian.test>",
-			"imapUid": 5, "imapFolder": "inbox", "imapUidValidity": 77, "from": map[string]any{"name": "Elena", "email": "elena.vasquez@meridian.test"},
+			"id": "inbox_copy", "folder": "inbox", "subject": "Move me", "messageId": "<move@a8m.test>",
+			"imapUid": 5, "imapFolder": "inbox", "imapUidValidity": 77, "from": map[string]any{"name": "Elena", "email": "elena.vasquez@a8m.test"},
 			"to": []any{}, "cc": []any{}, "bcc": []any{}, "date": "2026-10-28T09:00:00Z", "sizeBytes": 90,
 		},
 	}, "attachments": map[string]any{}, "people": []any{}}
-	user := userRecord{Email: "avery.chen@meridian.test", Name: "Avery Chen"}
+	user := userRecord{Email: "avery.chen@a8m.test", Name: "Avery Chen"}
 	moved := fetchedMail{
-		UID: 9, UIDValidity: 77, Folder: "archive", Subject: "Move me", MessageID: "<move@meridian.test>",
-		Date: time.Now(), From: []map[string]any{{"name": "Elena", "email": "elena.vasquez@meridian.test"}},
-		To:       []map[string]any{{"name": "Avery", "email": "avery.chen@meridian.test"}},
+		UID: 9, UIDValidity: 77, Folder: "archive", Subject: "Move me", MessageID: "<move@a8m.test>",
+		Date: time.Now(), From: []map[string]any{{"name": "Elena", "email": "elena.vasquez@a8m.test"}},
+		To:       []map[string]any{{"name": "Avery", "email": "avery.chen@a8m.test"}},
 		BodyText: "Move me", BodyHTML: "<p>Move me</p>", Size: 90,
 	}
 	imported, updated, removed := mergeFetchedMail(state, user, []fetchedMail{moved}, t.TempDir(), map[string]bool{"inbox": true, "archive": true})
@@ -232,19 +232,19 @@ func TestMergeFetchedMailUpdatesMovedMessageInPlace(t *testing.T) {
 
 func TestMergeFetchedMailDeduplicatesAndSetsThread(t *testing.T) {
 	state := map[string]any{"messages": []any{}, "attachments": map[string]any{}, "people": []any{}}
-	user := userRecord{Email: "avery.chen@meridian.test", Name: "Avery Chen", Initials: "AC", Color: "#34557a"}
+	user := userRecord{Email: "avery.chen@a8m.test", Name: "Avery Chen", Initials: "AC", Color: "#34557a"}
 	fetched := []fetchedMail{
 		{
-			UID: 1, UIDValidity: 99, Folder: "inbox", Subject: "Hello", MessageID: "<one@meridian.test>",
-			Date: time.Now(), From: []map[string]any{{"name": "Elena", "email": "elena.vasquez@meridian.test"}},
-			To:       []map[string]any{{"name": "Avery", "email": "avery.chen@meridian.test"}},
+			UID: 1, UIDValidity: 99, Folder: "inbox", Subject: "Hello", MessageID: "<one@a8m.test>",
+			Date: time.Now(), From: []map[string]any{{"name": "Elena", "email": "elena.vasquez@a8m.test"}},
+			To:       []map[string]any{{"name": "Avery", "email": "avery.chen@a8m.test"}},
 			BodyText: "Hello", BodyHTML: "<p>Hello</p>", Size: 100,
 		},
 		{
-			UID: 2, UIDValidity: 99, Folder: "inbox", Subject: "Re: Hello", MessageID: "<two@meridian.test>",
-			InReplyTo: "<one@meridian.test>", References: []string{"<one@meridian.test>"},
-			Date: time.Now().Add(time.Minute), From: []map[string]any{{"name": "Avery", "email": "avery.chen@meridian.test"}},
-			To:       []map[string]any{{"name": "Elena", "email": "elena.vasquez@meridian.test"}},
+			UID: 2, UIDValidity: 99, Folder: "inbox", Subject: "Re: Hello", MessageID: "<two@a8m.test>",
+			InReplyTo: "<one@a8m.test>", References: []string{"<one@a8m.test>"},
+			Date: time.Now().Add(time.Minute), From: []map[string]any{{"name": "Avery", "email": "avery.chen@a8m.test"}},
+			To:       []map[string]any{{"name": "Elena", "email": "elena.vasquez@a8m.test"}},
 			BodyText: "Reply", BodyHTML: "<p>Reply</p>", Size: 100,
 		},
 	}
@@ -285,13 +285,13 @@ func TestSearchStateMessages(t *testing.T) {
 	state := map[string]any{"messages": []any{
 		map[string]any{
 			"id": "m1", "folder": "inbox", "subject": "Invoice #4821", "bodyText": "Please approve",
-			"from": map[string]any{"name": "Elena Vasquez", "email": "elena.vasquez@meridian.test"},
+			"from": map[string]any{"name": "Elena Vasquez", "email": "elena.vasquez@a8m.test"},
 			"to":   []any{}, "cc": []any{}, "date": "2026-10-27T10:00:00Z", "sizeBytes": 5000,
 			"attachments": []any{map[string]any{"name": "invoice.pdf", "type": "PDF"}},
 		},
 		map[string]any{
 			"id": "m2", "folder": "archive", "subject": "Roadmap", "bodyText": "Planning",
-			"from": map[string]any{"name": "Nora Patel", "email": "nora.patel@meridian.test"},
+			"from": map[string]any{"name": "Nora Patel", "email": "nora.patel@a8m.test"},
 			"to":   []any{}, "cc": []any{}, "date": "2026-10-20T10:00:00Z", "sizeBytes": 1000,
 			"attachments": []any{},
 		},

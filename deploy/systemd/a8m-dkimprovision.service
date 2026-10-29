@@ -1,6 +1,6 @@
 [Unit]
-Description=Provision Meridian DKIM signing keys for mail domains
-Documentation=https://github.com/meridian-mail/meridian
+Description=Provision Alt8Mail DKIM signing keys for mail domains
+Documentation=https://github.com/CryptRoute/Alt8Mail
 After=postgresql.service redis-server.service rspamd.service
 Wants=postgresql.service redis-server.service rspamd.service
 
@@ -8,9 +8,9 @@ Wants=postgresql.service redis-server.service rspamd.service
 Type=oneshot
 User=root
 Group=root
-WorkingDirectory=/opt/meridian
-EnvironmentFile=/opt/meridian/secrets/app.env
-ExecStart=/opt/meridian/bin/meridian-dkimprovision
+WorkingDirectory=/opt/a8m
+EnvironmentFile=/opt/a8m/secrets/app.env
+ExecStart=/opt/a8m/bin/a8m-dkimprovision
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true

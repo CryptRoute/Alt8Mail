@@ -78,7 +78,7 @@ type parsedMailAttachment struct {
 
 func (s *Server) mailTLSConfig(serverName string) (*tls.Config, error) {
 	if s.cfg.MailCAFile == "" {
-		return nil, fmt.Errorf("MERIDIAN_MAIL_CA_FILE is not configured")
+		return nil, fmt.Errorf("ALT8MAIL_MAIL_CA_FILE is not configured")
 	}
 	pemData, err := os.ReadFile(s.cfg.MailCAFile)
 	if err != nil {
@@ -306,7 +306,7 @@ func (s *Server) checkNewInboxForUser(ctx context.Context, user userRecord) (int
 		current["mailSync"] = meta
 		if imported > 0 {
 			appendStateAudit(current, "mail.received", fmt.Sprintf("%d new message", imported), user.Name,
-				fmt.Sprintf("New INBOX mail · %d imported", imported), "127.0.0.1", "meridian-imap-worker")
+				fmt.Sprintf("New INBOX mail · %d imported", imported), "127.0.0.1", "a8m-imap-worker")
 		}
 		return nil
 	})
@@ -520,7 +520,7 @@ func (s *Server) syncUserMailbox(ctx context.Context, user userRecord) (map[stri
 		if imported > 0 || removed > 0 {
 			appendStateAudit(current, "mail.synced", fmt.Sprintf("%d new message", imported), user.Name,
 				fmt.Sprintf("IMAP sync · %d imported · %d refreshed · %d removed · %d pending",
-					imported, updated, removed, pendingTotal), "127.0.0.1", "meridian-imap-worker")
+					imported, updated, removed, pendingTotal), "127.0.0.1", "a8m-imap-worker")
 		}
 		return nil
 	})

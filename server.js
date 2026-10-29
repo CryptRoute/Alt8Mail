@@ -9,10 +9,10 @@ const dataFile = process.env.DATA_FILE || path.join(__dirname, "data", "db.json"
 
 const app = await startServer({ port, host, dataFile });
 const shownHost = host === "0.0.0.0" ? "localhost" : host === "127.0.0.1" ? "localhost" : host;
-console.log(`\n  Meridian Mail (Aurora template)`);
+console.log(`\n  Alt8Mail (Aurora template)`);
 console.log(`  → http://${shownHost}:${app.port}`);
 console.log(`  data: ${app.dataFile}`);
-console.log(`  demo: avery.chen@meridian.example / meridian-demo\n`);
+console.log(`  demo: avery.chen@a8m.example / a8m-demo\n`);
 
 let closing = false;
 async function shutdown(signal) {

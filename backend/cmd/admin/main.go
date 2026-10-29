@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
-	"github.com/meridian-mail/meridian/backend/internal/config"
-	"github.com/meridian-mail/meridian/backend/internal/store"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 )
 
 func main() {
@@ -59,7 +59,7 @@ func main() {
 		return
 	}
 	if *email == "" {
-		fmt.Fprintln(os.Stderr, "usage: meridian-admin -email user@example.test [-password ...] | -grant-system-admin | -revoke-system-admin | -list-admins")
+		fmt.Fprintln(os.Stderr, "usage: a8m-admin -email user@example.test [-password ...] | -grant-system-admin | -revoke-system-admin | -list-admins")
 		os.Exit(2)
 	}
 	if *grantSystemAdmin && *revokeSystemAdmin {

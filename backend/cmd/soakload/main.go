@@ -82,7 +82,7 @@ func realEndpoint(index int) string {
 }
 
 func userEmail(prefix string, index int) string {
-	return fmt.Sprintf("%s-%04d@meridian.test", prefix, index)
+	return fmt.Sprintf("%s-%04d@a8m.test", prefix, index)
 }
 
 func login(ctx context.Context, client *http.Client, base, email, password string) (string, error) {

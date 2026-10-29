@@ -1,4 +1,4 @@
-# Meridian Platform — Build & Production Plan
+# Alt8Mail Platform — Build & Production Plan
 
 Status: **active build — Phases 0–4 core live; customer/system administration
 console live; Phase 5 workspace, protocol and mail-scale work live** · Target: open-source
@@ -7,15 +7,15 @@ existing Aurora UI, preserved exactly · Backends: Go mail/system API and a
 separate Go admin console.
 
 **Live staging:** `https://130-94-46-22.sslip.io` (Let's Encrypt certificate) or
-`https://130.94.46.22` (self-signed fallback) · mail domain `meridian.test`. The
+`https://130.94.46.22` (self-signed fallback) · mail domain `a8m.test`. The
 root UI and `/api` are served by the Go system backend; the Node reference
 service is stopped and disabled. Go mail
 sync reads Dovecot over IMAP, actions write back to Dovecot and outbound mail is
 delivered through Postfix submission with TLS and SASL. The mailbox contains
 **no reference JSON demo messages**; tasks, files and calendar start empty.
-The staging login alias is `avery.chen@meridian.example` / `meridian-demo`,
-mapped to the canonical `avery.chen@meridian.test` account and gated by
-`MERIDIAN_DEMO_MODE` (login only, never data). Settings persist in PostgreSQL,
+The staging login alias is `avery.chen@a8m.example` / `a8m-demo`,
+mapped to the canonical `avery.chen@a8m.test` account and gated by
+`ALT8MAIL_DEMO_MODE` (login only, never data). Settings persist in PostgreSQL,
 rules/automatic replies deploy through ManageSieve, and real TOTP/WebAuthn
 enrollment plus first-time enrollment policy are implemented in Go. The
 enrollment policy is disabled per user in staging. A separate Go admin backend
@@ -117,7 +117,7 @@ installation has silently changed mail/HTTP exposure.
 
 ### Phase 1 — Infrastructure installation
 
-- [x] PostgreSQL 15 with a dedicated `meridian` role/database, local-only
+- [x] PostgreSQL 15 with a dedicated `a8m` role/database, local-only
   access and conservative 4 GB-host tuning.
 - [x] Redis 7 bound to localhost with a password/ACL and persistence policy.
 - [x] Dovecot IMAP/LMTP/Sieve + ManageSieve with virtual mailboxes in

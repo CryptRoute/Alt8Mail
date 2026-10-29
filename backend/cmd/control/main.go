@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
-	"github.com/meridian-mail/meridian/backend/internal/control"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/control"
 )
 
 var version = "dev"

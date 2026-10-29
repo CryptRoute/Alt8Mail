@@ -7,9 +7,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/config"
-	"github.com/meridian-mail/meridian/backend/internal/stateinit"
-	"github.com/meridian-mail/meridian/backend/internal/store"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/stateinit"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 )
 
 func main() {

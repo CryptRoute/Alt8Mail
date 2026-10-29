@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 const (

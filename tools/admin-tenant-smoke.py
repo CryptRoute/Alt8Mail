@@ -8,12 +8,12 @@ import time
 import urllib.error
 import urllib.request
 
-ADMIN_BASE = os.environ.get("MERIDIAN_ADMIN_API", "https://130-94-46-22.sslip.io/admin/api")
-USER_BASE = os.environ.get("MERIDIAN_USER_API", "https://130-94-46-22.sslip.io/system/api")
-EMAIL = os.environ.get("MERIDIAN_ADMIN_EMAIL", "avery.chen@meridian.test")
-PASSWORD = os.environ.get("MERIDIAN_ADMIN_PASSWORD", "")
-if not PASSWORD and os.environ.get("MERIDIAN_ADMIN_PASSWORD_FILE"):
-    with open(os.environ["MERIDIAN_ADMIN_PASSWORD_FILE"], "r", encoding="utf-8") as handle:
+ADMIN_BASE = os.environ.get("ALT8MAIL_ADMIN_API", "https://130-94-46-22.sslip.io/admin/api")
+USER_BASE = os.environ.get("ALT8MAIL_USER_API", "https://130-94-46-22.sslip.io/system/api")
+EMAIL = os.environ.get("ALT8MAIL_ADMIN_EMAIL", "avery.chen@a8m.test")
+PASSWORD = os.environ.get("ALT8MAIL_ADMIN_PASSWORD", "")
+if not PASSWORD and os.environ.get("ALT8MAIL_ADMIN_PASSWORD_FILE"):
+    with open(os.environ["ALT8MAIL_ADMIN_PASSWORD_FILE"], "r", encoding="utf-8") as handle:
         PASSWORD = handle.read().strip()
 if not PASSWORD:
     raise SystemExit("admin password is required")
@@ -44,7 +44,7 @@ class Client:
         csrf = self.csrf
         if not csrf:
             for cookie in self.jar:
-                if cookie.name in ("meridian_admin_csrf", "meridian_system_csrf"):
+                if cookie.name in ("a8m_admin_csrf", "a8m_system_csrf"):
                     csrf = cookie.value
         if csrf:
             req.add_header("X-CSRF-Token", csrf)

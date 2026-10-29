@@ -523,12 +523,12 @@ func restoreDraft(state map[string]any, item map[string]any) map[string]any {
 		"priority": firstNonEmpty(stateString(item, "priority"), "normal"),
 		"receipt":  stateBool(item, "receipt"), "delivery": stateBool(item, "delivery"),
 		"saveCopy": item["saveCopy"] != false, "categories": []any{}, "classification": "Internal",
-		"messageId": fmt.Sprintf("<%s@meridian.test>", draftID),
+		"messageId": fmt.Sprintf("<%s@a8m.test>", draftID),
 		"viaApi":    true,
 	}
 	auth, _ := snapshot["auth"].(map[string]any)
 	if auth == nil {
-		auth = map[string]any{"spf": "pass", "dkim": "pass", "dmarc": "pass", "tls": "TLS 1.3", "ip": "127.0.0.1", "signer": "meridian.test", "firstContact": false, "warnings": []any{}}
+		auth = map[string]any{"spf": "pass", "dkim": "pass", "dmarc": "pass", "tls": "TLS 1.3", "ip": "127.0.0.1", "signer": "a8m.test", "firstContact": false, "warnings": []any{}}
 	}
 	draft["auth"] = auth
 	if existing := findMessageIn(state, draftID); existing != nil && stateString(existing, "folder") == "drafts" {
@@ -582,9 +582,9 @@ func commitQueued(state map[string]any, item map[string]any) string {
 			"snippet": snippet(firstNonEmpty(text, "(no body)")), "bodyHtml": htmlBody, "bodyText": text,
 			"date": now, "unread": false, "starred": false, "draft": false,
 			"attachments": attachments, "categories": []any{}, "classification": "Internal", "external": false,
-			"auth":  map[string]any{"spf": "pass", "dkim": "pass", "dmarc": "pass", "tls": "TLS 1.3", "ip": "127.0.0.1", "signer": "meridian.test", "firstContact": false, "warnings": []any{}},
+			"auth":  map[string]any{"spf": "pass", "dkim": "pass", "dmarc": "pass", "tls": "TLS 1.3", "ip": "127.0.0.1", "signer": "a8m.test", "firstContact": false, "warnings": []any{}},
 			"event": nil, "sizeBytes": sizeBytes,
-			"messageId": firstNonEmpty(stateString(item, "mimeMessageId"), fmt.Sprintf("<%s@meridian.test>", newID("sent"))),
+			"messageId": firstNonEmpty(stateString(item, "mimeMessageId"), fmt.Sprintf("<%s@a8m.test>", newID("sent"))),
 			"inReplyTo": item["inReplyTo"], "priority": firstNonEmpty(stateString(item, "priority"), "normal"),
 			"receipt": stateBool(item, "receipt"), "delivery": stateBool(item, "delivery"),
 			"saveCopy": true, "viaApi": true, "windowMode": "floating",

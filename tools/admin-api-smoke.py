@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Admin API smoke test. Requires MERIDIAN_ADMIN_PASSWORD or MERIDIAN_ADMIN_PASSWORD_FILE."""
+"""Admin API smoke test. Requires ALT8MAIL_ADMIN_PASSWORD or ALT8MAIL_ADMIN_PASSWORD_FILE."""
 import http.cookiejar
 import json
 import os
@@ -9,14 +9,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-BASE = os.environ.get("MERIDIAN_ADMIN_API", "https://130-94-46-22.sslip.io/admin/api")
-EMAIL = os.environ.get("MERIDIAN_ADMIN_EMAIL", "avery.chen@meridian.test")
-PASSWORD = os.environ.get("MERIDIAN_ADMIN_PASSWORD", "")
-if not PASSWORD and os.environ.get("MERIDIAN_ADMIN_PASSWORD_FILE"):
-    with open(os.environ["MERIDIAN_ADMIN_PASSWORD_FILE"], "r", encoding="utf-8") as handle:
+BASE = os.environ.get("ALT8MAIL_ADMIN_API", "https://130-94-46-22.sslip.io/admin/api")
+EMAIL = os.environ.get("ALT8MAIL_ADMIN_EMAIL", "avery.chen@a8m.test")
+PASSWORD = os.environ.get("ALT8MAIL_ADMIN_PASSWORD", "")
+if not PASSWORD and os.environ.get("ALT8MAIL_ADMIN_PASSWORD_FILE"):
+    with open(os.environ["ALT8MAIL_ADMIN_PASSWORD_FILE"], "r", encoding="utf-8") as handle:
         PASSWORD = handle.read().strip()
 if not PASSWORD:
-    raise SystemExit("MERIDIAN_ADMIN_PASSWORD or MERIDIAN_ADMIN_PASSWORD_FILE is required")
+    raise SystemExit("ALT8MAIL_ADMIN_PASSWORD or ALT8MAIL_ADMIN_PASSWORD_FILE is required")
 
 jar = http.cookiejar.CookieJar()
 opener = urllib.request.build_opener(
@@ -83,7 +83,7 @@ users = ok("GET", "/users?limit=100")
 check(users.get("total", 0) >= 5, "users list is populated", users.get("total"))
 check(any(u["email"] == EMAIL for u in users["users"]), "admin identity is in the user list")
 stamp = int(time.time())
-smoke_email = f"admin.smoke.{stamp}@meridian.test"
+smoke_email = f"admin.smoke.{stamp}@a8m.test"
 created = ok("POST", "/users", {
     "name": "Admin Smoke",
     "email": smoke_email,
@@ -100,7 +100,7 @@ check(len(detail["user"]["aliases"]) == 1, "primary alias is provisioned")
 ok("PATCH", f"/users/{urllib.parse.quote(user_id)}", {"title": "Senior Smoke", "status": "suspended"})
 detail = ok("GET", f"/users/{urllib.parse.quote(user_id)}")
 check(detail["user"]["title"] == "Senior Smoke" and detail["user"]["status"] == "suspended", "user profile and status update")
-alias_email = f"smoke.alias.{stamp}@meridian.test"
+alias_email = f"smoke.alias.{stamp}@a8m.test"
 ok("POST", f"/users/{urllib.parse.quote(user_id)}/aliases", {"email": alias_email, "label": "Smoke alias"})
 detail = ok("GET", f"/users/{urllib.parse.quote(user_id)}")
 check(len(detail["user"]["aliases"]) == 2, "alias can be added")
@@ -119,7 +119,7 @@ ok("POST", "/users/bulk", {"action": "activate", "ids": [user_id]})
 print("\n[3] Groups and org units")
 group = ok("POST", "/groups", {
     "name": f"Smoke group {stamp}",
-    "email": f"smoke-group-{stamp}@meridian.test",
+    "email": f"smoke-group-{stamp}@a8m.test",
     "type": "distribution",
     "description": "admin smoke",
 })["group"]
@@ -148,7 +148,7 @@ ok("DELETE", f"/roles/{urllib.parse.quote(role['id'])}/assign/{urllib.parse.quot
 ok("DELETE", f"/roles/{urllib.parse.quote(role['id'])}")
 
 print("\n[5] Domains")
-domain = ok("POST", "/domains", {"domain": f"smoke-{stamp}.test", "dkimSelector": "meridian", "primary": False})["domain"]
+domain = ok("POST", "/domains", {"domain": f"smoke-{stamp}.test", "dkimSelector": "a8m", "primary": False})["domain"]
 check(domain["status"] == "pending", "new domain starts pending")
 verified = ok("POST", f"/domains/{urllib.parse.quote(domain['id'])}/verify", {})
 check(verified.get("ok") is False, "unconfigured DNS does not verify")
@@ -164,7 +164,7 @@ check(updated["security"]["passwordMinLength"] == 14, "policy persists")
 policy["security"]["passwordMinLength"] = 12
 ok("PATCH", "/policies", policy)
 settings = ok("GET", "/settings")
-ok("PATCH", "/settings", {"name": settings["tenant"]["name"], "branding": {"productName": "Meridian Mail", "primaryColor": "#0f6cbd"}})
+ok("PATCH", "/settings", {"name": settings["tenant"]["name"], "branding": {"productName": "Alt8Mail", "primaryColor": "#0f6cbd"}})
 
 print("\n[7] Audit and admin sessions")
 audit = ok("GET", "/audit?limit=100")
@@ -191,10 +191,10 @@ back = ok("POST", "/context", {"tenantId": tenant_id})
 check(back["activeTenant"]["id"] == tenant_id, "context restored")
 
 print("\n[9] System administrators")
-ok("POST", "/system/admins", {"email": "jordan.lee@meridian.test"})
+ok("POST", "/system/admins", {"email": "jordan.lee@a8m.test"})
 admins = ok("GET", "/system/admins")
-check(any(a["email"] == "jordan.lee@meridian.test" for a in admins["admins"]), "system admin granted")
-jordan_id = next(a["id"] for a in admins["admins"] if a["email"] == "jordan.lee@meridian.test")
+check(any(a["email"] == "jordan.lee@a8m.test" for a in admins["admins"]), "system admin granted")
+jordan_id = next(a["id"] for a in admins["admins"] if a["email"] == "jordan.lee@a8m.test")
 ok("DELETE", f"/system/admins/{urllib.parse.quote(jordan_id)}")
 
 print("\n[10] Cleanup targets")

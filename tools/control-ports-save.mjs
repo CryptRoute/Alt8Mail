@@ -52,7 +52,7 @@ const after = await main.req('/control/api/services/ports');
 console.log('after', after.listeners.map((listener) => `${listener.protocol}:${listener.port}/${listener.tls}`).join(' '));
 const smtp = await main.req('/control/api/delivery/smtp-tests', {
   method: 'POST',
-  body: { recipient: 'postmaster@meridian.test', from: 'postmaster@meridian.test', subject: `Listener save delivery test ${new Date().toISOString()}`, body: 'Listener configuration save verification.' },
+  body: { recipient: 'postmaster@a8m.test', from: 'postmaster@a8m.test', subject: `Listener save delivery test ${new Date().toISOString()}`, body: 'Listener configuration save verification.' },
 });
 console.log('smtp test', JSON.stringify({ ok: smtp.ok, status: smtp.status, error: smtp.error || '' }));
 if (!smtp.ok) process.exitCode = 1;

@@ -421,6 +421,50 @@ export async function createApp(options = {}) {
       assign("signature", String(input.signature));
     }
     if (input.autoAdvance !== undefined) assign("autoAdvance", !!input.autoAdvance);
+    for (const key of ["markReadOnOpen", "defaultReceipt", "notifyDesktop", "notifySound", "notifyCalendar", "externalWarnings"]) {
+      if (input[key] !== undefined) {
+        if (typeof input[key] !== "boolean") throw new ApiError(400, "PREFERENCES", `${key} must be true or false`);
+        assign(key, input[key]);
+      }
+    }
+    if (input.inboxView !== undefined) {
+      if (!["grouped", "individual"].includes(input.inboxView)) throw new ApiError(400, "PREFERENCES", "Inbox view must be grouped or individual");
+      assign("inboxView", input.inboxView);
+    }
+    if (input.theme !== undefined) {
+      if (!["light", "dark", "system"].includes(input.theme)) throw new ApiError(400, "PREFERENCES", "Theme must be light, dark or system");
+      assign("theme", input.theme);
+    }
+    if (input.accent !== undefined) {
+      if (!["blue", "teal", "violet", "rose"].includes(input.accent)) throw new ApiError(400, "PREFERENCES", "Unsupported accent color");
+      assign("accent", input.accent);
+    }
+    if (input.density !== undefined) {
+      if (!["comfortable", "compact"].includes(input.density)) throw new ApiError(400, "PREFERENCES", "Density must be comfortable or compact");
+      assign("density", input.density);
+    }
+    if (input.defaultPriority !== undefined) {
+      if (!["low", "normal", "high"].includes(input.defaultPriority)) throw new ApiError(400, "PREFERENCES", "Default priority must be low, normal or high");
+      assign("defaultPriority", input.defaultPriority);
+    }
+    if (input.undoSendSeconds !== undefined) {
+      if (!Number.isInteger(input.undoSendSeconds) || input.undoSendSeconds < 5 || input.undoSendSeconds > 10) {
+        throw new ApiError(400, "PREFERENCES", "Undo send window must be between 5 and 10 seconds");
+      }
+      assign("undoSendSeconds", input.undoSendSeconds);
+    }
+    if (input.composeMode !== undefined) {
+      if (!["html", "plain"].includes(input.composeMode)) throw new ApiError(400, "PREFERENCES", "Compose mode must be html or plain");
+      assign("composeMode", input.composeMode);
+    }
+    if (input.composeWidth !== undefined) {
+      if (!["standard", "wide", "full"].includes(input.composeWidth)) throw new ApiError(400, "PREFERENCES", "Compose width must be standard, wide or full");
+      assign("composeWidth", input.composeWidth);
+    }
+    if (input.composePosition !== undefined) {
+      if (!["center", "bottom-right", "bottom-left"].includes(input.composePosition)) throw new ApiError(400, "PREFERENCES", "Compose position must be center, bottom-right or bottom-left");
+      assign("composePosition", input.composePosition);
+    }
     return { next, changed };
   }
 
@@ -462,7 +506,7 @@ export async function createApp(options = {}) {
     const normalized = normalizeEmail(email);
     if (normalized === normalizeEmail(db.user.email)) return senderPerson(db.user);
     const person = db.people.find((item) => normalizeEmail(item.email) === normalized);
-    if (!person) throw new ApiError(400, "TASK_ASSIGNEE", "Choose a person from the Meridian directory");
+    if (!person) throw new ApiError(400, "TASK_ASSIGNEE", "Choose a person from the Alt8Mail directory");
     return senderPerson(person);
   }
 
@@ -738,11 +782,11 @@ export async function createApp(options = {}) {
       external: false,
       auth: {
         spf: "pass", dkim: "pass", dmarc: "pass", tls: "TLS 1.3",
-        ip: "127.0.0.1", signer: "meridian.example", firstContact: false, warnings: []
+        ip: "127.0.0.1", signer: "a8m.example", firstContact: false, warnings: []
       },
       event: null,
       sizeBytes,
-      messageId: existing ? existing.messageId : `<${id("draft")}@meridian.example>`,
+      messageId: existing ? existing.messageId : `<${id("draft")}@a8m.example>`,
       inReplyTo: input.inReplyTo == null ? (existing && existing.inReplyTo) || null : String(input.inReplyTo).slice(0, 400),
       threadId: String(input.threadId || (existing && existing.threadId) || id("t")).slice(0, 100),
       priority: ["low", "normal", "high"].includes(input.priority) ? input.priority : (existing && existing.priority) || "normal",
@@ -796,7 +840,7 @@ export async function createApp(options = {}) {
       external: false,
       auth: snapshot.auth || {
         spf: "pass", dkim: "pass", dmarc: "pass", tls: "TLS 1.3",
-        ip: "127.0.0.1", signer: "meridian.example", firstContact: false, warnings: []
+        ip: "127.0.0.1", signer: "a8m.example", firstContact: false, warnings: []
       }
     };
     return draft;
@@ -834,11 +878,11 @@ export async function createApp(options = {}) {
         external: false,
         auth: {
           spf: "pass", dkim: "pass", dmarc: "pass", tls: "TLS 1.3",
-          ip: "127.0.0.1", signer: "meridian.example", firstContact: false, warnings: []
+          ip: "127.0.0.1", signer: "a8m.example", firstContact: false, warnings: []
         },
         event: null,
         sizeBytes: 4 * 1024 + Buffer.byteLength(item.bodyText || "", "utf8") + (item.attachments || []).reduce((sum, file) => sum + (file.sizeBytes || 0), 0),
-        messageId: `<${id("sent")}@meridian.example>`,
+        messageId: `<${id("sent")}@a8m.example>`,
         inReplyTo: item.inReplyTo || null,
         priority: item.priority || "normal",
         receipt: !!item.receipt,
@@ -1014,7 +1058,7 @@ export async function createApp(options = {}) {
           loginAttempts.set(ip, current);
           addAudit(req, "auth.failed", email || "(blank)", `Failed ${method} sign-in`, "Unknown");
           await store.save();
-          throw new ApiError(401, "BAD_CREDENTIALS", "That email and password do not match a Meridian account");
+          throw new ApiError(401, "BAD_CREDENTIALS", "That email and password do not match a Alt8Mail account");
         }
         loginAttempts.delete(ip);
         const factor = db.user.security && db.user.security.twoFactor;
@@ -1234,7 +1278,7 @@ export async function createApp(options = {}) {
       }
       if (pathname === "/api/files" && req.method === "POST") {
         const body = await readJson(req);
-        const provider = providerById(String(body.providerId || "meridian"));
+        const provider = providerById(String(body.providerId || "a8m"));
         if (!provider) throw new ApiError(400, "FILE_PROVIDER", "Choose a valid storage provider");
         if (!provider.connected) throw new ApiError(409, "PROVIDER_OFFLINE", `${provider.name} is not connected`);
         let attachment = null;
@@ -1290,7 +1334,7 @@ export async function createApp(options = {}) {
         addAudit(req, "file.shared", file.name, `External ${access} link · expires in ${expiresDays} days`);
         await store.save();
         sendJson(res, 200, {
-          share: { url: `https://files.meridian.example/s/${token}`, access, expiresAt, expiresDays }
+          share: { url: `https://files.a8m.example/s/${token}`, access, expiresAt, expiresDays }
         });
         return;
       }
@@ -1605,7 +1649,7 @@ export async function createApp(options = {}) {
         if (existing && existing.folder !== "drafts") throw new ApiError(409, "NOT_A_DRAFT", "That id belongs to a message, not a draft");
         const draft = drainDraft(body, existing);
         draft.id = draftId;
-        draft.messageId = existing ? existing.messageId : `<${draftId}@meridian.example>`;
+        draft.messageId = existing ? existing.messageId : `<${draftId}@a8m.example>`;
         if (existing) {
           Object.assign(existing, draft);
         } else {
@@ -1876,7 +1920,7 @@ export async function createApp(options = {}) {
           ip: auth.ip || "—",
           signer: auth.signer || "—",
           warnings: auth.warnings || [],
-          policy: message.external ? "External sender · verified against Meridian DMARC policy" : "Internal sender · verified by Meridian directory",
+          policy: message.external ? "External sender · verified against Alt8Mail DMARC policy" : "Internal sender · verified by Alt8Mail directory",
           checkedAt: nowIso()
         });
         return;
@@ -1956,7 +2000,7 @@ export async function createApp(options = {}) {
         const payload = lines.join("\r\n") + "\r\n";
         res.writeHead(200, {
           "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": `attachment; filename="meridian-audit-${new Date().toISOString().slice(0, 10)}.csv"`,
+          "Content-Disposition": `attachment; filename="a8m-audit-${new Date().toISOString().slice(0, 10)}.csv"`,
           "Content-Length": Buffer.byteLength(payload),
           "Cache-Control": "no-store"
         });

@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.CONTROL_BASE || "https://130.94.46.22:8808";
 const EMAIL = process.env.CONTROL_EMAIL || "sysadmin@alt8mail.local";
 const PASSWORD = process.env.CONTROL_PASSWORD || fs.readFileSync(process.env.CONTROL_PASSWORD_FILE, "utf8").trim();
-const KEY_PATH = process.env.TERMINAL_KEY_PATH || path.join(os.homedir(), ".ssh", "meridian_deploy_ed25519");
+const KEY_PATH = process.env.TERMINAL_KEY_PATH || path.join(os.homedir(), ".ssh", "a8m_deploy_ed25519");
 const OUT = path.resolve(__dirname, "..", "artifacts", "control-ui");
 fs.mkdirSync(OUT, { recursive: true });
 const checks = [];

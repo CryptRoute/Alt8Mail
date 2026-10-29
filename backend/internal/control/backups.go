@@ -145,12 +145,12 @@ func (s *Server) runBackup(id, path string, contents []string) {
 	for _, content := range contents {
 		switch content {
 		case "panel_database":
-			dumpPath := filepath.Join(tempDir, "meridian.dump")
-			if err := runCommandToFile(ctx, dumpPath, "runuser", "-u", "postgres", "--", "pg_dump", "-Fc", "meridian"); err != nil {
+			dumpPath := filepath.Join(tempDir, "a8m.dump")
+			if err := runCommandToFile(ctx, dumpPath, "runuser", "-u", "postgres", "--", "pg_dump", "-Fc", "a8m"); err != nil {
 				fail(fmt.Errorf("database dump: %w", err))
 				return
 			}
-			if err := addPathToTar(tw, dumpPath, "database/meridian.dump"); err != nil {
+			if err := addPathToTar(tw, dumpPath, "database/a8m.dump"); err != nil {
 				fail(err)
 				return
 			}
@@ -398,14 +398,14 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request, ses
 	replaced := []string{}
 	counts := map[string]int{}
 	if selected["panel_database"] {
-		dump := filepath.Join(stage, "database", "meridian.dump")
+		dump := filepath.Join(stage, "database", "a8m.dump")
 		result, err := runCommand(r.Context(), 10*time.Minute, "runuser", "-u", "postgres", "--",
-			"pg_restore", "--clean", "--if-exists", "--no-owner", "--no-privileges", "-d", "meridian", dump)
+			"pg_restore", "--clean", "--if-exists", "--no-owner", "--no-privileges", "-d", "a8m", dump)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "RESTORE", "Database restore failed: "+strings.TrimSpace(result.Stderr))
 			return
 		}
-		replaced = append(replaced, "PostgreSQL meridian database")
+		replaced = append(replaced, "PostgreSQL a8m database")
 	}
 	if selected["postfix"] {
 		count, err := copyTree(filepath.Join(stage, "config/etc/postfix"), s.cfg.PostfixDir)

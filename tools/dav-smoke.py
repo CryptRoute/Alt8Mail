@@ -45,7 +45,7 @@ def request(method, path, body=None, content_type=None, expected=None, follow=Tr
     url = BASE + path
     req = urllib.request.Request(url, data=body, method=method)
     req.add_header("Authorization", AUTH)
-    req.add_header("User-Agent", "Meridian-DAV-Smoke/1.0")
+    req.add_header("User-Agent", "Alt8Mail-DAV-Smoke/1.0")
     if content_type:
         req.add_header("Content-Type", content_type)
     handlers = [urllib.request.HTTPSHandler(context=CONTEXT)]
@@ -96,7 +96,7 @@ def main():
     event_ics = (
         "BEGIN:VCALENDAR\r\n"
         "VERSION:2.0\r\n"
-        "PRODID:-//Meridian Smoke//EN\r\n"
+        "PRODID:-//Alt8Mail Smoke//EN\r\n"
         "BEGIN:VEVENT\r\n"
         f"UID:{event_uid}\r\n"
         "DTSTAMP:20260101T090000Z\r\n"

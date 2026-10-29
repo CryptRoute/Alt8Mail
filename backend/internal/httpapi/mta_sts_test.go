@@ -38,9 +38,9 @@ func TestVerifyDomainDNSMTASTS(t *testing.T) {
 	policy := mtaSTSPolicy{Domain: "example.test", Mode: "enforce", MaxAge: 604800, MailHost: "mail.example.test"}
 	lookup := fakeDomainLookup{
 		txt: map[string][]string{
-			"_meridian-verification.example.test": {"meridian-verify=tok_123"},
+			"_a8m-verification.example.test": {"a8m-verify=tok_123"},
 			"example.test":                        {"v=spf1 mx -all"},
-			"meridian._domainkey.example.test":    {"v=DKIM1; k=rsa; p=REALKEY"},
+			"a8m._domainkey.example.test":    {"v=DKIM1; k=rsa; p=REALKEY"},
 			"_dmarc.example.test":                 {"v=DMARC1; p=reject"},
 			"_mta-sts.example.test":               {"v=STSv1; id=" + policy.ID()},
 		},
@@ -49,7 +49,7 @@ func TestVerifyDomainDNSMTASTS(t *testing.T) {
 		},
 	}
 	fetch := func(context.Context, string) (string, error) { return string(policy.Body()), nil }
-	checks := verifyDomainDNSFull(context.Background(), lookup, "example.test", "meridian", "tok_123",
+	checks := verifyDomainDNSFull(context.Background(), lookup, "example.test", "a8m", "tok_123",
 		"v=DKIM1; k=rsa; p=REALKEY", "mail.example.test", "enforce", 604800, fetch)
 	if !checks.Ready || !checks.MTASTS {
 		t.Fatalf("MTA-STS should verify: %#v", checks)
@@ -61,13 +61,13 @@ func TestVerifyDomainDNSMTASTS(t *testing.T) {
 		staleLookup.txt[key] = value
 	}
 	staleLookup.txt["_mta-sts.example.test"] = []string{"v=STSv1; id=stale"}
-	checks = verifyDomainDNSFull(context.Background(), staleLookup, "example.test", "meridian", "tok_123",
+	checks = verifyDomainDNSFull(context.Background(), staleLookup, "example.test", "a8m", "tok_123",
 		"v=DKIM1; k=rsa; p=REALKEY", "mail.example.test", "enforce", 604800, fetch)
 	if checks.MTASTS || checks.Ready || !strings.Contains(checks.Details["mta-sts"], "id=") {
 		t.Fatalf("stale MTA-STS id must fail: %#v", checks)
 	}
 
-	checks = verifyDomainDNSFull(context.Background(), lookup, "example.test", "meridian", "tok_123",
+	checks = verifyDomainDNSFull(context.Background(), lookup, "example.test", "a8m", "tok_123",
 		"v=DKIM1; k=rsa; p=REALKEY", "mail.example.test", "enforce", 604800,
 		func(context.Context, string) (string, error) {
 			return "version: STSv1\r\nmode: testing\r\nmx: mail.example.test\r\nmax_age: 604800\r\n", nil
@@ -78,7 +78,7 @@ func TestVerifyDomainDNSMTASTS(t *testing.T) {
 }
 
 func TestDomainRecordsIncludeMTASTS(t *testing.T) {
-	records := domainRecordsWithMTA("example.test", "meridian", "tok_123", "mail.example.test",
+	records := domainRecordsWithMTA("example.test", "a8m", "tok_123", "mail.example.test",
 		"v=DKIM1; k=rsa; p=KEY", "reject", "enforce", 604800)
 	var txt, policy map[string]string
 	for _, record := range records {

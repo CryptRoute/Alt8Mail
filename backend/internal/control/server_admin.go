@@ -648,7 +648,7 @@ func (s *Server) handleDatabaseMigrate(w http.ResponseWriter, r *http.Request, s
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 		return
 	}
-	if !validatePGIdentifier(body.TargetDatabase) || body.TargetDatabase == "meridian" {
+	if !validatePGIdentifier(body.TargetDatabase) || body.TargetDatabase == "a8m" {
 		writeError(w, http.StatusBadRequest, "DATABASE", "Choose a different valid target database")
 		return
 	}
@@ -683,7 +683,7 @@ func (s *Server) runDatabaseMigration(id, target string) {
 	tempPath := temp.Name()
 	temp.Close()
 	defer os.Remove(tempPath)
-	if err := runCommandToFile(ctx, tempPath, "runuser", "-u", "postgres", "--", "pg_dump", "-Fc", "meridian"); err != nil {
+	if err := runCommandToFile(ctx, tempPath, "runuser", "-u", "postgres", "--", "pg_dump", "-Fc", "a8m"); err != nil {
 		set(10, "failed", "pg_dump: "+err.Error())
 		return
 	}

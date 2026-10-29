@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import { launchBrowser } from "./cdp.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BASE = process.env.MERIDIAN_UI_URL || "https://130-94-46-22.sslip.io/";
-const EMAIL = process.env.MERIDIAN_UI_EMAIL || "avery.chen@meridian.test";
-const PASSWORD = process.env.MERIDIAN_UI_PASSWORD || fs.readFileSync(path.resolve(__dirname, "..", "staging_avery_password"), "utf8").trim();
+const BASE = process.env.ALT8MAIL_UI_URL || "https://130-94-46-22.sslip.io/";
+const EMAIL = process.env.ALT8MAIL_UI_EMAIL || "avery.chen@a8m.test";
+const PASSWORD = process.env.ALT8MAIL_UI_PASSWORD || fs.readFileSync(path.resolve(__dirname, "..", "staging_avery_password"), "utf8").trim();
 const OUT = path.resolve(__dirname, "..", "artifacts", "webmail-0.9");
 fs.mkdirSync(OUT, { recursive: true });
 const checks = [];
@@ -25,7 +25,7 @@ const check = (name, condition, detail = "") => {
 };
 
 const api = (method, url, body) => page.eval(`(async () => {
-  const match = document.cookie.match(/(?:^|; )meridian_system_csrf=([^;]+)/);
+  const match = document.cookie.match(/(?:^|; )a8m_system_csrf=([^;]+)/);
   const headers = { "Content-Type": "application/json" };
   if (match) headers["X-CSRF-Token"] = decodeURIComponent(match[1]);
   const response = await fetch(${JSON.stringify(url)}, {
@@ -118,7 +118,7 @@ try {
 
   // Branding and About content.
   check("quota source is Alt8Mail", await page.eval("document.getElementById('quotaSource').textContent === 'Alt8Mail live'"));
-  check("settings footer is Alt8Mail", await page.eval("document.querySelector('.settings-nav-foot').textContent.includes('Alt8Mail') && !document.querySelector('.settings-nav-foot').textContent.includes('Meridian IT')"));
+  check("settings footer is Alt8Mail", await page.eval("document.querySelector('.settings-nav-foot').textContent.includes('Alt8Mail') && !document.querySelector('.settings-nav-foot').textContent.includes('Alt8Mail IT')"));
   await page.eval("document.querySelector('[data-settings-tab=\"about\"]').click()");
   await page.waitFor(() => document.getElementById("settingsTitle").textContent === "About", 5000);
   const about = await page.eval("document.querySelector('[data-settings-panel=\"about\"]').innerText");

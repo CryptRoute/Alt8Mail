@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 const (
-	trustedDeviceCookie = "meridian_system_trusted"
+	trustedDeviceCookie = "a8m_system_trusted"
 	trustedDeviceTTL    = 30 * 24 * time.Hour
 	totpPendingTTL      = 10 * time.Minute
 )
@@ -387,7 +387,7 @@ func (s *Server) beginTOTPEnrollment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "TOTP", "Could not store authenticator setup state")
 		return
 	}
-	issuer := "Meridian Mail"
+	issuer := "Alt8Mail"
 	writeJSON(w, http.StatusOK, map[string]any{
 		"secret": secret, "issuer": issuer, "account": sess.User.Email,
 		"otpauth":   auth.TOTPURI(secret, sess.User.Email, issuer),

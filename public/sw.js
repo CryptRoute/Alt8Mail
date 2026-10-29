@@ -1,7 +1,7 @@
-/* Meridian Mail — offline app shell.
+/* Alt8Mail — offline app shell.
    API calls are always network-only; mailbox data is never cached here. */
 const VERSION = "2026.10.29-8";
-const CACHE = `meridian-shell-${VERSION}`;
+const CACHE = `a8m-shell-${VERSION}`;
 const SHELL = [
   "/",
   "/styles.css?v=0.9.0-r2",

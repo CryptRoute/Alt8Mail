@@ -5,23 +5,23 @@ import { launchBrowser } from "./cdp.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const artifacts = path.resolve(__dirname, "..", "artifacts");
-const base = process.env.MERIDIAN_UI_URL || "https://130-94-46-22.sslip.io/";
-const email = process.env.MERIDIAN_UI_EMAIL || "avery.chen@meridian.test";
-const password = process.env.MERIDIAN_UI_PASSWORD || "";
+const base = process.env.ALT8MAIL_UI_URL || "https://130-94-46-22.sslip.io/";
+const email = process.env.ALT8MAIL_UI_EMAIL || "avery.chen@a8m.test";
+const password = process.env.ALT8MAIL_UI_PASSWORD || "";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const stamp = Date.now();
 const fontSubject = `Postcard font smoke ${stamp}`;
 const aiReplyStub = "Thank you for the update. I reviewed the conversation and will send the confirmed next steps by Friday.";
 const summaryStub = "The conversation confirms the IDLE delivery test succeeded and the team is reviewing the next steps.";
 const translationStub = "La conversación confirma que la prueba de entrega IDLE fue exitosa.";
-if (!password) throw new Error("MERIDIAN_UI_PASSWORD is required");
+if (!password) throw new Error("ALT8MAIL_UI_PASSWORD is required");
 
 const browser = await launchBrowser({ headless: true, width: 1440, height: 1000, ignoreCertificateErrors: false });
 const page = await browser.newPage(base);
 let beforeDraftIds = new Set();
 let draftsBaselineReady = false;
 
-const csrf = () => page.eval("document.cookie.match(/(?:^|; )meridian_system_csrf=([^;]+)/)?.[1] || ''");
+const csrf = () => page.eval("document.cookie.match(/(?:^|; )a8m_system_csrf=([^;]+)/)?.[1] || ''");
 const deleteDraft = async (id) => {
   const token = decodeURIComponent(await csrf());
   await page.eval(`fetch('/api/drafts/${encodeURIComponent(id)}',{method:'DELETE',credentials:'same-origin',headers:{'X-CSRF-Token':${JSON.stringify(token)}}})`);
@@ -57,7 +57,7 @@ try {
   draftsBaselineReady = true;
 
   await page.eval(`(() => {
-    window.__meridianRealFetch = window.fetch;
+    window.__a8mRealFetch = window.fetch;
     window.fetch = (input, init) => {
       const url = typeof input === 'string' ? input : input.url;
       if (url.includes('/api/ai/')) {
@@ -68,7 +68,7 @@ try {
             : { summary: ${JSON.stringify(summaryStub)}, language: "en-US" };
         return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } }));
       }
-      return window.__meridianRealFetch(input, init);
+      return window.__a8mRealFetch(input, init);
     };
   })()`);
 

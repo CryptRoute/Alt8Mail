@@ -3,7 +3,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const BASE = 'https://130.94.46.22:8808';
 const PASSWORD = fs.readFileSync(process.env.CONTROL_PASSWORD_FILE, 'utf8').trim();
 const MODE = process.argv[2] || 'create';
-const NAME = 'selfsigned-invcheck-meridian-test';
+const NAME = 'selfsigned-invcheck-a8m-test';
 class Session {
   constructor() { this.jar = new Map(); this.csrf = ''; }
   store(response) { for (const cookie of response.headers.getSetCookie ? response.headers.getSetCookie() : []) { const [pair] = cookie.split(';'); const i = pair.indexOf('='); if (i < 0) continue; const k = pair.slice(0, i).trim(); const v = pair.slice(i + 1); if (/max-age=0/i.test(cookie) || /expires=thu, 01 jan 1970/i.test(cookie)) this.jar.delete(k); else this.jar.set(k, v); } }
@@ -13,7 +13,7 @@ class Session {
 const session = new Session();
 await session.login();
 if (MODE === 'create') {
-  const created = await session.req('/control/api/tls/self-signed', { method: 'POST', expected: 201, body: { commonName: 'invcheck.meridian.test', sans: 'invcheck.meridian.test', force: true } });
+  const created = await session.req('/control/api/tls/self-signed', { method: 'POST', expected: 201, body: { commonName: 'invcheck.a8m.test', sans: 'invcheck.a8m.test', force: true } });
   const listed = await session.req('/control/api/tls/certificates');
   const found = listed.certificates.find((entry) => entry.name === NAME);
   if (!found) throw new Error('new self-signed certificate missing from inventory');

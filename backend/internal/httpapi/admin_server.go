@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 const (
-	adminSessionCookie = "meridian_admin_sid"
-	adminCSRFCookie    = "meridian_admin_csrf"
+	adminSessionCookie = "a8m_admin_sid"
+	adminCSRFCookie    = "a8m_admin_csrf"
 )
 
 type adminTenant struct {
@@ -262,7 +262,7 @@ func (s *Server) adminHealth(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, map[string]any{
-		"ok": status == http.StatusOK, "service": "meridian-admin-backend",
+		"ok": status == http.StatusOK, "service": "a8m-admin-backend",
 		"version": s.version, "env": s.cfg.Env, "time": time.Now().UTC().Format(time.RFC3339),
 		"checks": map[string]string{"postgres": dbStatus, "redis": redisStatus},
 	})
@@ -295,7 +295,7 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !passwordOK {
 		s.adminLimit.Fail(ip)
 		s.recordAdminAudit(r.Context(), nil, user, "admin.login_failed", email, "Failed admin password sign-in", nil)
-		writeError(w, http.StatusUnauthorized, "BAD_CREDENTIALS", "That email and password do not match a Meridian account")
+		writeError(w, http.StatusUnauthorized, "BAD_CREDENTIALS", "That email and password do not match a Alt8Mail account")
 		return
 	}
 	if user.Status != "active" || user.DeletedAt != nil {

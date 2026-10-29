@@ -39,17 +39,17 @@ let routeId = '';
 try {
   const ip = await main.req('/control/api/delivery/outbound-ips', {
     method: 'POST', expected: 201,
-    body: { address: '130.94.46.22', label: `Control test ${suffix}`, mode: 'backup', priority: 50, interface: 'eth0', heloName: 'mail.meridian.test', active: true, notes: 'Automated test' },
+    body: { address: '130.94.46.22', label: `Control test ${suffix}`, mode: 'backup', priority: 50, interface: 'eth0', heloName: 'mail.a8m.test', active: true, notes: 'Automated test' },
   });
   ipId = ip.id;
   const route = await main.req('/control/api/delivery/sender-routes', {
     method: 'POST', expected: 201,
-    body: { senderDomain: 'meridian.test', sourceIpId: ipId, heloName: 'mail.meridian.test', transportName: transport, active: true },
+    body: { senderDomain: 'a8m.test', sourceIpId: ipId, heloName: 'mail.a8m.test', transportName: transport, active: true },
   });
   routeId = route.id;
   const config = await main.req('/control/api/services/config?file=master.cf');
   const hasTransport = String(config.content || '').includes(transport);
-  const hasHelo = String(config.content || '').includes('smtp_helo_name=mail.meridian.test');
+  const hasHelo = String(config.content || '').includes('smtp_helo_name=mail.a8m.test');
   console.log('outbound route applied', JSON.stringify({ transport, hasTransport, hasHelo }));
   if (!hasTransport || !hasHelo) throw new Error('sender transport was not rendered into master.cf');
   await main.req(`/control/api/delivery/sender-routes/${routeId}`, { method: 'DELETE' });

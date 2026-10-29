@@ -134,16 +134,16 @@ Before exposing a production host:
 1. Use a customer-owned domain with trusted TLS certificates, including
    `mta-sts.<domain>` if MTA-STS is enabled.
 2. Publish and verify ownership/MX/SPF/DKIM/DMARC and the `_mta-sts` TXT id.
-3. Set all secrets outside the repository (`/opt/meridian/secrets` or a secret
+3. Set all secrets outside the repository (`/opt/a8m/secrets` or a secret
    manager), enforce 0600 root-only files, and rotate any staging credentials.
 4. Keep PostgreSQL, Redis, Dovecot, Postfix SASL, the Go APIs and the control
    policy daemon on loopback; expose only 25/587/993/995/4190 and 80/443 as
    required. Restrict System Control on 8808 to an operator VPN or source-IP
    allowlist; never publish it broadly.
 5. Keep the S3 bucket private; use a dedicated bucket policy and short-lived
-   credentials. OAuth token encryption derives from `MERIDIAN_SESSION_SECRET`;
+   credentials. OAuth token encryption derives from `ALT8MAIL_SESSION_SECRET`;
    rotating that secret requires connector reauthorization.
-6. Keep `MERIDIAN_CLAMAV_ADDR` configured in production and verify an EICAR
+6. Keep `ALT8MAIL_CLAMAV_ADDR` configured in production and verify an EICAR
    upload is rejected.
 7. Disable demo mode/aliases, first-time enrollment remains opt-in per user,
    and administrator accounts must use MFA. Rotate the bootstrap System Control
@@ -153,7 +153,7 @@ Before exposing a production host:
    documented data-processing agreement and a reviewed organization prompt.
    Restrict `policies.manage`; the endpoint is an intentional outbound SSRF
    surface for self-hosted gateways.
-9. Verify external sending-identity domains authorize Meridian in SPF/DKIM
+9. Verify external sending-identity domains authorize Alt8Mail in SPF/DKIM
    before advertising the identity feature; verification proves control, not
    deliverability.
 10. Replace the System Control self-signed bootstrap certificate with a

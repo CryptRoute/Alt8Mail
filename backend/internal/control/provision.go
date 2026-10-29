@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 var safeDomainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$`)
@@ -239,14 +239,14 @@ func (s *Server) generateDKIMKey(ctx context.Context, domainID, domain, selector
 func normalizeSelector(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
-		return "meridian"
+		return "a8m"
 	}
 	return value
 }
 
 func (s *Server) writeSelectorMap(ctx context.Context) (bool, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT lower(domain::text), COALESCE(NULLIF(dkim_selector,''),'meridian')
+		SELECT lower(domain::text), COALESCE(NULLIF(dkim_selector,''),'a8m')
 		FROM public.mail_domains ORDER BY domain
 	`)
 	if err != nil {

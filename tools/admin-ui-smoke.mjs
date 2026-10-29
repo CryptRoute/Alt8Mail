@@ -5,22 +5,22 @@ import { launchBrowser } from "./cdp.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const artifacts = path.resolve(__dirname, "..", "artifacts");
-const base = process.env.MERIDIAN_ADMIN_URL || "https://130-94-46-22.sslip.io/admin/";
-const email = process.env.MERIDIAN_ADMIN_EMAIL || "avery.chen@meridian.test";
-const password = process.env.MERIDIAN_ADMIN_PASSWORD || "";
+const base = process.env.ALT8MAIL_ADMIN_URL || "https://130-94-46-22.sslip.io/admin/";
+const email = process.env.ALT8MAIL_ADMIN_EMAIL || "avery.chen@a8m.test";
+const password = process.env.ALT8MAIL_ADMIN_PASSWORD || "";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-if (!password) throw new Error("MERIDIAN_ADMIN_PASSWORD is required");
+if (!password) throw new Error("ALT8MAIL_ADMIN_PASSWORD is required");
 
 const browser = await launchBrowser({ headless: true, width: 1440, height: 1000, ignoreCertificateErrors: false });
 const page = await browser.newPage(base);
 const stamp = Date.now();
-const smokeUser = `ui.smoke.${stamp}@meridian.test`;
-const smokeGroup = `ui-smoke-${stamp}@meridian.test`;
+const smokeUser = `ui.smoke.${stamp}@a8m.test`;
+const smokeGroup = `ui-smoke-${stamp}@a8m.test`;
 const smokeRole = `UI smoke role ${stamp}`;
 const smokeUnit = `UI Smoke Unit ${stamp}`;
 
 const api = (method, url, body) => page.eval(`(async () => {
-  const match = document.cookie.match(/(?:^|; )meridian_admin_csrf=([^;]+)/);
+  const match = document.cookie.match(/(?:^|; )a8m_admin_csrf=([^;]+)/);
   const headers = { "Content-Type": "application/json" };
   if (match) headers["X-CSRF-Token"] = decodeURIComponent(match[1]);
   const response = await fetch(${JSON.stringify(url)}, {
@@ -105,7 +105,7 @@ try {
 
   console.log("\n[5] Domains, audit, settings and organizations");
   await page.eval('location.hash = "#/domains"');
-  await page.waitFor(() => document.body.textContent.includes("meridian.test"), 10000);
+  await page.waitFor(() => document.body.textContent.includes("a8m.test"), 10000);
   await click(".domain-card");
   await page.waitFor(() => document.querySelector("#drawerRoot .drawer") !== null, 5000);
   const domainDrawer = await page.eval("document.getElementById('drawerRoot').textContent");

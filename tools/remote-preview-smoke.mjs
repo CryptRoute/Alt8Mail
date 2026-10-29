@@ -20,7 +20,7 @@ try {
   await sleep(300);
   const messages = await page.eval("document.querySelectorAll('.msg').length");
   assert.equal(messages, 12, "12 inbox conversations");
-  assert.equal(await page.eval("document.querySelector('.account-id span').textContent"), "avery.chen@meridian.example", "demo identity");
+  assert.equal(await page.eval("document.querySelector('.account-id span').textContent"), "avery.chen@a8m.example", "demo identity");
   await page.click(".rail-btn[data-task='tasks']");
   await page.waitFor(() => !document.getElementById("tasksView").hidden, 5000);
   assert.equal(await page.eval("document.querySelectorAll('.task-row').length"), 8, "tasks workspace");

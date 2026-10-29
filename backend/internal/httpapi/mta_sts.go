@@ -112,7 +112,7 @@ func (s *Server) fetchMTASTSPolicy(ctx context.Context, url string) (string, err
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("User-Agent", "Meridian-Mail-MTASTS-Verifier/1.0")
+	request.Header.Set("User-Agent", "Alt8Mail-MTASTS-Verifier/1.0")
 	client := &http.Client{
 		Timeout: 8 * time.Second,
 		Transport: &http.Transport{

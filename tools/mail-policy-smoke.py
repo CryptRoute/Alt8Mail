@@ -19,14 +19,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-ADMIN_BASE = os.environ.get("MERIDIAN_ADMIN_API", "https://130-94-46-22.sslip.io/admin/api")
-USER_BASE = os.environ.get("MERIDIAN_USER_API", "https://130-94-46-22.sslip.io/system/api")
-MAIL_HOST = os.environ.get("MERIDIAN_MAIL_HOST", "130.94.46.22")
-SMTP_HOST = os.environ.get("MERIDIAN_SMTP_HOST", MAIL_HOST)
-SMTP_PORT = int(os.environ.get("MERIDIAN_SMTP_PORT", "587"))
-ADMIN_EMAIL = os.environ.get("MERIDIAN_ADMIN_EMAIL", "avery.chen@meridian.test")
-ADMIN_PASSWORD_FILE = os.environ.get("MERIDIAN_ADMIN_PASSWORD_FILE", "staging_avery_password")
-ADMIN_PASSWORD = os.environ.get("MERIDIAN_ADMIN_PASSWORD", "")
+ADMIN_BASE = os.environ.get("ALT8MAIL_ADMIN_API", "https://130-94-46-22.sslip.io/admin/api")
+USER_BASE = os.environ.get("ALT8MAIL_USER_API", "https://130-94-46-22.sslip.io/system/api")
+MAIL_HOST = os.environ.get("ALT8MAIL_MAIL_HOST", "130.94.46.22")
+SMTP_HOST = os.environ.get("ALT8MAIL_SMTP_HOST", MAIL_HOST)
+SMTP_PORT = int(os.environ.get("ALT8MAIL_SMTP_PORT", "587"))
+ADMIN_EMAIL = os.environ.get("ALT8MAIL_ADMIN_EMAIL", "avery.chen@a8m.test")
+ADMIN_PASSWORD_FILE = os.environ.get("ALT8MAIL_ADMIN_PASSWORD_FILE", "staging_avery_password")
+ADMIN_PASSWORD = os.environ.get("ALT8MAIL_ADMIN_PASSWORD", "")
 if not ADMIN_PASSWORD and ADMIN_PASSWORD_FILE:
     with open(ADMIN_PASSWORD_FILE, "r", encoding="utf-8") as handle:
         ADMIN_PASSWORD = handle.read().strip()
@@ -34,7 +34,7 @@ if not ADMIN_PASSWORD:
     raise SystemExit("admin password is required")
 
 SUFFIX = str(int(time.time()))
-TEST_EMAIL = f"policy-test-{SUFFIX}@meridian.test"
+TEST_EMAIL = f"policy-test-{SUFFIX}@a8m.test"
 TEST_NAME = "Policy Test"
 TEMP_TO_NEW = "Policy-Test-2026!A"
 NEW_TO_THIRD = "Policy-Test-2026!B"
@@ -73,7 +73,7 @@ class Client:
         csrf = self.csrf
         if not csrf:
             for cookie in self.jar:
-                if cookie.name in ("meridian_admin_csrf", "meridian_system_csrf"):
+                if cookie.name in ("a8m_admin_csrf", "a8m_system_csrf"):
                     csrf = cookie.value
         if csrf:
             request.add_header("X-CSRF-Token", csrf)
@@ -215,7 +215,7 @@ try:
         "rules": [{
             "name": "Policy forward", "enabled": True, "match": "all",
             "conditions": [{"field": "subject", "operator": "contains", "value": "policy"}],
-            "action": {"type": "redirect", "value": "avery.chen@meridian.test"},
+            "action": {"type": "redirect", "value": "avery.chen@a8m.test"},
         }],
         "vacation": sieve["vacation"],
     }
@@ -247,9 +247,9 @@ try:
     member.ok("PUT", "/sieve", {"rules": [], "vacation": stored["vacation"]})
 
     print("\n[6] File sharing policy")
-    member.ok("POST", "/storage/meridian/connect", {})
+    member.ok("POST", "/storage/a8m/connect", {})
     uploaded = member.ok("POST", "/attachments", {"name": "policy.txt", "mime": "text/plain", "dataBase64": base64.b64encode(b"policy test").decode()})
-    file_record = member.ok("POST", "/files", {"providerId": "meridian", "attachmentId": uploaded["attachment"]["id"], "name": "policy.txt"})
+    file_record = member.ok("POST", "/files", {"providerId": "a8m", "attachmentId": uploaded["attachment"]["id"], "name": "policy.txt"})
     file_id = file_record["file"]["id"]
     policy["sharing"]["externalSharing"] = False
     admin.ok("PATCH", "/policies", policy)

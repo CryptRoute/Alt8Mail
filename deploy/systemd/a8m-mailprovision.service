@@ -1,6 +1,6 @@
 [Unit]
-Description=Provision Meridian Maildirs and ownership
-Documentation=https://github.com/meridian-mail/meridian
+Description=Provision Alt8Mail mailbox directories and ownership
+Documentation=https://github.com/CryptRoute/Alt8Mail
 After=postgresql.service redis-server.service
 Wants=postgresql.service redis-server.service
 
@@ -8,9 +8,9 @@ Wants=postgresql.service redis-server.service
 Type=oneshot
 User=root
 Group=root
-WorkingDirectory=/opt/meridian
-EnvironmentFile=/opt/meridian/secrets/app.env
-ExecStart=/opt/meridian/bin/meridian-mailprovision
+WorkingDirectory=/opt/a8m
+EnvironmentFile=/opt/a8m/secrets/app.env
+ExecStart=/opt/a8m/bin/a8m-mailprovision
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true

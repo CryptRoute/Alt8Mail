@@ -10,12 +10,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/config"
-	"github.com/meridian-mail/meridian/backend/internal/store"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 )
 
 func main() {
-	email := flag.String("email", "avery.chen@meridian.test", "mailbox to seed")
+	email := flag.String("email", "avery.chen@a8m.test", "mailbox to seed")
 	path := flag.String("state", "seed/state.json", "feature-state JSON document")
 	replace := flag.Bool("replace", false, "replace an existing state document")
 	flag.Parse()

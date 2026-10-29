@@ -17,9 +17,9 @@ CREATE TABLE IF NOT EXISTS password_history (
 );
 CREATE INDEX IF NOT EXISTS password_history_user_idx ON password_history (user_id, created_at DESC);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON mailboxes, password_history TO meridian_app;
-GRANT USAGE, SELECT ON SEQUENCE password_history_id_seq TO meridian_app;
-GRANT SELECT ON mailboxes, groups, group_members TO meridian_mail;
+GRANT SELECT, INSERT, UPDATE, DELETE ON mailboxes, password_history TO a8m_app;
+GRANT USAGE, SELECT ON SEQUENCE password_history_id_seq TO a8m_app;
+GRANT SELECT ON mailboxes, groups, group_members TO a8m_mail;
 
 INSERT INTO schema_migrations (version) VALUES ('0005_mail_provisioning')
 ON CONFLICT (version) DO NOTHING;

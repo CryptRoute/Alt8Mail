@@ -34,7 +34,7 @@ export async function launchBrowser({ chromePath, port, headless = true, width =
   ].filter(Boolean);
   const executable = candidates.find((candidate) => existsSync(candidate)) || candidates[0];
   const chosenPort = port || DEFAULT_PORTS.find((value) => value > 0) || 9333;
-  const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "meridian-chrome-"));
+  const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "a8m-chrome-"));
   const args = [
     `--remote-debugging-port=${chosenPort}`,
     `--user-data-dir=${userDataDir}`,

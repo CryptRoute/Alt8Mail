@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS app_passwords (
 );
 CREATE INDEX IF NOT EXISTS app_passwords_user_idx ON app_passwords (user_id, created_at DESC);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON app_passwords TO meridian_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON app_passwords TO a8m_app;
 
 INSERT INTO schema_migrations (version) VALUES ('0010_app_passwords')
 ON CONFLICT (version) DO NOTHING;

@@ -90,7 +90,7 @@ async function startExtraApp(options = {}) {
 }
 
 before(async () => {
-  tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "meridian-test-"));
+  tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "a8m-test-"));
   app = await createApp({
     dataFile: path.join(tempDir, "db.json"),
     holdMs: 450,
@@ -135,7 +135,7 @@ test("health, static assets, manifest, service worker and security headers", asy
   assert.equal(manifest.status, 200);
   assert.match(manifest.headers.get("content-type"), /application\/manifest\+json/);
   const manifestBody = await manifest.json();
-  assert.equal(manifestBody.name, "Meridian Mail");
+  assert.equal(manifestBody.name, "Alt8Mail");
   assert.equal(manifestBody.icons.length, 3);
   assert.equal(manifestBody.shortcuts.length, 3);
   assert.equal(manifestBody.screenshots.length, 4);
@@ -146,7 +146,7 @@ test("health, static assets, manifest, service worker and security headers", asy
   const sw = await fetch(base + "/sw.js");
   assert.equal(sw.status, 200);
   assert.equal(sw.headers.get("service-worker-allowed"), "/");
-  assert.match(await sw.text(), /meridian-shell/);
+  assert.match(await sw.text(), /a8m-shell/);
 
   const icon = await fetch(base + "/icons/icon-192.png");
   assert.equal(icon.status, 200);
@@ -247,7 +247,7 @@ test("two-factor: password challenge, passkey, recovery and one-time codes", asy
   });
   const recovery = await recoveryClient.request("/api/session/2fa", {
     method: "POST",
-    body: { challengeId: recoveryChallenge.body.challengeId, method: "recovery", code: "mrdn-7f2k-9q4a" },
+    body: { challengeId: recoveryChallenge.body.challengeId, method: "recovery", code: "a8m-7f2k-9q4a" },
     csrf: false
   });
   assert.equal(recovery.status, 200);
@@ -264,7 +264,7 @@ test("two-factor: password challenge, passkey, recovery and one-time codes", asy
   });
   const reused = await reuseClient.request("/api/session/2fa", {
     method: "POST",
-    body: { challengeId: reuseChallenge.body.challengeId, method: "recovery", code: "MRDN-7F2K-9Q4A" },
+    body: { challengeId: reuseChallenge.body.challengeId, method: "recovery", code: "A8M-7F2K-9Q4A" },
     csrf: false
   });
   assert.equal(reused.status, 401);
@@ -295,7 +295,7 @@ test("regional preferences persist, validate and drive the account payload", asy
       workEnd: "18:00",
       workDays: [1, 2, 3, 4, 5],
       autoAdvance: true,
-      signature: "Avery Chen\nVP Product · Meridian Berlin"
+      signature: "Avery Chen\nVP Product · Alt8Mail Berlin"
     }
   });
   assert.equal(patch.status, 200);
@@ -333,14 +333,14 @@ test("tasks: create, filter, complete, link and delete an enterprise task", asyn
       dueTime: "16:30",
       priority: "high",
       tags: ["Board", "Product"],
-      assigneeEmail: "elena.vasquez@meridian.example",
+      assigneeEmail: "elena.vasquez@a8m.example",
       linkedThreadId: "t-q4-roadmap",
       linkedSubject: "Q4 roadmap review"
     }
   });
   assert.equal(created.status, 201);
   assert.equal(created.body.task.status, "open");
-  assert.equal(created.body.task.assignee.email, "elena.vasquez@meridian.example");
+  assert.equal(created.body.task.assignee.email, "elena.vasquez@a8m.example");
   assert.deepEqual(created.body.task.tags, ["Board", "Product"]);
 
   const completed = await client.request(`/api/tasks/${created.body.task.id}`, {
@@ -402,7 +402,7 @@ test("storage connectors and enterprise files: connect, share, star and remove",
     body: { access: "edit", expiresDays: 14 }
   });
   assert.equal(shared.status, 200);
-  assert.match(shared.body.share.url, /^https:\/\/files\.meridian\.example\/s\//);
+  assert.match(shared.body.share.url, /^https:\/\/files\.a8m\.example\/s\//);
   assert.equal(shared.body.share.access, "edit");
   assert.equal(shared.body.share.expiresDays, 14);
 
@@ -450,11 +450,11 @@ test("attachments: upload PDF and text, inline preview, download disposition and
 
   const filed = await client.request("/api/files", {
     method: "POST",
-    body: { providerId: "meridian", attachmentId: attachment.id, description: "Board preview file." }
+    body: { providerId: "a8m", attachmentId: attachment.id, description: "Board preview file." }
   });
   assert.equal(filed.status, 201);
   assert.equal(filed.body.file.name, "board-preview.pdf");
-  assert.equal(filed.body.file.providerId, "meridian");
+  assert.equal(filed.body.file.providerId, "a8m");
   assert.equal(filed.body.file.attachmentId, attachment.id);
 });
 
@@ -464,7 +464,7 @@ test("scheduled send: future-only validation, visible queue and cancel back to d
     method: "POST",
     body: {
       fromEmail: DEMO_EMAIL,
-      to: "elena.vasquez@meridian.example",
+      to: "elena.vasquez@a8m.example",
       subject: "Scheduled board note",
       bodyText: "This leaves tomorrow morning.",
       scheduledFor: future
@@ -486,7 +486,7 @@ test("scheduled send: future-only validation, visible queue and cancel back to d
     method: "POST",
     body: {
       fromEmail: DEMO_EMAIL,
-      to: "elena.vasquez@meridian.example",
+      to: "elena.vasquez@a8m.example",
       subject: "Too late",
       bodyText: "Past date",
       scheduledFor: new Date(Date.now() - 60 * 1000).toISOString()
@@ -515,7 +515,7 @@ test("scheduled messages can be edited and sent immediately from the outbox", as
     method: "POST",
     body: {
       fromEmail: DEMO_EMAIL,
-      to: "elena.vasquez@meridian.example",
+      to: "elena.vasquez@a8m.example",
       subject: "Schedule manager test",
       bodyText: "First version of the scheduled message.",
       scheduledFor: firstTime
@@ -529,8 +529,8 @@ test("scheduled messages can be edited and sent immediately from the outbox", as
   const patch = await client.request(`/api/outbox/${id}`, {
     method: "PATCH",
     body: {
-      to: "elena.vasquez@meridian.example, nora.patel@meridian.example",
-      cc: "marcus.webb@meridian.example",
+      to: "elena.vasquez@a8m.example, nora.patel@a8m.example",
+      cc: "marcus.webb@a8m.example",
       subject: "Schedule manager test — revised",
       bodyText: "Second version, rescheduled with the manager.",
       sendAt: updatedTime
@@ -820,7 +820,7 @@ test("server-backed drafts: create, autosave, restore and discard", async () => 
   const put = await client.request(`/api/drafts/${draftId}`, {
     method: "PUT",
     body: {
-      toText: "elena.vasquez@meridian.example",
+      toText: "elena.vasquez@a8m.example",
       subject: "Draft that survives",
       bodyText: "First version",
       fromEmail: DEMO_EMAIL,
@@ -830,11 +830,11 @@ test("server-backed drafts: create, autosave, restore and discard", async () => 
   });
   assert.equal(put.status, 200);
   assert.equal(put.body.draft.folder, "drafts");
-  assert.equal(put.body.draft.to[0].email, "elena.vasquez@meridian.example");
+  assert.equal(put.body.draft.to[0].email, "elena.vasquez@a8m.example");
 
   const update = await client.request(`/api/drafts/${draftId}`, {
     method: "PUT",
-    body: { toText: "elena.vasquez@meridian.example", subject: "Draft that survives", bodyText: "Second version", fromEmail: DEMO_EMAIL }
+    body: { toText: "elena.vasquez@a8m.example", subject: "Draft that survives", bodyText: "Second version", fromEmail: DEMO_EMAIL }
   });
   assert.equal(update.status, 200);
   assert.equal(update.body.draft.bodyText, "Second version");
@@ -849,7 +849,7 @@ test("server-backed drafts: create, autosave, restore and discard", async () => 
 
   const wrongFrom = await client.request(`/api/drafts/${draftId}`, {
     method: "PUT",
-    body: { toText: "a@b.c", fromEmail: "ceo@meridian.example" }
+    body: { toText: "a@b.c", fromEmail: "ceo@a8m.example" }
   });
   assert.equal(wrongFrom.status, 403);
 
@@ -863,14 +863,14 @@ test("undo send queue: cancel restores draft, commit creates Sent and updates ou
   const draftId = "draft_send_test";
   await client.request(`/api/drafts/${draftId}`, {
     method: "PUT",
-    body: { toText: "elena.vasquez@meridian.example", subject: "Queued message", bodyText: "Hello from the queue", fromEmail: DEMO_EMAIL }
+    body: { toText: "elena.vasquez@a8m.example", subject: "Queued message", bodyText: "Hello from the queue", fromEmail: DEMO_EMAIL }
   });
   const sent = await client.request("/api/send", {
     method: "POST",
     body: {
       draftId,
       fromEmail: DEMO_EMAIL,
-      to: "elena.vasquez@meridian.example",
+      to: "elena.vasquez@a8m.example",
       subject: "Queued message",
       bodyText: "Hello from the queue",
       holdSeconds: 5
@@ -896,15 +896,15 @@ test("undo send queue: cancel restores draft, commit creates Sent and updates ou
   const sent2 = await client.request("/api/send", {
     method: "POST",
     body: {
-      fromEmail: "product@meridian.example",
-      to: "elena.vasquez@meridian.example",
+      fromEmail: "product@a8m.example",
+      to: "elena.vasquez@a8m.example",
       subject: "Committed message",
       bodyText: "This one goes out",
       holdSeconds: 5
     }
   });
   assert.equal(sent2.status, 200);
-  assert.equal(sent2.body.queued.from.email, "product@meridian.example");
+  assert.equal(sent2.body.queued.from.email, "product@a8m.example");
   await new Promise((resolve) => setTimeout(resolve, 900));
   bootstrap = (await client.request("/api/bootstrap")).body;
   const committed = bootstrap.messages.find((message) => message.folder === "sent" && message.subject === "Committed message");
@@ -925,13 +925,13 @@ test("outbound caps are enforced including queued messages", async () => {
   await cappedClient.login();
   const first = await cappedClient.request("/api/send", {
     method: "POST",
-    body: { fromEmail: DEMO_EMAIL, to: "elena.vasquez@meridian.example", subject: "Cap one", bodyText: "one" }
+    body: { fromEmail: DEMO_EMAIL, to: "elena.vasquez@a8m.example", subject: "Cap one", bodyText: "one" }
   });
   assert.equal(first.status, 200);
   assert.equal(first.body.outbound.usedWithQueued, 38);
   const second = await cappedClient.request("/api/send", {
     method: "POST",
-    body: { fromEmail: DEMO_EMAIL, to: "elena.vasquez@meridian.example", subject: "Cap two", bodyText: "two" }
+    body: { fromEmail: DEMO_EMAIL, to: "elena.vasquez@a8m.example", subject: "Cap two", bodyText: "two" }
   });
   assert.equal(second.status, 429);
   assert.equal(second.body.error.code, "OUTBOUND_CAP");
@@ -1049,7 +1049,7 @@ test("audit log filters and CSV export", async () => {
   const csv = await client.request("/api/audit.csv?category=message", { raw: true });
   assert.equal(csv.status, 200);
   assert.match(csv.headers.get("content-type"), /text\/csv/);
-  assert.match(csv.headers.get("content-disposition"), /attachment; filename="meridian-audit-/);
+  assert.match(csv.headers.get("content-disposition"), /attachment; filename="a8m-audit-/);
   const text = await csv.text();
   assert.match(text.split("\r\n")[0], /^time,action,target,actor,detail,ip$/);
   assert.match(text, /message\.archive/);

@@ -20,16 +20,16 @@ import (
 	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/meridian-mail/meridian/backend/internal/auth"
-	"github.com/meridian-mail/meridian/backend/internal/config"
-	"github.com/meridian-mail/meridian/backend/internal/store"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 )
 
 const (
 	// Distinct cookie names from the current reference feature preview. Both
 	// services share the staging origin until the Go API replaces the preview.
-	sessionCookie = "meridian_system_sid"
-	csrfCookie    = "meridian_system_csrf"
+	sessionCookie = "a8m_system_sid"
+	csrfCookie    = "a8m_system_csrf"
 )
 
 type Server struct {
@@ -76,7 +76,7 @@ func New(opts Options) *Server {
 	}
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          opts.Config.WebAuthnRPID,
-		RPDisplayName: "Meridian Mail",
+		RPDisplayName: "Alt8Mail",
 		RPOrigins:     opts.Config.WebAuthnOrigins,
 	})
 	if err != nil {
@@ -316,7 +316,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !passwordOK {
 		s.limit.Fail(ip)
 		s.audit(r, user, "auth.failed", email, "Failed password sign-in")
-		writeError(w, http.StatusUnauthorized, "BAD_CREDENTIALS", "That email and password do not match a Meridian account")
+		writeError(w, http.StatusUnauthorized, "BAD_CREDENTIALS", "That email and password do not match a Alt8Mail account")
 		return
 	}
 	s.limit.Reset(ip)
@@ -475,7 +475,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, status, map[string]any{
 		"ok":      status == http.StatusOK,
-		"service": "meridian-system-backend",
+		"service": "a8m-system-backend",
 		"version": s.version,
 		"env":     s.cfg.Env,
 		"time":    time.Now().UTC().Format(time.RFC3339),
@@ -821,7 +821,7 @@ func (s *Server) outboundInfo(ctx context.Context, userID, tenantID string) (map
 		"usedWithQueued": usedWithQueued,
 		"remaining":      max(0, limit-usedWithQueued),
 		"percent":        float64(usedWithQueued) / float64(limit) * 100,
-		"source":         "postfix/meridian-outbox",
+		"source":         "postfix/a8m-outbox",
 		"refreshedAt":    time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }
@@ -914,7 +914,7 @@ func publicUser(user userRecord) map[string]any {
 		"initials":               user.Initials,
 		"color":                  user.Color,
 		"role":                   user.Role,
-		"company":                "Meridian",
+		"company":                "Alt8Mail",
 		"preferences":            preferencesFor(user),
 		"security":               jsonRaw(user.Security),
 		"forcePasswordChange":    user.ForcePasswordChange,

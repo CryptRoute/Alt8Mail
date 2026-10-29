@@ -4,7 +4,7 @@
 -- per-user document even though they are short-lived.
 BEGIN;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON undo_actions TO meridian_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON undo_actions TO a8m_app;
 
 INSERT INTO undo_actions (token, tenant_id, user_id, action, snapshot, created_at, expires_at)
 SELECT

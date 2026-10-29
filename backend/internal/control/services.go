@@ -78,7 +78,7 @@ func allowedServiceUnit(unit string) bool {
 		"clamav-daemon.service", "clamav-freshclam.service", "nginx.service",
 		"postgresql@15-main.service", "redis-server.service", "fail2ban.service",
 		"cron.service", "chrony.service", "alt8mail-control.service",
-		"meridian-server.service", "meridian-admin.service", "rclone-s3.service":
+		"a8m-server.service", "a8m-admin.service", "rclone-s3.service":
 		return true
 	}
 	return false

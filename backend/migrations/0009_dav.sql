@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS contacts_uid_idx
   ON contacts (user_id, uid)
   WHERE uid <> '';
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON contacts, calendar_events TO meridian_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON contacts, calendar_events TO a8m_app;
 
 INSERT INTO schema_migrations (version) VALUES ('0009_dav')
 ON CONFLICT (version) DO NOTHING;

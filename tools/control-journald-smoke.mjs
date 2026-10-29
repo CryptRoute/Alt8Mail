@@ -44,7 +44,7 @@ try {
   await new Promise((r) => setTimeout(r, 2500));
   const send = await main.req('/control/api/delivery/smtp-tests', {
     method: 'POST',
-    body: { from: 'postmaster@meridian.test', recipient: 'postmaster@meridian.test', subject: `Journald ingestion test ${suffix}`, body: 'Testing journald ingestion source.' },
+    body: { from: 'postmaster@a8m.test', recipient: 'postmaster@a8m.test', subject: `Journald ingestion test ${suffix}`, body: 'Testing journald ingestion source.' },
   });
   const match = String(send.transcript || '').match(/queued as ([A-Fa-f0-9]+)/);
   const queueId = match ? match[1] : '';
@@ -52,7 +52,7 @@ try {
   let event = null;
   for (let i = 0; i < 20; i += 1) {
     await new Promise((r) => setTimeout(r, 1500));
-    const logs = await main.req(`/control/api/logs?q=${encodeURIComponent(queueId || 'postmaster@meridian.test')}&limit=50`);
+    const logs = await main.req(`/control/api/logs?q=${encodeURIComponent(queueId || 'postmaster@a8m.test')}&limit=50`);
     event = logs.events?.find((entry) => entry.source === 'journald' && (!queueId || entry.queueId === queueId));
     if (event) break;
   }

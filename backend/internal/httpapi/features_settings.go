@@ -173,7 +173,7 @@ func (s *Server) getAuditCSV(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writer.Flush()
-	filename := "meridian-audit-" + time.Now().UTC().Format("2006-01-02") + ".csv"
+	filename := "a8m-audit-" + time.Now().UTC().Format("2006-01-02") + ".csv"
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.Header().Set("Cache-Control", "no-store")

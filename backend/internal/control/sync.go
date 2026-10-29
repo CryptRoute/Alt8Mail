@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 func (s *Server) latestConfigSync(ctx context.Context) (map[string]any, error) {
@@ -141,7 +141,7 @@ func (s *Server) performConfigSync(ctx context.Context, actorID, trigger string)
 
 	domains := 0
 	rows, err := s.db.Query(ctx, `
-		SELECT id::text, domain::text, tenant_id::text, COALESCE(dkim_selector,'meridian'), COALESCE(dkim_record,'')
+		SELECT id::text, domain::text, tenant_id::text, COALESCE(dkim_selector,'a8m'), COALESCE(dkim_record,'')
 		FROM public.mail_domains ORDER BY domain
 	`)
 	if err != nil {

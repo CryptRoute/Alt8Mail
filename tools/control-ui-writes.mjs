@@ -4,7 +4,7 @@ import { launchBrowser } from './cdp.mjs';
 const BASE = 'https://130.94.46.22:8808';
 const PASSWORD = process.env.CONTROL_PASSWORD || fs.readFileSync(process.env.CONTROL_PASSWORD_FILE, 'utf8').trim();
 const suffix = Date.now().toString(36);
-const aliasAddress = `uitest${suffix}@meridian.test`;
+const aliasAddress = `uitest${suffix}@a8m.test`;
 const cronName = `UI test ${suffix}`;
 const keyName = `UI test key ${suffix}`;
 const checks = [];
@@ -42,7 +42,7 @@ try {
   await page.click('#alias-create');
   await page.waitFor(() => document.querySelector('[id^="alias-form-"]'), 10000);
   await page.setValue('[id^="alias-form-"] [name="address"]', aliasAddress);
-  await page.setValue('[id^="alias-form-"] [name="targets"]', 'avery.chen@meridian.test');
+  await page.setValue('[id^="alias-form-"] [name="targets"]', 'avery.chen@a8m.test');
   await page.setValue('[id^="alias-form-"] [name="description"]', 'UI write test');
   await page.eval("document.querySelector('[id^=\"alias-form-\"]').requestSubmit()");
   await page.waitFor(`Array.from(document.querySelectorAll('#aliases-body tbody tr')).some((row) => row.innerText.includes(${JSON.stringify(aliasAddress)}))`, 15000);

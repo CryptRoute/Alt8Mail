@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS app_states (
 );
 
 CREATE INDEX IF NOT EXISTS app_states_tenant_idx ON app_states (tenant_id);
-GRANT SELECT, INSERT, UPDATE, DELETE ON app_states TO meridian_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON app_states TO a8m_app;
 INSERT INTO schema_migrations (version) VALUES ('0002_app_state')
 ON CONFLICT (version) DO NOTHING;
 

@@ -30,8 +30,8 @@ var coreServiceUnits = []string{
 	"cron.service",
 	"chrony.service",
 	"alt8mail-control.service",
-	"meridian-server.service",
-	"meridian-admin.service",
+	"a8m-server.service",
+	"a8m-admin.service",
 }
 
 type commandResult struct {

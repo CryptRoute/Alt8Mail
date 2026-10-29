@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS outbox_due_idx ON outbox (send_at) WHERE status = 'queued';
 CREATE INDEX IF NOT EXISTS outbox_user_idx ON outbox (user_id, send_at);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON outbox TO meridian_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON outbox TO a8m_app;
 
 INSERT INTO outbox (
   id, tenant_id, user_id, draft_id, from_json, to_json, cc_json, bcc_json, subject,

@@ -12,7 +12,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 BASE = os.environ.get("GO_API", "http://127.0.0.1:8080/api")
-EMAIL = os.environ.get("GO_EMAIL", "avery.chen@meridian.test")
+EMAIL = os.environ.get("GO_EMAIL", "avery.chen@a8m.test")
 PASSWORD = open(os.environ["GO_PASSWORD_FILE"], encoding="utf-8").read().strip() if os.environ.get("GO_PASSWORD_FILE") else os.environ.get("GO_PASSWORD", "")
 JAR = http.cookiejar.CookieJar()
 OPENER = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(JAR))
@@ -110,11 +110,11 @@ def main():
         "due": "2026-11-01",
         "dueTime": "14:30",
         "priority": "high",
-        "assigneeEmail": "elena.vasquez@meridian.test",
+        "assigneeEmail": "elena.vasquez@a8m.test",
         "tags": ["Smoke", "API"],
     })["task"]
     check(task["title"] == "Go API smoke task", "task is created")
-    check(task["assignee"]["email"] == "elena.vasquez@meridian.test", "task assignee is resolved from the directory")
+    check(task["assignee"]["email"] == "elena.vasquez@a8m.test", "task assignee is resolved from the directory")
     completed = ok("PATCH", f"/tasks/{urllib.parse.quote(task['id'])}", {"status": "done"})["task"]
     check(completed["status"] == "done" and completed["completedAt"], "task can be completed")
     tasks = ok("GET", "/tasks")
@@ -124,12 +124,12 @@ def main():
     print("\n[4] Server drafts")
     draft_id = "draft_smoke_api"
     saved = ok("PUT", f"/drafts/{draft_id}", {
-        "toText": "nora.patel@meridian.test",
+        "toText": "nora.patel@a8m.test",
         "ccText": "",
         "bccText": "",
         "subject": "Go API smoke draft",
         "bodyText": "Draft body saved through the Go feature API.",
-        "fromEmail": "avery.chen@meridian.test",
+        "fromEmail": "avery.chen@a8m.test",
         "attachments": [],
         "windowMode": "floating",
         "priority": "normal",
@@ -146,8 +146,8 @@ def main():
     print("\n[5] Send queue, scheduled edit, send-now and cancel")
     future = (datetime.now(timezone.utc) + timedelta(hours=2)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     scheduled = ok("POST", "/send", {
-        "fromEmail": "avery.chen@meridian.test",
-        "to": "nora.patel@meridian.test",
+        "fromEmail": "avery.chen@a8m.test",
+        "to": "nora.patel@a8m.test",
         "cc": "",
         "bcc": "",
         "subject": "Go scheduling smoke",
@@ -164,7 +164,7 @@ def main():
     later = (datetime.now(timezone.utc) + timedelta(hours=3)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     edited = ok("PATCH", f"/outbox/{urllib.parse.quote(queued['id'])}", {
         "subject": "Go scheduling smoke — edited",
-        "to": "nora.patel@meridian.test",
+        "to": "nora.patel@a8m.test",
         "cc": "",
         "bodyText": "Edited through the Go outbox API.",
         "sendAt": later,
@@ -180,8 +180,8 @@ def main():
     check(any(m["folder"] == "sent" and m["subject"] == "Go scheduling smoke — edited" for m in boot["messages"]), "sent copy is in Sent")
 
     held = ok("POST", "/send", {
-        "fromEmail": "avery.chen@meridian.test",
-        "to": "nora.patel@meridian.test",
+        "fromEmail": "avery.chen@a8m.test",
+        "to": "nora.patel@a8m.test",
         "cc": "",
         "bcc": "",
         "subject": "Go undo-send smoke",
@@ -210,7 +210,7 @@ def main():
     check(status == 200 and content == pdf, "attachment content round-trips")
     check("inline" in headers.get("Content-Disposition", ""), "previewable attachment is served inline")
     file_record = ok("POST", "/files", {
-        "providerId": "meridian",
+        "providerId": "a8m",
         "attachmentId": attachment["id"],
         "path": "Uploads",
     })["file"]
@@ -227,7 +227,7 @@ def main():
 
     print("\n[7] Storage connectors")
     providers = {provider["id"]: provider for provider in ok("GET", "/storage")["providers"]}
-    check(providers["meridian"]["connected"] is True, "Meridian Drive is connected")
+    check(providers["a8m"]["connected"] is True, "Alt8Mail Drive is connected")
     dropbox = providers["dropbox"]
     status, payload, _ = request("POST", "/storage/dropbox/connect", {})
     if dropbox.get("configured"):

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { launchBrowser } from "./cdp.mjs";
 
-const base = process.env.MERIDIAN_UI_URL || "https://130-94-46-22.sslip.io/";
-const email = process.env.MERIDIAN_UI_DEMO_EMAIL || "avery.chen@meridian.example";
-const password = process.env.MERIDIAN_UI_DEMO_PASSWORD || "";
+const base = process.env.ALT8MAIL_UI_URL || "https://130-94-46-22.sslip.io/";
+const email = process.env.ALT8MAIL_UI_DEMO_EMAIL || "avery.chen@a8m.example";
+const password = process.env.ALT8MAIL_UI_DEMO_PASSWORD || "";
 const label = `Demo alias password verification ${Date.now()}`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-if (!password) throw new Error("MERIDIAN_UI_DEMO_PASSWORD is required");
+if (!password) throw new Error("ALT8MAIL_UI_DEMO_PASSWORD is required");
 
 const browser = await launchBrowser({ headless: true, width: 1440, height: 1000 });
 const page = await browser.newPage(base);
@@ -31,7 +31,7 @@ try {
   await page.waitFor(() => document.getElementById("bootSplash").hidden === true, 15000);
   await page.eval("document.querySelectorAll('.compose [data-compose-action=\"close\"]').forEach((button) => button.click())");
   await sleep(700);
-  csrf = decodeURIComponent(await page.eval("document.cookie.match(/(?:^|; )meridian_system_csrf=([^;]+)/)?.[1] || ''"));
+  csrf = decodeURIComponent(await page.eval("document.cookie.match(/(?:^|; )a8m_system_csrf=([^;]+)/)?.[1] || ''"));
 
   await page.click("#settingsBtn");
   await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);

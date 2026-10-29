@@ -1,6 +1,6 @@
 # Alt8Mail System Control
 
-System Control is the separate root-level operations panel for the Meridian
+System Control is the separate root-level operations panel for the Alt8Mail
 Mail staging host. It is not the webmail frontend and it is not the customer /
 tenant admin console. It manages the actual mail stack: PostgreSQL, Redis,
 Postfix, Dovecot, Rspamd, nginx, certificates, firewall, systemd, logs, backups,
@@ -15,8 +15,8 @@ imports and the control plane's own users and API keys.
 | Initial superadmin | `sysadmin@alt8mail.local` |
 | Initial password file | `/root/alt8mail-control-initial-password` (root-only, mode 0600) |
 | Service | `alt8mail-control.service` (enabled, active, `Restart=on-failure`) |
-| Database schema | `control` in the existing `meridian` database |
-| Database role | `alt8mail_control` (separate from `meridian_app` and `meridian_mail`) |
+| Database schema | `control` in the existing `a8m` database |
+| Database role | `alt8mail_control` (separate from `a8m_app` and `a8m_mail`) |
 | Health | `GET /healthz` (cheap, unauthenticated) |
 | Prometheus text | `GET /metrics` (unauthenticated; restrict at the firewall) |
 | Stack detail | `GET /healthz/stacks` (authenticated) |
@@ -26,7 +26,7 @@ The initial password is deliberately not reproduced in this repository or in
 any command output. Read it on the server:
 
 ```bash
-ssh -i ~/.ssh/meridian_deploy_ed25519 root@130.94.46.22 \
+ssh -i ~/.ssh/a8m_deploy_ed25519 root@130.94.46.22 \
   'cat /root/alt8mail-control-initial-password'
 ```
 
@@ -56,8 +56,8 @@ CA-issued certificate for the chosen panel hostname and restarts the service.
 
 | Application | URL / listener | Purpose | Credential store |
 | --- | --- | --- | --- |
-| Webmail | `https://130-94-46-22.sslip.io` via nginx → Go `127.0.0.1:8080` | End-user mail, calendar, contacts, tasks, files | `meridian` web sessions; Dovecot mail passwords |
-| Customer admin | `https://130-94-46-22.sslip.io/admin/` → Go `127.0.0.1:8081` | Tenants, org units, policy, customer administration | `meridian-admin-server` sessions and audit |
+| Webmail | `https://130-94-46-22.sslip.io` via nginx → Go `127.0.0.1:8080` | End-user mail, calendar, contacts, tasks, files | `a8m` web sessions; Dovecot mail passwords |
+| Customer admin | `https://130-94-46-22.sslip.io/admin/` → Go `127.0.0.1:8081` | Tenants, org units, policy, customer administration | `a8m-admin-server` sessions and audit |
 | **System Control** | **`https://130.94.46.22:8808` direct** | **Host, mail stack, certificates, network, operations** | **`control` schema, separate role and secrets** |
 
 System Control does not accept webmail or customer-admin sessions. It has its
@@ -301,9 +301,9 @@ migrations/0019_blocklist_sentinel.sql
 From the operator workstation:
 
 ```bash
-scp -i ~/.ssh/meridian_deploy_ed25519 -r build/control-deploy \
+scp -i ~/.ssh/a8m_deploy_ed25519 -r build/control-deploy \
   root@130.94.46.22:/tmp/
-ssh -i ~/.ssh/meridian_deploy_ed25519 root@130.94.46.22 \
+ssh -i ~/.ssh/a8m_deploy_ed25519 root@130.94.46.22 \
   'bash /tmp/control-deploy/install.sh'
 ```
 
@@ -317,7 +317,7 @@ The installer:
 1. installs `/opt/alt8mail/bin/alt8mail-control`;
 2. creates/resets the `alt8mail_control` PostgreSQL role with a random
    password;
-3. applies migrations 0015 and 0016 to database `meridian`;
+3. applies migrations 0015 and 0016 to database `a8m`;
 4. generates the self-signed control certificate if absent;
 5. writes `/opt/alt8mail/control.env` mode 0600;
 6. installs `alt8mail-control.service`, enables and restarts it;
@@ -337,7 +337,7 @@ The installer:
 | `CONTROL_CSRF_SECRET` | required, ≥32 chars | CSRF-signing key |
 | `CONTROL_SECRET_KEY` | required, ≥32 chars | AES-GCM key for sealed settings |
 | `CONTROL_PUBLIC_URL` | `https://130.94.46.22:8808` | Links in notifications and UI |
-| `CONTROL_MAIL_HOSTNAME` | `mail.meridian.test` | SMTP greeting/HELO identity |
+| `CONTROL_MAIL_HOSTNAME` | `mail.a8m.test` | SMTP greeting/HELO identity |
 | `CONTROL_WEBMAIL_URL` | empty | Webmail link in DNS plans/notifications |
 | `CONTROL_DNS_RESOLVER` | `1.1.1.1:53` | Resolver for DNS/DNSBL checks |
 | `CONTROL_MAIL_LOG` | `/var/log/mail.log` | Mail-event source |
@@ -354,7 +354,7 @@ The installer:
 | `CONTROL_CERTBOT_WEBROOT` | `/var/www/certbot` | Certbot webroot challenge |
 | `CONTROL_SMTP_ADDR` | `127.0.0.1:25` | Local SMTP test path |
 | `CONTROL_POLICY_LISTEN` | `127.0.0.1:10040` | Postfix policy daemon |
-| `CONTROL_REDIS_PASSWORD_FILE` | `/opt/meridian/secrets/redis_password` | Redis auth file; contents are never logged |
+| `CONTROL_REDIS_PASSWORD_FILE` | `/opt/a8m/secrets/redis_password` | Redis auth file; contents are never logged |
 | `CONTROL_INGEST_INTERVAL` | `8s` | Mail-log polling interval |
 | `CONTROL_HEALTH_INTERVAL` | `15s` | Service-monitor interval |
 | `CONTROL_METRICS_INTERVAL` | `5s` | Host metric sampling |

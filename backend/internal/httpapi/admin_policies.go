@@ -194,7 +194,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 		},
 		Sharing:   adminSharingPolicy{ExternalSharing: false, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
 		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: false},
-		Branding:  adminBrandingPolicy{ProductName: "Meridian Mail", PrimaryColor: "#0f6cbd", SupportEmail: "", LoginMessage: ""},
+		Branding:  adminBrandingPolicy{ProductName: "Alt8Mail", PrimaryColor: "#0f6cbd", SupportEmail: "", LoginMessage: ""},
 	}
 }
 
@@ -418,7 +418,7 @@ func (s *Server) adminGetTenantSettings(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"tenant":   adminTenantPayload(sess.ActiveTenant),
 		"branding": tenantPolicyFromSettings(sess.ActiveTenant.Settings).Branding,
-		"limits":   map[string]any{"supportEmail": "support@meridian.test"},
+		"limits":   map[string]any{"supportEmail": "support@a8m.test"},
 	})
 }
 

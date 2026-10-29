@@ -19,7 +19,7 @@ def session():
     s=requests.Session(); s.trust_env=False; s.verify=False; s.headers.update({'User-Agent':'Alt8Mail-soak-plane/1.0'}); return s
 web=session(); admin=session(); control=session()
 r=web.get(WEB+'/api/health',timeout=20); web_ok=r.status_code==200
-admin_login=admin.post(WEB+'/admin/api/session',json={'email':os.environ.get('SOAK_PROBE_WEB_EMAIL','avery.chen@meridian.test'),'password':ADMIN_PASSWORD},timeout=30)
+admin_login=admin.post(WEB+'/admin/api/session',json={'email':os.environ.get('SOAK_PROBE_WEB_EMAIL','avery.chen@a8m.test'),'password':ADMIN_PASSWORD},timeout=30)
 admin_ok=admin_login.status_code==200
 admin_csrf=admin_login.json().get('csrf','') if admin_ok else ''
 c=control.get(CONTROL+'/control/api/session',timeout=20); ccsrf=c.json().get('csrfToken','') if c.ok else ''

@@ -1,6 +1,6 @@
-# Meridian system backend (Go)
+# Alt8Mail system backend (Go)
 
-This is the Go system backend for the Meridian platform. The existing Aurora
+This is the Go system backend for the Alt8Mail platform. The existing Aurora
 frontend in `../public/` remains the user interface; nginx serves it and proxies
 `/api/` (and the `/system/api/` namespace) to this service.
 
@@ -36,7 +36,7 @@ frontend in `../public/` remains the user interface; nginx serves it and proxies
   Expiry is enforced on every DAV request; revocation is soft so the owner keeps
   an active/expired/revoked security history.
 - Optional ClamAV scanning of every web attachment upload and guest-share
-  replacement through clamd INSTREAM. `MERIDIAN_CLAMAV_ADDR` enables it
+  replacement through clamd INSTREAM. `ALT8MAIL_CLAMAV_ADDR` enables it
   (unix socket or `host:port`); scanner failure fails closed so malware cannot
   bypass detection by making clamd unavailable. An empty value disables scanning
   for local development only.
@@ -68,7 +68,7 @@ frontend in `../public/` remains the user interface; nginx serves it and proxies
   indexed simple, bodies english), capped at 500 results. The frontend calls it
   with a 220 ms debounce, so search no longer depends on browser-resident
   messages.
-- IMAP IDLE (`MERIDIAN_IMAP_IDLE`, default true): an INBOX push connection per
+- IMAP IDLE (`ALT8MAIL_IMAP_IDLE`, default true): an INBOX push connection per
   active mailbox imports new mail and refreshes flags/expunges as events
   arrive. Keepalive OKs are ignored; new mail runs the UID check while
   expunge/FETCH events run the flag reconcile. The IDLE command renews at 25
@@ -127,12 +127,12 @@ frontend in `../public/` remains the user interface; nginx serves it and proxies
 - SMTP submission to Postfix 587 with STARTTLS, Dovecot SASL, Rspamd/ClamAV in
   path and Sent-folder append.
 - Rules and automatic replies are compiled to Sieve and pushed over ManageSieve
-  (port 4190, STARTTLS, AUTH PLAIN) as the active `meridian` script before the
+  (port 4190, STARTTLS, AUTH PLAIN) as the active `a8m` script before the
   API acknowledges the save. Redirect rules are checked against tenant
   forward-internal/forward-external policy, and existing scripts are re-pushed
   after a policy change.
 - `cmd/mailprovision` explicitly creates Maildir++ folders as the `vmail` owner
-  from pending/error rows; `deploy/systemd/meridian-mailprovision.timer` runs it
+  from pending/error rows; `deploy/systemd/a8m-mailprovision.timer` runs it
   every minute. Provisioning state is exposed in the admin user detail.
 - `cmd/dkimprovision` runs as root from a timer, generates/reuses a 2048-bit RSA
   key per domain/selector under `/var/lib/rspamd/dkim`, stores the real DKIM
@@ -153,8 +153,8 @@ has independent admin sessions/cookies, RBAC (owner/admin, custom roles and
 domain verification, policy, admin TOTP, admin audit and system administrators.
 See `docs/ADMIN.md`.
 
-Staging has real Go auth users including `avery.chen@meridian.test` (system
-administrator) and `jordan.lee@meridian.test`. Every active mailbox has a
+Staging has real Go auth users including `avery.chen@a8m.test` (system
+administrator) and `jordan.lee@a8m.test`. Every active mailbox has a
 per-user worker. Postfix group addresses expand to active members, and Maildirs
 are provisioned explicitly by the root timer. Normalized workspace tables,
 CalDAV/CardDAV, guest share pages, S3 sync and MTA-STS policy publication are
@@ -168,12 +168,12 @@ app credentials. Staging status and gaps are tracked in
 ```bash
 go mod tidy
 go test ./...
-go build -trimpath -o bin/meridian-server ./cmd/server
-go build -trimpath -o bin/meridian-admin-server ./cmd/adminserver
-go build -trimpath -o bin/meridian-admin ./cmd/admin
-go build -trimpath -o bin/meridian-inituser ./cmd/inituser
-go build -trimpath -o bin/meridian-mailprovision ./cmd/mailprovision
-go build -trimpath -o bin/meridian-dkimprovision ./cmd/dkimprovision
+go build -trimpath -o bin/a8m-server ./cmd/server
+go build -trimpath -o bin/a8m-admin-server ./cmd/adminserver
+go build -trimpath -o bin/a8m-admin ./cmd/admin
+go build -trimpath -o bin/a8m-inituser ./cmd/inituser
+go build -trimpath -o bin/a8m-mailprovision ./cmd/mailprovision
+go build -trimpath -o bin/a8m-dkimprovision ./cmd/dkimprovision
 ```
 
 ## Configuration
@@ -183,66 +183,66 @@ Configuration is read from environment variables. See
 required identity values are:
 
 ```text
-MERIDIAN_DB_HOST, MERIDIAN_DB_PORT, MERIDIAN_DB_NAME,
-MERIDIAN_DB_USER, MERIDIAN_DB_PASSWORD,
-MERIDIAN_REDIS_ADDR, MERIDIAN_REDIS_PASSWORD,
-MERIDIAN_SESSION_SECRET, MERIDIAN_CSRF_SECRET
+ALT8MAIL_DB_HOST, ALT8MAIL_DB_PORT, ALT8MAIL_DB_NAME,
+ALT8MAIL_DB_USER, ALT8MAIL_DB_PASSWORD,
+ALT8MAIL_REDIS_ADDR, ALT8MAIL_REDIS_PASSWORD,
+ALT8MAIL_SESSION_SECRET, ALT8MAIL_CSRF_SECRET
 ```
 
 Mail workers add:
 
 ```text
-MERIDIAN_IMAP_ADDR, MERIDIAN_IMAP_MASTER_USER,
-MERIDIAN_IMAP_MASTER_PASSWORD_FILE, MERIDIAN_MAILDIR_BASE,
-MERIDIAN_MAIL_WORKER_CONCURRENCY (default 8),
-MERIDIAN_IMAP_TLS_NAME, MERIDIAN_IMAP_SYNC_SECONDS,
-MERIDIAN_IMAP_POLL_SECONDS (new-mail fallback, default 15, min 5),
-MERIDIAN_IMAP_IDLE (default true),
-MERIDIAN_SMTP_ADDR, MERIDIAN_SMTP_TLS_NAME, MERIDIAN_MAIL_CA_FILE,
-MERIDIAN_MANAGESIEVE_ADDR, MERIDIAN_MANAGESIEVE_TLS_NAME
+ALT8MAIL_IMAP_ADDR, ALT8MAIL_IMAP_MASTER_USER,
+ALT8MAIL_IMAP_MASTER_PASSWORD_FILE, ALT8MAIL_MAILDIR_BASE,
+ALT8MAIL_MAIL_WORKER_CONCURRENCY (default 8),
+ALT8MAIL_IMAP_TLS_NAME, ALT8MAIL_IMAP_SYNC_SECONDS,
+ALT8MAIL_IMAP_POLL_SECONDS (new-mail fallback, default 15, min 5),
+ALT8MAIL_IMAP_IDLE (default true),
+ALT8MAIL_SMTP_ADDR, ALT8MAIL_SMTP_TLS_NAME, ALT8MAIL_MAIL_CA_FILE,
+ALT8MAIL_MANAGESIEVE_ADDR, ALT8MAIL_MANAGESIEVE_TLS_NAME
 
 # Legacy single-mailbox fallback, used only when master auth is absent:
-MERIDIAN_IMAP_USER, MERIDIAN_IMAP_PASSWORD_FILE
+ALT8MAIL_IMAP_USER, ALT8MAIL_IMAP_PASSWORD_FILE
 ```
 
 WebAuthn and enrollment add:
 
 ```text
-MERIDIAN_PUBLIC_URL=https://mail.example.com
-MERIDIAN_WEBAUTHN_RPID=mail.example.com
-MERIDIAN_WEBAUTHN_ORIGINS=https://mail.example.com
+ALT8MAIL_PUBLIC_URL=https://mail.example.com
+ALT8MAIL_WEBAUTHN_RPID=mail.example.com
+ALT8MAIL_WEBAUTHN_ORIGINS=https://mail.example.com
 ```
 
-`MERIDIAN_WEBAUTHN_RPID` must be the bare hostname; origins are comma-separated
+`ALT8MAIL_WEBAUTHN_RPID` must be the bare hostname; origins are comma-separated
 and are validated by the WebAuthn ceremony. Both default to
-`MERIDIAN_PUBLIC_URL`. Apply migrations `0003_real_auth.sql` through
+`ALT8MAIL_PUBLIC_URL`. Apply migrations `0003_real_auth.sql` through
 `0014_compose_identity_ai.sql` before deploying this release; `0011`–`0014`
 must run before normalized mail, identity verification and AI paths are used.
 
 Storage, DNS and DAV add:
 
 ```text
-MERIDIAN_MAIL_HOSTNAME=mail.example.com
-MERIDIAN_DKIM_DIR=/var/lib/rspamd/dkim
-MERIDIAN_DKIM_SELECTOR_MAP=/var/lib/rspamd/dkim/selectors.map
+ALT8MAIL_MAIL_HOSTNAME=mail.example.com
+ALT8MAIL_DKIM_DIR=/var/lib/rspamd/dkim
+ALT8MAIL_DKIM_SELECTOR_MAP=/var/lib/rspamd/dkim/selectors.map
 
-MERIDIAN_S3_ENDPOINT=127.0.0.1:9000
-MERIDIAN_S3_REGION=us-east-1
-MERIDIAN_S3_BUCKET=meridian
-MERIDIAN_S3_ACCESS_KEY=...
-MERIDIAN_S3_SECRET_KEY=...
-MERIDIAN_S3_USE_SSL=false
-MERIDIAN_S3_PATH_STYLE=true
+ALT8MAIL_S3_ENDPOINT=127.0.0.1:9000
+ALT8MAIL_S3_REGION=us-east-1
+ALT8MAIL_S3_BUCKET=a8m
+ALT8MAIL_S3_ACCESS_KEY=...
+ALT8MAIL_S3_SECRET_KEY=...
+ALT8MAIL_S3_USE_SSL=false
+ALT8MAIL_S3_PATH_STYLE=true
 
-MERIDIAN_CLAMAV_ADDR=/var/run/clamav/clamd.ctl
+ALT8MAIL_CLAMAV_ADDR=/var/run/clamav/clamd.ctl
 
-MERIDIAN_GOOGLE_CLIENT_ID / MERIDIAN_GOOGLE_CLIENT_SECRET
-MERIDIAN_DROPBOX_CLIENT_ID / MERIDIAN_DROPBOX_CLIENT_SECRET
-MERIDIAN_MICROSOFT_CLIENT_ID / MERIDIAN_MICROSOFT_CLIENT_SECRET
+ALT8MAIL_GOOGLE_CLIENT_ID / ALT8MAIL_GOOGLE_CLIENT_SECRET
+ALT8MAIL_DROPBOX_CLIENT_ID / ALT8MAIL_DROPBOX_CLIENT_SECRET
+ALT8MAIL_MICROSOFT_CLIENT_ID / ALT8MAIL_MICROSOFT_CLIENT_SECRET
 ```
 
 OAuth refresh/access tokens are encrypted with AES-GCM using a key derived from
-`MERIDIAN_SESSION_SECRET`. Rotating that secret invalidates stored connector
+`ALT8MAIL_SESSION_SECRET`. Rotating that secret invalidates stored connector
 tokens, so reconnect providers after rotation. The tenant AI provider API key is
 sealed with the same key material; rotating the session secret also requires an
 administrator to re-enter the AI key.
@@ -256,30 +256,30 @@ user-facing AI controls appear only while the tenant setting is enabled.
 The admin backend adds:
 
 ```text
-MERIDIAN_ADMIN_LISTEN=127.0.0.1:8081
-MERIDIAN_ADMIN_DIR=/opt/meridian/admin
-MERIDIAN_ADMIN_URL=https://admin.example.com
-MERIDIAN_ADMIN_SESSION_HOURS=8
+ALT8MAIL_ADMIN_LISTEN=127.0.0.1:8081
+ALT8MAIL_ADMIN_DIR=/opt/a8m/admin
+ALT8MAIL_ADMIN_URL=https://admin.example.com
+ALT8MAIL_ADMIN_SESSION_HOURS=8
 ```
 
-`MERIDIAN_COOKIE_SECURE` must be `true` when the app is served over HTTPS.
-`MERIDIAN_ENV=production` refuses insecure cookies and refuses
-`MERIDIAN_DEMO_MODE=true`.
+`ALT8MAIL_COOKIE_SECURE` must be `true` when the app is served over HTTPS.
+`ALT8MAIL_ENV=production` refuses insecure cookies and refuses
+`ALT8MAIL_DEMO_MODE=true`.
 
 Staging demo login is opt-in only:
 
 ```text
-MERIDIAN_DEMO_MODE=true
-MERIDIAN_DEMO_EMAIL=avery.chen@meridian.example
-MERIDIAN_DEMO_PASSWORD=<staging secret>
-MERIDIAN_DEMO_USER_EMAIL=avery.chen@meridian.test
+ALT8MAIL_DEMO_MODE=true
+ALT8MAIL_DEMO_EMAIL=avery.chen@a8m.example
+ALT8MAIL_DEMO_PASSWORD=<staging secret>
+ALT8MAIL_DEMO_USER_EMAIL=avery.chen@a8m.test
 ```
 
 ## Set an account password
 
 ```bash
 printf '%s\n' "$NEW_PASSWORD" \
-  | ./bin/meridian-admin -email avery.chen@meridian.test
+  | ./bin/a8m-admin -email avery.chen@a8m.test
 ```
 
 The admin command writes the Argon2id web hash. Dovecot uses the separate
@@ -295,7 +295,7 @@ Security & privacy toggle (`PATCH /api/security/policy`) or SQL:
 
 ```sql
 UPDATE users SET enrollment_required = true, updated_at = now()
-WHERE email = 'avery.chen@meridian.test';
+WHERE email = 'avery.chen@a8m.test';
 ```
 
 With the policy on, a password sign-in with no enrolled factor is stopped at
@@ -312,9 +312,9 @@ starts with zero messages, tasks, files and calendar events; the IMAP worker the
 fills the mailbox from Dovecot:
 
 ```bash
-set -a; . /opt/meridian/secrets/app.env; set +a
-./bin/meridian-inituser -email avery.chen@meridian.test
-systemctl restart meridian-server
+set -a; . /opt/a8m/secrets/app.env; set +a
+./bin/a8m-inituser -email avery.chen@a8m.test
+systemctl restart a8m-server
 ```
 
 `cmd/mailprovision` creates the Maildir and its `Sent`, `Drafts`, `Archive`,
@@ -328,28 +328,28 @@ Repository helpers:
 
 ```bash
 python3 ../tools/go-api-smoke.py     # API, including real SMTP when configured
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node ../tools/go-ui-smoke.mjs      # Chromium UI smoke
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node ../tools/go-settings-smoke.mjs  # all settings tabs + DB readback
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node ../tools/go-auth-smoke.mjs    # TOTP, recovery, WebAuthn, enrollment
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node ../tools/go-live-mail-smoke.mjs  # open-page self-delivery + notification
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node ../tools/compose-notifications-smoke.mjs  # 0.7 compose/notifications
 
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password \
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password \
   python3 ../tools/admin-api-smoke.py
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password \
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password \
   python3 ../tools/admin-auth-smoke.py
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password \
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password \
   python3 ../tools/admin-policy-smoke.py
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password \
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password \
   python3 ../tools/admin-tenant-smoke.py
-MERIDIAN_ADMIN_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_ADMIN_PASSWORD="$(cat ./staging_avery_password)" \
   node ../tools/admin-ui-smoke.mjs
-MERIDIAN_SMTP_HOST=127.0.0.1 MERIDIAN_SMTP_PORT=1587 \
+ALT8MAIL_SMTP_HOST=127.0.0.1 ALT8MAIL_SMTP_PORT=1587 \
   python ../tools/mail-policy-smoke.py
 ```
 

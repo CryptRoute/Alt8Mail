@@ -114,7 +114,7 @@ export async function renderDomains(ctx) {
         <div class="form-grid">
           ${ui.field({ label: 'Domain name', name: 'domain', placeholder: 'example.com', required: true, help: 'Apex domain only. Do not include a subdomain unless it is the mail domain you intend to manage.', autocomplete: 'off' })}
           ${ui.field({ label: 'Tenant', name: 'tenantId', type: 'select', required: true, options: tenants.map((tenant) => ({ value: tenant.id, label: `${tenant.name} (${tenant.slug})` })) })}
-          ${ui.field({ label: 'DKIM selector', name: 'selector', value: 'meridian', required: true, help: 'The selector appears as <selector>._domainkey in DNS. Lowercase letters, digits, dots and hyphens.' })}
+          ${ui.field({ label: 'DKIM selector', name: 'selector', value: 'a8m', required: true, help: 'The selector appears as <selector>._domainkey in DNS. Lowercase letters, digits, dots and hyphens.' })}
           <div class="field"><label>Options</label><div class="option-list">${ui.switchField({ label: 'Make this the primary domain', name: 'isPrimary', help: 'Used for default mail-from addresses and the webmail identity.' })}${ui.switchField({ label: 'Create postmaster mailbox', name: 'createPostmaster', checked: true, help: 'Creates postmaster@<domain> with a generated password when a mailbox name is available.' })}</div></div>
         </div>
         <div class="form-actions"><span class="form-note">Creation writes to PostgreSQL, generates DKIM keys and triggers a Postfix reload.</span><div class="form-actions-right"><button type="button" class="btn btn-ghost" data-modal-close>Cancel</button><button type="submit" class="btn btn-primary">Create domain</button></div></div>
@@ -133,7 +133,7 @@ export async function renderDomains(ctx) {
           body: {
             domain: values.domain,
             tenantId: values.tenantId,
-            selector: values.selector || 'meridian',
+            selector: values.selector || 'a8m',
             isPrimary: values.isPrimary,
             createPostmaster: values.createPostmaster,
           },
@@ -386,7 +386,7 @@ export async function renderDomainDetail(ctx) {
     const modal = ctx.modal({
       title: 'Regenerate DKIM key', subtitle: 'The selector changes the DNS record name; the previous key remains on disk until replaced.',
       size: 'small',
-      body: `<form id="dkim-form"><div class="form-grid is-single">${ui.field({ label: 'DKIM selector', name: 'selector', value: detail.dkimSelector || 'meridian', required: true, help: 'Lowercase letters, digits, dots and hyphens. The public TXT record is replaced.' })}<div class="form-actions"><span class="form-note">Rspamd is reloaded after the key is written.</span><div class="form-actions-right"><button type="button" class="btn btn-ghost" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Generate key</button></div></div></div></form>`,
+      body: `<form id="dkim-form"><div class="form-grid is-single">${ui.field({ label: 'DKIM selector', name: 'selector', value: detail.dkimSelector || 'a8m', required: true, help: 'Lowercase letters, digits, dots and hyphens. The public TXT record is replaced.' })}<div class="form-actions"><span class="form-note">Rspamd is reloaded after the key is written.</span><div class="form-actions-right"><button type="button" class="btn btn-ghost" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Generate key</button></div></div></div></form>`,
     });
     const form = modal.root.querySelector('#dkim-form');
     form?.addEventListener('submit', async (event) => {

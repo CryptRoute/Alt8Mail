@@ -81,10 +81,10 @@ func domainRecords(domain, selector, token, mailHost, dkimRecord, dmarcPolicy st
 
 func domainRecordsWithMTA(domain, selector, token, mailHost, dkimRecord, dmarcPolicy, mtaMode string, mtaMaxAge int) []map[string]string {
 	if selector == "" {
-		selector = "meridian"
+		selector = "a8m"
 	}
 	if mailHost == "" {
-		mailHost = "mail.meridian.test"
+		mailHost = "mail.a8m.test"
 	}
 	mailHost = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(mailHost)), ".")
 	dmarcPolicy = strings.ToLower(strings.TrimSpace(dmarcPolicy))
@@ -106,7 +106,7 @@ func domainRecordsWithMTA(domain, selector, token, mailHost, dkimRecord, dmarcPo
 		dkim["status"] = "ready"
 	}
 	records := []map[string]string{
-		{"type": "TXT", "name": "_meridian-verification." + domain, "value": "meridian-verify=" + token, "purpose": "Ownership verification"},
+		{"type": "TXT", "name": "_a8m-verification." + domain, "value": "a8m-verify=" + token, "purpose": "Ownership verification"},
 		{"type": "MX", "name": domain, "value": "10 " + mailHost + ".", "purpose": "Inbound mail routing"},
 		{"type": "TXT", "name": domain, "value": "v=spf1 mx -all", "purpose": "SPF sender authorization"},
 		dkim,
@@ -148,7 +148,7 @@ func (s *Server) adminCreateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.DKIMSelector == "" {
-		body.DKIMSelector = "meridian"
+		body.DKIMSelector = "a8m"
 	}
 	if !validDKIMSelector(body.DKIMSelector) {
 		writeError(w, http.StatusBadRequest, "DKIM", "Invalid DKIM selector")
@@ -415,16 +415,16 @@ func verifyDomainDNSFull(ctx context.Context, resolver domainLookup, domain, sel
 	mailHost, mtaMode string, mtaMaxAge int, fetchPolicy mtaSTSFetcher) domainDNSChecks {
 	checks := domainDNSChecks{Details: map[string]string{}, MTASTS: normalizeMTASTSMode(mtaMode) == "none"}
 	if selector == "" {
-		selector = "meridian"
+		selector = "a8m"
 	}
 	mailHost = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(mailHost)), ".")
 
 	if token == "" {
 		checks.Details["ownership"] = "verification token is missing"
-	} else if txts, err := resolver.LookupTXT(ctx, "_meridian-verification."+domain); err != nil {
+	} else if txts, err := resolver.LookupTXT(ctx, "_a8m-verification."+domain); err != nil {
 		checks.Details["ownership"] = "TXT lookup failed: " + err.Error()
 	} else {
-		expected := "meridian-verify=" + token
+		expected := "a8m-verify=" + token
 		for _, txt := range txts {
 			if strings.TrimSpace(txt) == expected {
 				checks.Verification = true
@@ -432,7 +432,7 @@ func verifyDomainDNSFull(ctx context.Context, resolver domainLookup, domain, sel
 			}
 		}
 		if !checks.Verification {
-			checks.Details["ownership"] = "no matching meridian-verify TXT record"
+			checks.Details["ownership"] = "no matching a8m-verify TXT record"
 		}
 	}
 

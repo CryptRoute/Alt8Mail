@@ -38,7 +38,7 @@ let jobId = '';
 try {
   const created = await main.req('/control/api/imports', {
     method: 'POST', expected: 201,
-    body: { kind: 'mbox', targetMailbox: 'postmaster@meridian.test', path: MBOX },
+    body: { kind: 'mbox', targetMailbox: 'postmaster@a8m.test', path: MBOX },
   });
   jobId = created.id;
   let job = null;

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/config"
-	"github.com/meridian-mail/meridian/backend/internal/store"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 )
 
 var pathPartPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+=-]{0,127}$`)

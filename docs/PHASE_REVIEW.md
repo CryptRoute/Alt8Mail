@@ -353,7 +353,7 @@ whole mailbox without windowing.
 
 ## Partial / constrained
 
-- **Public DNS and MTA-STS:** staging uses the reserved `meridian.test`, which
+- **Public DNS and MTA-STS:** staging uses the reserved `a8m.test`, which
   has no public DNS. The admin screen shows the real records, the policy
   endpoint answers on the correct Host, and unit tests cover the verifier, but
   ownership/MX/SPF/DKIM/DMARC/MTA-STS cannot pass public verification until a
@@ -385,7 +385,7 @@ whole mailbox without windowing.
 - **External identities:** verification proves control of the address, but
   deliverability still depends on that domain's SPF/DKIM alignment and
   reputation; the UI warns against using an address the domain has not
-  authorized Meridian to send for.
+  authorized Alt8Mail to send for.
 - **Notifications:** read/dismissed state is per-browser localStorage and does
   not sync across devices. Content is derived live; there is no server push
   channel for non-mail events beyond the existing browser poll/IDLE mail path.

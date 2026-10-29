@@ -20,7 +20,7 @@ type storageProviderDef struct {
 
 func (s *Server) storageProviderDefs() []storageProviderDef {
 	return []storageProviderDef{
-		{ID: "meridian", Name: "Meridian Drive", Kind: "internal", Color: "#0f6cbd",
+		{ID: "a8m", Name: "Alt8Mail Drive", Kind: "internal", Color: "#0f6cbd",
 			Description: "Company-managed storage on this server.", Configured: true},
 		{ID: "s3", Name: "S3 / MinIO", Kind: "s3", Color: "#d97706",
 			Description: "Use the configured S3-compatible bucket.", Configured: s.s3Configured()},
@@ -85,7 +85,7 @@ func (s *Server) publicStorageProviders(ctx context.Context, user userRecord) ([
 		used := providerFiles[provider.ID]
 		var limit int64
 		var lastSync any
-		if provider.ID == "meridian" {
+		if provider.ID == "a8m" {
 			connected = true
 			accountEmail = user.Email
 			status = "synced"
@@ -128,7 +128,7 @@ type storageAccountSummary struct {
 }
 
 func (s *Server) workspaceKey() []byte {
-	sum := sha256.Sum256([]byte(s.cfg.SessionSecret + "|meridian-workspace-token-v1"))
+	sum := sha256.Sum256([]byte(s.cfg.SessionSecret + "|a8m-workspace-token-v1"))
 	return sum[:]
 }
 

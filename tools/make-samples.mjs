@@ -30,7 +30,7 @@ function buildPdf({ title, subtitle, lines, accent = [15, 108, 189] }) {
     y -= bold ? 24 : 18;
   }
   content.push("q 0.82 0.85 0.89 rg 48 64 516 1 re f Q");
-  content.push("BT /F1 8 Tf 48 48 Td 0.48 0.52 0.58 rg (Meridian Mail - demo attachment - generated for the Aurora template) Tj ET");
+  content.push("BT /F1 8 Tf 48 48 Td 0.48 0.52 0.58 rg (Alt8Mail - demo attachment - generated for the Aurora template) Tj ET");
 
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
@@ -56,7 +56,7 @@ const pdfs = [
   {
     file: "Q4-roadmap-v3.pdf",
     title: "Q4 Roadmap Review",
-    subtitle: "Meridian Product · Thursday 10:00 · Conference Room B",
+    subtitle: "Alt8Mail Product · Thursday 10:00 · Conference Room B",
     accent: [15, 108, 189],
     lines: [
       "## Overview",
@@ -94,7 +94,7 @@ const pdfs = [
       "",
       "## Signature",
       "Jordan Blake, Brightline                         Date: 2026-10-27",
-      "Dana Whitfield, Meridian                         Date: 2026-10-27",
+      "Dana Whitfield, Alt8Mail                         Date: 2026-10-27",
       "",
       "Security review complete. Onboarding begins Monday."
     ]
@@ -125,7 +125,7 @@ const pdfs = [
   {
     file: "invoice-4821.pdf",
     title: "Invoice 4821",
-    subtitle: "Meridian Finance · due Friday",
+    subtitle: "Alt8Mail Finance · due Friday",
     accent: [122, 74, 92],
     lines: [
       "## Vendor",
@@ -176,7 +176,7 @@ for (const pdf of pdfs) {
   console.log(pdf.file, buffer.length, "bytes");
 }
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="Meridian offsite in Berlin">
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="Alt8Mail offsite in Berlin">
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#0b3260"/>
@@ -198,7 +198,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" v
     <circle cx="520" cy="130" r="2"/><circle cx="690" cy="190" r="2.4"/><circle cx="1080" cy="160" r="2.8"/>
     <circle cx="800" cy="110" r="1.8"/><circle cx="1020" cy="90" r="2.2"/>
   </g>
-  <text x="70" y="110" fill="#f6fbff" font-family="Segoe UI, Arial, sans-serif" font-size="54" font-weight="600" letter-spacing="-2">Meridian offsite</text>
+  <text x="70" y="110" fill="#f6fbff" font-family="Segoe UI, Arial, sans-serif" font-size="54" font-weight="600" letter-spacing="-2">Alt8Mail offsite</text>
   <text x="72" y="158" fill="#c7ddf2" font-family="Segoe UI, Arial, sans-serif" font-size="22">Berlin · Product team · 2026</text>
   <g fill="#f6fbff" opacity=".82" font-family="Segoe UI, Arial, sans-serif" font-size="15">
     <text x="72" y="720">Photo placeholder for the Aurora template attachment preview.</text>

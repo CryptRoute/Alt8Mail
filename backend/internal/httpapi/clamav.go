@@ -16,7 +16,7 @@ var errUploadInfected = errors.New("upload contains malware")
 const maxClamAVResponse = 4096
 
 // scanUpload scans bytes through clamd's INSTREAM protocol. An empty
-// MERIDIAN_CLAMAV_ADDR disables scanning (local development). When configured,
+// ALT8MAIL_CLAMAV_ADDR disables scanning (local development). When configured,
 // scanner errors fail closed so an unavailable scanner cannot be used to bypass
 // malware detection on user uploads and guest-share replacements.
 func (s *Server) scanUpload(ctx context.Context, data []byte) error {

@@ -12,11 +12,11 @@ import time
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("MERIDIAN_ADMIN_API", "https://130-94-46-22.sslip.io/admin/api")
-EMAIL = os.environ.get("MERIDIAN_ADMIN_EMAIL", "avery.chen@meridian.test")
-PASSWORD = os.environ.get("MERIDIAN_ADMIN_PASSWORD", "")
-if not PASSWORD and os.environ.get("MERIDIAN_ADMIN_PASSWORD_FILE"):
-    with open(os.environ["MERIDIAN_ADMIN_PASSWORD_FILE"], "r", encoding="utf-8") as handle:
+BASE = os.environ.get("ALT8MAIL_ADMIN_API", "https://130-94-46-22.sslip.io/admin/api")
+EMAIL = os.environ.get("ALT8MAIL_ADMIN_EMAIL", "avery.chen@a8m.test")
+PASSWORD = os.environ.get("ALT8MAIL_ADMIN_PASSWORD", "")
+if not PASSWORD and os.environ.get("ALT8MAIL_ADMIN_PASSWORD_FILE"):
+    with open(os.environ["ALT8MAIL_ADMIN_PASSWORD_FILE"], "r", encoding="utf-8") as handle:
         PASSWORD = handle.read().strip()
 if not PASSWORD:
     raise SystemExit("admin password is required")

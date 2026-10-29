@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Meridian Mail</title>
-<meta name="description" content="Meridian Mail — an enterprise webmail template with two-factor sign-in, threaded conversations, instant search, scheduled send, tasks, files, attachment preview and sender trust.">
+<title>Alt8Mail</title>
+<meta name="description" content="Alt8Mail — an enterprise webmail template with two-factor sign-in, threaded conversations, instant search, scheduled send, tasks, files, attachment preview and sender trust.">
 <meta name="theme-color" content="#093256">
 <meta name="color-scheme" content="light dark">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -84,7 +84,7 @@
   </defs>
 </svg>
 
-<div class="boot-splash" id="bootSplash" role="status" aria-live="polite" aria-label="Opening Meridian Mail">
+<div class="boot-splash" id="bootSplash" role="status" aria-live="polite" aria-label="Opening Alt8Mail">
   <div class="boot-splash-inner">
     <div class="boot-envelope" aria-hidden="true">
       <span class="boot-envelope-letter"></span>
@@ -94,7 +94,7 @@
       <span class="boot-spark boot-spark-2"></span>
       <span class="boot-spark boot-spark-3"></span>
     </div>
-    <p class="eyebrow">Meridian Mail</p>
+    <p class="eyebrow">Alt8Mail</p>
     <h1>Opening your workspace</h1>
     <p>Restoring your secure session and mailbox…</p>
     <div class="boot-progress" aria-hidden="true"><span></span></div>
@@ -107,7 +107,7 @@
     <div class="login-brand-top">
       <span class="login-mark" aria-hidden="true">M</span>
       <div>
-        <strong>Meridian</strong>
+        <strong>Alt8Mail</strong>
         <span>Enterprise workspace</span>
       </div>
     </div>
@@ -139,9 +139,9 @@
   <section class="login-panel">
     <form class="login-card" id="loginForm" novalidate>
       <div class="login-heading">
-        <p class="eyebrow">Meridian Mail</p>
+        <p class="eyebrow">Alt8Mail</p>
         <h2>Sign in</h2>
-        <p>Use your Meridian account to continue.</p>
+        <p>Use your Alt8Mail account to continue.</p>
       </div>
       <button class="sso-btn" id="ssoBtn" type="button">
         <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
@@ -150,12 +150,12 @@
       <div class="login-divider"><span>or sign in with your work email</span></div>
       <div class="login-field">
         <label for="loginEmail">Work email</label>
-        <input id="loginEmail" type="email" value="avery.chen@meridian.example" autocomplete="username" spellcheck="false">
+        <input id="loginEmail" type="email" value="avery.chen@a8m.example" autocomplete="username" spellcheck="false">
       </div>
       <div class="login-field">
         <label for="loginPassword">Password</label>
         <div class="password-wrap">
-          <input id="loginPassword" type="password" value="meridian-demo" autocomplete="current-password">
+          <input id="loginPassword" type="password" value="a8m-demo" autocomplete="current-password">
           <button id="passwordToggle" type="button">Show</button>
         </div>
       </div>
@@ -183,7 +183,7 @@
       </div>
       <div class="two-factor-user">
         <span class="avatar avatar-md" id="twoFactorAvatar" style="--av:#34557a">AC</span>
-        <div><strong id="twoFactorName">Avery Chen</strong><span id="twoFactorEmail">avery.chen@meridian.example</span></div>
+        <div><strong id="twoFactorName">Avery Chen</strong><span id="twoFactorEmail">avery.chen@a8m.example</span></div>
         <span class="policy-chip"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Secure</span>
       </div>
       <div class="passkey-panel" id="passkeyPanel">
@@ -212,7 +212,7 @@
       <div class="recovery-block" id="recoveryBlock" hidden>
         <label class="login-field">
           <span>Recovery code</span>
-          <input id="recoveryCode" type="text" placeholder="MRDN-XXXX-XXXX" autocomplete="one-time-code" spellcheck="false">
+          <input id="recoveryCode" type="text" placeholder="A8M-XXXX-XXXX" autocomplete="one-time-code" spellcheck="false">
         </label>
         <button class="login-link" id="otpModeBtn" type="button">Use authenticator code instead</button>
       </div>
@@ -238,7 +238,7 @@
       </div>
       <div class="two-factor-user">
         <span class="avatar avatar-md" id="enrollmentAvatar" style="--av:#34557a">AC</span>
-        <div><strong id="enrollmentName">Avery Chen</strong><span id="enrollmentEmail">avery.chen@meridian.test</span></div>
+        <div><strong id="enrollmentName">Avery Chen</strong><span id="enrollmentEmail">avery.chen@a8m.test</span></div>
         <span class="policy-chip"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Required</span>
       </div>
       <div class="enrollment-methods">
@@ -254,11 +254,11 @@
       <p class="login-error" id="enrollmentError" hidden></p>
       <div class="login-actions-row">
         <button class="login-link" id="enrollmentCancel" type="button">Back to sign in</button>
-        <span>Second factor is stored and verified by Meridian.</span>
+        <span>Second factor is stored and verified by Alt8Mail.</span>
       </div>
       <div class="login-card-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>First-time enrollment · TOTP or WebAuthn</div>
     </form>
-    <div class="login-legal">Meridian Mail · staging environment</div>
+    <div class="login-legal">Alt8Mail · staging environment</div>
   </section>
 </div>
 
@@ -270,7 +270,7 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">M</span>
-      <span class="brand-name">Meridian</span>
+      <span class="brand-name">Alt8Mail</span>
       <span class="brand-chip">Mail</span>
       <svg class="icon brand-shield" aria-hidden="true" title="Verified organization"><use href="#i-shield-check"/></svg>
     </div>
@@ -436,7 +436,7 @@
             <div class="tenant">
               <span class="tenant-mark" aria-hidden="true">M</span>
               <div class="tenant-id">
-                <strong>Meridian</strong>
+                <strong>Alt8Mail</strong>
                 <span><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Enterprise workspace</span>
               </div>
             </div>
@@ -444,7 +444,7 @@
               <span class="avatar avatar-sm" style="--av:#3f5d7a">AC</span>
               <div class="account-id">
                 <strong>Avery Chen</strong>
-                <span>avery.chen@meridian.example</span>
+                <span>avery.chen@a8m.example</span>
               </div>
             </div>
           </div>
@@ -577,7 +577,7 @@
       <div class="people-view" id="peopleView" hidden>
         <aside class="people-list" aria-label="Contacts">
           <div class="people-head">
-            <p class="eyebrow">Meridian directory</p>
+            <p class="eyebrow">Alt8Mail directory</p>
             <div class="people-title-row">
               <h1>People</h1>
               <span class="people-count" id="peopleCount">8 contacts</span>
@@ -613,7 +613,7 @@
       <div class="tasks-view" id="tasksView" hidden>
         <header class="workspace-page-head">
           <div>
-            <p class="eyebrow">Meridian workspace</p>
+            <p class="eyebrow">Alt8Mail workspace</p>
             <div class="workspace-title-row">
               <h1>Tasks</h1>
               <span class="workspace-meta" id="tasksMeta">My tasks and team follow-ups</span>
@@ -641,7 +641,7 @@
       <div class="files-view" id="filesView" hidden>
         <header class="workspace-page-head">
           <div>
-            <p class="eyebrow">Meridian workspace</p>
+            <p class="eyebrow">Alt8Mail workspace</p>
             <div class="workspace-title-row">
               <h1>Files</h1>
               <span class="workspace-meta" id="filesMeta">Company storage and connected drives</span>
@@ -673,7 +673,7 @@
       <div class="scheduled-view" id="scheduledView" hidden>
         <header class="workspace-page-head">
           <div>
-            <p class="eyebrow">Meridian outbox</p>
+            <p class="eyebrow">Alt8Mail outbox</p>
             <div class="workspace-title-row">
               <h1>Scheduled</h1>
               <span class="workspace-meta" id="scheduledMeta">Messages waiting for their send time</span>
@@ -703,7 +703,7 @@
           <div class="scheduled-list" id="scheduledList"></div>
           <div class="scheduled-policy">
             <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
-            <div><strong>Server-backed schedule</strong><span>Scheduled mail is held in the Meridian outbox, survives sign-out and restarts, and can be sent now, edited or cancelled until its send time.</span></div>
+            <div><strong>Server-backed schedule</strong><span>Scheduled mail is held in the Alt8Mail outbox, survives sign-out and restarts, and can be sent now, edited or cancelled until its send time.</span></div>
           </div>
         </div>
       </div>
@@ -711,7 +711,7 @@
       <div class="calendar-view" id="calendarView" hidden>
         <header class="calendar-head">
           <div class="calendar-title">
-            <p class="eyebrow">Meridian workspace</p>
+            <p class="eyebrow">Alt8Mail workspace</p>
             <h1>Calendar</h1>
           </div>
           <div class="calendar-actions">
@@ -751,7 +751,7 @@
             <div class="cal-agenda-list" id="agendaList"></div>
             <div class="cal-agenda-foot">
               <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
-              Calendar data stays within Meridian.
+              Calendar data stays within Alt8Mail.
             </div>
           </aside>
         </div>
@@ -761,7 +761,7 @@
         <div class="settings-layout">
           <aside class="settings-nav">
             <div class="settings-nav-head">
-              <p class="eyebrow">Meridian workspace</p>
+              <p class="eyebrow">Alt8Mail workspace</p>
               <h1>Settings</h1>
             </div>
             <nav class="settings-nav-list" aria-label="Settings sections">
@@ -1108,7 +1108,7 @@
                       <div class="pref-row">
                         <div class="pref-copy">
                           <strong>Desktop notifications</strong>
-                          <span>Show an alert when new mail arrives while Meridian Mail is open.</span>
+                          <span>Show an alert when new mail arrives while Alt8Mail is open.</span>
                         </div>
                         <button class="switch" data-pref="notifyDesktop" type="button" role="switch" aria-checked="true" aria-label="Desktop notifications"><span></span></button>
                       </div>
@@ -1244,7 +1244,7 @@
                     <section class="auto-reply-card">
                       <div class="auto-reply-card-head">
                         <span class="auto-reply-icon"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></span>
-                        <div><strong>Inside Meridian</strong><span>Sent to colleagues in your organization.</span></div>
+                        <div><strong>Inside Alt8Mail</strong><span>Sent to colleagues in your organization.</span></div>
                         <span class="policy-chip">Always on with automatic replies</span>
                       </div>
                       <label class="form-field"><span>Subject</span><input id="autoReplyInternalSubject" type="text" placeholder="Out of office"></label>
@@ -1253,7 +1253,7 @@
                     <section class="auto-reply-card">
                       <div class="auto-reply-card-head">
                         <span class="auto-reply-icon external"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span>
-                        <div><strong>Outside Meridian</strong><span>Different wording for customers and partners.</span></div>
+                        <div><strong>Outside Alt8Mail</strong><span>Different wording for customers and partners.</span></div>
                         <button class="switch" id="autoReplyExternalToggle" type="button" role="switch" aria-checked="true" aria-label="Reply to external senders"><span></span></button>
                       </div>
                       <label class="form-field"><span>Subject</span><input id="autoReplyExternalSubject" type="text" placeholder="Away from the office"></label>
@@ -1456,7 +1456,7 @@
                       <div class="setting-row">
                         <div class="setting-copy">
                           <strong>External sender warnings</strong>
-                          <span>Show a warning banner on mail from outside meridian.test.</span>
+                          <span>Show a warning banner on mail from outside a8m.test.</span>
                         </div>
                         <button class="switch" id="externalWarningToggle" type="button" role="switch" aria-checked="true" aria-label="External sender warnings"><span></span></button>
                       </div>
@@ -1470,7 +1470,7 @@
                       <div class="setting-row">
                         <div class="setting-copy">
                           <strong>Retention</strong>
-                          <span>Mail is retained for seven years under Meridian policy.</span>
+                          <span>Mail is retained for seven years under Alt8Mail policy.</span>
                         </div>
                         <span class="policy-chip">7 years</span>
                       </div>
@@ -1510,10 +1510,10 @@
                     <span class="avatar avatar-xl" style="--av:#34557a">AC</span>
                     <div class="account-profile-copy">
                       <h3>Avery Chen</h3>
-                      <p>VP Product · Meridian</p>
+                      <p>VP Product · Alt8Mail</p>
                       <span class="directory-badge"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Internal directory</span>
                     </div>
-                    <button class="btn-secondary" data-copy-email="avery.chen@meridian.example" type="button">Copy email</button>
+                    <button class="btn-secondary" data-copy-email="avery.chen@a8m.example" type="button">Copy email</button>
                   </div>
 
                   <div class="settings-block" id="profileEditBlock">
@@ -1530,10 +1530,10 @@
                   </div>
 
                   <div class="settings-block">
-                    <div class="settings-block-head"><h3>Workspace</h3><p>Your Meridian account and storage.</p></div>
+                    <div class="settings-block-head"><h3>Workspace</h3><p>Your Alt8Mail account and storage.</p></div>
                     <div class="pref-list">
                       <div class="pref-row">
-                        <div class="pref-copy"><strong>Work email</strong><span id="accountEmail">avery.chen@meridian.example</span></div>
+                        <div class="pref-copy"><strong>Work email</strong><span id="accountEmail">avery.chen@a8m.example</span></div>
                         <span class="policy-chip">Verified</span>
                       </div>
                       <div class="pref-row">
@@ -1562,7 +1562,7 @@
                     </div>
                     <div class="settings-actions">
                       <button class="btn-secondary" id="signOutOtherSessions" type="button">Sign out other sessions</button>
-                      <button class="btn-secondary" id="signOutSettings" type="button">Sign out of Meridian Mail</button>
+                      <button class="btn-secondary" id="signOutSettings" type="button">Sign out of Alt8Mail</button>
                     </div>
                   </div>
                 </section>
@@ -1715,7 +1715,7 @@
     <header class="notice-window-head">
       <div class="notice-window-title">
         <span class="notice-window-icon"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg></span>
-        <div><p class="eyebrow">Meridian workspace</p><h2 id="noticeTitle">Notification center</h2></div>
+        <div><p class="eyebrow">Alt8Mail workspace</p><h2 id="noticeTitle">Notification center</h2></div>
       </div>
       <div class="notice-window-actions">
         <button class="btn-secondary small" id="noticeMarkAll" type="button">Mark all read</button>
@@ -1843,7 +1843,7 @@
     <div class="dialog-head">
       <div class="dialog-title-wrap">
         <span class="dialog-icon report-icon"><svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg></span>
-        <div><h2 id="reportTitle">Report email</h2><p>Send this message to Meridian Security for review.</p></div>
+        <div><h2 id="reportTitle">Report email</h2><p>Send this message to Alt8Mail Security for review.</p></div>
       </div>
       <button class="icon-btn" id="reportClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
     </div>
@@ -2032,7 +2032,7 @@
       <span id="previewDimensions"></span>
     </div>
     <div class="preview-body" id="previewBody"></div>
-    <div class="preview-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span id="previewFootNote">Scanned by Meridian attachment protection</span></div>
+    <div class="preview-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span id="previewFootNote">Scanned by Alt8Mail attachment protection</span></div>
   </div>
 </div>
 

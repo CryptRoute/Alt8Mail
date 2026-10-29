@@ -389,22 +389,22 @@ const DEFAULT_PREFERENCES = {
    ============================================================ */
 const prefs = {
   get(key) {
-    try { return localStorage.getItem("meridian." + key); } catch { return null; }
+    try { return localStorage.getItem("a8m." + key); } catch { return null; }
   },
   set(key, value) {
-    try { localStorage.setItem("meridian." + key, value); } catch {}
+    try { localStorage.setItem("a8m." + key, value); } catch {}
   },
   clear() {
     try {
       Object.keys(localStorage)
-        .filter((key) => key.startsWith("meridian."))
+        .filter((key) => key.startsWith("a8m."))
         .forEach((key) => localStorage.removeItem(key));
     } catch {}
   }
 };
 
 function notificationStorageKey() {
-  return "meridian.notifications.read." + normalizeEmail(state.user?.email || "guest");
+  return "a8m.notifications.read." + normalizeEmail(state.user?.email || "guest");
 }
 
 function loadDismissedNotifications() {
@@ -1322,7 +1322,7 @@ async function submitLogin() {
   loginError.hidden = true;
   loginHint.hidden = true;
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    loginError.textContent = "Enter a valid Meridian work email address.";
+    loginError.textContent = "Enter a valid Alt8Mail work email address.";
     loginError.hidden = false;
     loginEmail.focus();
     return;
@@ -1399,7 +1399,7 @@ function showTwoFactorChallenge(data, remember) {
     avatarEl.textContent = user.initials || initialsFrom(user.name || "");
     avatarEl.style.setProperty("--av", user.color || "#34557a");
   }
-  document.getElementById("twoFactorName").textContent = user.name || "Meridian account";
+  document.getElementById("twoFactorName").textContent = user.name || "Alt8Mail account";
   document.getElementById("twoFactorEmail").textContent = user.email || loginEmail.value.trim();
   const passkey = (data.passkeys || [])[0];
   const passkeyPanel = document.getElementById("passkeyPanel");
@@ -1626,7 +1626,7 @@ function showEnrollmentChallenge(data, remember) {
   const user = data.user || {};
   document.getElementById("enrollmentAvatar").textContent = user.initials || initialsFrom(user.name || "");
   document.getElementById("enrollmentAvatar").style.setProperty("--av", user.color || "#34557a");
-  document.getElementById("enrollmentName").textContent = user.name || "Meridian account";
+  document.getElementById("enrollmentName").textContent = user.name || "Alt8Mail account";
   document.getElementById("enrollmentEmail").textContent = user.email || loginEmail.value.trim();
   requestAnimationFrame(() => document.getElementById("enrollmentTotpBtn").focus());
 }
@@ -1937,7 +1937,7 @@ async function pollNewMail() {
   renderNotifications();
 }
 
-function showBrowserNotification(title, body, tag = "meridian-new-mail") {
+function showBrowserNotification(title, body, tag = "a8m-new-mail") {
   if (!state.notifyDesktop || !("Notification" in window) || Notification.permission !== "granted") return false;
   try {
     const notification = new Notification(title, { body, tag, icon: "/icons/icon-192.png", badge: "/icons/icon-192.png" });
@@ -1971,7 +1971,7 @@ function showNewMailNotification(message, count) {
   const sender = message.from ? (message.from.name || message.from.email) : "New sender";
   const body = count > 1 ? `${count} new messages · ${sender}: ${subject}` : `${sender}: ${subject}`;
   if (state.notifySound) playNotificationTone();
-  if (!showBrowserNotification("New Meridian mail", body, "meridian-new-mail")) {
+  if (!showBrowserNotification("New Alt8Mail", body, "a8m-new-mail")) {
     showToast(`New mail from ${sender}: ${subject}`, "Open", () => { setTask("mail"); setFolder("inbox"); });
   }
 }
@@ -1988,7 +1988,7 @@ async function checkCalendarReminders() {
     if (diff <= 0 || diff > 10 * 60 * 1000) continue;
     state.remindedEventIds.add(key);
     const body = `${event.start} · ${event.where || "Calendar"}`;
-    if (!showBrowserNotification("Meeting in 10 minutes", `${event.title} — ${body}`, "meridian-calendar-" + key)) {
+    if (!showBrowserNotification("Meeting in 10 minutes", `${event.title} — ${body}`, "a8m-calendar-" + key)) {
       showToast(`Starting soon: ${event.title} · ${body}`);
     }
   }
@@ -2209,7 +2209,7 @@ function renderAccountChrome() {
     const h3 = $(".account-profile-copy h3", profile);
     const p = $(".account-profile-copy p", profile);
     if (h3) h3.textContent = user.name;
-    if (p) p.textContent = `${user.role || "Team member"} · ${user.company || "Meridian"}`;
+    if (p) p.textContent = `${user.role || "Team member"} · ${user.company || "Alt8Mail"}`;
   }
 }
 
@@ -2557,7 +2557,7 @@ function externalBannerMarkup(thread) {
       <strong>${failed ? "This sender failed authentication" : "External sender"}</strong>
       <span>${failed
         ? `SPF ${esc(auth.spf || "none")} · DKIM ${esc(auth.dkim || "none")} · DMARC ${esc(auth.dmarc || "none")}. Do not share confidential information or open unexpected attachments.`
-        : "This message came from outside Meridian. Verify the sender before sharing confidential information or opening attachments."}</span>
+        : "This message came from outside Alt8Mail. Verify the sender before sharing confidential information or opening attachments."}</span>
       ${warnings.length ? `<ul class="external-warnings">${warnings.map((warning) => `<li>${esc(warning)}</li>`).join("")}</ul>` : ""}
     </div>
     <div class="banner-actions">
@@ -2964,7 +2964,7 @@ function openPreview(file) {
   state.previewZoom = 1;
   previewTitle.textContent = file.name || "Attachment";
   previewMeta.textContent = `${file.type || "FILE"} · ${file.size || formatBytes(file.sizeBytes)}`;
-  previewFootNote.textContent = "Scanned by Meridian attachment protection";
+  previewFootNote.textContent = "Scanned by Alt8Mail attachment protection";
   if (url) {
     previewOpen.href = url;
     previewDownload.href = url;
@@ -3471,7 +3471,7 @@ async function submitSpamReport() {
     renderList();
     renderReader();
     syncSelectionUi();
-    showToast("Reported to Meridian Security · message moved to Junk");
+    showToast("Reported to Alt8Mail Security · message moved to Junk");
   } catch (error) {
     reportSubmit.classList.remove("is-busy");
     reportSubmit.disabled = false;
@@ -5481,11 +5481,11 @@ function syncStatusRange() {
 
 function syncStatusContext() {
   if (state.offline) { statusMid.textContent = "Offline — changes will retry"; return; }
-  if (state.task === "calendar") statusMid.textContent = "Calendar synced · Meridian";
-  else if (state.task === "people") statusMid.textContent = "Directory synced · Meridian";
-  else if (state.task === "tasks") statusMid.textContent = "Task workspace synced · Meridian";
+  if (state.task === "calendar") statusMid.textContent = "Calendar synced · Alt8Mail";
+  else if (state.task === "people") statusMid.textContent = "Directory synced · Alt8Mail";
+  else if (state.task === "tasks") statusMid.textContent = "Task workspace synced · Alt8Mail";
   else if (state.task === "files") statusMid.textContent = `${state.storageProviders.filter((provider) => provider.connected).length} storage providers connected`;
-  else if (state.task === "scheduled") statusMid.textContent = "Server outbox synced · Meridian";
+  else if (state.task === "scheduled") statusMid.textContent = "Server outbox synced · Alt8Mail";
   else if (state.task === "settings") statusMid.textContent = "Policy managed by Alt8Mail";
   else if (state.query) statusMid.textContent = `Searching ${state.messages.length} message index`;
   else statusMid.textContent = "Synced just now";
@@ -5510,7 +5510,7 @@ function openDetails(messageOrId) {
     ["Sender IP", auth.ip || "—"],
     ["TLS", auth.tls || "TLS 1.3"],
     ["Signing domain", auth.signer || "—"],
-    ["Retention", "7 years · Meridian policy"]
+    ["Retention", "7 years · Alt8Mail policy"]
   ];
   const checks = [
     ["SPF", auth.spf || "none", "Authorised sending host"],
@@ -5520,7 +5520,7 @@ function openDetails(messageOrId) {
   detailsBody.innerHTML = `<div class="details-security">
       <div class="details-security-head">
         <span class="trust-shield ${showExternalTag && message.external && !message.trusted ? "is-warn" : ""}"><svg class="icon" aria-hidden="true"><use href="#${showExternalTag && message.external ? "i-alert" : "i-shield-check"}"/></svg></span>
-        <div><strong>${message.external ? (showExternalTag ? (message.trusted ? "Trusted external sender" : "External sender") : (message.trusted ? "Trusted sender · authentication verified" : externalLabel)) : "Verified internal sender"}</strong><span>${message.external ? "Evaluated by Meridian DKIM, DMARC and DNS checks" : "Verified by the Meridian directory"}</span></div>
+        <div><strong>${message.external ? (showExternalTag ? (message.trusted ? "Trusted external sender" : "External sender") : (message.trusted ? "Trusted sender · authentication verified" : externalLabel)) : "Verified internal sender"}</strong><span>${message.external ? "Evaluated by Alt8Mail DKIM, DMARC and DNS checks" : "Verified by the Alt8Mail directory"}</span></div>
       </div>
       <div class="auth-grid">${checks.map(([name, result, detail]) => `<div class="auth-card ${result === "pass" ? "pass" : result === "fail" || result === "softfail" ? "fail" : "none"}"><span class="auth-name">${name}</span><strong>${esc(result)}</strong><span>${esc(detail)}</span></div>`).join("")}</div>
       ${(auth.warnings || []).length ? `<ul class="details-warnings">${auth.warnings.map((warning) => `<li>${esc(warning)}</li>`).join("")}</ul>` : ""}
@@ -5569,7 +5569,7 @@ const SETTINGS_META = {
   rules: { title: "Rules", eyebrow: "Server-side Sieve" },
   autoreply: { title: "Automatic replies", eyebrow: "Out of office" },
   audit: { title: "Audit log", eyebrow: "Account activity" },
-  security: { title: "Security & privacy", eyebrow: "Meridian policy" },
+  security: { title: "Security & privacy", eyebrow: "Alt8Mail policy" },
   account: { title: "Account", eyebrow: "Profile and sessions" },
   about: { title: "About", eyebrow: "Alt8Mail Email System" }
 };
@@ -5656,7 +5656,7 @@ function renderAutoReply() {
   document.querySelectorAll(".auto-reply-card")[1]?.classList.toggle("is-disabled", !vacation.external.enabled);
   autoReplyStatus.classList.toggle("is-on", vacation.enabled);
   autoReplyStatus.innerHTML = vacation.enabled
-    ? `<span class="auto-reply-dot" aria-hidden="true"></span><div><strong>Automatic replies are on</strong><span>${hasRange ? `${esc(vacation.start)} to ${esc(vacation.end)}` : "Replying until you turn it off"} · ${vacation.external.enabled ? "inside and outside Meridian" : "inside Meridian only"}</span></div>`
+    ? `<span class="auto-reply-dot" aria-hidden="true"></span><div><strong>Automatic replies are on</strong><span>${hasRange ? `${esc(vacation.start)} to ${esc(vacation.end)}` : "Replying until you turn it off"} · ${vacation.external.enabled ? "inside and outside Alt8Mail" : "inside Alt8Mail only"}</span></div>`
     : '<span class="auto-reply-dot" aria-hidden="true"></span><div><strong>Automatic replies are off</strong><span>Your colleagues and external senders receive normal mail delivery.</span></div>';
   updateAutoReplyPreview();
 }
@@ -5673,11 +5673,11 @@ function updateAutoReplyPreview() {
   const externalMessage = autoReplyExternalMessage.value.trim() || "No external message set.";
   autoReplyPreview.innerHTML = `<div class="auto-reply-preview-head"><span>Preview</span><span class="policy-chip ${enabled ? "is-live" : ""}">${enabled ? "Active" : "Off"}</span></div>
     <div class="auto-reply-mail">
-      <span class="auto-reply-mail-kicker">Inside Meridian</span>
+      <span class="auto-reply-mail-kicker">Inside Alt8Mail</span>
       <strong>${esc(internalSubject)}</strong>
       <p>${esc(internalMessage).replace(/\n/g, "<br>")}</p>
     </div>
-    ${external ? `<div class="auto-reply-mail external"><span class="auto-reply-mail-kicker">Outside Meridian</span><strong>${esc(externalSubject)}</strong><p>${esc(externalMessage).replace(/\n/g, "<br>")}</p></div>` : ""}
+    ${external ? `<div class="auto-reply-mail external"><span class="auto-reply-mail-kicker">Outside Alt8Mail</span><strong>${esc(externalSubject)}</strong><p>${esc(externalMessage).replace(/\n/g, "<br>")}</p></div>` : ""}
     ${start && end ? `<span class="auto-reply-window">Active ${esc(start)} → ${esc(end)}</span>` : ""}`;
 }
 
@@ -6273,7 +6273,7 @@ async function exportAudit() {
     const blob = await response.blob();
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `meridian-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `a8m-audit-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -6739,7 +6739,7 @@ function renderFileDetail() {
   if (!fileDetail) return;
   const file = state.files.find((item) => item.id === state.selectedFileId);
   if (!file) {
-    fileDetail.innerHTML = `<div class="file-detail-empty"><span class="file-detail-mark"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg></span><h2>Your files, connected</h2><p>Meridian Drive and OneDrive are connected. Add Dropbox, Google Drive or S3 to bring every team file into one view.</p><button class="btn-secondary" data-open-storage type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add storage</button><div class="file-detail-tips"><span>${state.files.filter((item) => storageConnected(item.providerId)).length} indexed files</span><span>OAuth-ready connectors</span><span>Enterprise sharing controls</span></div></div>`;
+    fileDetail.innerHTML = `<div class="file-detail-empty"><span class="file-detail-mark"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg></span><h2>Your files, connected</h2><p>Alt8Mail Drive and OneDrive are connected. Add Dropbox, Google Drive or S3 to bring every team file into one view.</p><button class="btn-secondary" data-open-storage type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add storage</button><div class="file-detail-tips"><span>${state.files.filter((item) => storageConnected(item.providerId)).length} indexed files</span><span>OAuth-ready connectors</span><span>Enterprise sharing controls</span></div></div>`;
     return;
   }
   const provider = storageProvider(file.providerId);
@@ -6930,8 +6930,8 @@ async function uploadFiles(files) {
   if (uploadBusy || !files || !files.length) return;
   uploadBusy = true;
   const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
-  const targetProvider = state.fileProvider !== "all" && storageConnected(state.fileProvider) ? state.fileProvider : "meridian";
-  const targetName = targetProvider === "meridian" ? "Meridian Drive" : (storageProvider(targetProvider)?.name || "connected storage");
+  const targetProvider = state.fileProvider !== "all" && storageConnected(state.fileProvider) ? state.fileProvider : "a8m";
+  const targetName = targetProvider === "a8m" ? "Alt8Mail Drive" : (storageProvider(targetProvider)?.name || "connected storage");
   let uploaded = 0;
   for (const file of Array.from(files)) {
     if (file.size > max) {
@@ -6983,7 +6983,7 @@ function scheduledRecipients(item) {
 
 function scheduledAliasLabel(item) {
   const alias = state.aliases.find((entry) => normalizeEmail(entry.email) === normalizeEmail(item.from && item.from.email));
-  return alias ? alias.label : (item.from && (item.from.name || item.from.email)) || "Meridian";
+  return alias ? alias.label : (item.from && (item.from.name || item.from.email)) || "Alt8Mail";
 }
 
 function scheduledAssessment(stamp) {
@@ -7614,7 +7614,7 @@ async function saveEvent() {
     const editingId = calendarEditingId;
     const data = await api(editingId ? `/api/calendar/events/${encodeURIComponent(editingId)}` : "/api/calendar/events", {
       method: editingId ? "PATCH" : "POST",
-      body: { title, date, start, end, where: where || "Meridian HQ", color: "#3d6b62" }
+      body: { title, date, start, end, where: where || "Alt8Mail HQ", color: "#3d6b62" }
     });
     if (editingId) {
       const index = state.calendarEvents.findIndex((item) => item.id === editingId);
@@ -7981,7 +7981,7 @@ function buildNotifications() {
       kind: "security",
       title: AUDIT_LABELS[action] || "Account security activity",
       body: entry.detail || entry.target || "Security event",
-      detail: entry.ip ? `IP ${entry.ip}` : "Meridian security",
+      detail: entry.ip ? `IP ${entry.ip}` : "Alt8Mail security",
       time: entry.ts,
       unread: true,
       action: { type: "security" }
@@ -8176,13 +8176,13 @@ function registerServiceWorker() {
     deferredInstallPrompt = null;
     const install = document.getElementById("installApp");
     if (install) install.hidden = true;
-    showToast("Meridian Mail installed");
+    showToast("Alt8Mail installed");
   });
 }
 
 async function installApp() {
   if (!deferredInstallPrompt) {
-    showToast("Use your browser’s Install App menu to add Meridian Mail");
+    showToast("Use your browser’s Install App menu to add Alt8Mail");
     return;
   }
   deferredInstallPrompt.prompt();
@@ -8218,7 +8218,7 @@ function handleDeepLink() {
       renderReader();
       syncSelectionUi();
       if (isMobile()) document.body.classList.add("reader-open");
-      document.title = `${threadSubject(thread)} — Meridian Mail`;
+      document.title = `${threadSubject(thread)} — Alt8Mail`;
     } else {
       showToast("That conversation is no longer available");
     }
@@ -8231,7 +8231,7 @@ function handleDeepLink() {
 function openThreadWindow(threadId) {
   if (!threadId) return;
   const url = `${location.origin}/?thread=${encodeURIComponent(threadId)}&popout=1`;
-  const windowName = `meridian-thread-${String(threadId).replace(/[^A-Za-z0-9_-]/g, "")}`;
+  const windowName = `a8m-thread-${String(threadId).replace(/[^A-Za-z0-9_-]/g, "")}`;
   const win = window.open(url, windowName, "popup=yes,width=1040,height=820,left=120,top=90,resizable=yes,scrollbars=yes");
   if (!win) showToast("Allow pop-ups to open conversations in a new window");
 }

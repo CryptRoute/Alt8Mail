@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 func (s *Server) adminTenantStats(ctx context.Context, tenantID string) (map[string]any, error) {
@@ -186,7 +186,7 @@ func (s *Server) adminCreateTenant(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO mail_domains (tenant_id, domain, is_primary, dkim_selector, status, verification_token) VALUES ($1, $2, true, 'meridian', 'pending', $3)`, tenantID, body.PrimaryDomain, randomToken(18)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO mail_domains (tenant_id, domain, is_primary, dkim_selector, status, verification_token) VALUES ($1, $2, true, 'a8m', 'pending', $3)`, tenantID, body.PrimaryDomain, randomToken(18)); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			writeError(w, http.StatusConflict, "DOMAIN_TAKEN", "That domain is already assigned to another organization")
 		} else {
@@ -457,7 +457,7 @@ func (s *Server) adminExportAudit(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	_, entries := s.adminAuditPage(r.Context(), sess.ActiveTenantID, strings.TrimSpace(r.URL.Query().Get("action")), strings.TrimSpace(r.URL.Query().Get("q")), 5000, 0)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="meridian-admin-audit.csv"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="a8m-admin-audit.csv"`)
 	writer := csv.NewWriter(w)
 	_ = writer.Write([]string{"created_at", "actor", "action", "target", "detail", "ip", "user_agent"})
 	for _, entry := range entries {

@@ -1,6 +1,6 @@
--- Meridian platform core schema (PostgreSQL 15+)
+-- Alt8Mail platform core schema (PostgreSQL 15+)
 -- The system backend owns this schema. Dovecot/Postfix read only the mailbox and
--- alias mapping tables through the restricted meridian_mail role.
+-- alias mapping tables through the restricted a8m_mail role.
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS citext;
@@ -401,14 +401,14 @@ CREATE TABLE IF NOT EXISTS system_settings (
 -- Restrict the mail daemons to the mapping tables they need.
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meridian_mail') THEN
-    RAISE EXCEPTION 'meridian_mail role must exist before migrations';
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'a8m_mail') THEN
+    RAISE EXCEPTION 'a8m_mail role must exist before migrations';
   END IF;
 END $$;
 
-GRANT CONNECT ON DATABASE meridian TO meridian_mail;
-GRANT USAGE ON SCHEMA public TO meridian_mail;
-GRANT SELECT ON mailboxes, user_aliases, mail_domains, users TO meridian_mail;
+GRANT CONNECT ON DATABASE a8m TO a8m_mail;
+GRANT USAGE ON SCHEMA public TO a8m_mail;
+GRANT SELECT ON mailboxes, user_aliases, mail_domains, users TO a8m_mail;
 
 INSERT INTO schema_migrations (version) VALUES ('0001_core')
 ON CONFLICT (version) DO NOTHING;

@@ -2,8 +2,8 @@ import { randomUUID, scryptSync, randomBytes } from "node:crypto";
 import { stripHtml } from "../public/search.mjs";
 import { renderSieve } from "./sieve.mjs";
 
-export const DEMO_EMAIL = "avery.chen@meridian.example";
-export const DEMO_PASSWORD = "meridian-demo";
+export const DEMO_EMAIL = "avery.chen@a8m.example";
+export const DEMO_PASSWORD = "a8m-demo";
 export const GIB = 1024 ** 3;
 export const MIB = 1024 ** 2;
 export const KIB = 1024;
@@ -72,40 +72,40 @@ const ME = {
   initials: "AC",
   color: "#34557a",
   role: "VP Product",
-  company: "Meridian",
+  company: "Alt8Mail",
   team: "Product",
   phone: "+1 (415) 555-0101",
   location: "San Francisco",
   reportsTo: "Dana Whitfield, CEO"
 };
 
-const ELENA = { name: "Elena Vasquez", email: "elena.vasquez@meridian.example", initials: "EV", color: "#34557a" };
-const MARCUS = { name: "Marcus Webb", email: "marcus.webb@meridian.example", initials: "MW", color: "#3d6b62" };
-const NORA = { name: "Nora Patel", email: "nora.patel@meridian.example", initials: "NP", color: "#5b4a7e" };
-const PRIYA = { name: "Priya Shah", email: "priya.shah@meridian.example", initials: "PS", color: "#7a4a5c" };
-const TOMAS = { name: "Tomás Ribeiro", email: "tomas.ribeiro@meridian.example", initials: "TR", color: "#7a5a3a" };
-const LENA = { name: "Lena Fischer", email: "lena.fischer@meridian.example", initials: "LF", color: "#3f6570" };
-const DANIEL = { name: "Daniel Kim", email: "daniel.kim@meridian.example", initials: "DK", color: "#476b4f" };
-const AISHA = { name: "Aisha Bello", email: "aisha.bello@meridian.example", initials: "AB", color: "#4f5673" };
+const ELENA = { name: "Elena Vasquez", email: "elena.vasquez@a8m.example", initials: "EV", color: "#34557a" };
+const MARCUS = { name: "Marcus Webb", email: "marcus.webb@a8m.example", initials: "MW", color: "#3d6b62" };
+const NORA = { name: "Nora Patel", email: "nora.patel@a8m.example", initials: "NP", color: "#5b4a7e" };
+const PRIYA = { name: "Priya Shah", email: "priya.shah@a8m.example", initials: "PS", color: "#7a4a5c" };
+const TOMAS = { name: "Tomás Ribeiro", email: "tomas.ribeiro@a8m.example", initials: "TR", color: "#7a5a3a" };
+const LENA = { name: "Lena Fischer", email: "lena.fischer@a8m.example", initials: "LF", color: "#3f6570" };
+const DANIEL = { name: "Daniel Kim", email: "daniel.kim@a8m.example", initials: "DK", color: "#476b4f" };
+const AISHA = { name: "Aisha Bello", email: "aisha.bello@a8m.example", initials: "AB", color: "#4f5673" };
 const JORDAN = { name: "Jordan Blake", email: "jordan.blake@brightline.example", initials: "JB", color: "#8a6a3a", company: "Brightline" };
-const NADIA = { name: "Nadia Haddad", email: "nadia.haddad@meridian.example", initials: "NH", color: "#b8336a" };
-const ANDREW = { name: "Andrew Lowe", email: "andrew.lowe@meridian.example", initials: "AL", color: "#0e7490" };
-const IT = { name: "Meridian IT", email: "it@meridian.example", initials: "IT", color: "#64748b" };
-const FINANCE = { name: "Meridian Finance", email: "finance@meridian.example", initials: "MF", color: "#15803d" };
+const NADIA = { name: "Nadia Haddad", email: "nadia.haddad@a8m.example", initials: "NH", color: "#b8336a" };
+const ANDREW = { name: "Andrew Lowe", email: "andrew.lowe@a8m.example", initials: "AL", color: "#0e7490" };
+const IT = { name: "Alt8Mail IT", email: "it@a8m.example", initials: "IT", color: "#64748b" };
+const FINANCE = { name: "Alt8Mail Finance", email: "finance@a8m.example", initials: "MF", color: "#15803d" };
 const PARCEL = { name: "Parcel Notice", email: "no-reply@parcel-alert.example", initials: "PN", color: "#64748b" };
 const OFFERS = { name: "Offers Daily", email: "hello@offers-daily.example", initials: "OD", color: "#b45309" };
-const PHISH = { name: "Meridian Account Team", email: "account-verify@meridian-security.example", initials: "MA", color: "#991b1b" };
+const PHISH = { name: "Alt8Mail Account Team", email: "account-verify@a8m-security.example", initials: "MA", color: "#991b1b" };
 const DESIGNFILE = { name: "Design Weekly", email: "news@designweekly.example", initials: "DW", color: "#6346d8" };
 
 const PEOPLE = [
-  { name: "Elena Vasquez", role: "VP Product", company: "Meridian", team: "Product", email: "elena.vasquez@meridian.example", phone: "+1 (415) 555-0138", location: "San Francisco", reportsTo: "Dana Whitfield, CEO", initials: "EV", color: "#34557a" },
-  { name: "Marcus Webb", role: "Legal Counsel", company: "Meridian", team: "Legal", email: "marcus.webb@meridian.example", phone: "+1 (415) 555-0112", location: "New York", reportsTo: "Dana Whitfield, CEO", initials: "MW", color: "#3d6b62" },
-  { name: "Nora Patel", role: "Design Lead", company: "Meridian", team: "Design", email: "nora.patel@meridian.example", phone: "+1 (415) 555-0164", location: "San Francisco", reportsTo: "Elena Vasquez, VP Product", initials: "NP", color: "#5b4a7e" },
-  { name: "Priya Shah", role: "Finance Manager", company: "Meridian", team: "Finance", email: "priya.shah@meridian.example", phone: "+1 (415) 555-0179", location: "London", reportsTo: "Dana Whitfield, CEO", initials: "PS", color: "#7a4a5c" },
-  { name: "Tomás Ribeiro", role: "Customer Success Lead", company: "Meridian", team: "Customer Success", email: "tomas.ribeiro@meridian.example", phone: "+1 (415) 555-0193", location: "Lisbon", reportsTo: "Elena Vasquez, VP Product", initials: "TR", color: "#7a5a3a" },
-  { name: "Lena Fischer", role: "People Operations", company: "Meridian", team: "People", email: "lena.fischer@meridian.example", phone: "+1 (415) 555-0147", location: "Berlin", reportsTo: "Dana Whitfield, CEO", initials: "LF", color: "#3f6570" },
-  { name: "Daniel Kim", role: "Data & Analytics", company: "Meridian", team: "Data", email: "daniel.kim@meridian.example", phone: "+1 (415) 555-0125", location: "San Francisco", reportsTo: "Elena Vasquez, VP Product", initials: "DK", color: "#476b4f" },
-  { name: "Aisha Bello", role: "Engineering Manager", company: "Meridian", team: "Engineering", email: "aisha.bello@meridian.example", phone: "+1 (415) 555-0186", location: "London", reportsTo: "Dana Whitfield, CEO", initials: "AB", color: "#4f5673" }
+  { name: "Elena Vasquez", role: "VP Product", company: "Alt8Mail", team: "Product", email: "elena.vasquez@a8m.example", phone: "+1 (415) 555-0138", location: "San Francisco", reportsTo: "Dana Whitfield, CEO", initials: "EV", color: "#34557a" },
+  { name: "Marcus Webb", role: "Legal Counsel", company: "Alt8Mail", team: "Legal", email: "marcus.webb@a8m.example", phone: "+1 (415) 555-0112", location: "New York", reportsTo: "Dana Whitfield, CEO", initials: "MW", color: "#3d6b62" },
+  { name: "Nora Patel", role: "Design Lead", company: "Alt8Mail", team: "Design", email: "nora.patel@a8m.example", phone: "+1 (415) 555-0164", location: "San Francisco", reportsTo: "Elena Vasquez, VP Product", initials: "NP", color: "#5b4a7e" },
+  { name: "Priya Shah", role: "Finance Manager", company: "Alt8Mail", team: "Finance", email: "priya.shah@a8m.example", phone: "+1 (415) 555-0179", location: "London", reportsTo: "Dana Whitfield, CEO", initials: "PS", color: "#7a4a5c" },
+  { name: "Tomás Ribeiro", role: "Customer Success Lead", company: "Alt8Mail", team: "Customer Success", email: "tomas.ribeiro@a8m.example", phone: "+1 (415) 555-0193", location: "Lisbon", reportsTo: "Elena Vasquez, VP Product", initials: "TR", color: "#7a5a3a" },
+  { name: "Lena Fischer", role: "People Operations", company: "Alt8Mail", team: "People", email: "lena.fischer@a8m.example", phone: "+1 (415) 555-0147", location: "Berlin", reportsTo: "Dana Whitfield, CEO", initials: "LF", color: "#3f6570" },
+  { name: "Daniel Kim", role: "Data & Analytics", company: "Alt8Mail", team: "Data", email: "daniel.kim@a8m.example", phone: "+1 (415) 555-0125", location: "San Francisco", reportsTo: "Elena Vasquez, VP Product", initials: "DK", color: "#476b4f" },
+  { name: "Aisha Bello", role: "Engineering Manager", company: "Alt8Mail", team: "Engineering", email: "aisha.bello@a8m.example", phone: "+1 (415) 555-0186", location: "London", reportsTo: "Dana Whitfield, CEO", initials: "AB", color: "#4f5673" }
 ];
 
 const FOLDERS = [
@@ -125,7 +125,7 @@ function authInternal(overrides = {}) {
     dmarc: "pass",
     tls: "TLS 1.3",
     ip: "10.20.4.18",
-    signer: "meridian.example",
+    signer: "a8m.example",
     firstContact: false,
     warnings: [],
     ...overrides
@@ -153,7 +153,7 @@ function message(input) {
   const bodyText = input.bodyText || stripHtml(bodyHtml);
   const attachments = input.attachments || [];
   const sizeBytes = Number(input.sizeBytes) || (8 * KIB + attachments.reduce((sum, item) => sum + (item.sizeBytes || 0), 0));
-  const external = input.external != null ? input.external : (input.from && !String(input.from.email).endsWith("@meridian.example"));
+  const external = input.external != null ? input.external : (input.from && !String(input.from.email).endsWith("@a8m.example"));
   return {
     id: input.id || `m${messageCounter}`,
     threadId: input.threadId || input.id || `m${messageCounter}`,
@@ -177,7 +177,7 @@ function message(input) {
     auth: input.auth || (external ? authExternal() : authInternal()),
     event: input.event || null,
     sizeBytes,
-    messageId: `<${input.id || "m" + messageCounter}@meridian.example>`,
+    messageId: `<${input.id || "m" + messageCounter}@a8m.example>`,
     inReplyTo: input.inReplyTo || null,
     priority: input.priority || "normal",
     receipt: !!input.receipt,
@@ -194,7 +194,7 @@ function bodyParagraphs(lines) {
 }
 
 function signature(name, role) {
-  return `<p class="sig">${name}<br><span>${role} · Meridian</span></p>`;
+  return `<p class="sig">${name}<br><span>${role} · Alt8Mail</span></p>`;
 }
 
 export function seedDatabase() {
@@ -220,7 +220,7 @@ export function seedDatabase() {
     subject: "Re: Q4 roadmap review — Thursday 10:00",
     date: iso(1 * HOUR + 58 * MINUTE), unread: false, sizeBytes: 16 * KIB,
     snippet: "The deck looks tight. I'd keep the shared-inbox beta in Q4 and move the analytics export to early January.",
-    inReplyTo: "<m1@meridian.example>",
+    inReplyTo: "<m1@a8m.example>",
     bodyHtml: bodyParagraphs(["Elena —", "The deck looks tight. I'd keep the shared-inbox beta in Q4 and move the analytics export to early January, as long as support has the macro library ready.", "I'll bring both questions to Thursday.", "Avery"])
   }));
   messages.push(message({
@@ -229,7 +229,7 @@ export function seedDatabase() {
     date: iso(38 * MINUTE), unread: true, sizeBytes: 9 * KIB,
     categories: ["decision"],
     snippet: "One more thing for the agenda: support asked for a hard date on the macro library.",
-    inReplyTo: "<m2@meridian.example>",
+    inReplyTo: "<m2@a8m.example>",
     bodyHtml: bodyParagraphs(["One more thing for the agenda: support asked for a hard date on the macro library. Could you bring the latest estimate?", "Thanks — Elena"])
   }));
 
@@ -247,7 +247,7 @@ export function seedDatabase() {
     id: "m5", threadId: "t2", folder: "sent", from: ME, to: JORDAN,
     subject: "Re: Brightline — signed order form and next steps",
     date: iso(2 * HOUR + 40 * MINUTE), unread: false, sizeBytes: 18 * KIB,
-    inReplyTo: "<m4@meridian.example>",
+    inReplyTo: "<m4@a8m.example>",
     bodyHtml: bodyParagraphs(["Jordan,", "Received — thank you. Billing contact is Priya Shah; the PO reference is PO-2026-0418.", "Avery"])
   }));
   messages.push(message({
@@ -256,7 +256,7 @@ export function seedDatabase() {
     date: iso(50 * MINUTE), unread: true, external: true,
     categories: ["sales"],
     snippet: "Perfect. Security signed off this morning — we are cleared to start onboarding Monday.",
-    inReplyTo: "<m5@meridian.example>",
+    inReplyTo: "<m5@a8m.example>",
     auth: authExternal({ ip: "198.51.100.24", signer: "brightline.example" }),
     bodyHtml: bodyParagraphs(["Perfect. Security signed off this morning — we're cleared to start onboarding Monday.", "I'll ask our team to send the kickoff invite.", "Jordan"])
   }));
@@ -274,7 +274,7 @@ export function seedDatabase() {
     id: "m8", threadId: "t3", folder: "sent", from: ME, to: MARCUS,
     subject: "Re: Contract renewal — legal has signed off",
     date: iso(3 * HOUR + 55 * MINUTE), unread: false, sizeBytes: 12 * KIB,
-    inReplyTo: "<m7@meridian.example>",
+    inReplyTo: "<m7@a8m.example>",
     bodyHtml: bodyParagraphs(["Marcus,", "Thanks for pushing this through. Let me know when the countersigned copy is filed and I'll update the vendor record.", "Avery"])
   }));
   messages.push(message({
@@ -283,7 +283,7 @@ export function seedDatabase() {
     date: iso(2 * HOUR + 20 * MINUTE), unread: false,
     categories: ["legal"], classification: "Confidential",
     snippet: "Filed under REF-2026-1019. I've copied the executed copy into the vendor folder.",
-    inReplyTo: "<m8@meridian.example>",
+    inReplyTo: "<m8@a8m.example>",
     bodyHtml: bodyParagraphs(["Filed under REF-2026-1019. I've copied the executed copy into the vendor folder.", "Marcus"])
   }));
 
@@ -300,7 +300,7 @@ export function seedDatabase() {
     id: "m11", threadId: "t4", folder: "sent", from: ME, to: NORA,
     subject: "Re: Design review notes + updated flows",
     date: iso(5 * HOUR + 10 * MINUTE), unread: false, sizeBytes: 14 * KIB,
-    inReplyTo: "<m10@meridian.example>",
+    inReplyTo: "<m10@a8m.example>",
     bodyHtml: bodyParagraphs(["Nora —", "The second step is close. I'd merge the permission prompt into step three and keep the copy short. I left two comments in the doc.", "Avery"])
   }));
   messages.push(message({
@@ -308,7 +308,7 @@ export function seedDatabase() {
     subject: "Re: Design review notes + updated flows",
     date: iso(65 * MINUTE), unread: true,
     snippet: "Merged the permission prompt into step three. One question about the mobile empty state.",
-    inReplyTo: "<m11@meridian.example>",
+    inReplyTo: "<m11@a8m.example>",
     bodyHtml: bodyParagraphs(["Merged the permission prompt into step three. One question about the mobile empty state — should it mention search?", "Nora"])
   }));
 
@@ -327,7 +327,7 @@ export function seedDatabase() {
     date: iso(7 * HOUR + 15 * MINUTE), unread: false,
     categories: ["finance"], classification: "Confidential",
     snippet: "Quick reminder: AP closes the batch at 16:00 today.",
-    inReplyTo: "<m13@meridian.example>",
+    inReplyTo: "<m13@a8m.example>",
     bodyHtml: bodyParagraphs(["Quick reminder: AP closes the batch at 16:00 today.", "Priya"])
   }));
 
@@ -345,7 +345,7 @@ export function seedDatabase() {
     date: iso(28 * HOUR), unread: true,
     categories: ["people"], sizeBytes: 22 * KIB,
     snippet: "Location is still TBD; I'll confirm once we have the headcount. Please add dietary notes by Monday.",
-    event: { title: "Product offsite", day: "Friday, November 14", time: "09:00–17:00", where: "Meridian HQ", attendees: 24, response: null },
+    event: { title: "Product offsite", day: "Friday, November 14", time: "09:00–17:00", where: "Alt8Mail HQ", attendees: 24, response: null },
     bodyHtml: bodyParagraphs(["Hi everyone,", "You're invited to the product offsite on Friday, November 14. Location is still TBD; I'll confirm once we have the headcount. Please add one dietary note to the sheet by Monday.", "I'll share the travel guidance in the same thread.", "Lena"])
   }));
   messages.push(message({
@@ -368,7 +368,7 @@ export function seedDatabase() {
     subject: "Scheduled maintenance: Saturday 02:00–04:00 UTC",
     date: iso(4 * DAY + 3 * HOUR), unread: true,
     snippet: "Mail delivery will continue; the admin console may be briefly unavailable.",
-    bodyHtml: bodyParagraphs(["Hello,", "Scheduled maintenance will take place this Saturday, 02:00–04:00 UTC. Mail delivery will continue; the admin console may be briefly unavailable during the window.", "No action is needed from you.", "— Meridian IT"])
+    bodyHtml: bodyParagraphs(["Hello,", "Scheduled maintenance will take place this Saturday, 02:00–04:00 UTC. Mail delivery will continue; the admin console may be briefly unavailable during the window.", "No action is needed from you.", "— Alt8Mail IT"])
   }));
   messages.push(message({
     id: "m20", threadId: "t11", folder: "inbox", from: NADIA, to: ME,
@@ -384,7 +384,7 @@ export function seedDatabase() {
     date: iso(6 * DAY), unread: false,
     categories: ["finance"],
     snippet: "€418.60 will be reimbursed in the next payroll run.",
-    bodyHtml: bodyParagraphs(["Hello Avery,", "Your expense report for the Berlin trip has been approved. €418.60 will be reimbursed in the next payroll run. No further action is needed from you.", "— Meridian Finance"])
+    bodyHtml: bodyParagraphs(["Hello Avery,", "Your expense report for the Berlin trip has been approved. €418.60 will be reimbursed in the next payroll run. No further action is needed from you.", "— Alt8Mail Finance"])
   }));
 
   // Archive
@@ -431,10 +431,10 @@ export function seedDatabase() {
   }));
   messages.push(message({
     id: "sp3", threadId: "tsp3", folder: "spam", from: PHISH, to: ME,
-    subject: "Action required: re-verify your Meridian account",
+    subject: "Action required: re-verify your Alt8Mail account",
     date: iso(40 * MINUTE), unread: true, external: true, classification: "Confidential",
     snippet: "Your mailbox will be suspended unless you confirm your password today.",
-    auth: authExternal({ spf: "fail", dkim: "none", dmarc: "fail", signer: "", ip: "192.0.2.201", warnings: ["SPF and DMARC failed", "Lookalike domain: meridian-security.example", "Urgency and credential request detected"] }),
+    auth: authExternal({ spf: "fail", dkim: "none", dmarc: "fail", signer: "", ip: "192.0.2.201", warnings: ["SPF and DMARC failed", "Lookalike domain: a8m-security.example", "Urgency and credential request detected"] }),
     bodyHtml: bodyParagraphs(["Your mailbox will be suspended unless you confirm your password today.", "Open the secure form to keep access."])
   }));
 
@@ -507,12 +507,12 @@ export function seedDatabase() {
       days: 7,
       internal: {
         subject: "Out of office",
-        message: "I'm away from the office and will reply when I return. For urgent matters, contact product@meridian.example."
+        message: "I'm away from the office and will reply when I return. For urgent matters, contact product@a8m.example."
       },
       external: {
         enabled: true,
         subject: "Away from the office",
-        message: "Thanks for your message. I'm away and will reply when I return. For urgent matters, please contact product@meridian.example."
+        message: "Thanks for your message. I'm away and will reply when I return. For urgent matters, please contact product@a8m.example."
       }
     }
   };
@@ -552,7 +552,7 @@ export function seedDatabase() {
     { id: "cal7", date: dayKey(2), start: "11:30", end: "12:00", title: "Product all-hands", color: "var(--cat-product)", where: "Auditorium", attendees: 38 },
     { id: "cal8", date: dayKey(3), start: "15:00", end: "15:45", title: "Offsite planning", color: "var(--cat-people)", where: "Teams", attendees: 4 },
     { id: "cal9", date: dayKey(6), start: "10:00", end: "11:30", title: "Board metrics review", color: "var(--cat-finance)", where: "Boardroom", attendees: 9 },
-    { id: "cal10", date: dayKey(14), start: "09:00", end: "17:00", title: "Product offsite", color: "var(--cat-product)", where: "Meridian HQ", attendees: 24 },
+    { id: "cal10", date: dayKey(14), start: "09:00", end: "17:00", title: "Product offsite", color: "var(--cat-product)", where: "Alt8Mail HQ", attendees: 24 },
     { id: "cal11", date: dayKey(-2), start: "10:00", end: "10:30", title: "Weekly product sync", color: "var(--cat-product)", where: "Teams", attendees: 8 },
     { id: "cal12", date: dayKey(-5), start: "14:00", end: "15:00", title: "Design review", color: "var(--cat-product)", where: "Studio 2", attendees: 5 },
     { id: "cal13", date: dayKey(-7), start: "11:00", end: "12:00", title: "Company all-hands", color: "var(--cat-people)", where: "Auditorium", attendees: 64 }
@@ -657,23 +657,23 @@ export function seedDatabase() {
   });
 
   const files = [
-    textFile({ id: "file_roadmap", name: "Q4-roadmap-v3.pdf", type: "PDF", size: "2.4 MB", providerId: "meridian", path: "Product / Q4 planning", modifiedAt: iso(2 * HOUR), starred: true, sharedWith: ["elena.vasquez@meridian.example", "nora.patel@meridian.example", "aisha.bello@meridian.example"], contentUrl: "/samples/Q4-roadmap-v3.pdf", description: "Revised scope, launch checklist and open decisions." }),
-    textFile({ id: "file_invoice", name: "invoice-4821.pdf", type: "PDF", size: "312 KB", providerId: "meridian", path: "Finance / 2026 / AP", modifiedAt: iso(8 * HOUR), sharedWith: ["priya.shah@meridian.example"], locked: true, contentUrl: "/samples/invoice-4821.pdf", description: "Northstar Research invoice awaiting approval." }),
-    textFile({ id: "file_flows", name: "first-run-flows.pdf", type: "PDF", size: "1.1 MB", providerId: "meridian", path: "Design / Onboarding", modifiedAt: iso(6 * HOUR), sharedWith: ["nora.patel@meridian.example"], contentUrl: "/samples/first-run-flows.pdf", description: "Updated first-run flows for the design review." }),
-    textFile({ id: "file_brightline", name: "Brightline-order-form.pdf", type: "PDF", size: "1.8 MB", providerId: "meridian", path: "Legal / Vendors / Brightline", modifiedAt: iso(3 * HOUR), sharedWith: ["marcus.webb@meridian.example", "priya.shah@meridian.example"], contentUrl: "/samples/Brightline-order-form.pdf", description: "Countersigned annual order form." }),
-    textFile({ id: "file_retro", name: "q3-retro.pdf", type: "PDF", size: "920 KB", providerId: "meridian", path: "Product / Retrospectives", modifiedAt: iso(9 * DAY), contentUrl: "/samples/q3-retro.pdf", description: "Q3 retrospective actions and owners." }),
-    textFile({ id: "file_offsite_svg", name: "offsite-team.svg", type: "IMG", mime: "image/svg+xml", size: "1.8 MB", providerId: "meridian", path: "People / Offsite 2026", modifiedAt: iso(5 * DAY), sharedWith: ["lena.fischer@meridian.example"], contentUrl: "/samples/offsite-team.svg", description: "Offsite visual for the team recap." }),
-    textFile({ id: "file_brand", name: "Meridian-brand-library.zip", type: "ZIP", size: "248 MB", providerId: "meridian", path: "Brand / Library", modifiedAt: iso(12 * DAY), description: "Logos, fonts and brand guidelines." }),
-    textFile({ id: "file_offsite_plan", name: "Product-offsite-plan.docx", type: "DOC", size: "2.2 MB", providerId: "meridian", path: "People / Offsite 2026", modifiedAt: iso(4 * DAY), sharedWith: ["lena.fischer@meridian.example"], description: "Travel, agenda and dietary notes." }),
-    textFile({ id: "file_board_pptx", name: "Board-metrics-Q4.pptx", type: "PPT", size: "8.4 MB", providerId: "onedrive", path: "Board / 2026", owner: ELENA, modifiedAt: iso(20 * HOUR), sharedWith: ["avery.chen@meridian.example"], description: "Board deck outline with cohort metrics." }),
-    textFile({ id: "file_model", name: "Finance-model-2027.xlsx", type: "XLS", size: "1.4 MB", providerId: "onedrive", path: "Finance / Planning", owner: PRIYA, modifiedAt: iso(2 * DAY), sharedWith: ["avery.chen@meridian.example", "elena.vasquez@meridian.example"], locked: true, description: "Departmental planning model." }),
-    textFile({ id: "file_contract", name: "Contract-renewal-signed.pdf", type: "PDF", size: "640 KB", providerId: "onedrive", path: "Legal / Contracts", owner: MARCUS, modifiedAt: iso(2 * DAY), sharedWith: ["avery.chen@meridian.example"], description: "Executed renewal agreement, REF-2026-1019." }),
-    textFile({ id: "file_customer_notes", name: "Brightline-call-notes.docx", type: "DOC", size: "840 KB", providerId: "onedrive", path: "Customer success / Brightline", owner: TOMAS, modifiedAt: iso(26 * HOUR), sharedWith: ["avery.chen@meridian.example"], description: "Recap and themes from the customer call." })
+    textFile({ id: "file_roadmap", name: "Q4-roadmap-v3.pdf", type: "PDF", size: "2.4 MB", providerId: "a8m", path: "Product / Q4 planning", modifiedAt: iso(2 * HOUR), starred: true, sharedWith: ["elena.vasquez@a8m.example", "nora.patel@a8m.example", "aisha.bello@a8m.example"], contentUrl: "/samples/Q4-roadmap-v3.pdf", description: "Revised scope, launch checklist and open decisions." }),
+    textFile({ id: "file_invoice", name: "invoice-4821.pdf", type: "PDF", size: "312 KB", providerId: "a8m", path: "Finance / 2026 / AP", modifiedAt: iso(8 * HOUR), sharedWith: ["priya.shah@a8m.example"], locked: true, contentUrl: "/samples/invoice-4821.pdf", description: "Northstar Research invoice awaiting approval." }),
+    textFile({ id: "file_flows", name: "first-run-flows.pdf", type: "PDF", size: "1.1 MB", providerId: "a8m", path: "Design / Onboarding", modifiedAt: iso(6 * HOUR), sharedWith: ["nora.patel@a8m.example"], contentUrl: "/samples/first-run-flows.pdf", description: "Updated first-run flows for the design review." }),
+    textFile({ id: "file_brightline", name: "Brightline-order-form.pdf", type: "PDF", size: "1.8 MB", providerId: "a8m", path: "Legal / Vendors / Brightline", modifiedAt: iso(3 * HOUR), sharedWith: ["marcus.webb@a8m.example", "priya.shah@a8m.example"], contentUrl: "/samples/Brightline-order-form.pdf", description: "Countersigned annual order form." }),
+    textFile({ id: "file_retro", name: "q3-retro.pdf", type: "PDF", size: "920 KB", providerId: "a8m", path: "Product / Retrospectives", modifiedAt: iso(9 * DAY), contentUrl: "/samples/q3-retro.pdf", description: "Q3 retrospective actions and owners." }),
+    textFile({ id: "file_offsite_svg", name: "offsite-team.svg", type: "IMG", mime: "image/svg+xml", size: "1.8 MB", providerId: "a8m", path: "People / Offsite 2026", modifiedAt: iso(5 * DAY), sharedWith: ["lena.fischer@a8m.example"], contentUrl: "/samples/offsite-team.svg", description: "Offsite visual for the team recap." }),
+    textFile({ id: "file_brand", name: "Alt8Mail-brand-library.zip", type: "ZIP", size: "248 MB", providerId: "a8m", path: "Brand / Library", modifiedAt: iso(12 * DAY), description: "Logos, fonts and brand guidelines." }),
+    textFile({ id: "file_offsite_plan", name: "Product-offsite-plan.docx", type: "DOC", size: "2.2 MB", providerId: "a8m", path: "People / Offsite 2026", modifiedAt: iso(4 * DAY), sharedWith: ["lena.fischer@a8m.example"], description: "Travel, agenda and dietary notes." }),
+    textFile({ id: "file_board_pptx", name: "Board-metrics-Q4.pptx", type: "PPT", size: "8.4 MB", providerId: "onedrive", path: "Board / 2026", owner: ELENA, modifiedAt: iso(20 * HOUR), sharedWith: ["avery.chen@a8m.example"], description: "Board deck outline with cohort metrics." }),
+    textFile({ id: "file_model", name: "Finance-model-2027.xlsx", type: "XLS", size: "1.4 MB", providerId: "onedrive", path: "Finance / Planning", owner: PRIYA, modifiedAt: iso(2 * DAY), sharedWith: ["avery.chen@a8m.example", "elena.vasquez@a8m.example"], locked: true, description: "Departmental planning model." }),
+    textFile({ id: "file_contract", name: "Contract-renewal-signed.pdf", type: "PDF", size: "640 KB", providerId: "onedrive", path: "Legal / Contracts", owner: MARCUS, modifiedAt: iso(2 * DAY), sharedWith: ["avery.chen@a8m.example"], description: "Executed renewal agreement, REF-2026-1019." }),
+    textFile({ id: "file_customer_notes", name: "Brightline-call-notes.docx", type: "DOC", size: "840 KB", providerId: "onedrive", path: "Customer success / Brightline", owner: TOMAS, modifiedAt: iso(26 * HOUR), sharedWith: ["avery.chen@a8m.example"], description: "Recap and themes from the customer call." })
   ];
 
   const storageProviders = [
-    { id: "meridian", name: "Meridian Drive", kind: "internal", connected: true, account: DEMO_EMAIL, usedBytes: 12.4 * GIB, limitBytes: 100 * GIB, color: "#0f6cbd", status: "synced", lastSyncAt: iso(4 * MINUTE), description: "Company-managed, encrypted at rest." },
-    { id: "onedrive", name: "Microsoft OneDrive", kind: "oauth", connected: true, account: "avery.chen@meridian.example", usedBytes: 286 * GIB, limitBytes: 1024 * GIB, color: "#0364b8", status: "synced", lastSyncAt: iso(2 * MINUTE), description: "Business account · Microsoft 365 tenant." },
+    { id: "a8m", name: "Alt8Mail Drive", kind: "internal", connected: true, account: DEMO_EMAIL, usedBytes: 12.4 * GIB, limitBytes: 100 * GIB, color: "#0f6cbd", status: "synced", lastSyncAt: iso(4 * MINUTE), description: "Company-managed, encrypted at rest." },
+    { id: "onedrive", name: "Microsoft OneDrive", kind: "oauth", connected: true, account: "avery.chen@a8m.example", usedBytes: 286 * GIB, limitBytes: 1024 * GIB, color: "#0364b8", status: "synced", lastSyncAt: iso(2 * MINUTE), description: "Business account · Microsoft 365 tenant." },
     { id: "dropbox", name: "Dropbox Business", kind: "oauth", connected: false, account: "", usedBytes: 0, limitBytes: 2 * 1024 * GIB, color: "#0061ff", status: "disconnected", lastSyncAt: null, description: "Connect a Dropbox Business team folder." },
     { id: "gdrive", name: "Google Drive", kind: "oauth", connected: false, account: "", usedBytes: 0, limitBytes: 2 * 1024 * GIB, color: "#188038", status: "disconnected", lastSyncAt: null, description: "Connect Google Workspace shared drives." },
     { id: "s3", name: "AWS S3", kind: "s3", connected: false, account: "", usedBytes: 0, limitBytes: 0, color: "#d97706", status: "disconnected", lastSyncAt: null, description: "Bring your own bucket with IAM role access." }
@@ -689,9 +689,9 @@ export function seedDatabase() {
       quota: { limitBytes: 15 * GIB, baselineUsedBytes },
       aliases: [
         { id: "primary", email: DEMO_EMAIL, label: "Avery Chen", kind: "primary", canSend: true, reason: "" },
-        { id: "short", email: "a.chen@meridian.example", label: "Avery Chen (short)", kind: "alias", canSend: true, reason: "" },
-        { id: "product", email: "product@meridian.example", label: "Product Team", kind: "shared", canSend: true, reason: "" },
-        { id: "support", email: "support@meridian.example", label: "Support queue", kind: "shared", canSend: false, reason: "Requires delegated access" }
+        { id: "short", email: "a.chen@a8m.example", label: "Avery Chen (short)", kind: "alias", canSend: true, reason: "" },
+        { id: "product", email: "product@a8m.example", label: "Product Team", kind: "shared", canSend: true, reason: "" },
+        { id: "support", email: "support@a8m.example", label: "Support queue", kind: "shared", canSend: false, reason: "Requires delegated access" }
       ],
       trustedSenders: [],
       outbound: { limit: 200, windowHours: 24, baselineUsed: 37, events: [] },
@@ -706,7 +706,7 @@ export function seedDatabase() {
         workDays: [1, 2, 3, 4, 5],
         defaultFrom: DEMO_EMAIL,
         signatureEnabled: true,
-        signature: "Avery Chen\nVP Product · Meridian\n+1 (415) 555-0101",
+        signature: "Avery Chen\nVP Product · Alt8Mail\n+1 (415) 555-0101",
         autoAdvance: false
       },
       security: {
@@ -719,10 +719,10 @@ export function seedDatabase() {
             { id: "pk_phone", name: "iPhone · Face ID", createdAt: iso(14 * DAY), lastUsedAt: iso(6 * DAY) }
           ],
           recoveryCodes: [
-            { code: "MRDN-7F2K-9Q4A", used: false },
-            { code: "MRDN-3N8P-2L6C", used: false },
-            { code: "MRDN-9T4X-1V5B", used: false },
-            { code: "MRDN-5R7H-8M2D", used: false }
+            { code: "A8M-7F2K-9Q4A", used: false },
+            { code: "A8M-3N8P-2L6C", used: false },
+            { code: "A8M-9T4X-1V5B", used: false },
+            { code: "A8M-5R7H-8M2D", used: false }
           ]
         }
       }

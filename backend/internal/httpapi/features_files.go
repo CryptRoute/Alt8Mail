@@ -124,7 +124,7 @@ func (s *Server) storageAction(w http.ResponseWriter, r *http.Request) {
 		s.recordWorkspaceAudit(r.Context(), sess, "storage.connected", provider.Name, "Connected as "+accountEmail)
 	case "disconnect":
 		if provider.Kind == "internal" {
-			writeError(w, http.StatusBadRequest, "INTERNAL_STORAGE", "Meridian Drive is managed by the organization and cannot be disconnected")
+			writeError(w, http.StatusBadRequest, "INTERNAL_STORAGE", "Alt8Mail Drive is managed by the organization and cannot be disconnected")
 			return
 		}
 		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM files WHERE user_id=$1 AND provider_id=$2`, sess.User.ID, providerID)
@@ -222,7 +222,7 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	}
 	providerID := body.ProviderID
 	if providerID == "" {
-		providerID = "meridian"
+		providerID = "a8m"
 	}
 	provider, ok := s.storageProvider(providerID)
 	if !ok {
@@ -526,7 +526,7 @@ func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file c
 		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'")
 	}
 	switch file.ProviderID {
-	case "meridian":
+	case "a8m":
 		path := file.StorageKey
 		if path == "" {
 			path = file.AttachmentID
@@ -571,7 +571,7 @@ func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file c
 }
 
 func (s *Server) storageConnected(ctx context.Context, userID, providerID string) (bool, error) {
-	if providerID == "meridian" {
+	if providerID == "a8m" {
 		return true, nil
 	}
 	var connected bool

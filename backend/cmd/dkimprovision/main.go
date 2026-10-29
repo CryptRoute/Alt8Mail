@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/config"
-	"github.com/meridian-mail/meridian/backend/internal/store"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 )
 
 var domainPartPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
@@ -60,7 +60,7 @@ func main() {
 	}
 
 	rows, err := st.DB.Query(ctx, `
-		SELECT id::text, lower(domain::text), COALESCE(NULLIF(dkim_selector, ''), 'meridian')
+		SELECT id::text, lower(domain::text), COALESCE(NULLIF(dkim_selector, ''), 'a8m')
 		FROM mail_domains ORDER BY domain
 	`)
 	if err != nil {
@@ -86,7 +86,7 @@ func main() {
 		row.domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(row.domain)), ".")
 		row.selector = strings.ToLower(strings.TrimSpace(row.selector))
 		if row.selector == "" {
-			row.selector = "meridian"
+			row.selector = "a8m"
 		}
 		if !domainPartPattern.MatchString(row.domain) || strings.Contains(row.domain, "..") || len(row.domain) > 253 {
 			_ = updateDomainKeyError(ctx, st, row.id, "domain is not safe for a DKIM key path")

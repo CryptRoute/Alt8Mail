@@ -1008,17 +1008,17 @@ export async function renderDatabase(ctx) {
           <form id="db-test-form" class="form-grid is-single">
             ${ui.field({ label: 'Host', name: 'host', value: '127.0.0.1', required: true })}
             ${ui.field({ label: 'Port', name: 'port', type: 'number', value: '5432', min: 1, max: 65535 })}
-            ${ui.field({ label: 'Database', name: 'database', value: 'meridian', required: true })}
-            ${ui.field({ label: 'User', name: 'user', value: 'meridian', required: true })}
+            ${ui.field({ label: 'Database', name: 'database', value: 'a8m', required: true })}
+            ${ui.field({ label: 'User', name: 'user', value: 'a8m', required: true })}
             ${ui.field({ label: 'Password', name: 'password', type: 'password', autocomplete: 'current-password' })}
             ${ui.field({ label: 'SSL mode', name: 'sslmode', type: 'select', value: 'disable', options: [{ value: 'disable', label: 'disable' }, { value: 'require', label: 'require' }, { value: 'verify-full', label: 'verify-full' }] })}
             <div class="form-actions"><span class="form-note">The password is sent to this endpoint over TLS and not stored.</span><div class="form-actions-right"><button class="btn btn-secondary" type="submit">Test connection</button></div></div>
           </form>
           <div id="db-test-result"></div>
         </div></section>
-        <section class="card"><header class="card-head"><div><h3>Start a database copy</h3><p>Copy the live meridian database into a target</p></div></header><div class="card-body">
+        <section class="card"><header class="card-head"><div><h3>Start a database copy</h3><p>Copy the live a8m database into a target</p></div></header><div class="card-body">
           <form id="db-migrate-form" class="form-grid is-single">
-            ${ui.field({ label: 'Target database', name: 'targetDatabase', placeholder: 'meridian_copy', required: true, help: 'The target must already exist and must not be meridian. Provision a role/database first if needed.' })}
+            ${ui.field({ label: 'Target database', name: 'targetDatabase', placeholder: 'a8m_copy', required: true, help: 'The target must already exist and must not be a8m. Provision a role/database first if needed.' })}
             <div class="form-actions"><span class="form-note">Runs in the background with progress and a log.</span><div class="form-actions-right"><button class="btn btn-primary" type="submit" ${canManage ? '' : 'disabled'}>Start copy</button></div></div>
           </form>
         </div></section>
@@ -1032,7 +1032,7 @@ export async function renderDatabase(ctx) {
     const connPercent = data.maxConnections ? (data.connections / data.maxConnections) * 100 : 0;
     document.getElementById('db-summary').innerHTML = `<div class="stat-grid">
       ${ui.statTile({ label: 'PostgreSQL', value: data.service === 'active' ? 'Online' : data.service || 'Unknown', detail: ui.truncate(data.version || '', 46), iconName: 'database', tone: data.service === 'active' ? 'good' : 'critical' })}
-      ${ui.statTile({ label: 'Database size', value: ui.bytes(data.databaseSizeBytes), detail: 'meridian database', iconName: 'archive', tone: 'info' })}
+      ${ui.statTile({ label: 'Database size', value: ui.bytes(data.databaseSizeBytes), detail: 'a8m database', iconName: 'archive', tone: 'info' })}
       ${ui.statTile({ label: 'Connections', value: `${ui.num(data.connections)}/${ui.num(data.maxConnections)}`, detail: `${ui.pct(connPercent)} of max_connections`, iconName: 'users', tone: connPercent > 85 ? 'warning' : 'good' })}
       ${ui.statTile({ label: 'Cache hit', value: ui.pct(data.cacheHitPercent, 2), detail: 'Shared buffer hit ratio', iconName: 'activity', tone: data.cacheHitPercent >= 99 ? 'good' : data.cacheHitPercent >= 95 ? 'warning' : 'critical' })}
     </div>`;
@@ -1082,8 +1082,8 @@ export async function renderDatabase(ctx) {
     const modal = ctx.modal({
       title: 'Provision PostgreSQL role and database', size: 'medium',
       body: `<form id="db-provision-form"><div class="form-grid is-single">
-        ${ui.field({ label: 'Role name', name: 'role', placeholder: 'meridian_reporting', required: true, help: 'Letters, digits, underscores. Must not already exist.' })}
-        ${ui.field({ label: 'Database name', name: 'database', placeholder: 'meridian_reporting', required: true, help: 'Created with the new role as owner.' })}
+        ${ui.field({ label: 'Role name', name: 'role', placeholder: 'a8m_reporting', required: true, help: 'Letters, digits, underscores. Must not already exist.' })}
+        ${ui.field({ label: 'Database name', name: 'database', placeholder: 'a8m_reporting', required: true, help: 'Created with the new role as owner.' })}
       </div><div class="notice tone-warning mt-3">${ui.icon('alert', 16)}<div><strong>The generated password is shown once</strong><p>It is not stored in the panel database. Copy it into the consuming application's secret store.</p></div></div><div class="form-actions"><span class="form-note">Runs as the local postgres superuser via runuser.</span><div class="form-actions-right"><button type="button" class="btn btn-ghost" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Provision</button></div></div></form>`,
     });
     const form = modal.root.querySelector('#db-provision-form');

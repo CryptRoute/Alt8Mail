@@ -508,7 +508,7 @@ func (s *Server) uploadToOAuthProvider(ctx context.Context, sess *sessionRecord,
 	case "gdrive":
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
-		_ = writer.SetBoundary("meridian" + randomToken(8))
+		_ = writer.SetBoundary("a8m" + randomToken(8))
 		meta, _ := writer.CreatePart(map[string][]string{"Content-Type": {"application/json; charset=UTF-8"}})
 		_, _ = meta.Write([]byte(fmt.Sprintf(`{"name":%q,"mimeType":%q}`, name, mime)))
 		part, _ := writer.CreatePart(map[string][]string{"Content-Type": {mime}})
@@ -530,7 +530,7 @@ func (s *Server) uploadToOAuthProvider(ctx context.Context, sess *sessionRecord,
 		_ = json.Unmarshal(payloadBody, &result)
 		return stateString(result, "id"), stateString(result, "webViewLink"), nil
 	case "dropbox":
-		arg := fmt.Sprintf(`{"path":"/Meridian/%s","mode":"add","autorename":true,"mute":false}`, strings.ReplaceAll(name, `"`, ""))
+		arg := fmt.Sprintf(`{"path":"/Alt8Mail/%s","mode":"add","autorename":true,"mute":false}`, strings.ReplaceAll(name, `"`, ""))
 		request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://content.dropboxapi.com/2/files/upload", bytes.NewReader(data))
 		request.Header.Set("Authorization", "Bearer "+token)
 		request.Header.Set("Dropbox-API-Arg", arg)
@@ -548,7 +548,7 @@ func (s *Server) uploadToOAuthProvider(ctx context.Context, sess *sessionRecord,
 		_ = json.Unmarshal(payloadBody, &result)
 		return firstNonEmpty(stateString(result, "path_lower"), stateString(result, "id")), stateString(result, "path_display"), nil
 	case "onedrive":
-		endpoint := "https://graph.microsoft.com/v1.0/me/drive/root:/Meridian/" + url.PathEscape(name) + ":/content"
+		endpoint := "https://graph.microsoft.com/v1.0/me/drive/root:/Alt8Mail/" + url.PathEscape(name) + ":/content"
 		request, _ := http.NewRequestWithContext(ctx, http.MethodPut, endpoint, bytes.NewReader(data))
 		request.Header.Set("Authorization", "Bearer "+token)
 		request.Header.Set("Content-Type", mime)

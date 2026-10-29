@@ -191,7 +191,7 @@ func (s *Server) publicShareReplace(w http.ResponseWriter, r *http.Request) {
 	mime, previewable := detectUploadMIME(data, header.Header.Get("Content-Type"), name)
 	var storageKey, externalID, externalURL string
 	switch share.ProviderID {
-	case "meridian":
+	case "a8m":
 		storageKey = newID("att")
 		if err := os.WriteFile(filepath.Join(s.cfg.UploadDir, storageKey), data, 0o640); err != nil {
 			http.Error(w, "The file could not be stored.", http.StatusInternalServerError)

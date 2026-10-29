@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/config"
-	"github.com/meridian-mail/meridian/backend/internal/httpapi"
-	"github.com/meridian-mail/meridian/backend/internal/store"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/httpapi"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 )
 
 var version = "dev"

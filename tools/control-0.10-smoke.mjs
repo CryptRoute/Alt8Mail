@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.CONTROL_BASE || "https://130.94.46.22:8808";
 const EMAIL = process.env.CONTROL_EMAIL || "sysadmin@alt8mail.local";
 const PASSWORD = process.env.CONTROL_PASSWORD || fs.readFileSync(process.env.CONTROL_PASSWORD_FILE, "utf8").trim();
-const SSH_KEY = process.env.CONTROL_SSH_KEY || path.join(os.homedir(), ".ssh", "meridian_deploy_ed25519");
+const SSH_KEY = process.env.CONTROL_SSH_KEY || path.join(os.homedir(), ".ssh", "a8m_deploy_ed25519");
 const OUT = path.resolve(__dirname, "..", "artifacts", "control-ui");
 fs.mkdirSync(OUT, { recursive: true });
 const checks = [];
@@ -209,7 +209,7 @@ try {
   if (importedName) {
     try {
       execFileSync("ssh", ["-i", SSH_KEY, "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "root@130.94.46.22",
-        `rm -f /etc/ssl/alt8mail/imported/${importedName}.crt /etc/ssl/alt8mail/imported/${importedName}.key; runuser -u postgres -- psql -d meridian -q -c "DELETE FROM control.ssl_certificates WHERE name='${importedName}'"`], { stdio: "ignore" });
+        `rm -f /etc/ssl/alt8mail/imported/${importedName}.crt /etc/ssl/alt8mail/imported/${importedName}.key; runuser -u postgres -- psql -d a8m -q -c "DELETE FROM control.ssl_certificates WHERE name='${importedName}'"`], { stdio: "ignore" });
     } catch (error) {
       console.error(`Could not clean imported test certificate: ${error.message}`);
     }
@@ -217,7 +217,7 @@ try {
   if (dovecotTouched) {
     try {
       execFileSync("ssh", ["-i", SSH_KEY, "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "root@130.94.46.22",
-        "rm -f /etc/dovecot/conf.d/99-alt8mail-tls.conf; systemctl reload dovecot; runuser -u postgres -- psql -d meridian -q -c \"DELETE FROM control.tls_assignments WHERE target='dovecot'\""], { stdio: "ignore" });
+        "rm -f /etc/dovecot/conf.d/99-alt8mail-tls.conf; systemctl reload dovecot; runuser -u postgres -- psql -d a8m -q -c \"DELETE FROM control.tls_assignments WHERE target='dovecot'\""], { stdio: "ignore" });
     } catch (error) {
       console.error(`Could not clean Dovecot test assignment: ${error.message}`);
     }

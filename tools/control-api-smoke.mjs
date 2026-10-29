@@ -287,7 +287,7 @@ try {
     await temp.req('/control/api/dashboard');
     const denied = await temp.req('/control/api/domains', {
       method: 'POST', expected: 403,
-      body: { domain: `denied-${suffix}.example`, tenantId: '', selector: 'meridian' },
+      body: { domain: `denied-${suffix}.example`, tenantId: '', selector: 'a8m' },
     });
     if (denied.status !== 403) throw new Error('readonly user mutated domains');
     const begin = await temp.req('/control/api/me/totp/begin', { method: 'POST' });
@@ -316,18 +316,18 @@ try {
   });
 
   await step('alias_lifecycle', async () => {
-    const address = `ct${suffix}@meridian.test`;
+    const address = `ct${suffix}@a8m.test`;
     const created = await main.req('/control/api/aliases', {
       method: 'POST', expected: 201,
-      body: { address, kind: 'forward', targets: ['avery.chen@meridian.test'], target: 'avery.chen@meridian.test', description: 'Automated test forwarder', active: true },
+      body: { address, kind: 'forward', targets: ['avery.chen@a8m.test'], target: 'avery.chen@a8m.test', description: 'Automated test forwarder', active: true },
     });
     resources.aliasId = created.data.id;
     const preview = await main.req('/control/api/aliases/preview', {
-      method: 'POST', body: { action: 'update', id: resources.aliasId, input: { address, kind: 'forward', target: 'jordan.lee@meridian.test', active: true } },
+      method: 'POST', body: { action: 'update', id: resources.aliasId, input: { address, kind: 'forward', target: 'jordan.lee@a8m.test', active: true } },
     });
     if (!Array.isArray(preview.data.diff) || !preview.data.postfixQuery) throw new Error('alias preview missing diff');
-    await main.req(`/control/api/aliases/${resources.aliasId}`, { method: 'PATCH', body: { address, kind: 'forward', target: 'jordan.lee@meridian.test', active: false } });
-    await main.req(`/control/api/aliases/${resources.aliasId}`, { method: 'PATCH', body: { address, kind: 'forward', target: 'jordan.lee@meridian.test', active: true } });
+    await main.req(`/control/api/aliases/${resources.aliasId}`, { method: 'PATCH', body: { address, kind: 'forward', target: 'jordan.lee@a8m.test', active: false } });
+    await main.req(`/control/api/aliases/${resources.aliasId}`, { method: 'PATCH', body: { address, kind: 'forward', target: 'jordan.lee@a8m.test', active: true } });
     await main.req(`/control/api/aliases/${resources.aliasId}`, { method: 'DELETE' });
     resources.aliasId = '';
     return `${preview.data.diff.length} preview lines`;
@@ -448,7 +448,7 @@ try {
     const templateData = await template.json();
     const send = await fetch(`${BASE}/api/v1/messages`, {
       method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: 'postmaster@meridian.test', to: ['postmaster@meridian.test'], subject: `Control API test ${suffix}`, text: 'Public API integration test.', variables: {} }),
+      body: JSON.stringify({ from: 'postmaster@a8m.test', to: ['postmaster@a8m.test'], subject: `Control API test ${suffix}`, text: 'Public API integration test.', variables: {} }),
     });
     if (send.status !== 202) throw new Error(`API send HTTP ${send.status}`);
     const sendData = await send.json();
@@ -470,7 +470,7 @@ try {
   });
 
   await step('tls_test_email', async () => {
-    const result = await main.req('/control/api/tls/test-email', { method: 'POST', body: { recipient: 'postmaster@meridian.test' } });
+    const result = await main.req('/control/api/tls/test-email', { method: 'POST', body: { recipient: 'postmaster@a8m.test' } });
     if (!result.data.ok || !String(result.data.transcript || '').includes('250')) throw new Error('SSL test email was not accepted');
     return 'SMTP transcript accepted';
   });
@@ -516,7 +516,7 @@ try {
   await step('database_connection_test', async () => {
     const result = await main.req('/control/api/database/test', {
       method: 'POST',
-      body: { host: '127.0.0.1', port: 5432, database: 'meridian', user: `alt8mail_missing_${suffix}`, password: 'not-a-real-password', sslmode: 'disable' },
+      body: { host: '127.0.0.1', port: 5432, database: 'a8m', user: `alt8mail_missing_${suffix}`, password: 'not-a-real-password', sslmode: 'disable' },
     });
     if (result.data.ok !== false || !result.data.error) throw new Error('invalid database credentials unexpectedly succeeded');
     return 'invalid credentials rejected cleanly';
@@ -526,8 +526,8 @@ try {
     const tenants = await main.req('/control/api/tenants');
     const tenantId = tenants.data.tenants?.[0]?.id;
     if (!tenantId) throw new Error('no active tenant');
-    const oldDomain = `ct-${suffix}.meridian.test`;
-    const newDomain = `ct-${suffix}b.meridian.test`;
+    const oldDomain = `ct-${suffix}.a8m.test`;
+    const newDomain = `ct-${suffix}b.a8m.test`;
     const created = await main.req('/control/api/domains', {
       method: 'POST', expected: 201,
       body: { domain: oldDomain, tenantId, isPrimary: false, selector: `ct${suffix}`, createPostmaster: false },
@@ -577,7 +577,7 @@ try {
     let found = [];
     for (let i = 0; i < 12; i += 1) {
       await new Promise((r) => setTimeout(r, 2000));
-      const logs = await main.req('/control/api/logs?q=postmaster%40meridian.test&limit=50');
+      const logs = await main.req('/control/api/logs?q=postmaster%40a8m.test&limit=50');
       found = logs.data.events || [];
       if (found.length) break;
     }

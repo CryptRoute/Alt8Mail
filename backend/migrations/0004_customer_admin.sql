@@ -62,7 +62,7 @@ ALTER TABLE mail_domains
 UPDATE mail_domains
 SET status = 'verified', verified_at = COALESCE(verified_at, created_at),
     mx_verified = true, spf_verified = true, dkim_verified = true, dmarc_verified = true
-WHERE status = 'pending' AND domain = 'meridian.test';
+WHERE status = 'pending' AND domain = 'a8m.test';
 
 CREATE TABLE IF NOT EXISTS admin_roles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -183,9 +183,9 @@ FROM tenants t
 WHERE NOT EXISTS (SELECT 1 FROM admin_roles r WHERE r.tenant_id = t.id AND lower(r.name) = 'auditor');
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON org_units, admin_roles, admin_role_assignments, groups, group_members,
-  admin_sessions, admin_auth_challenges, admin_audit_log TO meridian_app;
-GRANT USAGE, SELECT ON SEQUENCE admin_audit_log_id_seq TO meridian_app;
-GRANT SELECT ON tenants, users, mail_domains, user_aliases, mailboxes, groups, group_members TO meridian_mail;
+  admin_sessions, admin_auth_challenges, admin_audit_log TO a8m_app;
+GRANT USAGE, SELECT ON SEQUENCE admin_audit_log_id_seq TO a8m_app;
+GRANT SELECT ON tenants, users, mail_domains, user_aliases, mailboxes, groups, group_members TO a8m_mail;
 
 INSERT INTO schema_migrations (version) VALUES ('0004_customer_admin')
 ON CONFLICT (version) DO NOTHING;

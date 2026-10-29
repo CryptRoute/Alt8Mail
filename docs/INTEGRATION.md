@@ -54,7 +54,7 @@ stable.
 
 **Demo:** `server/seed.mjs` creates a scrypt-hashed demo user and a `sessions`
 Map in `server/app.mjs`. `/api/session` accepts password or demo SSO and sets
-`meridian_sid` + `meridian_csrf` cookies.
+`a8m_sid` + `a8m_csrf` cookies.
 
 **Production:**
 
@@ -241,7 +241,7 @@ debounce (`flushDraft`) and on tab hide via `keepalive`. Draft documents carry
 
 1. Use the draft id as your client key and map it to a Dovecot `Drafts` message
    (or a server draft record) via a stable `draftId` column/header
-   (`X-Meridian-Draft-Id`). IMAP `APPEND` with `\Draft` is usually sufficient.
+   (`X-Alt8Mail-Draft-Id`). IMAP `APPEND` with `\Draft` is usually sufficient.
 2. Keep the autosave endpoint idempotent. The demo replaces the document; add
    `If-Match`/revision checks if multiple browser tabs can edit the same draft.
    On a 409, keep the local text and prompt for a merge or duplicate.
@@ -529,12 +529,12 @@ deletion are audited and the UI receives `task.*` events.
 
 ## 11b. Files and storage connectors
 
-**Demo:** `db.storageProviders` contains Meridian Drive, OneDrive, Dropbox,
+**Demo:** `db.storageProviders` contains Alt8Mail Drive, OneDrive, Dropbox,
 Google Drive and S3 with connected/account/usage/sync state. Connecting a
 provider is idempotent, adds two seeded file records and writes
 `storage.connected`. Files support list/filter, metadata edits, star, delete,
 upload, preview and expiring share links (`/api/files/:id/share`). Share URLs
-are illustrative (`files.meridian.example`) and are not resolvable.
+are illustrative (`files.a8m.example`) and are not resolvable.
 
 **Production:**
 

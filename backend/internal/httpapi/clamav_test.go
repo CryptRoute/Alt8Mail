@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
 )
 
 func fakeClamd(t *testing.T, response string) (string, func()) {

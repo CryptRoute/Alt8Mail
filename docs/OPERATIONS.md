@@ -1,8 +1,8 @@
 # Staging Operations Runbook
 
-This runbook records the reproducible build of the first live Meridian staging
+This runbook records the reproducible build of the first live Alt8Mail staging
 slice on the throw-away KVM host. It intentionally excludes secret values; all
-secrets live on the server under `/opt/meridian/secrets` with owner-only
+secrets live on the server under `/opt/a8m/secrets` with owner-only
 permissions. Never commit them or paste them into tickets.
 
 ## 1. Host baseline
@@ -15,34 +15,34 @@ permissions. Never commit them or paste them into tickets.
 | CPU / RAM / disk | 2 vCPU / 3.8 GiB RAM / 50 GiB root volume |
 | Swap | 4 GiB `/swapfile` |
 | Time zone | UTC |
-| Hostname | `mail.meridian.test` |
-| Staging mail domain | `meridian.test` (reserved test domain; no public DNS) |
+| Hostname | `mail.a8m.test` |
+| Staging mail domain | `a8m.test` (reserved test domain; no public DNS) |
 | Staging mail users | Every active mailbox is synced by its own Go worker (Avery, Jordan and the directory users) |
-| Second real auth user | `jordan.lee@meridian.test` (Go login + Maildir + per-user worker) |
-| Staging UI/API user | `avery.chen@meridian.test` (Argon2id web password) |
-| Staging demo alias | `avery.chen@meridian.example` / `meridian-demo` → canonical account, demo mode only |
+| Second real auth user | `jordan.lee@a8m.test` (Go login + Maildir + per-user worker) |
+| Staging UI/API user | `avery.chen@a8m.test` (Argon2id web password) |
+| Staging demo alias | `avery.chen@a8m.example` / `a8m-demo` → canonical account, demo mode only |
 | Web URL | `https://130-94-46-22.sslip.io` (Let's Encrypt, valid) |
 | IP fallback | `https://130.94.46.22` (self-signed certificate) |
 | Root UI + feature API | nginx `/api` → Go system backend on `127.0.0.1:8080` |
 | Go system API namespace | nginx `/system/api` → the same Go service |
 | Admin console | `https://130-94-46-22.sslip.io/admin/` → Go admin backend `127.0.0.1:8081` |
-| Admin backend | `meridian-admin-server` (separate cookies, sessions and audit) |
+| Admin backend | `a8m-admin-server` (separate cookies, sessions and audit) |
 | System Control | `https://130.94.46.22:8808` → `alt8mail-control` (separate schema, role, sessions and audit) |
 | Control bootstrap | `sysadmin@alt8mail.local`; password in `/root/alt8mail-control-initial-password` (root-only) |
-| Reference preview | `meridian-preview` Node service (stopped and disabled; not used) |
-| SSH | key `~/.ssh/meridian_deploy_ed25519` on the operator workstation |
+| Reference preview | `a8m-preview` Node service (stopped and disabled; not used) |
+| SSH | key `~/.ssh/a8m_deploy_ed25519` on the operator workstation |
 
 > **Architecture note:** the root Aurora UI and `/api` are served by the Go
 > system backend. The mailbox is real Dovecot data: IMAP sync/actions, draft
 > persistence, SMTP submission and deferred expunge are live. A second Go
-> process, `meridian-admin-server`, serves the customer/system administration
+> process, `a8m-admin-server`, serves the customer/system administration
 > console with its own sessions and audit. A third, independent service,
 > `alt8mail-control`, serves the root-level System Control panel on TLS port
 > 8808 with its own `control` schema and `alt8mail_control` role. The reference
 > Node service is stopped, is not proxied, and its `seed/state.json` is not read
 > by the Go frontend. The staging-only login alias is accepted only because
-> `MERIDIAN_DEMO_MODE=true`; config loading refuses demo mode when
-> `MERIDIAN_ENV=production`. See [ADMIN.md](ADMIN.md) and
+> `ALT8MAIL_DEMO_MODE=true`; config loading refuses demo mode when
+> `ALT8MAIL_ENV=production`. See [ADMIN.md](ADMIN.md) and
 > [SYSTEM_CONTROL.md](SYSTEM_CONTROL.md).
 
 SSH was hardened on 2026-10-29: external root login is key-only
@@ -57,11 +57,11 @@ break-glass credential and back it up outside the host.
 The operator key was installed into `/root/.ssh/authorized_keys`. Verify:
 
 ```bash
-ssh -i ~/.ssh/meridian_deploy_ed25519 \
+ssh -i ~/.ssh/a8m_deploy_ed25519 \
   -o BatchMode=yes root@130.94.46.22 'hostname; id'
 ```
 
-Expected: `mail.meridian.test`, `uid=0(root)`.
+Expected: `mail.a8m.test`, `uid=0(root)`.
 
 ## 2. Live topology
 
@@ -79,13 +79,13 @@ nginx                                  Postfix / Dovecot / ManageSieve
   ├── /system/api/* ── the same Go system backend
   ├── /admin/* ── Go admin backend 127.0.0.1:8081
   │              ├── admin sessions, RBAC, tenant policy and audit
-  │              └── /opt/meridian/admin (admin UI)
+  │              └── /opt/a8m/admin (admin UI)
   ├── 8808 alt8mail-control ── control schema
   │              ├── Postfix policy daemon 127.0.0.1:10040
   │              ├── Postfix/Dovecot/certbot/systemd/UFW management
   │              └── logs, imports, backups, cron and API v1
   ├── reference preview ── Node 127.0.0.1:8001 (stopped/disabled)
-  └── /var/www/meridian (Aurora frontend)
+  └── /var/www/a8m (Aurora frontend)
                          │
                          ├── Dovecot (IMAP, LMTP, Sieve, quota)
                          ├── Postfix (SMTP ingress + submission)
@@ -104,7 +104,7 @@ the panel URL is `https://130.94.46.22:8808`.
 
 | Component | Version | Notes |
 | --- | --- | --- |
-| PostgreSQL | 15.19 | Database `meridian`; app role `meridian_app`; mail role `meridian_mail` |
+| PostgreSQL | 15.19 | Database `a8m`; app role `a8m_app`; mail role `a8m_mail` |
 | Redis | 7.0.15 | Loopback, password, AOF, 256 MB no-eviction limit |
 | Dovecot | 2.3.19.1 | IMAP + POP3S + LMTP + Sieve; PostgreSQL virtual users; Maildir |
 | Pigeonhole / ManageSieve | 0.5.19 | Port 4190, STARTTLS, auth tested |
@@ -121,7 +121,7 @@ The public staging hostname is `130-94-46-22.sslip.io`, which resolves to the
 server IP through sslip.io. nginx uses a Let's Encrypt certificate for that
 hostname (auto-renewal through `certbot.timer`, deploy hook reloads nginx). The
 IP fallback serves the earlier self-signed certificate at
-`/etc/ssl/meridian/mail.crt`. Production still needs a customer-owned domain,
+`/etc/ssl/a8m/mail.crt`. Production still needs a customer-owned domain,
 CA validation for the mail hostname and proper DNS ownership; sslip.io is only a
 staging convenience.
 
@@ -139,20 +139,20 @@ staging convenience.
 /var/vmail/.control-imports/  staged imports (vmail-owned, cleaned per job)
 /etc/systemd/system/alt8mail-control.service
 
-/opt/meridian/
+/opt/a8m/
   app/backend/            Go source (module + migrations)
   app/public/             source frontend copy (deployment reference)
   preview/                reference Node service source (stopped; not used)
   data/preview/db.json    reference preview data archive (not used)
-  bin/meridian-server     Go API + per-user IMAP/retention/expunge workers
-  bin/meridian-mailprovision  root Maildir provisioner (systemd oneshot/timer)
-  bin/meridian-dkimprovision  root DKIM key/selector-map provisioner
-  bin/meridian-admin-server  customer/system administration backend
-  bin/meridian-admin      password/support CLI (includes system admin grant)
+  bin/a8m-server     Go API + per-user IMAP/retention/expunge workers
+  bin/a8m-mailprovision  root Maildir provisioner (systemd oneshot/timer)
+  bin/a8m-dkimprovision  root DKIM key/selector-map provisioner
+  bin/a8m-admin-server  customer/system administration backend
+  bin/a8m-admin      password/support CLI (includes system admin grant)
   app/deploy/systemd/     mail/DKIM provisioning units (source copy)
-  admin/                  admin UI served by meridian-admin-server
-  bin/meridian-inituser   real per-user state initializer (non-demo)
-  secrets/                secrets, 0600, owner meridian
+  admin/                  admin UI served by a8m-admin-server
+  bin/a8m-inituser   real per-user state initializer (non-demo)
+  secrets/                secrets, 0600, owner a8m
     app.env               service environment
     postgres_app_password
     postgres_mail_password
@@ -164,22 +164,22 @@ staging convenience.
   uploads/                uploaded and IMAP-ingested attachment binaries
   app/backend/seed/demo_mailboxes.sql  staging directory recipient rows only
   app/backend/migrations/ PostgreSQL migrations
-/etc/dovecot/conf.d/99-meridian.conf
+/etc/dovecot/conf.d/99-a8m.conf
 /etc/dovecot/dovecot-sql.conf.ext
 /etc/postfix/pgsql-virtual-*.cf
 /etc/rspamd/local.d/antivirus.conf
 /etc/rspamd/local.d/dkim_signing.conf
 /etc/rspamd/local.d/redis.conf
-/etc/nginx/sites-available/meridian
-/etc/systemd/system/meridian-server.service
-/etc/systemd/system/meridian-admin.service
-/etc/systemd/system/meridian-mailprovision.service
-/etc/systemd/system/meridian-mailprovision.timer
-/etc/systemd/system/meridian-dkimprovision.service
-/etc/systemd/system/meridian-dkimprovision.timer
+/etc/nginx/sites-available/a8m
+/etc/systemd/system/a8m-server.service
+/etc/systemd/system/a8m-admin.service
+/etc/systemd/system/a8m-mailprovision.service
+/etc/systemd/system/a8m-mailprovision.timer
+/etc/systemd/system/a8m-dkimprovision.service
+/etc/systemd/system/a8m-dkimprovision.timer
 /var/lib/rspamd/dkim/    per-domain signing keys + selectors.map
-/var/www/meridian/        deployed static frontend
-/var/vmail/meridian.test/avery.chen/Maildir/
+/var/www/a8m/        deployed static frontend
+/var/vmail/a8m.test/avery.chen/Maildir/
 ```
 
 ### Application credentials
@@ -188,19 +188,19 @@ The staging web password is intentionally not written in this document. Read it
 on the server as root:
 
 ```bash
-ssh -i ~/.ssh/meridian_deploy_ed25519 root@130.94.46.22 \
-  'cat /opt/meridian/secrets/staging_avery_password'
+ssh -i ~/.ssh/a8m_deploy_ed25519 root@130.94.46.22 \
+  'cat /opt/a8m/secrets/staging_avery_password'
 ```
 
 This random password is for the **Go system backend** web identity. The
 Dovecot/Postfix mailbox has a separate random password stored at
-`/opt/meridian/secrets/avery_mail_password` and is used by the Go IMAP/SMTP
+`/opt/a8m/secrets/avery_mail_password` and is used by the Go IMAP/SMTP
 workers. It is never exposed to the browser.
 
 Jordan Lee is a second real Go authentication user. Its web password is
-`/opt/meridian/secrets/staging_jordan_password`; its mailbox password is
-`/opt/meridian/secrets/jordan_mail_password`; its Maildir is
-`/var/vmail/meridian.test/jordan.lee/Maildir`. Jordan and every other active
+`/opt/a8m/secrets/staging_jordan_password`; its mailbox password is
+`/opt/a8m/secrets/jordan_mail_password`; its Maildir is
+`/var/vmail/a8m.test/jordan.lee/Maildir`. Jordan and every other active
 mailbox now has its own per-user IMAP worker. The Go server authenticates to
 Dovecot with the master user, while end-user web self-service password changes
 rotate both the web password and the Dovecot `mail_password_hash`.
@@ -208,11 +208,11 @@ rotate both the web password and the Dovecot `mail_password_hash`.
 The root UI also accepts the staging demo alias configured in `app.env`:
 
 ```text
-avery.chen@meridian.example / meridian-demo
+avery.chen@a8m.example / a8m-demo
 ```
 
-That alias is accepted only when `MERIDIAN_DEMO_MODE=true` and
-`MERIDIAN_ENV` is not `production`; it maps to `avery.chen@meridian.test`. It only
+That alias is accepted only when `ALT8MAIL_DEMO_MODE=true` and
+`ALT8MAIL_ENV` is not `production`; it maps to `avery.chen@a8m.test`. It only
 affects the login identity and never restores mailbox or workspace JSON data.
 While demo mode is enabled, the mapped account also accepts the same demo
 password for current-password re-authentication prompts such as app-password
@@ -235,8 +235,8 @@ apt-get install -y ca-certificates curl gnupg lsb-release apt-transport-https \
   software-properties-common ufw fail2ban unattended-upgrades chrony jq git \
   rsync unzip zip build-essential dnsutils htop ncdu vim-tiny acl openssl
 timedatectl set-timezone UTC
-hostnamectl set-hostname mail.meridian.test
-printf '\n127.0.1.1 mail.meridian.test mail\n' >> /etc/hosts
+hostnamectl set-hostname mail.a8m.test
+printf '\n127.0.1.1 mail.a8m.test mail\n' >> /etc/hosts
 fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 ```
@@ -258,7 +258,7 @@ ufw --force enable
 apt-get install -y python3-systemd rsyslog
 ```
 
-`/etc/fail2ban/jail.d/meridian.local`:
+`/etc/fail2ban/jail.d/a8m.local`:
 
 ```ini
 [DEFAULT]
@@ -275,13 +275,13 @@ enabled = true
 port = ssh
 ```
 
-The repository copy is `deploy/fail2ban/meridian.local`.
+The repository copy is `deploy/fail2ban/a8m.local`.
 
 ### 5.3 Package installation
 
 ```bash
 echo 'postfix postfix/main_mailer_type select Internet Site' | debconf-set-selections
-echo 'postfix postfix/mailname string mail.meridian.test' | debconf-set-selections
+echo 'postfix postfix/mailname string mail.a8m.test' | debconf-set-selections
 apt-get install -y postgresql postgresql-contrib postgresql-client \
   redis-server redis-tools dovecot-core dovecot-imapd dovecot-lmtpd \
   dovecot-managesieved dovecot-sieve dovecot-pgsql postfix postfix-pgsql \
@@ -312,39 +312,39 @@ ln -sf /usr/local/go/bin/go /usr/local/bin/go
 ### 5.4 PostgreSQL
 
 ```bash
-runuser -u postgres -- psql -c "CREATE ROLE meridian_app LOGIN PASSWORD '<random>';"
-runuser -u postgres -- psql -c "CREATE ROLE meridian_mail LOGIN PASSWORD '<random>';"
-runuser -u postgres -- createdb -O meridian_app meridian
-runuser -u postgres -- psql -d meridian -c 'CREATE EXTENSION citext; CREATE EXTENSION pgcrypto;'
+runuser -u postgres -- psql -c "CREATE ROLE a8m_app LOGIN PASSWORD '<random>';"
+runuser -u postgres -- psql -c "CREATE ROLE a8m_mail LOGIN PASSWORD '<random>';"
+runuser -u postgres -- createdb -O a8m_app a8m
+runuser -u postgres -- psql -d a8m -c 'CREATE EXTENSION citext; CREATE EXTENSION pgcrypto;'
 ```
 
 Then apply the repository migrations:
 
 ```bash
-cd /opt/meridian/app/backend
-PGPASSWORD="$(cat /opt/meridian/secrets/postgres_app_password)" \
-  psql -h 127.0.0.1 -U meridian_app -d meridian -v ON_ERROR_STOP=1 \
+cd /opt/a8m/app/backend
+PGPASSWORD="$(cat /opt/a8m/secrets/postgres_app_password)" \
+  psql -h 127.0.0.1 -U a8m_app -d a8m -v ON_ERROR_STOP=1 \
   -f migrations/0001_core.sql
-# postgres cannot traverse /opt/meridian (0750); stage later migrations first.
+# postgres cannot traverse /opt/a8m (0750); stage later migrations first.
 for n in 0002_app_state 0003_real_auth 0004_customer_admin 0005_mail_provisioning 0006_dkim_keys 0007_workspace 0008_mta_sts 0009_dav 0010_app_passwords 0011_mail_tables 0012_outbox 0013_undo_table 0014_compose_identity_ai; do
   install -m 644 "migrations/${n}.sql" "/tmp/${n}.sql"
-  runuser -u postgres -- psql -d meridian -v ON_ERROR_STOP=1 -f "/tmp/${n}.sql"
+  runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -f "/tmp/${n}.sql"
   rm -f "/tmp/${n}.sql"
 done
 ```
 
 `0002_app_state.sql` creates the per-user `app_states` JSONB document used as
-the transitional feature-state layer and grants the `meridian_app` role access.
+the transitional feature-state layer and grants the `a8m_app` role access.
 
 
-`conf.d/meridian.conf` sets `listen_addresses = '127.0.0.1, ::1'`,
+`conf.d/a8m.conf` sets `listen_addresses = '127.0.0.1, ::1'`,
 `shared_buffers = 256MB`, `work_mem = 4MB`, UTC and bounded connections. The
-`meridian_mail` role receives `SELECT` only on the mailbox/alias/domain/group
+`a8m_mail` role receives `SELECT` only on the mailbox/alias/domain/group
 map tables.
 
 ### 5.5 Redis
 
-`/etc/redis/meridian.conf`:
+`/etc/redis/a8m.conf`:
 
 ```ini
 bind 127.0.0.1 -::1
@@ -362,12 +362,12 @@ PostgreSQL and Redis must never be exposed in UFW.
 
 ### 5.6 Dovecot
 
-Create a `vmail` account (UID/GID 5000) and `meridian.test` mailbox tree under
+Create a `vmail` account (UID/GID 5000) and `a8m.test` mailbox tree under
 `/var/vmail`. The SQL auth file:
 
 ```ini
 driver = pgsql
-connect = host=127.0.0.1 dbname=meridian user=meridian_mail password=<random>
+connect = host=127.0.0.1 dbname=a8m user=a8m_mail password=<random>
 default_pass_scheme = SHA512-CRYPT
 password_query = SELECT m.email AS user, u.mail_password_hash AS password \
   FROM mailboxes m \
@@ -390,7 +390,7 @@ iterate_query = SELECT m.email AS user FROM mailboxes m JOIN users u ON u.id = m
   WHERE m.active = true AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'
 ```
 
-`99-meridian.conf` sets Maildir, vmail ownership, SQL passdb/userdb, TLS,
+`99-a8m.conf` sets Maildir, vmail ownership, SQL passdb/userdb, TLS,
 Postfix auth/LMTP sockets, Sieve, quota and ManageSieve. `protocols = imap pop3
 lmtp sieve` enables POP3S on 995; UFW must allow 995. Install `dovecot-pop3d`
 before enabling the protocol or Dovecot fails with `service(pop3): No such file`.
@@ -405,7 +405,7 @@ submission when an administrator turns the switch off.
 
 The Go server must read every mailbox without storing each user's mailbox
 password. Dovecot master auth is configured in
-`/etc/dovecot/conf.d/05-meridian-master.conf`:
+`/etc/dovecot/conf.d/05-a8m-master.conf`:
 
 ```ini
 auth_master_user_separator = *
@@ -418,31 +418,31 @@ passdb {
 ```
 
 `/etc/dovecot/master-users` contains one long random SHA512-CRYPT hash for
-`meridian-worker`, mode `0600 root:dovecot`. The plaintext is stored separately
-as `/opt/meridian/secrets/imap_master_password` (mode 0600, owner `meridian`)
+`a8m-worker`, mode `0600 root:dovecot`. The plaintext is stored separately
+as `/opt/a8m/secrets/imap_master_password` (mode 0600, owner `a8m`)
 and referenced from `app.env`:
 
 ```text
-MERIDIAN_IMAP_MASTER_USER=meridian-worker
-MERIDIAN_IMAP_MASTER_PASSWORD_FILE=/opt/meridian/secrets/imap_master_password
-MERIDIAN_MAIL_WORKER_CONCURRENCY=8
+ALT8MAIL_IMAP_MASTER_USER=a8m-worker
+ALT8MAIL_IMAP_MASTER_PASSWORD_FILE=/opt/a8m/secrets/imap_master_password
+ALT8MAIL_MAIL_WORKER_CONCURRENCY=8
 ```
 
-A mailbox login is `<mailbox-email>*meridian-worker`. Master auth is verified for
+A mailbox login is `<mailbox-email>*a8m-worker`. Master auth is verified for
 IMAP, SMTP submission and ManageSieve. Revoke or rotate it by replacing the
 `master-users` entry and the secret file, then restarting Dovecot and
-`meridian-server`. The IMAP certificate is the same
-`mail.meridian.test` certificate Postfix uses. Copy it into the Dovecot private
+`a8m-server`. The IMAP certificate is the same
+`mail.a8m.test` certificate Postfix uses. Copy it into the Dovecot private
 directory so the master process can read the key:
 
 ```bash
 install -m 640 -o root -g dovecot \
-  /etc/ssl/meridian/mail.crt /etc/dovecot/private/meridian-mail.crt
+  /etc/ssl/a8m/mail.crt /etc/dovecot/private/alt8mail.crt
 install -m 640 -o root -g dovecot \
-  /etc/ssl/meridian/mail.key /etc/dovecot/private/meridian-mail.key
-# 99-meridian.conf:
-ssl_cert = </etc/dovecot/private/meridian-mail.crt
-ssl_key = </etc/dovecot/private/meridian-mail.key
+  /etc/ssl/a8m/mail.key /etc/dovecot/private/alt8mail.key
+# 99-a8m.conf:
+ssl_cert = </etc/dovecot/private/alt8mail.crt
+ssl_key = </etc/dovecot/private/alt8mail.key
 ```
 
 Set the mailbox password and verify it before starting the Go workers:
@@ -450,12 +450,12 @@ Set the mailbox password and verify it before starting the Go workers:
 ```bash
 PW=$(openssl rand -base64 36 | tr -d '\n')
 umask 077
-printf '%s' "$PW" > /opt/meridian/secrets/avery_mail_password
-chown meridian:meridian /opt/meridian/secrets/avery_mail_password
+printf '%s' "$PW" > /opt/a8m/secrets/avery_mail_password
+chown a8m:a8m /opt/a8m/secrets/avery_mail_password
 HASH=$(doveadm pw -s SHA512-CRYPT -p "$PW")
-printf "UPDATE users SET mail_password_hash = :'hash' WHERE email='avery.chen@meridian.test';\n" \
-  | runuser -u postgres -- psql -d meridian -v hash="$HASH" -f -
-doveadm auth test avery.chen@meridian.test "$PW"
+printf "UPDATE users SET mail_password_hash = :'hash' WHERE email='avery.chen@a8m.test';\n" \
+  | runuser -u postgres -- psql -d a8m -v hash="$HASH" -f -
+doveadm auth test avery.chen@a8m.test "$PW"
 ```
 
 ### 5.7 Postfix
@@ -463,9 +463,9 @@ doveadm auth test avery.chen@meridian.test "$PW"
 Main settings used:
 
 ```text
-myhostname = mail.meridian.test
+myhostname = mail.a8m.test
 mydestination = localhost
-myorigin = meridian.test
+myorigin = a8m.test
 virtual_mailbox_domains = pgsql:/etc/postfix/pgsql-virtual-domains.cf
 virtual_mailbox_maps = pgsql:/etc/postfix/pgsql-virtual-mailbox.cf
 virtual_alias_maps = pgsql:/etc/postfix/pgsql-virtual-alias.cf
@@ -475,8 +475,8 @@ smtpd_sasl_type = dovecot
 smtpd_sasl_path = private/auth
 smtpd_milters = inet:127.0.0.1:11332
 non_smtpd_milters = inet:127.0.0.1:11332
-smtpd_tls_cert_file = /etc/ssl/meridian/mail.crt
-smtpd_tls_key_file = /etc/ssl/meridian/mail.key
+smtpd_tls_cert_file = /etc/ssl/a8m/mail.crt
+smtpd_tls_key_file = /etc/ssl/a8m/mail.key
 smtpd_tls_auth_only = yes
 ```
 
@@ -492,12 +492,12 @@ classification.
 
 The alias map performs real mailing-list expansion. Group addresses are unioned
 with normal user aliases, and each member is returned as a comma-separated
-recipient. The `meridian_mail` role therefore needs `SELECT` on `groups` and
+recipient. The `a8m_mail` role therefore needs `SELECT` on `groups` and
 `group_members` in addition to the mailbox tables:
 
 ```sql
 GRANT SELECT ON tenants, users, mail_domains, user_aliases, mailboxes,
-  groups, group_members TO meridian_mail;
+  groups, group_members TO a8m_mail;
 ```
 
 `/etc/postfix/pgsql-virtual-alias.cf` query (one line in the file):
@@ -523,7 +523,7 @@ SELECT target FROM (
 ```
 
 Use a SQL file on `/tmp` when applying grants/migrations because `postgres`
-cannot traverse `/opt/meridian` (mode 0750, owner `meridian`). After changing
+cannot traverse `/opt/a8m` (mode 0750, owner `a8m`). After changing
 grants or a map, run `postmap -q <group-address>
 pgsql:/etc/postfix/pgsql-virtual-alias.cf` and `postfix reload`; a `451` already
 cached by a running `trivial-rewrite` process disappears after the reload.
@@ -532,19 +532,19 @@ cached by a running `trivial-rewrite` process disappears after the reload.
 
 - Antivirus: `clamav` block with `action = "reject"`, whole-message scanning
   and the `/var/run/clamav/clamd.ctl` socket.
-- DKIM: key generated for `meridian.test`, selector `meridian`; DNS TXT record
-  is in `/var/lib/rspamd/dkim/meridian.test.meridian.txt`.
+- DKIM: key generated for `a8m.test`, selector `a8m`; DNS TXT record
+  is in `/var/lib/rspamd/dkim/a8m.test.a8m.txt`.
 - Signing applies to local/authenticated submission. Tested header:
-  `DKIM-Signature: ... d=meridian.test ...`.
+  `DKIM-Signature: ... d=a8m.test ...`.
 - Rspamd Redis is configured with the local Redis password.
 - Milfers use `inet:127.0.0.1:11332`.
 
 Publish the DKIM public key and SPF record in real DNS before external mail:
 
 ```text
-meridian._domainkey.meridian.test. TXT "<contents of the generated .txt file>"
-meridian.test.                       TXT "v=spf1 mx -all"
-_dmarc.meridian.test.                TXT "v=DMARC1; p=reject; rua=mailto:dmarc@meridian.test"
+a8m._domainkey.a8m.test. TXT "<contents of the generated .txt file>"
+a8m.test.                       TXT "v=spf1 mx -all"
+_dmarc.a8m.test.                TXT "v=DMARC1; p=reject; rua=mailto:dmarc@a8m.test"
 ```
 
 #### DKIM signing keys and DNS records
@@ -556,7 +556,7 @@ Rspamd signs outbound mail using per-domain keys under
 ```text
 enabled = true;
 path = "/var/lib/rspamd/dkim/$domain.$selector.key";
-selector = "meridian";
+selector = "a8m";
 selector_map = "/var/lib/rspamd/dkim/selectors.map";
 use_domain = "header";
 allow_username_mismatch = true;
@@ -564,7 +564,7 @@ allow_hdrfrom_mismatch = true;
 sign_networks = ["127.0.0.0/8", "::1"];
 ```
 
-`meridian-dkimprovision.timer` runs a root oneshot every minute. For every
+`a8m-dkimprovision.timer` runs a root oneshot every minute. For every
 `mail_domains` row it:
 
 1. reuses the existing private key if present, otherwise generates a 2048-bit
@@ -582,14 +582,14 @@ the next pass creates the new selector key.
 
 Domain verification checks:
 
-- ownership TXT at `_meridian-verification.<domain>`;
-- MX records point at `MERIDIAN_MAIL_HOSTNAME`;
+- ownership TXT at `_a8m-verification.<domain>`;
+- MX records point at `ALT8MAIL_MAIL_HOSTNAME`;
 - an SPF TXT record exists;
 - the selector TXT is `v=DKIM1` and its `p=` exactly matches the active signing
   key (not merely any DKIM record);
 - DMARC has a valid `p=none|quarantine|reject`.
 
-`meridian.test` is a reserved test domain with no public DNS, so the staging
+`a8m.test` is a reserved test domain with no public DNS, so the staging
 verification screen will correctly report missing DNS records even though the
 real DKIM key and Rspamd signature are working locally. Use a customer-owned
 domain with public DNS for a successful end-to-end verification.
@@ -598,35 +598,35 @@ Inspect without exposing private key material:
 
 ```bash
 cd /tmp
-runuser -u postgres -- psql -d meridian -c   "SELECT domain, dkim_selector, dkim_record FROM mail_domains ORDER BY domain;"
+runuser -u postgres -- psql -d a8m -c   "SELECT domain, dkim_selector, dkim_record FROM mail_domains ORDER BY domain;"
 cat /var/lib/rspamd/dkim/selectors.map
-doveadm fetch -u nora.patel@meridian.test hdr mailbox INBOX |
+doveadm fetch -u nora.patel@a8m.test hdr mailbox INBOX |
   grep -A4 -i '^DKIM-Signature'
 ```
 
 ### 5.9 Go system backend
 
 ```bash
-cd /opt/meridian/app/backend
+cd /opt/a8m/app/backend
 go mod tidy
 go test ./...
 go build -trimpath -ldflags "-s -w -X main.version=0.9.0-staging" \
-  -o /opt/meridian/bin/meridian-server ./cmd/server
+  -o /opt/a8m/bin/a8m-server ./cmd/server
 go build -trimpath -ldflags "-s -w -X main.version=0.9.0-staging" \
-  -o /opt/meridian/bin/meridian-admin-server ./cmd/adminserver
-go build -trimpath -ldflags "-s -w" -o /opt/meridian/bin/meridian-admin ./cmd/admin
-go build -trimpath -ldflags "-s -w" -o /opt/meridian/bin/meridian-inituser ./cmd/inituser
-go build -trimpath -ldflags "-s -w" -o /opt/meridian/bin/meridian-mailprovision ./cmd/mailprovision
-go build -trimpath -ldflags "-s -w -X main.version=0.9.0-staging" -o /opt/meridian/bin/meridian-dkimprovision ./cmd/dkimprovision
-install -d -o meridian -g meridian /opt/meridian/admin
-cp -a /path/to/meridian/admin/. /opt/meridian/admin/
-install -m 644 ../deploy/systemd/meridian-mailprovision.service /etc/systemd/system/
-install -m 644 ../deploy/systemd/meridian-mailprovision.timer /etc/systemd/system/
-install -m 644 ../deploy/systemd/meridian-dkimprovision.service /etc/systemd/system/
-install -m 644 ../deploy/systemd/meridian-dkimprovision.timer /etc/systemd/system/
+  -o /opt/a8m/bin/a8m-admin-server ./cmd/adminserver
+go build -trimpath -ldflags "-s -w" -o /opt/a8m/bin/a8m-admin ./cmd/admin
+go build -trimpath -ldflags "-s -w" -o /opt/a8m/bin/a8m-inituser ./cmd/inituser
+go build -trimpath -ldflags "-s -w" -o /opt/a8m/bin/a8m-mailprovision ./cmd/mailprovision
+go build -trimpath -ldflags "-s -w -X main.version=0.9.0-staging" -o /opt/a8m/bin/a8m-dkimprovision ./cmd/dkimprovision
+install -d -o a8m -g a8m /opt/a8m/admin
+cp -a /path/to/a8m/admin/. /opt/a8m/admin/
+install -m 644 ../deploy/systemd/a8m-mailprovision.service /etc/systemd/system/
+install -m 644 ../deploy/systemd/a8m-mailprovision.timer /etc/systemd/system/
+install -m 644 ../deploy/systemd/a8m-dkimprovision.service /etc/systemd/system/
+install -m 644 ../deploy/systemd/a8m-dkimprovision.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now meridian-mailprovision.timer meridian-dkimprovision.timer
-systemctl restart meridian-server meridian-admin
+systemctl enable --now a8m-mailprovision.timer a8m-dkimprovision.timer
+systemctl restart a8m-server a8m-admin
 ```
 
 Migration `0003_real_auth.sql` adds `users.enrollment_required` and
@@ -654,81 +654,81 @@ without them, authentication and admin routes fail closed. Migrations are
 idempotent (`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`). See [ADMIN.md](ADMIN.md)
 for the admin console, permissions and subdomain deployment.
 
-Environment is `/opt/meridian/secrets/app.env`, loaded by systemd as user
-`meridian`. The unit uses `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`,
+Environment is `/opt/a8m/secrets/app.env`, loaded by systemd as user
+`a8m`. The unit uses `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`,
 `ProtectSystem=strict`, `ProtectHome`, an empty capability set and only
-`/opt/meridian/uploads` writable. Mail worker and security settings:
+`/opt/a8m/uploads` writable. Mail worker and security settings:
 
 ```text
-MERIDIAN_PUBLIC_URL=https://130-94-46-22.sslip.io
-MERIDIAN_MAIL_HOSTNAME=mail.meridian.test
-MERIDIAN_DKIM_DIR=/var/lib/rspamd/dkim
-MERIDIAN_DKIM_SELECTOR_MAP=/var/lib/rspamd/dkim/selectors.map
-MERIDIAN_IMAP_ADDR=127.0.0.1:993
-MERIDIAN_IMAP_MASTER_USER=meridian-worker
-MERIDIAN_IMAP_MASTER_PASSWORD_FILE=/opt/meridian/secrets/imap_master_password
-MERIDIAN_MAILDIR_BASE=/var/vmail
-MERIDIAN_MAIL_WORKER_CONCURRENCY=8
+ALT8MAIL_PUBLIC_URL=https://130-94-46-22.sslip.io
+ALT8MAIL_MAIL_HOSTNAME=mail.a8m.test
+ALT8MAIL_DKIM_DIR=/var/lib/rspamd/dkim
+ALT8MAIL_DKIM_SELECTOR_MAP=/var/lib/rspamd/dkim/selectors.map
+ALT8MAIL_IMAP_ADDR=127.0.0.1:993
+ALT8MAIL_IMAP_MASTER_USER=a8m-worker
+ALT8MAIL_IMAP_MASTER_PASSWORD_FILE=/opt/a8m/secrets/imap_master_password
+ALT8MAIL_MAILDIR_BASE=/var/vmail
+ALT8MAIL_MAIL_WORKER_CONCURRENCY=8
 # Legacy single-mailbox fallback; master auth takes precedence when configured.
-MERIDIAN_IMAP_USER=avery.chen@meridian.test
-MERIDIAN_IMAP_PASSWORD_FILE=/opt/meridian/secrets/avery_mail_password
-MERIDIAN_IMAP_TLS_NAME=mail.meridian.test
-MERIDIAN_IMAP_SYNC_SECONDS=300
-MERIDIAN_IMAP_POLL_SECONDS=15
-MERIDIAN_IMAP_IDLE=true
-MERIDIAN_SMTP_ADDR=127.0.0.1:587
-MERIDIAN_SMTP_TLS_NAME=mail.meridian.test
-MERIDIAN_MAIL_CA_FILE=/etc/ssl/meridian/mail.crt
-MERIDIAN_MANAGESIEVE_ADDR=127.0.0.1:4190
-MERIDIAN_MANAGESIEVE_TLS_NAME=mail.meridian.test
-MERIDIAN_WEBAUTHN_RPID=130-94-46-22.sslip.io
-MERIDIAN_WEBAUTHN_ORIGINS=https://130-94-46-22.sslip.io
-MERIDIAN_ADMIN_LISTEN=127.0.0.1:8081
-MERIDIAN_ADMIN_DIR=/opt/meridian/admin
-MERIDIAN_ADMIN_URL=https://130-94-46-22.sslip.io/admin/
-MERIDIAN_ADMIN_SESSION_HOURS=8
-MERIDIAN_CLAMAV_ADDR=/var/run/clamav/clamd.ctl
+ALT8MAIL_IMAP_USER=avery.chen@a8m.test
+ALT8MAIL_IMAP_PASSWORD_FILE=/opt/a8m/secrets/avery_mail_password
+ALT8MAIL_IMAP_TLS_NAME=mail.a8m.test
+ALT8MAIL_IMAP_SYNC_SECONDS=300
+ALT8MAIL_IMAP_POLL_SECONDS=15
+ALT8MAIL_IMAP_IDLE=true
+ALT8MAIL_SMTP_ADDR=127.0.0.1:587
+ALT8MAIL_SMTP_TLS_NAME=mail.a8m.test
+ALT8MAIL_MAIL_CA_FILE=/etc/ssl/a8m/mail.crt
+ALT8MAIL_MANAGESIEVE_ADDR=127.0.0.1:4190
+ALT8MAIL_MANAGESIEVE_TLS_NAME=mail.a8m.test
+ALT8MAIL_WEBAUTHN_RPID=130-94-46-22.sslip.io
+ALT8MAIL_WEBAUTHN_ORIGINS=https://130-94-46-22.sslip.io
+ALT8MAIL_ADMIN_LISTEN=127.0.0.1:8081
+ALT8MAIL_ADMIN_DIR=/opt/a8m/admin
+ALT8MAIL_ADMIN_URL=https://130-94-46-22.sslip.io/admin/
+ALT8MAIL_ADMIN_SESSION_HOURS=8
+ALT8MAIL_CLAMAV_ADDR=/var/run/clamav/clamd.ctl
 
 # Optional storage connectors; leave OAuth IDs empty until the provider app is ready.
-MERIDIAN_S3_ENDPOINT=127.0.0.1:9000
-MERIDIAN_S3_REGION=us-east-1
-MERIDIAN_S3_BUCKET=meridian
-MERIDIAN_S3_ACCESS_KEY=...
-MERIDIAN_S3_SECRET_KEY=...
-MERIDIAN_S3_USE_SSL=false
-MERIDIAN_S3_PATH_STYLE=true
-MERIDIAN_GOOGLE_CLIENT_ID=
-MERIDIAN_GOOGLE_CLIENT_SECRET=
-MERIDIAN_DROPBOX_CLIENT_ID=
-MERIDIAN_DROPBOX_CLIENT_SECRET=
-MERIDIAN_MICROSOFT_CLIENT_ID=
-MERIDIAN_MICROSOFT_CLIENT_SECRET=
+ALT8MAIL_S3_ENDPOINT=127.0.0.1:9000
+ALT8MAIL_S3_REGION=us-east-1
+ALT8MAIL_S3_BUCKET=a8m
+ALT8MAIL_S3_ACCESS_KEY=...
+ALT8MAIL_S3_SECRET_KEY=...
+ALT8MAIL_S3_USE_SSL=false
+ALT8MAIL_S3_PATH_STYLE=true
+ALT8MAIL_GOOGLE_CLIENT_ID=
+ALT8MAIL_GOOGLE_CLIENT_SECRET=
+ALT8MAIL_DROPBOX_CLIENT_ID=
+ALT8MAIL_DROPBOX_CLIENT_SECRET=
+ALT8MAIL_MICROSOFT_CLIENT_ID=
+ALT8MAIL_MICROSOFT_CLIENT_SECRET=
 ```
 
-`MERIDIAN_WEBAUTHN_RPID` is a bare hostname (no scheme/port) and
-`MERIDIAN_WEBAUTHN_ORIGINS` is a comma-separated origin allowlist. If unset, both
-derive from `MERIDIAN_PUBLIC_URL`. Changing the public hostname requires updating
+`ALT8MAIL_WEBAUTHN_RPID` is a bare hostname (no scheme/port) and
+`ALT8MAIL_WEBAUTHN_ORIGINS` is a comma-separated origin allowlist. If unset, both
+derive from `ALT8MAIL_PUBLIC_URL`. Changing the public hostname requires updating
 these values; existing passkeys are bound to the old RP ID.
 
-Dovecot and Postfix both present the `mail.meridian.test` certificate from
-`/etc/ssl/meridian/mail.crt`; Dovecot reads a copy under
-`/etc/dovecot/private/meridian-mail.{crt,key}`. ManageSieve presents the same
-certificate. The Go client verifies that CA and the `mail.meridian.test` name
+Dovecot and Postfix both present the `mail.a8m.test` certificate from
+`/etc/ssl/a8m/mail.crt`; Dovecot reads a copy under
+`/etc/dovecot/private/alt8mail.{crt,key}`. ManageSieve presents the same
+certificate. The Go client verifies that CA and the `mail.a8m.test` name
 for IMAP, SMTP and ManageSieve.
 
-`MERIDIAN_IMAP_SYNC_SECONDS` controls the full reconciliation scan. Each worker
-keeps an INBOX `IDLE` connection when `MERIDIAN_IMAP_IDLE=true` (the default):
+`ALT8MAIL_IMAP_SYNC_SECONDS` controls the full reconciliation scan. Each worker
+keeps an INBOX `IDLE` connection when `ALT8MAIL_IMAP_IDLE=true` (the default):
 new mail, flag changes and expunges wake the worker immediately, and
 `refreshInboxFlagsForUser` applies flags/deletions without re-downloading bodies.
 If a server does not advertise IDLE, the worker logs that fact and falls back to
-the new-mail check (`MERIDIAN_IMAP_POLL_SECONDS`, default 15, minimum 5), which
+the new-mail check (`ALT8MAIL_IMAP_POLL_SECONDS`, default 15, minimum 5), which
 performs a cheap `UID SEARCH` on INBOX and fetches only new bodies. The browser
 also polls the inbox every 15 seconds and updates the open list/reader in place;
 new mail therefore appears without a page refresh and raises a desktop
 notification or an in-app toast. Lowering the poll interval increases IMAP
 connections per mailbox. The Go process runs one worker per active mailbox,
 serialized by a per-user mutex and bounded by
-`MERIDIAN_MAIL_WORKER_CONCURRENCY` (default 8). IDLE uses one additional IMAP
+`ALT8MAIL_MAIL_WORKER_CONCURRENCY` (default 8). IDLE uses one additional IMAP
 connection per active mailbox; size Dovecot's `mail_max_userip_connections`,
 process limits and file descriptors before enabling it for a very large user
 base. That isolates users while keeping a restart from opening every mailbox at
@@ -737,8 +737,8 @@ once.
 Set the web password:
 
 ```bash
-printf '%s\n' "$(cat /opt/meridian/secrets/staging_avery_password)" \
-  | /opt/meridian/bin/meridian-admin -email avery.chen@meridian.test
+printf '%s\n' "$(cat /opt/a8m/secrets/staging_avery_password)" \
+  | /opt/a8m/bin/a8m-admin -email avery.chen@a8m.test
 ```
 
 Jordan's credentials are managed the same way. Its web password file is
@@ -746,8 +746,8 @@ Jordan's credentials are managed the same way. Its web password file is
 and stored in `jordan_mail_password`:
 
 ```bash
-printf '%s\n' "$(cat /opt/meridian/secrets/staging_jordan_password)" \
-  | /opt/meridian/bin/meridian-admin -email jordan.lee@meridian.test
+printf '%s\n' "$(cat /opt/a8m/secrets/staging_jordan_password)" \
+  | /opt/a8m/bin/a8m-admin -email jordan.lee@a8m.test
 ```
 
 Jordan is a real Go authentication identity with its own Maildir. Every active
@@ -760,12 +760,12 @@ PostgreSQL and leaves messages, tasks, files, calendar and audit empty; the IMAP
 worker then imports the mailbox from Dovecot:
 
 ```bash
-set -a; . /opt/meridian/secrets/app.env; set +a
-/opt/meridian/bin/meridian-inituser -email avery.chen@meridian.test
-systemctl restart meridian-server
+set -a; . /opt/a8m/secrets/app.env; set +a
+/opt/a8m/bin/a8m-inituser -email avery.chen@a8m.test
+systemctl restart a8m-server
 ```
 
-`seed/state.json` and `meridian-seedstate` belong to the retired Node preview
+`seed/state.json` and `a8m-seedstate` belong to the retired Node preview
 and are not used by the live service. Do not run them against the staging Go
 mailbox.
 
@@ -773,27 +773,27 @@ Create the staging-only directory recipients so delivery to seeded addresses
 resolves (they have no web password and cannot sign in):
 
 ```bash
-runuser -u postgres -- psql -d meridian \
-  -f /opt/meridian/app/backend/seed/demo_mailboxes.sql
+runuser -u postgres -- psql -d a8m \
+  -f /opt/a8m/app/backend/seed/demo_mailboxes.sql
 for d in elena.vasquez marcus.webb nora.patel priya.shah \
          tomas.ribeiro lena.fischer daniel.kim aisha.bello; do
-  install -d -o vmail -g vmail "/var/vmail/meridian.test/$d/Maildir"
+  install -d -o vmail -g vmail "/var/vmail/a8m.test/$d/Maildir"
 done
 ```
 
 
 #### Per-user workers, Maildir provisioning and retention
 
-`meridian-server` starts a worker per active mailbox after its initial directory
+`a8m-server` starts a worker per active mailbox after its initial directory
 refresh and refreshes that list every 60 seconds. Each worker keeps an INBOX
-IDLE connection when `MERIDIAN_IMAP_IDLE=true` and otherwise performs a UID-only
-INBOX check every `MERIDIAN_IMAP_POLL_SECONDS`; both also run a full folder
-reconciliation every `MERIDIAN_IMAP_SYNC_SECONDS`. A per-user mutex serializes
+IDLE connection when `ALT8MAIL_IMAP_IDLE=true` and otherwise performs a UID-only
+INBOX check every `ALT8MAIL_IMAP_POLL_SECONDS`; both also run a full folder
+reconciliation every `ALT8MAIL_IMAP_SYNC_SECONDS`. A per-user mutex serializes
 the worker, web sync, mailbox actions and retention; different users proceed in
 parallel.
 
-`meridian-mailprovision` is a root-run oneshot invoked by
-`meridian-mailprovision.timer` every minute. It claims only `pending`/`error`
+`a8m-mailprovision` is a root-run oneshot invoked by
+`a8m-mailprovision.timer` every minute. It claims only `pending`/`error`
 mailboxes and creates the Maildir++ tree (`cur`, `new`, `tmp`, `.Sent`,
 `.Drafts`, `.Archive`, `.Junk`, `.Trash`), chowns it to `vmail:vmail` (UID/GID
 5000) and sets the provisioning fields surfaced in the admin console. The unit
@@ -802,7 +802,7 @@ writable and a minimal capability set (`CAP_CHOWN`, `CAP_DAC_OVERRIDE`,
 `CAP_FOWNER`). Run `-all` manually to re-verify every mailbox:
 
 ```bash
-/opt/meridian/bin/meridian-mailprovision -all
+/opt/a8m/bin/a8m-mailprovision -all
 ```
 
 Retention follows the tenant `mail.retentionDays` policy. A daily background
@@ -815,8 +815,8 @@ per-user audit entry. A manual run is audited in the admin log.
 
 ### 5.10 nginx, frontend and reference feature service
 
-- Deployed frontend: `/var/www/meridian` (owned `www-data`).
-- Site: `/etc/nginx/sites-available/meridian` (symlinked into `sites-enabled`).
+- Deployed frontend: `/var/www/a8m` (owned `www-data`).
+- Site: `/etc/nginx/sites-available/a8m` (symlinked into `sites-enabled`).
 - HTTP 80 redirects to HTTPS 443.
 - `/api/` proxies to the **Go system backend** on `127.0.0.1:8080`.
 - `/system/api/` proxies to the **same Go system backend** under a
@@ -824,8 +824,8 @@ per-user audit entry. A manual run is audited in the admin log.
 - `location ^~ /admin/` proxies to the **Go admin backend** on
   `127.0.0.1:8081`; `location = /admin` also proxies there so the admin mux can
   redirect to `/admin/`. `^~` is required so the static `.js`/`.css` regex in
-  the mail site does not serve admin assets from `/var/www/meridian`.
-- The admin binary serves its own UI from `/opt/meridian/admin`; relative asset
+  the mail site does not serve admin assets from `/var/www/a8m`.
+- The admin binary serves its own UI from `/opt/a8m/admin`; relative asset
   and API paths let the same UI run at `/admin/` or at an admin subdomain root.
 - `.mjs` must be served as `application/javascript`; this required adding
   `mjs` to `/etc/nginx/mime.types`.
@@ -833,7 +833,7 @@ per-user audit entry. A manual run is audited in the admin log.
   discovery and resources to `127.0.0.1:8080` with a 120-second read timeout
   and a 4 MB request limit. `location = /.well-known/mta-sts.txt` proxies the
   MTA-STS policy. Both blocks are in
-  `deploy/nginx/meridian-dav-mta.conf`.
+  `deploy/nginx/a8m-dav-mta.conf`.
 - CSP is enabled. HSTS is deferred until a production-owned domain is in use so
   the self-signed IP fallback does not get pinned by browsers.
 - Self-signed certificate SANs include the public IP.
@@ -841,20 +841,20 @@ per-user audit entry. A manual run is audited in the admin log.
 The admin backend runs under a sibling unit:
 
 ```ini
-# /etc/systemd/system/meridian-admin.service
+# /etc/systemd/system/a8m-admin.service
 [Unit]
-Description=Meridian customer and system administration backend
+Description=Alt8Mail customer and system administration backend
 After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target
 Requires=postgresql.service redis-server.service
 
 [Service]
 Type=simple
-User=meridian
-Group=meridian
-WorkingDirectory=/opt/meridian
-EnvironmentFile=/opt/meridian/secrets/app.env
-ExecStart=/opt/meridian/bin/meridian-admin-server
+User=a8m
+Group=a8m
+WorkingDirectory=/opt/a8m
+EnvironmentFile=/opt/a8m/secrets/app.env
+ExecStart=/opt/a8m/bin/a8m-admin-server
 Restart=on-failure
 RestartSec=2
 UMask=0027
@@ -879,9 +879,9 @@ WantedBy=multi-user.target
 Grant the first system administrator after migration:
 
 ```bash
-set -a; . /opt/meridian/secrets/app.env; set +a
-/opt/meridian/bin/meridian-admin -grant-system-admin -email avery.chen@meridian.test
-/opt/meridian/bin/meridian-admin -list-admins
+set -a; . /opt/a8m/secrets/app.env; set +a
+/opt/a8m/bin/a8m-admin -grant-system-admin -email avery.chen@a8m.test
+/opt/a8m/bin/a8m-admin -list-admins
 ```
 
 The reference feature service is stopped and disabled. Its unit and source are
@@ -889,48 +889,48 @@ retained only as an archive; it is not proxied and its demo JSON is not used by
 the staging frontend. The old unit definition was:
 
 ```ini
-# /etc/systemd/system/meridian-preview.service
+# /etc/systemd/system/a8m-preview.service
 [Service]
-User=meridian
-WorkingDirectory=/opt/meridian/preview
+User=a8m
+WorkingDirectory=/opt/a8m/preview
 Environment=PORT=8001
 Environment=HOST=127.0.0.1
-Environment=DATA_FILE=/opt/meridian/data/preview/db.json
+Environment=DATA_FILE=/opt/a8m/data/preview/db.json
 ExecStart=/usr/local/bin/node server.js
 ProtectSystem=strict
 ProtectHome=true
 NoNewPrivileges=true
 PrivateTmp=true
-ReadWritePaths=/opt/meridian/data/preview
+ReadWritePaths=/opt/a8m/data/preview
 CapabilityBoundingSet=
 ```
 
 Deploy frontend updates only:
 
 ```bash
-tar -czf /tmp/meridian-public.tgz -C public .
-scp /tmp/meridian-public.tgz root@130.94.46.22:/tmp/
+tar -czf /tmp/a8m-public.tgz -C public .
+scp /tmp/a8m-public.tgz root@130.94.46.22:/tmp/
 ssh root@130.94.46.22 '
-  tar -xzf /tmp/meridian-public.tgz -C /var/www/meridian &&
-  chown -R www-data:www-data /var/www/meridian &&
+  tar -xzf /tmp/a8m-public.tgz -C /var/www/a8m &&
+  chown -R www-data:www-data /var/www/a8m &&
   nginx -t && systemctl reload nginx
 '
 ```
 
-Do **not** restart `meridian-preview` or copy its demo data onto the real
+Do **not** restart `a8m-preview` or copy its demo data onto the real
 mailbox host. The old preview unit above is documented only for audit/history.
 
 The deployed `index.html` keeps the template's staging login prefill
-(`avery.chen@meridian.example` / `meridian-demo`) so testing is easy; Go maps
+(`avery.chen@a8m.example` / `a8m-demo`) so testing is easy; Go maps
 that staging alias to the canonical `.test` identity. It does not supply any
 mailbox or workspace content. The server copy does not alter the local repository
 template.
 
 **Go API transition completed:** nginx `location /api/` proxies to
 `127.0.0.1:8080`; the full API and browser smoke suites pass against Go, and the
-UI reads only real Dovecot/PostgreSQL data. `meridian-preview` is stopped and
+UI reads only real Dovecot/PostgreSQL data. `a8m-preview` is stopped and
 disabled. The saved nginx fragment
-`/etc/nginx/sites-available/meridian.node-preview` and the old unit are archived
+`/etc/nginx/sites-available/a8m.node-preview` and the old unit are archived
 for historical comparison only; do not re-enable the demo preview on a real
 mailbox host.
 
@@ -1035,7 +1035,7 @@ server {
 Run **Run DNS verification** in the domain drawer. Verification checks the
 `_mta-sts` TXT id, fetches the policy over HTTPS through a public-IP-only
 dialer (private, loopback and link-local destinations are refused), and compares
-`version`, `mode`, `max_age` and the MX host. `meridian.test` cannot pass public
+`version`, `mode`, `max_age` and the MX host. `a8m.test` cannot pass public
 verification because it has no public DNS; the endpoint and verifier are tested
 with unit fakes and a Host-header policy request on staging.
 
@@ -1045,17 +1045,17 @@ S3/MinIO is configured entirely by environment and is connected per user from
 the Files workspace:
 
 ```text
-MERIDIAN_S3_ENDPOINT=127.0.0.1:9000
-MERIDIAN_S3_REGION=us-east-1
-MERIDIAN_S3_BUCKET=meridian
-MERIDIAN_S3_ACCESS_KEY=...
-MERIDIAN_S3_SECRET_KEY=...
-MERIDIAN_S3_USE_SSL=false
-MERIDIAN_S3_PATH_STYLE=true
+ALT8MAIL_S3_ENDPOINT=127.0.0.1:9000
+ALT8MAIL_S3_REGION=us-east-1
+ALT8MAIL_S3_BUCKET=a8m
+ALT8MAIL_S3_ACCESS_KEY=...
+ALT8MAIL_S3_SECRET_KEY=...
+ALT8MAIL_S3_USE_SSL=false
+ALT8MAIL_S3_PATH_STYLE=true
 ```
 
 Web attachment uploads and guest-share replacements are scanned through clamd
-INSTREAM when `MERIDIAN_CLAMAV_ADDR` is set. Staging uses
+INSTREAM when `ALT8MAIL_CLAMAV_ADDR` is set. Staging uses
 `/var/run/clamav/clamd.ctl` (socket mode 666); the app's systemd sandbox already
 allows AF_UNIX. When scanning is configured, a scanner error fails the upload
 closed with `503 ATTACHMENT_SCAN`; an infected file returns
@@ -1081,11 +1081,11 @@ https://mail.example.com/api/storage/oauth/dropbox/callback
 https://mail.example.com/api/storage/oauth/microsoft/callback
 ```
 
-Set `MERIDIAN_GOOGLE_CLIENT_ID`, `MERIDIAN_GOOGLE_CLIENT_SECRET`,
-`MERIDIAN_DROPBOX_CLIENT_ID`, `MERIDIAN_DROPBOX_CLIENT_SECRET`,
-`MERIDIAN_MICROSOFT_CLIENT_ID` and `MERIDIAN_MICROSOFT_CLIENT_SECRET`. Providers
+Set `ALT8MAIL_GOOGLE_CLIENT_ID`, `ALT8MAIL_GOOGLE_CLIENT_SECRET`,
+`ALT8MAIL_DROPBOX_CLIENT_ID`, `ALT8MAIL_DROPBOX_CLIENT_SECRET`,
+`ALT8MAIL_MICROSOFT_CLIENT_ID` and `ALT8MAIL_MICROSOFT_CLIENT_SECRET`. Providers
 are shown as unconfigured until both ID and secret are present. Refresh/access
-tokens are AES-GCM sealed with a key derived from `MERIDIAN_SESSION_SECRET`;
+tokens are AES-GCM sealed with a key derived from `ALT8MAIL_SESSION_SECRET`;
 rotating that secret requires users to reconnect. OAuth cannot be live-tested
 without real provider apps; the authorization, callback, refresh, upload,
 download and sync paths are implemented and unit/API boundaries are documented
@@ -1134,12 +1134,12 @@ ignored, so it does not cause a reconnect or a mailbox-wide flag fetch. A new
 mail event runs the UID check only; expunge/FETCH events run the flag reconcile.
 The connection renews its 25-minute IDLE command and reconnects after each
 mailbox event. The per-user worker pool defaults to 8 concurrent mailboxes
-(`MERIDIAN_MAIL_WORKER_CONCURRENCY`), a 5-minute full sync and a 15-second
+(`ALT8MAIL_MAIL_WORKER_CONCURRENCY`), a 5-minute full sync and a 15-second
 INBOX poll. At 1,000 users, tune the pool to CPU/IO, watch `mail_messages`
 index/table size, and budget one additional IMAP connection per active mailbox
 for IDLE. Guest share tokens are stored as SHA-256 hashes with
 expiry, revocation and access counters; share pages are served at
-`/files/s/<token>`. Back up the database and `MERIDIAN_UPLOAD_DIR` together so
+`/files/s/<token>`. Back up the database and `ALT8MAIL_UPLOAD_DIR` together so
 internal attachment/file content and rows stay consistent.
 
 ### 5.15 Compose 0.7, identities, forwarding and AI
@@ -1201,7 +1201,7 @@ Run these on the server.
 ### 6.1 Service health
 
 ```bash
-systemctl is-active postgresql redis-server dovecot postfix rspamd clamav-daemon nginx meridian-server fail2ban
+systemctl is-active postgresql redis-server dovecot postfix rspamd clamav-daemon nginx a8m-server fail2ban
 curl -ksS https://127.0.0.1/api/health
 curl -ksS https://127.0.0.1/system/api/health
 curl -ksS https://127.0.0.1/admin/api/health
@@ -1210,27 +1210,27 @@ curl -ksS https://127.0.0.1/admin/api/health
 Expected backends:
 
 ```json
-{"checks":{"postgres":"ok","redis":"ok"},"env":"staging","ok":true,"service":"meridian-system-backend"}
+{"checks":{"postgres":"ok","redis":"ok"},"env":"staging","ok":true,"service":"a8m-system-backend"}
 ```
 
 ### 6.2 Local mail delivery
 
 ```bash
 swaks --server 127.0.0.1:25 --from staging-test@external.test \
-  --to avery.chen@meridian.test --header 'Subject: delivery test' \
+  --to avery.chen@a8m.test --header 'Subject: delivery test' \
   --body 'test' --suppress-data
 ```
 
 Observed: `250 2.0.0 Ok: queued`, Dovecot LMTP `saved mail to INBOX`, file in
-`/var/vmail/meridian.test/avery.chen/Maildir/new`.
+`/var/vmail/a8m.test/avery.chen/Maildir/new`.
 
 ### 6.3 Authenticated submission and IMAP/ManageSieve
 
 ```bash
-MAIL_PW=$(cat /opt/meridian/secrets/avery_mail_password)
+MAIL_PW=$(cat /opt/a8m/secrets/avery_mail_password)
 swaks --server 127.0.0.1:587 --tls --auth PLAIN \
-  --auth-user avery.chen@meridian.test --auth-password "$MAIL_PW" \
-  --from avery.chen@meridian.test --to avery.chen@meridian.test \
+  --auth-user avery.chen@a8m.test --auth-password "$MAIL_PW" \
+  --from avery.chen@a8m.test --to avery.chen@a8m.test \
   --header 'Subject: auth test' --body 'test' --suppress-data
 ```
 
@@ -1263,13 +1263,13 @@ curl -ksS https://127.0.0.1/system/api/health
 
 # Go API login
 curl -ksS -c /tmp/go.cookies -H 'Content-Type: application/json' \
-  -d "{\"email\":\"avery.chen@meridian.test\",\"password\":\"$(cat /opt/meridian/secrets/staging_avery_password)\"}" \
+  -d "{\"email\":\"avery.chen@a8m.test\",\"password\":\"$(cat /opt/a8m/secrets/staging_avery_password)\"}" \
   https://127.0.0.1/system/api/session
 curl -ksS -b /tmp/go.cookies https://127.0.0.1/system/api/bootstrap \
   | jq '{user:.user.email,messages:(.messages|length),tasks:(.tasks|length)}'
 ```
 
-Observed: Go login 200, bootstrap 200 with `avery.chen@meridian.test`, real IMAP
+Observed: Go login 200, bootstrap 200 with `avery.chen@a8m.test`, real IMAP
 messages and `mailboxMode: "imap"`. No reference JSON subjects are present.
 Tasks, Files and Calendar start empty. The API smoke test
 `tools/go-api-smoke.py` passes all login, bootstrap, action/undo, tasks,
@@ -1291,7 +1291,7 @@ curl -ksS -b /tmp/go.cookies -H "X-CSRF-Token: $CSRF" \
 curl -ksS -b /tmp/go.cookies https://127.0.0.1/system/api/mail/sync | jq
 ```
 
-Observed on 2026-10-28 after `meridian-inituser` replaced all demo state:
+Observed on 2026-10-28 after `a8m-inituser` replaced all demo state:
 
 - The worker created `Sent`, `Drafts`, `Archive`, `Junk` and `Trash` and synced
   the real Maildir (the live state includes the preserved self-send, its reply
@@ -1305,25 +1305,25 @@ Observed on 2026-10-28 after `meridian-inituser` replaced all demo state:
 - A saved compose draft appeared in `Drafts` via `doveadm search`; deleting it
   removed the IMAP copy. A scheduled send advanced with **Send now** returned
   200, delivered through Postfix submission, produced a message in
-  `/var/vmail/meridian.test/nora.patel/Maildir`, and appended to Dovecot Sent.
+  `/var/vmail/a8m.test/nora.patel/Maildir`, and appended to Dovecot Sent.
 - `tools/go-api-smoke.py` passed all real-mail assertions, and
   `tools/go-ui-smoke.mjs` rendered the real inbox in Chromium.
 
-See `journalctl -u meridian-server` for `outbound send committed` and the IMAP
+See `journalctl -u a8m-server` for `outbound send committed` and the IMAP
 action warnings (if any).
 
 ### 6.7 Settings persistence
 
 ```bash
 # Run from the repository root with the staging web password file
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node tools/go-settings-smoke.mjs
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node tools/go-settings-smoke.mjs > artifacts/go-settings-smoke.txt 2>&1
 
 # Inspect the persisted row directly
-runuser -u postgres -- psql -d meridian -x \
-  -c "SELECT email, preferences FROM users WHERE email='avery.chen@meridian.test'"
+runuser -u postgres -- psql -d a8m -x \
+  -c "SELECT email, preferences FROM users WHERE email='avery.chen@a8m.test'"
 ```
 
 Observed: appearance, reading behavior, notification choices, language/date/
@@ -1335,25 +1335,25 @@ values, then exercises `POST /api/preferences/reset`. Screenshots:
 Sieve rules are additionally verified in Dovecot with:
 
 ```bash
-doveadm sieve list -u avery.chen@meridian.test
-doveadm sieve get -u avery.chen@meridian.test meridian
+doveadm sieve list -u avery.chen@a8m.test
+doveadm sieve get -u avery.chen@a8m.test a8m
 ```
 
-Both showed the generated `meridian` script as active; a probe message was filed
+Both showed the generated `a8m` script as active; a probe message was filed
 into `Archive` and an automatic reply was delivered to a second local mailbox.
 
 ### 6.8 TOTP, WebAuthn and first-time enrollment
 
 ```bash
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node tools/go-auth-smoke.mjs
 
 # Policy is per user and disabled in staging
-runuser -u postgres -- psql -d meridian -Atc \
+runuser -u postgres -- psql -d a8m -Atc \
   "SELECT email, enrollment_required FROM users ORDER BY email"
 
 # Factors and sessions after the test cleanup
-runuser -u postgres -- psql -d meridian -Atc \
+runuser -u postgres -- psql -d a8m -Atc \
   "SELECT (SELECT count(*) FROM webauthn_credentials) AS passkeys,
           (SELECT count(*) FROM auth_challenges) AS challenges,
           (SELECT count(*) FROM sessions) AS sessions"
@@ -1384,7 +1384,7 @@ from Security & privacy (the toggle is real) or:
 
 ```sql
 UPDATE users SET enrollment_required = true, updated_at = now()
-WHERE email = 'avery.chen@meridian.test';
+WHERE email = 'avery.chen@a8m.test';
 ```
 
 There is no tenant-wide enrollment policy yet; that belongs to the customer
@@ -1396,7 +1396,7 @@ Staging tests create browser sessions quickly. Before handing the environment to
 someone, revoke others from Account → Sign-in sessions, or clear expired rows:
 
 ```bash
-runuser -u postgres -- psql -d meridian -c \
+runuser -u postgres -- psql -d a8m -c \
   "DELETE FROM sessions WHERE expires_at <= now();"
 ```
 
@@ -1405,12 +1405,12 @@ Do not delete the session you are currently using unless you intend to sign out.
 ### 6.10 Live delivery and new-mail notifications
 
 ```bash
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node tools/go-live-mail-smoke.mjs
 
 # External inbound check (local Postfix → LMTP → Dovecot)
-swaks --server 127.0.0.1:25 --from nora.patel@meridian.test \
-  --to avery.chen@meridian.test --header "Subject: live inbound check" \
+swaks --server 127.0.0.1:25 --from nora.patel@a8m.test \
+  --to avery.chen@a8m.test --header "Subject: live inbound check" \
   --body "delivery test" --suppress-data
 ```
 
@@ -1426,7 +1426,7 @@ Observed on 2026-10-28 after the sync fix:
   reload (`window.__liveMarker` unchanged). The in-app toast fired when desktop
   notification permission was denied; with permission granted the same path
   creates a browser `Notification`.
-- A separately injected Postfix/LMTP message from `nora.patel@meridian.test`
+- A separately injected Postfix/LMTP message from `nora.patel@a8m.test`
   appeared in avery's state as unread within 20 seconds.
 - Test messages were then expunged and `POST /api/mail/sync` reconciled the
   state. The user's real `self` message and open `Re: self` draft were kept.
@@ -1441,23 +1441,23 @@ That was a test-harness issue, not a settings persistence failure.
 
 ```bash
 # API, RBAC, users, groups, org units, roles, domains, policies, audit, tenants
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password \
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password \
   python3 tools/admin-api-smoke.py
 
 # Admin TOTP enrollment, challenge login and removal
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password \
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password \
   python3 tools/admin-auth-smoke.py
 
 # Tenant MFA policy reaches the mail user login
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password \
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password \
   python3 tools/admin-policy-smoke.py
 
 # Tenant create -> owner login -> suspend -> blocked -> reactivate
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password \
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password \
   python3 tools/admin-tenant-smoke.py
 
 # Full admin browser flows and mobile drawer
-MERIDIAN_ADMIN_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_ADMIN_PASSWORD="$(cat ./staging_avery_password)" \
   node tools/admin-ui-smoke.mjs
 ```
 
@@ -1492,13 +1492,13 @@ sharing).
 # retention and explicit Maildir provisioning. Open a local tunnel first if
 # the operator network blocks submission port 587:
 # ssh -f -N -L 1587:127.0.0.1:587 root@130.94.46.22
-MERIDIAN_SMTP_HOST=127.0.0.1 MERIDIAN_SMTP_PORT=1587 \
+ALT8MAIL_SMTP_HOST=127.0.0.1 ALT8MAIL_SMTP_PORT=1587 \
   python3 tools/mail-policy-smoke.py
 ```
 
 Observed on 2026-10-28:
 
-- A fresh test user was provisioned by `meridian-mailprovision` to a
+- A fresh test user was provisioned by `a8m-mailprovision` to a
   `vmail`-owned Maildir shown in the admin detail. The temporary web password
   forced a password change; the old password stopped working for webmail and
   IMAP, the new web password authenticated to Dovecot, and password history
@@ -1534,17 +1534,17 @@ Observed on 2026-10-28:
 ### 6.13 DKIM keys and domain DNS verification
 
 ```bash
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password   python3 tools/dkim-smoke.py
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password   python3 tools/dkim-smoke.py
 
 # Real signing test (local Postfix -> Rspamd -> Dovecot LMTP)
-swaks --to nora.patel@meridian.test --from avery.chen@meridian.test   --server 127.0.0.1:25 --header "Subject: DKIM check" --body "test"
-doveadm fetch -u nora.patel@meridian.test hdr mailbox INBOX uid <uid> |
+swaks --to nora.patel@a8m.test --from avery.chen@a8m.test   --server 127.0.0.1:25 --header "Subject: DKIM check" --body "test"
+doveadm fetch -u nora.patel@a8m.test hdr mailbox INBOX uid <uid> |
   grep -A5 -i '^DKIM-Signature'
 ```
 
 Observed on 2026-10-28:
 
-- The migrated `meridian.test` key is imported into PostgreSQL and served by
+- The migrated `a8m.test` key is imported into PostgreSQL and served by
   `/admin/api/domains` as the real `v=DKIM1; k=rsa; p=...` value. No placeholder
   remains; `dkim-smoke.py` passes.
 - A test domain with selector `testsel2` caused the root worker to generate a
@@ -1553,9 +1553,9 @@ Observed on 2026-10-28:
   `DKIM-Signature: ... d=dkim-smoke-<stamp>.test; s=testsel2;`.
 - The test domain, key and message were removed after the check.
 - The verification endpoint checks the exact DKIM `p=` against the active key,
-  MX against `MERIDIAN_MAIL_HOSTNAME`, SPF, DMARC and ownership. Unit tests cover
+  MX against `ALT8MAIL_MAIL_HOSTNAME`, SPF, DMARC and ownership. Unit tests cover
   the success/mismatch paths with a fake DNS resolver.
-- Public-DNS success cannot be demonstrated on `meridian.test` because that
+- Public-DNS success cannot be demonstrated on `a8m.test` because that
   reserved test domain has no public DNS. The staged failure output is honest:
   ownership/MX/SPF/DKIM/DMARC lookups return NXDOMAIN while the local key is
   ready. Use a customer-owned domain for the public end-to-end gate.
@@ -1568,15 +1568,15 @@ this runbook.
 
 ```bash
 GO_API=https://130-94-46-22.sslip.io \
-DAV_EMAIL=avery.chen@meridian.test \
-DAV_PASSWORD="$(cat /opt/meridian/secrets/staging_avery_password)" \
+DAV_EMAIL=avery.chen@a8m.test \
+DAV_PASSWORD="$(cat /opt/a8m/secrets/staging_avery_password)" \
   python3 tools/dav-smoke.py
 
-MERIDIAN_UI_PASSWORD="$(cat /opt/meridian/secrets/staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat /opt/a8m/secrets/staging_avery_password)" \
   node tools/workspace-ui-smoke.mjs
 
 # MTA policy on the correct Host (mode must be testing/enforce)
-curl -ksS -H 'Host: mta-sts.meridian.test' \
+curl -ksS -H 'Host: mta-sts.a8m.test' \
   https://127.0.0.1/.well-known/mta-sts.txt
 ```
 
@@ -1601,7 +1601,7 @@ Observed on 2026-10-28:
 ### 6.15 Compose 0.7, notifications, identities, forwarding and AI
 
 ```bash
-MERIDIAN_UI_PASSWORD="$(cat /opt/meridian/secrets/staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat /opt/a8m/secrets/staging_avery_password)" \
   node tools/compose-notifications-smoke.mjs
 ```
 
@@ -1611,14 +1611,14 @@ Observed on 2026-10-29:
   security events; the former hardcoded Roadmap/sign-in rows were absent.
 - HTML draft save stripped `<script>`/`onclick`, preserved allowed formatting,
   persisted `windowMode=closed`, and a reload did not reopen the closed draft.
-- Compose From resolved to `avery.chen@meridian.test`, priority rendered as a
+- Compose From resolved to `avery.chen@a8m.test`, priority rendered as a
   three-way radio group, HTML↔Plain switching preserved text, and drag-drop
   uploaded `compose-smoke.txt` through `/api/attachments`.
 - Settings → Compose persisted HTML/wide/center; changing to standard +
   bottom-left opened the next compose at `left≈28,width≈580`; restoring the
   preference returned to wide/center.
 - Identity list showed primary/Product/support with verified/read-only states;
-  `product@meridian.test` was rejected as an already-owned alias; an external
+  `product@a8m.test` was rejected as an already-owned alias; an external
   `.invalid` identity reached `pending`, had its token confirmed by POST, became
   `verified`, and was deleted.
 - Dated forwarding with DD/MM/YYYY input compiled and activated a Sieve rule
@@ -1639,7 +1639,7 @@ Observed on 2026-10-29:
 ### 6.16 0.8 AI, reading, typography and dock behavior
 
 ```bash
-MERIDIAN_UI_PASSWORD="$(cat /opt/meridian/secrets/staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat /opt/a8m/secrets/staging_avery_password)" \
   node tools/ai-reading-compose-smoke.mjs
 ```
 
@@ -1661,7 +1661,7 @@ Observed on 2026-10-29:
   restored `grouped`.
 - Reply-all was separately verified against a temporary CC message: it was
   absent on a no-CC thread and, on the CC thread, opened compose to
-  `jordan.lee@meridian.test` with `nora.patel@meridian.test` in Cc.
+  `jordan.lee@a8m.test` with `nora.patel@a8m.test` in Cc.
 - App-password creation was verified after signing in through the staging demo
   alias using that alias password, then revoked; the test history row was
   removed.
@@ -1712,17 +1712,17 @@ Observed on 2026-10-29:
 - The certificate inventory now discovers panel-generated self-signed
   certificates and prunes rows when their files are removed. A self-signed leaf
   is correctly reported as `selfSigned=true` (a CA-issued leaf remains false).
-- Server settings were set to `mail.meridian.test`, webmail URL
+- Server settings were set to `mail.a8m.test`, webmail URL
   `https://130-94-46-22.sslip.io`, resolver `1.1.1.1:53`, public IPv4
-  `130.94.46.22` and mail-from `postmaster@meridian.test`; TLS admin email is
-  `postmaster@meridian.test` with a 14-day warning threshold.
+  `130.94.46.22` and mail-from `postmaster@a8m.test`; TLS admin email is
+  `postmaster@a8m.test` with a 14-day warning threshold.
 - The webmail 0.9 stack and the real DeepSeek tenant AI configuration were left
   running and unchanged.
 
 ### 6.18 1,000-user soak and capacity tuning (2026-10-29)
 
 A true 1,000-user soak was prepared with distinct accounts, not a shared login:
-1,000 synthetic `soak-20261029-*@meridian.test` users were created through the
+1,000 synthetic `soak-20261029-*@a8m.test` users were created through the
 real admin user-provisioning path (1,000 created, 0 failed, 0 state-init
 failures), all 1,000 mailboxes were provisioned, and forced password rotation
 was cleared for the test cohort. A pre-soak database/config backup was written
@@ -1735,11 +1735,11 @@ Capacity changes required before the run:
   reachable by the internal Dovecot user, otherwise hibernation succeeds but
   unhibernation fails with `net_connect_unix(/run/dovecot/imap-master)
   Permission denied`. The exact config is in
-  `deploy/dovecot/99-meridian-soak.conf`.
+  `deploy/dovecot/99-a8m-soak.conf`.
 - IMAP/POP3 process and client limits were raised, and inotify limits were
   increased via `deploy/sysctl/99-alt8mail-mail.conf`; inotify exhaustion at
   UID 5000 otherwise disables mailbox change notifications.
-- The webmail poll interval is 300 seconds (`MERIDIAN_IMAP_POLL_SECONDS=300`)
+- The webmail poll interval is 300 seconds (`ALT8MAIL_IMAP_POLL_SECONDS=300`)
   because IDLE is the primary new-mail path. Polling every 15 seconds
   un-hibernates all users and defeats the memory saving at 1,000 users.
 - The worker initial-check and first-full-sync delays now use a true random
@@ -1786,8 +1786,8 @@ The full report is `docs/PENTEST_REPORT_2026-10-29.md`; raw evidence is under
 ## 7. Operations
 
 ```bash
-systemctl status meridian-server
-journalctl -u meridian-server -f
+systemctl status a8m-server
+journalctl -u a8m-server -f
 systemctl status postfix dovecot rspamd clamav-daemon nginx fail2ban
 tail -f /var/log/mail.log
 nginx -t && systemctl reload nginx
@@ -1797,19 +1797,19 @@ Do not expose 5432/6379/8080. The API is bound to `127.0.0.1:8080`.
 
 ### Backups (implemented)
 
-`meridian-backup.timer` runs `/usr/local/sbin/meridian-backup.sh` daily at 02:30
+`a8m-backup.timer` runs `/usr/local/sbin/a8m-backup.sh` daily at 02:30
 UTC with a randomized delay and 14-day retention:
 
 - PostgreSQL custom-format dump at
-  `/var/backups/meridian/meridian-postgres-<stamp>.dump`.
-- `/var/vmail`, `/opt/meridian/secrets`, preview data, Dovecot/Postfix/Rspamd/
+  `/var/backups/a8m/a8m-postgres-<stamp>.dump`.
+- `/var/vmail`, `/opt/a8m/secrets`, preview data, Dovecot/Postfix/Rspamd/
   nginx/TLS/systemd configuration packed and AES-256 encrypted at
-  `/var/backups/meridian/meridian-files-<stamp>.tar.gz.enc`.
-- The backup passphrase is `/opt/meridian/secrets/backup_passphrase` (0600).
+  `/var/backups/a8m/a8m-files-<stamp>.tar.gz.enc`.
+- The backup passphrase is `/opt/a8m/secrets/backup_passphrase` (0600).
   **Copy it into an off-server secret manager.** A backup and its passphrase on
   the same lost server is not a backup.
 - Verified on 2026-10-28: PostgreSQL restore into an isolated
-  `meridian_restore_check` database produced 1 user and 1 tenant; the encrypted
+  `a8m_restore_check` database produced 1 user and 1 tenant; the encrypted
   archive decrypted and listed the expected Maildir/config entries.
 - Before production: add off-site object storage, WAL/PITR, retention/legal
   policy, and quarterly restore drills.
@@ -1844,7 +1844,7 @@ The staging environment is intentionally not marked production-complete.
   deferred expunge; drafts stored in Dovecot Drafts.
 - SMTP submission through Postfix 587 with STARTTLS + Dovecot SASL, Rspamd and
   ClamAV in path; Sent append to Dovecot.
-- No seeded mailbox data: `meridian-inituser` builds identity/aliases/directory
+- No seeded mailbox data: `a8m-inituser` builds identity/aliases/directory
   from PostgreSQL and leaves messages/tasks/files/calendar empty; Dovecot is the
   source of mailbox truth.
 - Tasks, Files/storage connectors, calendar reads, directory, Sieve/vacation,

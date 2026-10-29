@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BASE = process.env.CONTROL_BASE || "https://130.94.46.22:8808";
 const EMAIL = process.env.CONTROL_EMAIL || "sysadmin@alt8mail.local";
 const PASSWORD = process.env.CONTROL_PASSWORD || fs.readFileSync(process.env.CONTROL_PASSWORD_FILE, "utf8").trim();
-const SSH_KEY = process.env.CONTROL_SSH_KEY || path.join(os.homedir(), ".ssh", "meridian_deploy_ed25519");
+const SSH_KEY = process.env.CONTROL_SSH_KEY || path.join(os.homedir(), ".ssh", "a8m_deploy_ed25519");
 const OUT = path.resolve(__dirname, "..", "artifacts", "control-ui");
 fs.mkdirSync(OUT, { recursive: true });
 const checks = [];
@@ -101,9 +101,9 @@ try {
   check("nginx accepts the imported certificate", webAssign.status === 200, JSON.stringify(webAssign.body?.error));
   webSwapped = true;
   check("nginx health responds with the imported certificate", (await probeHealth("https://130-94-46-22.sslip.io/api/health", { insecure: true })) === "200");
-  const webConfig = ssh("readlink -f /etc/nginx/sites-enabled/meridian && grep -n 'ssl_certificate ' /etc/nginx/sites-available/meridian | head -n 1");
+  const webConfig = ssh("readlink -f /etc/nginx/sites-enabled/a8m && grep -n 'ssl_certificate ' /etc/nginx/sites-available/a8m | head -n 1");
   check("nginx configuration points at the imported certificate", webConfig.includes(`/etc/ssl/alt8mail/imported/${importedName}.crt`), webConfig);
-  check("nginx site remains a symlink after the rewrite", ssh("test -L /etc/nginx/sites-enabled/meridian && echo symlink").includes("symlink"));
+  check("nginx site remains a symlink after the rewrite", ssh("test -L /etc/nginx/sites-enabled/a8m && echo symlink").includes("symlink"));
   const webRestore = await api("POST", "/control/api/tls/assign", { certificate: originalWeb.name, targets: ["web"] });
   check("nginx certificate is restored", webRestore.status === 200, JSON.stringify(webRestore.body?.error));
   webSwapped = false;
@@ -146,12 +146,12 @@ try {
   if (webSwapped) {
     const cert = originalWeb?.certPath || webTarget?.certPath || "/etc/letsencrypt/live/130-94-46-22.sslip.io/fullchain.pem";
     const key = originalWeb?.keyPath || webTarget?.keyPath || "/etc/letsencrypt/live/130-94-46-22.sslip.io/privkey.pem";
-    ssh(`sed -i "s#^\\([[:space:]]*ssl_certificate[[:space:]]\\).*#\\1${cert};#" /etc/nginx/sites-available/meridian; sed -i "s#^\\([[:space:]]*ssl_certificate_key[[:space:]]\\).*#\\1${key};#" /etc/nginx/sites-available/meridian; nginx -t && systemctl reload nginx`);
+    ssh(`sed -i "s#^\\([[:space:]]*ssl_certificate[[:space:]]\\).*#\\1${cert};#" /etc/nginx/sites-available/a8m; sed -i "s#^\\([[:space:]]*ssl_certificate_key[[:space:]]\\).*#\\1${key};#" /etc/nginx/sites-available/a8m; nginx -t && systemctl reload nginx`);
     webSwapped = false;
   }
   if (postfixSwapped) {
-    const cert = originalPostfix?.certPath || postfixTarget?.certPath || "/etc/ssl/meridian/mail.crt";
-    const key = originalPostfix?.keyPath || postfixTarget?.keyPath || "/etc/ssl/meridian/mail.key";
+    const cert = originalPostfix?.certPath || postfixTarget?.certPath || "/etc/ssl/a8m/mail.crt";
+    const key = originalPostfix?.keyPath || postfixTarget?.keyPath || "/etc/ssl/a8m/mail.key";
     ssh(`postconf -e smtpd_tls_cert_file=${cert} smtpd_tls_key_file=${key} && postfix check && postfix reload`);
     postfixSwapped = false;
   }
@@ -161,7 +161,7 @@ try {
       if (referenced.trim() !== "0") {
         console.error("Imported test certificate is still referenced by a live service; leaving it on disk for manual recovery.");
       } else {
-        ssh(`rm -f /etc/ssl/alt8mail/imported/${importedName}.crt /etc/ssl/alt8mail/imported/${importedName}.key; runuser -u postgres -- psql -d meridian -q -c "DELETE FROM control.ssl_certificates WHERE name='${importedName}'; DELETE FROM control.tls_assignments WHERE certificate_name='${importedName}'"`);
+        ssh(`rm -f /etc/ssl/alt8mail/imported/${importedName}.crt /etc/ssl/alt8mail/imported/${importedName}.key; runuser -u postgres -- psql -d a8m -q -c "DELETE FROM control.ssl_certificates WHERE name='${importedName}'; DELETE FROM control.tls_assignments WHERE certificate_name='${importedName}'"`);
       }
     } catch (error) {
       console.error(`Could not clean imported swap certificate: ${error.message}`);

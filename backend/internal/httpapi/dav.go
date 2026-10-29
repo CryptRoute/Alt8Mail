@@ -183,7 +183,7 @@ func (s *Server) davPropfind(w http.ResponseWriter, r *http.Request, user userRe
 	switch {
 	case len(segments) == 0:
 		items = append(items, davItem{
-			Href: "/dav/", Kind: "root", DisplayName: "Meridian Mail",
+			Href: "/dav/", Kind: "root", DisplayName: "Alt8Mail",
 		})
 	case len(segments) == 2 && segments[0] == "principals":
 		if !davUserMatches(user, segments[1]) {
@@ -202,7 +202,7 @@ func (s *Server) davPropfind(w http.ResponseWriter, r *http.Request, user userRe
 		if segments[0] == "addressbooks" {
 			home = davAddressbookHome(user)
 		}
-		items = append(items, davItem{Href: home, Kind: "home", DisplayName: "Meridian Mail"})
+		items = append(items, davItem{Href: home, Kind: "home", DisplayName: "Alt8Mail"})
 		if depthOne {
 			items = append(items, s.davCollectionItem(r.Context(), user, segments[0]))
 		}
@@ -288,7 +288,7 @@ func (s *Server) davSyncToken(ctx context.Context, userID, kind string) string {
 			FROM contacts WHERE user_id = $1`
 	}
 	_ = s.store.DB.QueryRow(ctx, query, userID).Scan(&stamp, &count)
-	return "urn:meridian:sync:" + kind + ":" + stamp + ":" + strconv.FormatInt(count, 10)
+	return "urn:a8m:sync:" + kind + ":" + stamp + ":" + strconv.FormatInt(count, 10)
 }
 
 func (s *Server) davReport(w http.ResponseWriter, r *http.Request, user userRecord, segments []string) {
@@ -948,7 +948,7 @@ func davProps(item davItem, user userRecord) string {
 	var props strings.Builder
 	switch item.Kind {
 	case "root":
-		props.WriteString(`<D:resourcetype><D:collection/></D:resourcetype><D:displayname>Meridian Mail</D:displayname><D:current-user-principal><D:href>` +
+		props.WriteString(`<D:resourcetype><D:collection/></D:resourcetype><D:displayname>Alt8Mail</D:displayname><D:current-user-principal><D:href>` +
 			xmlEscape(davPrincipalHref(user)) + `</D:href></D:current-user-principal>`)
 	case "principal":
 		props.WriteString(`<D:resourcetype><D:principal/></D:resourcetype><D:displayname>`)

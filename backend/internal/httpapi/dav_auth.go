@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 const (
@@ -29,7 +29,7 @@ func newAppPasswordToken() (string, error) {
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
-	return "meridian-app-" + base64URL(raw), nil
+	return "a8m-app-" + base64URL(raw), nil
 }
 
 func hashAppPassword(token string) string {
@@ -144,7 +144,7 @@ func (s *Server) davRequireAuth(w http.ResponseWriter, r *http.Request) (userRec
 		return user, true
 	}
 	s.davLimit.Fail(ip)
-	w.Header().Set("WWW-Authenticate", `Basic realm="Meridian Mail CalDAV/CardDAV", charset="UTF-8"`)
+	w.Header().Set("WWW-Authenticate", `Basic realm="Alt8Mail CalDAV/CardDAV", charset="UTF-8"`)
 	http.Error(w, "Authentication required. Accounts with two-factor authentication must use an app password.", http.StatusUnauthorized)
 	return userRecord{}, false
 }

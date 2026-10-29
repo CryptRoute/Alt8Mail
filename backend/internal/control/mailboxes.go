@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/meridian-mail/meridian/backend/internal/auth"
-	"github.com/meridian-mail/meridian/backend/internal/stateinit"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/stateinit"
 )
 
 func (s *Server) registerMailboxRoutes(mux *http.ServeMux) {

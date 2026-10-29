@@ -11,7 +11,7 @@ in the request path and its JSON demo data is not read by the live frontend.
 ## Authentication
 
 - `POST /api/session` verifies an Argon2id password, creates an opaque session
-  in PostgreSQL and sets `meridian_system_sid` + `meridian_system_csrf`.
+  in PostgreSQL and sets `a8m_system_sid` + `a8m_system_csrf`.
 - `POST /api/password/change` validates the current password, tenant password
   policy and history, rotates both `users.password_hash` and
   `users.mail_password_hash`, records the old hash in `password_history`,
@@ -21,9 +21,9 @@ in the request path and its JSON demo data is not read by the live frontend.
 - Mutations require `X-CSRF-Token`; the token is returned by sign-in/session.
 - Login is rate-limited by client IP. Session cookies are HttpOnly, Secure and
   SameSite=Lax in staging/production.
-- `MERIDIAN_DEMO_MODE=true` enables the staging alias
-  `avery.chen@meridian.example` / `meridian-demo`, mapped to
-  `avery.chen@meridian.test`. Config loading refuses demo mode in production.
+- `ALT8MAIL_DEMO_MODE=true` enables the staging alias
+  `avery.chen@a8m.example` / `a8m-demo`, mapped to
+  `avery.chen@a8m.test`. Config loading refuses demo mode in production.
   While demo mode is enabled, that mapped account also accepts the demo
   password for current-password re-authentication prompts (app passwords,
   password change and authenticator removal); no other account accepts it.
@@ -31,8 +31,8 @@ in the request path and its JSON demo data is not read by the live frontend.
   single-use recovery codes, trusted-device cookies and WebAuthn passkeys are
   implemented in Go. A password sign-in returns a five-minute challenge
   (`auth_challenges`) when TOTP or a passkey is enrolled.
-- WebAuthn uses `MERIDIAN_WEBAUTHN_RPID` and `MERIDIAN_WEBAUTHN_ORIGINS`
-  (default: the host/origin from `MERIDIAN_PUBLIC_URL`). Ceremony state lives in
+- WebAuthn uses `ALT8MAIL_WEBAUTHN_RPID` and `ALT8MAIL_WEBAUTHN_ORIGINS`
+  (default: the host/origin from `ALT8MAIL_PUBLIC_URL`). Ceremony state lives in
   Redis; credential IDs, public keys, sign counters and transports live in
   `webauthn_credentials` in PostgreSQL.
 - First-time enrollment is a per-user policy in `users.enrollment_required`
@@ -114,7 +114,7 @@ demo document:
 ## Mail pipeline
 
 ```text
-IMAP 993 (verified mail.meridian.test certificate)
+IMAP 993 (verified mail.a8m.test certificate)
   → ensure INBOX/Sent/Drafts/Archive/Junk/Trash exist
   → full UID snapshot per folder (uncapped, for exact reconciliation)
   → fetch envelope + flags for known UIDs at most every 15 minutes
@@ -126,21 +126,21 @@ IMAP 993 (verified mail.meridian.test certificate)
   → upsert normalized mail_messages and attachment rows in one transaction;
     update flags/folder; remove messages absent from every successfully
     scanned folder; reset a folder on UIDVALIDITY change
-  → attachment bytes stored under MERIDIAN_UPLOAD_DIR
+  → attachment bytes stored under ALT8MAIL_UPLOAD_DIR
 
 Per-user worker (one per active mailbox, bounded by
-MERIDIAN_MAIL_WORKER_CONCURRENCY, serialized per user)
-  → IMAP IDLE on INBOX when MERIDIAN_IMAP_IDLE=true (the default)
+ALT8MAIL_MAIL_WORKER_CONCURRENCY, serialized per user)
+  → IMAP IDLE on INBOX when ALT8MAIL_IMAP_IDLE=true (the default)
     → EXISTS runs the UID check; EXPUNGE/FETCH run the flag reconcile
     → ignore untagged OK keepalives so they cannot trigger reconnects
     → reconnect with backoff and a 25-minute server logout timeout
     → fall back to polling if the server does not advertise IDLE
-  → every MERIDIAN_IMAP_POLL_SECONDS (default 15): SELECT INBOX
+  → every ALT8MAIL_IMAP_POLL_SECONDS (default 15): SELECT INBOX
     → UID SEARCH only UIDs above the saved INBOX checkpoint
     → fetch envelopes/bodies for those UIDs only
     → merge without reconciling other folders
     → advance the checkpoint; the open webmail refreshes in place
-  → every MERIDIAN_IMAP_SYNC_SECONDS (default 300): full folder reconciliation
+  → every ALT8MAIL_IMAP_SYNC_SECONDS (default 300): full folder reconciliation
   → daily retention: UID SEARCH BEFORE cutoff, AddFlags \Deleted, UID EXPUNGE
     (UIDPLUS; never a mailbox-wide EXPUNGE), then delete rows and audit
 
@@ -167,7 +167,7 @@ Sieve rules / automatic replies → PUT /api/sieve
   → validate fields, operators, folder targets, dates and message lengths
   → render a complete Sieve script (fileinto, imap4flags, body, date, vacation)
   → ManageSieve 4190 STARTTLS + AUTH PLAIN (mailbox password)
-  → PUTSCRIPT "meridian" + SETACTIVE "meridian"
+  → PUTSCRIPT "a8m" + SETACTIVE "a8m"
   → only then persist the structured rules in app state
   → Pigeonhole applies fileinto/vacation at LMTP delivery
 
@@ -266,10 +266,10 @@ notification table are used. The popover shows the latest items and the "View
 all" window provides All/Unread/Mail/System filters.
 
 The mailbox password is separate from the web password. It lives in
-`/opt/meridian/secrets/avery_mail_password` and is referenced by
-`MERIDIAN_IMAP_PASSWORD_FILE`. The IMAP/SMTP/ManageSieve clients verify the CA in
-`MERIDIAN_MAIL_CA_FILE` and the hostname in `MERIDIAN_IMAP_TLS_NAME` /
-`MERIDIAN_SMTP_TLS_NAME` / `MERIDIAN_MANAGESIEVE_TLS_NAME`.
+`/opt/a8m/secrets/avery_mail_password` and is referenced by
+`ALT8MAIL_IMAP_PASSWORD_FILE`. The IMAP/SMTP/ManageSieve clients verify the CA in
+`ALT8MAIL_MAIL_CA_FILE` and the hostname in `ALT8MAIL_IMAP_TLS_NAME` /
+`ALT8MAIL_SMTP_TLS_NAME` / `ALT8MAIL_MANAGESIEVE_TLS_NAME`.
 
 ## Storage model
 
@@ -288,12 +288,12 @@ tables, backfill any legacy documents and then remove the `messages`,
 addresses and hashed verification tokens), `tenant_ai_settings` (encrypted
 provider configuration) and `mail_ai_cache` (per-message/user/language
 summaries and translations), adds `app_passwords.revoked_at` and
-`outbox.body_html`, and grants them to `meridian_app`. `app_passwords` retains
+`outbox.body_html`, and grants them to `a8m_app`. `app_passwords` retains
 expiry and revocation history.
 
 `app_states` remains only for small per-user presentation state (people, folder
 metadata, pending expunges, Sieve/forwarding profile and feature audit). For a new
-mailbox, `meridian-inituser` builds that document from PostgreSQL identity,
+mailbox, `a8m-inituser` builds that document from PostgreSQL identity,
 aliases, tenant directory, quota and trusted senders; mail is imported
 exclusively from Dovecot. `seed/state.json` is not read by the Go service or
 the staging frontend.
@@ -343,7 +343,7 @@ all fourteen migrations before deploying this release.
   the IMAP UID/folder, then the folder-local Message-ID, then an unambiguous
   move of a message whose previous folder copy disappeared.
 - IMAP IDLE keeps an INBOX push connection per active mailbox when
-  `MERIDIAN_IMAP_IDLE=true` (default). A pushed new-mail event runs the UID
+  `ALT8MAIL_IMAP_IDLE=true` (default). A pushed new-mail event runs the UID
   check only; expunge/FETCH events refresh flags and remove rows for UIDs that
   are gone. Dovecot's two-minute untagged OK keepalive is ignored, so it no
   longer causes reconnects or whole-mailbox flag fetches. The IDLE command
@@ -369,9 +369,9 @@ all fourteen migrations before deploying this release.
   changed rows instead of rewriting one document. Search is index-backed
   PostgreSQL FTS and new-mail push is IDLE, not a five-minute poll.
 - The staging deployment uses Dovecot master auth
-  (`MERIDIAN_IMAP_MASTER_USER`/`MERIDIAN_IMAP_MASTER_PASSWORD_FILE`) so every
+  (`ALT8MAIL_IMAP_MASTER_USER`/`ALT8MAIL_IMAP_MASTER_PASSWORD_FILE`) so every
   active mailbox has an independent worker without storing each user's
-  plaintext mailbox password. `jordan.lee@meridian.test` and the seeded
+  plaintext mailbox password. `jordan.lee@a8m.test` and the seeded
   directory users are synced the same way as Avery.
 - Postfix group addresses are real lists. The SQL alias map returns all active
   members of an active group, subject to tenant/domain/user status checks.
@@ -380,7 +380,7 @@ all fourteen migrations before deploying this release.
   `provision_status`, attempts, error and path.
 - Mail, workspace and auth storage are normalized. Mail sync and mutations
   serialize per mailbox, so one large mailbox does not block other users, and
-  `MERIDIAN_MAIL_WORKER_CONCURRENCY` bounds how many run at once. Use the
+  `ALT8MAIL_MAIL_WORKER_CONCURRENCY` bounds how many run at once. Use the
   per-folder `pending` sync metadata to monitor backfill. Bootstrap still
   returns the full message set in one response; windowing/pagination is the
   remaining step for extreme mailbox sizes before the 1,000-user soak.
@@ -391,40 +391,40 @@ all fourteen migrations before deploying this release.
 cd backend
 go test ./...        # unit/feature tests
 go vet ./...
-go build -trimpath -o bin/meridian-inituser ./cmd/inituser
-./bin/meridian-inituser -email avery.chen@meridian.test
+go build -trimpath -o bin/a8m-inituser ./cmd/inituser
+./bin/a8m-inituser -email avery.chen@a8m.test
 
 # on the operator workstation, with a local password file
 GO_API=https://130-94-46-22.sslip.io/system/api \
 GO_PASSWORD_FILE=./staging_avery_password \
 python3 tools/go-api-smoke.py
 
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/go-ui-smoke.mjs
 
 # settings persistence across every tab
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/go-settings-smoke.mjs
 
 # real TOTP, recovery codes, WebAuthn, first-time enrollment policy
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/go-auth-smoke.mjs
 
 # self-delivery reaches INBOX while the page stays open; toast/browser notice
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/go-live-mail-smoke.mjs
 
 # calendar/contact/profile/app-password browser flows
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/workspace-ui-smoke.mjs
 
 # compose/notification/identity/app-password UI and closed-draft reload
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/compose-notifications-smoke.mjs
 
 # CalDAV/CardDAV discovery and CRUD (use an app password when MFA is enabled)
 GO_API=https://130-94-46-22.sslip.io \
-DAV_EMAIL=avery.chen@meridian.test \
+DAV_EMAIL=avery.chen@a8m.test \
 DAV_PASSWORD="$(cat ./staging_avery_password)" \
 python3 tools/dav-smoke.py
 ```

@@ -289,7 +289,7 @@ func parseCalendarICS(data []byte, user userRecord, defaultColor string) (davCal
 		}
 	}
 	if event.UID == "" {
-		event.UID = newID("uid") + "@meridian"
+		event.UID = newID("uid") + "@a8m"
 	}
 	if event.Title == "" {
 		event.Title = "(no title)"
@@ -314,7 +314,7 @@ func calendarToICS(event davCalendarEvent, user userRecord) []byte {
 	lines := []string{
 		"BEGIN:VCALENDAR",
 		"VERSION:2.0",
-		"PRODID:-//Meridian Mail//CalDAV 1.0//EN",
+		"PRODID:-//Alt8Mail//CalDAV 1.0//EN",
 		"CALSCALE:GREGORIAN",
 		"BEGIN:VEVENT",
 		"UID:" + cleanICalToken(event.UID),
@@ -540,7 +540,7 @@ func parseVCard(data []byte) (davContact, error) {
 		contact.Name = contact.Email
 	}
 	if contact.UID == "" {
-		contact.UID = newID("uid") + "@meridian"
+		contact.UID = newID("uid") + "@a8m"
 	}
 	return contact, nil
 }

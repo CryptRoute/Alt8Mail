@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/meridian-mail/meridian/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 type webAuthnUser struct {
@@ -462,7 +462,7 @@ func (s *Server) beginEnrollmentTOTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "TOTP", "Could not store authenticator setup state")
 		return
 	}
-	issuer := "Meridian Mail"
+	issuer := "Alt8Mail"
 	writeJSON(w, http.StatusOK, map[string]any{
 		"secret": secret, "issuer": issuer, "account": user.Email,
 		"otpauth":   auth.TOTPURI(secret, user.Email, issuer),

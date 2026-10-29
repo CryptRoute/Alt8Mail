@@ -1,5 +1,10 @@
 # Alt8Mail — Enterprise Email Platform
 
+> **Naming note:** Alt8Mail was previously developed under the working name
+> Meridian. That name is retained only in this note and historical records; all
+> current product, code, configuration, database and service names use
+> Alt8Mail/A8M.
+
 Alt8Mail is an enterprise email platform with a real HTTP backend, persistent
 mailbox state, threaded conversations, indexed search, server-backed drafts,
 undo send and scheduled send, Sieve rules and automatic replies, sender trust,
@@ -44,7 +49,7 @@ identity provider, audit log, internal directory).
 
 ```text
 http://localhost:8001
-demo: avery.chen@meridian.example / meridian-demo
+demo: avery.chen@a8m.example / a8m-demo
 second factor: use the simulated passkey or code 123456
 ```
 
@@ -57,11 +62,11 @@ https://130-94-46-22.sslip.io   (Let's Encrypt certificate, valid)
 https://130.94.46.22            (IP fallback, self-signed/warning)
 
 Alt8Mail UI + full Go feature API (nginx /api → Go):
-  staging alias: avery.chen@meridian.example / meridian-demo
-  primary account: avery.chen@meridian.test
-  password: /opt/meridian/secrets/staging_avery_password (server root only)
-  second Go auth user: jordan.lee@meridian.test
-  password: /opt/meridian/secrets/staging_jordan_password (server root only)
+  staging alias: avery.chen@a8m.example / a8m-demo
+  primary account: avery.chen@a8m.test
+  password: /opt/a8m/secrets/staging_avery_password (server root only)
+  second Go auth user: jordan.lee@a8m.test
+  password: /opt/a8m/secrets/staging_jordan_password (server root only)
 
 Go system API namespace (nginx /system/api → same Go service):
   https://130-94-46-22.sslip.io/system/api/
@@ -104,7 +109,7 @@ What is live:
   on demand at `POST /api/mail/sync`. An IMAP IDLE connection pushes new mail,
   flag changes and expunges as they happen; when IDLE is unavailable, a
   UID-based INBOX check runs every 15 seconds per user. Work is serialized per
-  mailbox and bounded by `MERIDIAN_MAIL_WORKER_CONCURRENCY`.
+  mailbox and bounded by `ALT8MAIL_MAIL_WORKER_CONCURRENCY`.
 - The open webmail polls the real inbox every 15 seconds as a safety net,
   updates the list, folder counts and reading pane in place, and shows a desktop
   notification or an in-app toast. No page reload is required; returning to the
@@ -162,7 +167,7 @@ What is live:
   creates or uploads through the Go API. They are stored in normalized
   PostgreSQL tables, not per-user JSONB. Storage connector definitions are
   configuration, not example file rows.
-- Files can live in Meridian Drive, S3/MinIO, Google Drive, Dropbox or OneDrive.
+- Files can live in Alt8Mail Drive, S3/MinIO, Google Drive, Dropbox or OneDrive.
   S3 is live-tested with upload/sync/download/delete; OAuth connectors implement
   authorization, refresh, upload, download and sync but need real provider app
   credentials. Guest share pages at `/files/s/<token>` support expiry,
@@ -185,14 +190,14 @@ What is live:
   customer-owned domain and `mta-sts.<domain>` TLS certificate.
 - Login, aliases and directory are read from PostgreSQL users and
   `user_aliases`.
-- Mail TLS uses the pinned `mail.meridian.test` certificate through
-  `MERIDIAN_MAIL_CA_FILE`; IMAP and SMTP verify the certificate.
+- Mail TLS uses the pinned `mail.a8m.test` certificate through
+  `ALT8MAIL_MAIL_CA_FILE`; IMAP and SMTP verify the certificate.
 - Settings from Appearance through Account are server-backed in PostgreSQL:
   theme, accent, density, reading behavior, default priority/receipt, undo
   window, signature, notification choices, language/date/time/time zone/work
   hours, sender-warning policy, 2FA policy and account sessions.
 - Sieve rules and automatic replies are validated server-side, saved in
-  PostgreSQL and pushed to Dovecot ManageSieve as the active `meridian` script.
+  PostgreSQL and pushed to Dovecot ManageSieve as the active `a8m` script.
 - Real TOTP enrollment, hashed single-use recovery codes, trusted devices and
   WebAuthn passkey registration/verification are implemented in Go. Login
   issues a real second-factor challenge when any factor is enrolled.
@@ -221,22 +226,22 @@ What is live:
   respects the tenant sharing policy.
 - Group addresses are real distribution lists: the Postfix SQL alias map expands
   active group membership to active mailboxes. A root-run
-  `meridian-mailprovision` timer creates and verifies each Maildir explicitly,
+  `a8m-mailprovision` timer creates and verifies each Maildir explicitly,
   and the admin console shows provisioning state.
-- A root-run `meridian-dkimprovision` timer creates per-domain 2048-bit RSA DKIM
+- A root-run `a8m-dkimprovision` timer creates per-domain 2048-bit RSA DKIM
   keys, publishes the real public key in the admin DNS records, updates
   Rspamd's selector map and verifies that the published `p=` matches the active
   signing key. Rspamd signs with the domain selector; the admin console never
   shows a placeholder DKIM value.
 - The Go server authenticates its workers with Dovecot master auth
-  (`MERIDIAN_IMAP_MASTER_*`), so every mailbox is synced without storing each
+  (`ALT8MAIL_IMAP_MASTER_*`), so every mailbox is synced without storing each
   user's plaintext mailbox password.
 
-The staging login alias is gated by `MERIDIAN_DEMO_MODE` and is refused when
-`MERIDIAN_ENV=production`. It only maps the login, never restores example
+The staging login alias is gated by `ALT8MAIL_DEMO_MODE` and is refused when
+`ALT8MAIL_ENV=production`. It only maps the login, never restores example
 mailbox content.
 
-The reference Node `meridian-preview` service is stopped and disabled. Its demo
+The reference Node `a8m-preview` service is stopped and disabled. Its demo
 JSON remains in the repository only as the standalone local reference template;
 it is not proxied and is not used by the staging frontend. See
 [`docs/GO_API.md`](docs/GO_API.md) for the Go endpoint map, mail pipeline and
@@ -387,7 +392,7 @@ decisions and audit entries.
   priorities, due dates and times, tags, assignee validation against the
   directory, linked email conversations, notes, and complete/reopen/delete
   flows. Stats and list ordering respect the user's time zone.
-- **Files workspace** — a unified enterprise file shelf across Meridian Drive,
+- **Files workspace** — a unified enterprise file shelf across Alt8Mail Drive,
   Microsoft OneDrive, Dropbox Business, Google Drive and AWS S3. Connectors
   have connected/disconnected states, account and usage details; connecting a
   provider indexes its mock files, file filters cover all/recent/shared/images/
@@ -440,7 +445,7 @@ already replaced the passkey simulation with real WebAuthn.
   tests a provider in the admin console.
 - **External identity deliverability** — verification emails are sent through
   the normal Postfix submission path. An external identity can only send
-  successfully when its domain publishes SPF/DKIM aligned for Meridian's egress;
+  successfully when its domain publishes SPF/DKIM aligned for Alt8Mail's egress;
   otherwise recipients may reject or junk the mail even though the identity is
   verified.
 - **Notification read state** is per-browser (localStorage) rather than synced
@@ -688,15 +693,15 @@ from sign-in (`X-CSRF-Token`); the session is an HttpOnly cookie. Responses are
 | GET | `/.well-known/caldav`, `/.well-known/carddav` | DAV discovery redirects |
 
 The deployed Go API uses the same paths. Its session cookies are
-`meridian_system_sid` / `meridian_system_csrf`, and the staging login alias maps
+`a8m_system_sid` / `a8m_system_csrf`, and the staging login alias maps
 to the canonical `.test` account. The reference demo-reset endpoint has been
 removed from the Go API; initialize a clean real mailbox with
-`meridian-inituser`.
+`a8m-inituser`.
 
 The separate administration API (`/admin/api` on staging, or `/api` on the admin
 subdomain), permission catalog, tenant policy model and RBAC are documented in
-[`docs/ADMIN.md`](docs/ADMIN.md). Admin CSRF uses `meridian_admin_csrf` and
-sessions use `meridian_admin_sid`.
+[`docs/ADMIN.md`](docs/ADMIN.md). Admin CSRF uses `a8m_admin_csrf` and
+sessions use `a8m_admin_sid`.
 
 ## Go backend build and verification
 
@@ -705,19 +710,19 @@ cd backend
 go test ./...
 go vet ./...
 go build ./...
-go build -o bin/meridian-inituser ./cmd/inituser
-go build -o bin/meridian-admin-server ./cmd/adminserver
-go build -o bin/meridian-mailprovision ./cmd/mailprovision
-go build -o bin/meridian-dkimprovision ./cmd/dkimprovision
+go build -o bin/a8m-inituser ./cmd/inituser
+go build -o bin/a8m-admin-server ./cmd/adminserver
+go build -o bin/a8m-mailprovision ./cmd/mailprovision
+go build -o bin/a8m-dkimprovision ./cmd/dkimprovision
 
 # migrations 0003_real_auth through 0014_compose_identity_ai must be applied first on
 # staging, after loading the service environment:
-# bin/meridian-inituser -email avery.chen@meridian.test
-# systemctl restart meridian-server
-# systemctl enable --now meridian-mailprovision.timer meridian-dkimprovision.timer
+# bin/a8m-inituser -email avery.chen@a8m.test
+# systemctl restart a8m-server
+# systemctl enable --now a8m-mailprovision.timer a8m-dkimprovision.timer
 ```
 
-`meridian-inituser` replaces any demo/legacy state with a clean identity,
+`a8m-inituser` replaces any demo/legacy state with a clean identity,
 aliases and tenant directory. It writes **zero** messages, tasks, files,
 calendar events and audit rows; the IMAP worker imports the real mailbox.
 
@@ -731,72 +736,72 @@ GO_PASSWORD_FILE=./staging_avery_password \
 python3 tools/go-api-smoke.py
 
 # Browser: sign in, threads, search, Scheduled, Tasks, Files, People, Calendar
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/go-ui-smoke.mjs
 
 # Every settings tab, with /api/preferences DB readback
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/go-settings-smoke.mjs
 
 # Real TOTP, recovery codes, WebAuthn passkeys and first-time enrollment
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/go-auth-smoke.mjs
 
 # Self-delivery appears in the open INBOX without a reload, with a notification
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/go-live-mail-smoke.mjs
 
 # 0.7 composer, live notifications, identities, app-password controls and
 # closed-draft reload behavior
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/compose-notifications-smoke.mjs
 
 # 0.8 five-second splash, manual AI summary/translation, Reply with AI,
 # font controls, blue minimized dock tab and grouped/individual inbox view
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/ai-reading-compose-smoke.mjs
 
 # App-password re-authentication through the staging demo alias.
 # Supply the gated demo password without putting it in shell history.
-MERIDIAN_UI_DEMO_PASSWORD=... \
+ALT8MAIL_UI_DEMO_PASSWORD=... \
 node tools/app-password-demo-smoke.mjs
 
 # Calendar/contact/profile edits and app-password create/revoke through the UI
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
 node tools/workspace-ui-smoke.mjs
 
 # Customer/system administration API, RBAC, policy, tenant lifecycle, admin MFA
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password python3 tools/admin-api-smoke.py
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password python3 tools/admin-auth-smoke.py
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password python3 tools/admin-policy-smoke.py
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password python3 tools/admin-tenant-smoke.py
-MERIDIAN_ADMIN_PASSWORD="$(cat ./staging_avery_password)" node tools/admin-ui-smoke.mjs
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password python3 tools/admin-api-smoke.py
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password python3 tools/admin-auth-smoke.py
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password python3 tools/admin-policy-smoke.py
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password python3 tools/admin-tenant-smoke.py
+ALT8MAIL_ADMIN_PASSWORD="$(cat ./staging_avery_password)" node tools/admin-ui-smoke.mjs
 
 # Password flow, mail-client policy gates, forwarding, sharing, quarantine,
 # retention and explicit Maildir provisioning. Port 587 is often blocked from
 # operator networks; open an SSH tunnel and point the test at localhost.
-MERIDIAN_SMTP_HOST=127.0.0.1 MERIDIAN_SMTP_PORT=1587 \
+ALT8MAIL_SMTP_HOST=127.0.0.1 ALT8MAIL_SMTP_PORT=1587 \
   python tools/mail-policy-smoke.py
 
 # DKIM public key in the admin API, exact p= matching and readiness state
-MERIDIAN_ADMIN_PASSWORD_FILE=./staging_avery_password \
+ALT8MAIL_ADMIN_PASSWORD_FILE=./staging_avery_password \
   python tools/dkim-smoke.py
 
 # CalDAV/CardDAV discovery and event/contact CRUD. Use an app password when
 # the account has MFA; DAV_INSECURE=1 only for a self-signed staging cert.
 GO_API=https://130-94-46-22.sslip.io \
-DAV_EMAIL=avery.chen@meridian.test \
+DAV_EMAIL=avery.chen@a8m.test \
 DAV_PASSWORD="$(cat ./staging_avery_password)" \
   python3 tools/dav-smoke.py
 
 # Calendar/contact/profile/app-password UI flows
-MERIDIAN_UI_PASSWORD="$(cat ./staging_avery_password)" \
+ALT8MAIL_UI_PASSWORD="$(cat ./staging_avery_password)" \
   node tools/workspace-ui-smoke.mjs
 ```
 
 `tools/go-api-smoke.py` needs Python 3 and a password file readable by the
 operator; do not put the secret in shell history. The UI smoke uses the
-prefilled staging demo login if `MERIDIAN_UI_PASSWORD` is omitted.
+prefilled staging demo login if `ALT8MAIL_UI_PASSWORD` is omitted.
 
 ## Security notes
 
@@ -841,7 +846,7 @@ Responsible disclosure and the production hardening checklist are in
   frames only so the PDF preview can render inside the app.
 - Uploaded content is MIME-sniffed, size-limited and served with `nosniff`.
   Web attachment uploads and guest-share replacements are scanned with ClamAV
-  INSTREAM when `MERIDIAN_CLAMAV_ADDR` is configured; scanner errors fail closed.
+  INSTREAM when `ALT8MAIL_CLAMAV_ADDR` is configured; scanner errors fail closed.
   Uploaded SVG is not registered as previewable, and any SVG attachment response
   is sandboxed so it cannot execute script when opened directly. The live mail
   path also runs Postfix/Rspamd/ClamAV before delivery. Production should add
@@ -852,10 +857,10 @@ Responsible disclosure and the production hardening checklist are in
 - Path traversal is blocked for static files; API data is outside the public
   root. Uploaded bytes are stored under `data/uploads/`, not in the web root.
 - The staging login card prefills the gated demo alias by design. The alias is
-  refused when `MERIDIAN_DEMO_MODE=false` or `MERIDIAN_ENV=production`. Remove
+  refused when `ALT8MAIL_DEMO_MODE=false` or `ALT8MAIL_ENV=production`. Remove
   the prefilled values, demo seed and demo reset endpoint before exposing the
   reference template publicly. The Go API has no demo reset endpoint; use
-  `meridian-inituser` for a clean real mailbox.
+  `a8m-inituser` for a clean real mailbox.
 
 ## Testing
 

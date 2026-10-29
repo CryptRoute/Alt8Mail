@@ -300,7 +300,7 @@ func (s *Server) validateTaskBody(ctx context.Context, sess *sessionRecord, body
 	}
 	assignee, lookupErr := s.workspaceUserByEmail(ctx, sess.User.TenantID, assigneeID)
 	if lookupErr != nil {
-		return "", "", "", "", "", "", "", nil, nil, nil, fail(http.StatusBadRequest, "TASK_ASSIGNEE", "Choose a person from the Meridian directory")
+		return "", "", "", "", "", "", "", nil, nil, nil, fail(http.StatusBadRequest, "TASK_ASSIGNEE", "Choose a person from the Alt8Mail directory")
 	}
 	if !strings.EqualFold(assignee.Email, sess.User.Email) {
 		policy := s.tenantPolicyFor(ctx, sess.User.TenantID)

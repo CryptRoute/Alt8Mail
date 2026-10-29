@@ -1,8 +1,8 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { stripHtml } from "../public/search.mjs";
 
-export const SESSION_COOKIE = "meridian_sid";
-export const CSRF_COOKIE = "meridian_csrf";
+export const SESSION_COOKIE = "a8m_sid";
+export const CSRF_COOKIE = "a8m_csrf";
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function id(prefix) {

@@ -19,7 +19,7 @@ try {
   await new Promise((r) => setTimeout(r, 700));
   await page.click('#smtp-test-new');
   await page.waitFor(() => document.querySelector('#smtp-test-form'), 8000);
-  await page.setValue('#smtp-test-form [name="recipient"]', 'postmaster@meridian.test');
+  await page.setValue('#smtp-test-form [name="recipient"]', 'postmaster@a8m.test');
   await page.setValue('#smtp-test-form [name="subject"]', `System Control delivery path test ${new Date().toISOString()}`);
   await page.setValue('#smtp-test-form [name="body"]', 'This is an automated delivery-path test from Alt8Mail System Control. Policy service and local delivery are being verified.');
   await page.screenshot(`${OUT}/12-smtp-test-form.png`);
@@ -36,7 +36,7 @@ try {
   await page.screenshot(`${OUT}/13-smtp-test-result.png`, { fullPage: false });
   await page.pressKey('Escape');
   await new Promise((r) => setTimeout(r, 1000));
-  await page.eval("location.hash = '#/logs?q=postmaster%40meridian.test'");
+  await page.eval("location.hash = '#/logs?q=postmaster%40a8m.test'");
   await page.waitFor(() => !document.querySelector('#logs-table .loading-state'), 25000);
   await new Promise((r) => setTimeout(r, 1500));
   const logs = await page.eval(() => ({

@@ -416,7 +416,7 @@ func (s *Server) renameDomain(ctx context.Context, id, oldDomain, newDomain stri
 		rollbackDir()
 		return nil, err
 	}
-	_, _ = s.generateDKIMKey(ctx, id, newDomain, "meridian", false)
+	_, _ = s.generateDKIMKey(ctx, id, newDomain, "a8m", false)
 	_, _ = s.writeSelectorMap(ctx)
 	_ = reloadPostfix(ctx)
 	var mailboxes, aliases int
@@ -457,7 +457,7 @@ func (s *Server) handleDomainDKIM(w http.ResponseWriter, r *http.Request, sess *
 	}
 	_ = decodeJSON(w, r, &body, 16<<10)
 	var domain, selector string
-	if err := s.db.QueryRow(r.Context(), `SELECT domain::text, COALESCE(dkim_selector,'meridian') FROM public.mail_domains WHERE id=$1`, id).Scan(&domain, &selector); err != nil {
+	if err := s.db.QueryRow(r.Context(), `SELECT domain::text, COALESCE(dkim_selector,'a8m') FROM public.mail_domains WHERE id=$1`, id).Scan(&domain, &selector); err != nil {
 		writeFromError(w, err)
 		return
 	}
@@ -591,7 +591,7 @@ func (s *Server) domainDNSPlan(ctx context.Context, id string) (map[string]any, 
 	var domain, selector, record string
 	var dmarcPolicy string
 	err := s.db.QueryRow(ctx, `
-		SELECT domain::text, COALESCE(dkim_selector,'meridian'), COALESCE(dkim_record,''),
+		SELECT domain::text, COALESCE(dkim_selector,'a8m'), COALESCE(dkim_record,''),
 		       COALESCE(dmarc_policy,'none')
 		FROM public.mail_domains WHERE id=$1
 	`, id).Scan(&domain, &selector, &record, &dmarcPolicy)

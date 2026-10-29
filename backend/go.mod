@@ -1,4 +1,4 @@
-module github.com/meridian-mail/meridian/backend
+module github.com/CryptRoute/Alt8Mail/backend
 
 go 1.26.0
 

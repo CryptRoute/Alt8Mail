@@ -62,10 +62,10 @@ CREATE INDEX IF NOT EXISTS mail_ai_cache_user_idx ON mail_ai_cache (user_id, upd
 
 ALTER TABLE outbox ADD COLUMN IF NOT EXISTS body_html text NOT NULL DEFAULT '';
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON app_passwords TO meridian_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON mail_identities TO meridian_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_ai_settings TO meridian_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON mail_ai_cache TO meridian_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON app_passwords TO a8m_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON mail_identities TO a8m_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_ai_settings TO a8m_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON mail_ai_cache TO a8m_app;
 
 INSERT INTO schema_migrations (version) VALUES ('0014_compose_identity_ai')
 ON CONFLICT (version) DO NOTHING;
