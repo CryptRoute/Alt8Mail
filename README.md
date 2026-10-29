@@ -46,7 +46,10 @@ The updater uses the read-only deploy key in `/etc/a8m/github_readonly`, builds
 the selected tag, backs up the database, configuration and systemd units under
 `/var/backups/alt8mail`, applies new migrations and waits up to 60 seconds for
 all three services to report the target version. If readiness fails, it restores
-the previous release, database and unit files. Release artifacts are built by
+the previous release, database and unit files.
+
+Register `/etc/a8m/github_readonly.pub` as a read-only deploy key on the
+repository before using the updater. Release artifacts are built by
 `.github/workflows/release.yml`.
 
 ## Localization

@@ -443,6 +443,7 @@ if [[ ! -s "$UPDATE_KEY" ]]; then
   ssh-keygen -q -t ed25519 -N '' -C "a8m-readonly-$(hostname)" -f "$UPDATE_KEY"
   chmod 0600 "$UPDATE_KEY"
 fi
+log "updater deploy key: $UPDATE_KEY.pub (register it as a read-only repository deploy key)"
 cat > "$CONFIG_ROOT/update.conf" <<EOF
 A8M_REPO=git@github.com:CryptRoute/Alt8Mail.git
 A8M_GIT_KEY=$UPDATE_KEY
