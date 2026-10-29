@@ -1948,7 +1948,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   updateScheduledUi();
   startOutboxPolling();
   syncPreferencesUi();
-  if (state.settingsTab === "account" || state.settingsTab === "security" || state.settingsTab === "regional" || state.settingsTab === "autoreply") renderSettingsDynamic();
+  if (["account", "security", "regional", "autoreply", "storage"].includes(state.settingsTab)) renderSettingsDynamic();
   if (state.task === "settings" && ["rules", "audit"].includes(state.settingsTab)) renderSettingsDynamic();
   if (!quiet && previousThread && !threadById(previousThread)) state.selectedThreadId = null;
   renderReader();
