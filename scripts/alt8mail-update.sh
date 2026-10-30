@@ -27,6 +27,18 @@ A8M_GIT_KEY="${A8M_GIT_KEY:-/etc/a8m/github_readonly}"
 A8M_CHANNEL="${A8M_CHANNEL:-stable}"
 A8M_SERVICES="${A8M_SERVICES:-a8m-server a8m-admin alt8mail-control}"
 
+# The control plane launches this script from a transient systemd unit with no
+# login environment. Set stable HOME/Go paths before SSH or the release build.
+if [[ -z "${HOME:-}" ]]; then
+  HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+  HOME="${HOME:-/root}"
+  export HOME
+fi
+export PATH="/usr/local/go/bin:/usr/local/bin:${PATH:-/usr/sbin:/usr/bin:/sbin:/bin}"
+if [[ -z "${GOPATH:-}" ]]; then export GOPATH="$HOME/go"; fi
+if [[ -z "${GOMODCACHE:-}" ]]; then export GOMODCACHE="$GOPATH/pkg/mod"; fi
+if [[ -z "${GOCACHE:-}" ]]; then export GOCACHE="$HOME/.cache/go-build"; fi
+
 # Derive an HTTPS fallback for GitHub SSH remotes. This keeps existing hosts
 # working when their update.conf predates A8M_REPO_HTTPS.
 if [[ -z "$A8M_REPO_HTTPS" && "$A8M_REPO" =~ ^git@github\.com:(.+)$ ]]; then

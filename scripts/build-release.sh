@@ -7,6 +7,19 @@
 # installer/deployment templates. It does not contain secrets or runtime data.
 set -Eeuo pipefail
 
+# systemd-run transient units (used by the control-plane updater) do not inherit
+# a login environment. Give Go stable writable paths even when HOME/GOPATH are
+# absent.
+if [[ -z "${HOME:-}" ]]; then
+  HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+  HOME="${HOME:-/root}"
+  export HOME
+fi
+export PATH="/usr/local/go/bin:/usr/local/bin:${PATH:-/usr/sbin:/usr/bin:/sbin:/bin}"
+if [[ -z "${GOPATH:-}" ]]; then export GOPATH="$HOME/go"; fi
+if [[ -z "${GOMODCACHE:-}" ]]; then export GOMODCACHE="$GOPATH/pkg/mod"; fi
+if [[ -z "${GOCACHE:-}" ]]; then export GOCACHE="$HOME/.cache/go-build"; fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${1:-$(tr -d '[:space:]' < "$ROOT/VERSION")}"
 OUT_DIR="${2:-$ROOT/dist}"

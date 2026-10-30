@@ -68,6 +68,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.15** release makes control-plane updates self-healing when systemd starts the updater without a login environment: the release builder and updater set stable `HOME`, `GOPATH`, `GOMODCACHE` and `GOCACHE` paths, and the transient update unit receives the same environment explicitly.
+
 The **0.3.14** release repairs mailbox import validation: the admin UI and API now share one canonical connection/options contract, older cached admin bundles are still accepted, duplicate or invalid source mailboxes are rejected before a job starts, the configured message-size limit is enforced for IMAP and POP3, and mismatched TLS ports are caught before validating credentials.
 
 The **0.3.13** release adds the System Control **System** page for transactional Alt8Mail release updates with live logs, release history, reboot tracking and audit entries; seeds hostname, mail hostname and webmail URL from the installer; lets reviewers undo a mistaken threat confirmation; and makes the updater try SSH and HTTPS repository transports in turn.

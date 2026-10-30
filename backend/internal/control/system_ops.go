@@ -413,6 +413,7 @@ func (s *Server) handleAppUpdateStart(w http.ResponseWriter, r *http.Request, se
 	args := []string{
 		"--quiet", "--collect", "--unit=" + unitName,
 		"--description=Alt8Mail application update " + target,
+		"--property=Environment=HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod GOCACHE=/root/.cache/go-build",
 		"--property=StandardOutput=append:" + logPath,
 		"--property=StandardError=append:" + logPath,
 		updateBinary, "--to", target,
@@ -426,6 +427,7 @@ func (s *Server) handleAppUpdateStart(w http.ResponseWriter, r *http.Request, se
 		args = []string{
 			"--quiet", "--collect", "--unit=" + unitName,
 			"--description=Alt8Mail application update " + target,
+			"--property=Environment=HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod GOCACHE=/root/.cache/go-build",
 			updateBinary, "--to", target,
 		}
 		result, runErr = runCommand(r.Context(), 20*time.Second, "systemd-run", args...)
