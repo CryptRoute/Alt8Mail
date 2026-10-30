@@ -199,7 +199,7 @@ async function renderImportMailboxes() {
       ${(history.jobs || []).length ? `<section class="card import-card"><div class="import-step"><span>${icon("history")}</span><div><h2>Migration history</h2><p>Resume monitoring any job from here.</p></div></div><div class="import-history">${(history.jobs || []).slice(0, 10).map((entry) => `<button class="import-history-row" data-view-mail-import="${esc(entry.id)}"><div><b>${esc(entry.host)} · ${esc(entry.protocol.toUpperCase())}</b><small>${esc(entry.createdAt)} · ${entry.total} mailbox${entry.total === 1 ? "" : "es"}</small></div><span class="badge ${mailImportStatusClass(entry.status)}">${esc(entry.status.replace(/_/g, " "))}</span><span>${entry.importedMessages || 0} messages</span></button>`).join("")}</div></section>` : ""}
     </div>`;
   bindImportMailboxes();
-  if (mailImportState.jobId && mailImportState.job && !["completed", "failed", "cancelled"].includes(mailImportState.job.status)) scheduleMailImportPoll();
+  if (mailImportState.jobId && mailImportState.job && !["completed", "failed", "cancelled", "awaiting_mapping"].includes(mailImportState.job.status)) scheduleMailImportPoll();
 }
 
 function mailImportStatusClass(status) {
@@ -303,7 +303,7 @@ function bindImportMailboxes() {
   $$("[data-manual-remove]").forEach((button) => button.addEventListener("click", () => { mailImportState.manualRows.splice(Number(button.dataset.manualRemove), 1); renderImportMailboxes(); }));
   $("#mailImportValidate")?.addEventListener("click", startMailImportValidation);
   $("#mailImportStart")?.addEventListener("click", submitMailImportMapping);
-  $("#mailImportBack")?.addEventListener("click", () => { mailImportState.jobId = ""; mailImportState.job = null; mailImportState.items = []; renderImportMailboxes(); });
+  $("#mailImportBack")?.addEventListener("click", () => { mailImportState.jobId = ""; mailImportState.job = null; mailImportState.items = []; mailImportState.manualRows = []; renderImportMailboxes(); });
   $("#mailImportCancel")?.addEventListener("click", cancelMailImport);
   $("#mailImportDownload")?.addEventListener("click", downloadMailImportResults);
   $$("[data-mapping-mode]").forEach((select) => select.addEventListener("change", () => {

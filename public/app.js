@@ -2951,7 +2951,7 @@ function openFolderMoveMenu() {
   const descendants = new Set();
   const collect = (id) => (state.folders || []).filter((item) => item.parentId === id).forEach((child) => { descendants.add(child.id); collect(child.id); });
   collect(folder.id);
-  const candidates = (state.folders || []).filter((item) => item.id !== folder.id && !descendants.has(item.id) && !item.virtual);
+  const candidates = (state.folders || []).filter((item) => item.id !== folder.id && !descendants.has(item.id) && !item.virtual && !item.delegated);
   folderMenu.innerHTML = `<div class="folder-subhead"><button type="button" data-folder-submenu-back>‹</button><strong>Move folder</strong></div>
     <button type="button" data-folder-parent-id=""><span class="folder-count-choice">/</span>Top level</button>
     ${candidates.map((item) => `<button type="button" data-folder-parent-id="${esc(item.id)}"><span class="folder-count-choice"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg></span>${esc(item.label)}</button>`).join("")}`;
@@ -2979,7 +2979,7 @@ function openFolderEditor(mode = "create", folder = null, parentId = "") {
     collect(folder.id);
   }
   parent.innerHTML = `<option value="">Top level</option>` + (state.folders || [])
-    .filter((item) => !item.virtual && !excluded.has(item.id))
+    .filter((item) => !item.virtual && !item.delegated && !excluded.has(item.id))
     .map((item) => `<option value="${esc(item.id)}"${state.folderEditor.parentId === item.id ? " selected" : ""}>${esc(item.label)}</option>`).join("");
   parent.disabled = mode === "rename";
   document.getElementById("folderEditorError").hidden = true;
@@ -8233,7 +8233,7 @@ function syncRuleActionInputs() {
   if (previousMode && previousMode !== type) value = type === "move" ? "archive" : "";
   wrap.dataset.mode = type;
   if (type === "move") {
-    const folders = (state.folders || []).filter((folder) => !folder.virtual).sort((a, b) => folderSortValue(a) - folderSortValue(b));
+    const folders = (state.folders || []).filter((folder) => !folder.virtual && !folder.delegated).sort((a, b) => folderSortValue(a) - folderSortValue(b));
     if (!folders.some((folder) => folder.id === value)) value = folders.some((folder) => folder.id === "archive") ? "archive" : (folders[0]?.id || "inbox");
     input.outerHTML = `<select id="ruleActionValue" aria-label="Folder">${folders.map((folder) => `<option value="${esc(folder.id)}"${value === folder.id ? " selected" : ""}>${esc(folder.label)}</option>`).join("")}</select>`;
   } else {
@@ -10250,7 +10250,7 @@ function moveFolderRow(folder) {
 function moveMenuListMarkup() {
   const query = state.moveSearch.trim().toLowerCase();
   const folders = (state.folders || [])
-    .filter((folder) => !folder.virtual && folder.id !== "starred")
+    .filter((folder) => !folder.virtual && !folder.delegated && folder.id !== "starred")
     .filter((folder) => !query || folder.label.toLowerCase().includes(query))
     .sort((a, b) => folderSortValue(a) - folderSortValue(b));
   return folders.map(moveFolderRow).join("") || `<div class="move-empty">No folder matches “${esc(state.moveSearch)}”.</div>`;
@@ -11164,7 +11164,7 @@ function bindEvents() {
       state.bulkMoveOpen = !state.bulkMoveOpen;
       const menu = document.getElementById("bulkMoveMenu");
       if (menu) {
-        menu.innerHTML = (state.folders || []).filter((folder) => !folder.virtual).map((folder) =>
+        menu.innerHTML = (state.folders || []).filter((folder) => !folder.virtual && !folder.delegated).map((folder) =>
           `<button type="button" data-bulk-move-folder="${esc(folder.id)}"><svg class="icon" aria-hidden="true"><use href="#${esc(folder.icon || "i-folder")}"/></svg>${esc(folder.label)}</button>`
         ).join("");
         menu.hidden = !state.bulkMoveOpen;

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"html"
 	"strings"
-	"time"
 )
 
 // accountNotice describes a mailbox welcome/ready email. The message is built
@@ -140,28 +139,6 @@ func renderAccountNotice(notice accountNotice, tenantName, productName, primaryC
 	}
 	textBody += "\n" + notice.FooterNote + "\n"
 	return textBody, htmlBody
-}
-
-// accountNoticeSender picks the envelope sender for system notice mail. The
-// acting administrator's mailbox is always deliverable through the master
-// user; the organization's support address becomes Reply-To-style guidance in
-// the body instead of a spoofed From line.
-func accountNoticeSender(fromEmail, fromName, productName string) (string, string) {
-	fromEmail = strings.ToLower(strings.TrimSpace(fromEmail))
-	if fromEmail == "" {
-		return "", ""
-	}
-	name := strings.TrimSpace(fromName)
-	if name == "" {
-		name = productName + " Accounts"
-	} else {
-		name = productName + " · " + name
-	}
-	return fromEmail, name
-}
-
-func accountNoticeExpiryNote() string {
-	return "This temporary password expires when you change it. " + time.Now().UTC().Format("2 Jan 2006")
 }
 
 // noticeSenderFor resolves a deliverable From mailbox for administrative

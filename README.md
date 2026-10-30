@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.4** release keeps delegated mailboxes out of move and rule destinations, stops the migration mapping form from refreshing while an administrator edits it, and clears source credentials after a migration is dismissed.
+
 The **0.3.3** release preserves the branded HTML of account and migration notification emails (server-generated, escaped) and surfaces notification failures in migration results.
 
 The **0.3.2** release finishes the admin detail-page polish: edits stay on the user page, vacation intervals match the Sieve limit, and validated mailboxes are auto-mapped to existing users with the same address.
