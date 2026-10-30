@@ -848,7 +848,7 @@ try {
       body: JSON.stringify({
         subject: 'HTML reply fixture',
         bodyText: 'The original message keeps its layout and image.',
-        bodyHtml: '<div style="background:#f4f7fb;padding:18px"><p style="font-size:18px;font-weight:700">The original message keeps its layout and image.</p><img src="https://images.example.test/logo.png" alt="Brand logo"></div>'
+        bodyHtml: '<div style="background:#f4f7fb;padding:18px"><p style="font-size:18px;font-weight:700">The original message keeps its layout and image.</p><img src="https://images.example.test/logo.png" alt="Brand logo" width="240" style="width:100%;height:auto"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=" alt="Sized logo" width="240" style="width:100%;height:auto"></div>'
       })
     });
   })()`);
@@ -859,6 +859,7 @@ try {
     if (row) row.click();
   })()`);
   await sleep(400);
+  await page.waitFor(() => Boolean(document.querySelector(".reader [data-details]")), 5000);
   await page.click(".reader [data-details]");
   await page.waitFor(() => !document.getElementById("detailsOverlay").hidden, 5000);
   await page.click('[data-details-tab="source"]');
@@ -875,6 +876,7 @@ try {
   check(await page.eval(`Boolean(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote .email-quote img[src^="/api/mail/image"]'))`), "reply renders the original image through the privacy proxy");
   check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote img')?.getAttribute('data-email-src') === 'https://images.example.test/logo.png'`), "the quoted image keeps its original URL for sending");
   check(await page.eval(`Boolean(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote .email-quote p'))`), "reply preserves the original HTML layout inside the quote");
+  check(await page.eval(`Math.abs(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote img[alt="Sized logo"]').getBoundingClientRect().width - 240) < 2`), "quoted image keeps its designed width instead of filling the composer");
   check(await page.eval(`!document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]').classList.contains('is-quote-collapsed')`), "reply shows the original quote automatically");
   check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-priority="normal"]')?.classList.contains('is-active')`), "normal priority is selected by default");
   await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="options"]`);

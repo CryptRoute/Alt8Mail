@@ -119,6 +119,13 @@ function safeEmailHtml(html, { message = null, allowImages = true } = {}) {
         const value = String(node.getAttribute(dimension) || "").trim();
         if (value && !/^\d{1,5}(?:%|px)?$/i.test(value)) node.removeAttribute(dimension);
       }
+      // Outlook treats a numeric width attribute as the rendered width even
+      // when the email also carries width:100% in its inline style. Apply the
+      // same precedence so logos do not fill the whole compose column.
+      const widthValue = String(node.getAttribute("width") || "").trim();
+      if (/^\d{1,5}(?:px)?$/i.test(widthValue)) {
+        node.style.width = `${parseInt(widthValue, 10)}px`;
+      }
       node.setAttribute("decoding", "async");
       node.setAttribute("referrerpolicy", "no-referrer");
       node.setAttribute("class", "email-image");
