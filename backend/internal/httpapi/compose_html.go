@@ -31,6 +31,24 @@ var composeHTMLPolicy = func() *bluemonday.Policy {
 	policy.AllowStyles("font-family").Matching(composeFontFamilyPattern).OnElements(elements...)
 	policy.AllowStyles("font-size").Matching(composeFontSizePattern).OnElements(elements...)
 	policy.AllowStyles("text-decoration").Matching(composeTextDecorationPattern).OnElements(elements...)
+	// Quoted HTML commonly carries spacing, borders and table layout inline.
+	// Allow conservative CSS values without functions/URLs so the original
+	// structure survives in the sent message as well as in the editor.
+	composeLayoutValuePattern := regexp.MustCompile(`^[0-9A-Za-z#.,%+\-\s/]+$`)
+	policy.AllowStyles(
+		"line-height", "letter-spacing", "vertical-align", "text-indent", "font-variant",
+		"white-space", "word-break", "overflow-wrap", "table-layout", "opacity",
+		"background", "border-radius", "border-collapse", "border-spacing",
+		"width", "max-width", "height", "max-height", "display",
+	).Matching(composeLayoutValuePattern).OnElements(elements...)
+	for _, property := range []string{
+		"margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
+		"padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+		"border", "border-top", "border-right", "border-bottom", "border-left",
+		"border-color", "border-width", "border-style",
+	} {
+		policy.AllowStyles(property).Matching(composeLayoutValuePattern).OnElements(elements...)
+	}
 	policy.AllowURLSchemes("http", "https", "mailto")
 	// Draft bodies may reference Alt8Mail's same-origin image proxy. Outbound
 	// sends restore the original remote URL in the browser before submission.

@@ -37,14 +37,14 @@ const recipientLabel = (message) => {
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
 const SAFE_EMAIL_STYLE_PROPERTIES = new Set([
-  "color", "background-color", "font-family", "font-size", "font-weight", "font-style",
-  "text-decoration", "text-align", "line-height", "letter-spacing", "vertical-align",
+  "color", "background-color", "background", "font-family", "font-size", "font-weight", "font-style",
+  "font-variant", "text-decoration", "text-align", "text-indent", "line-height", "letter-spacing", "vertical-align",
   "margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
   "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
   "border", "border-top", "border-right", "border-bottom", "border-left",
-  "border-color", "border-width", "border-style", "border-radius", "border-collapse",
+  "border-color", "border-width", "border-style", "border-radius", "border-collapse", "border-spacing",
   "width", "max-width", "height", "max-height", "display", "white-space", "word-break",
-  "overflow-wrap", "list-style-type", "text-transform",
+  "overflow-wrap", "list-style-type", "text-transform", "table-layout", "opacity",
 ]);
 
 function safeEmailStyle(value) {

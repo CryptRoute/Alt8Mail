@@ -52,6 +52,19 @@ func TestSanitizeComposeHTMLImages(t *testing.T) {
 	}
 }
 
+func TestSanitizeComposeHTMLLayout(t *testing.T) {
+	clean := sanitizeComposeHTML(`<div style="padding:18px;margin:0 0 12px;background:#f4f7fb;border:1px solid #d7e0ea;max-width:100%"><table style="width:100%;border-collapse:collapse"><tr><td style="padding:8px">Cell</td></tr></table></div>`)
+	for _, expected := range []string{"padding: 18px", "background: #f4f7fb", "border: 1px solid #d7e0ea", "max-width: 100%", "width: 100%"} {
+		if !strings.Contains(clean, expected) {
+			t.Fatalf("quoted layout style %q was removed: %s", expected, clean)
+		}
+	}
+	unsafe := sanitizeComposeHTML(`<div style="background:url(https://evil.test/x);position:fixed">x</div>`)
+	if strings.Contains(strings.ToLower(unsafe), "url(") || strings.Contains(strings.ToLower(unsafe), "position") {
+		t.Fatalf("unsafe layout style survived: %s", unsafe)
+	}
+}
+
 func TestNormalizeComposeBody(t *testing.T) {
 	htmlBody, textBody := normalizeComposeBody("", "Hello\n\nTeam")
 	if !strings.Contains(htmlBody, "<p>Hello</p>") || !strings.Contains(textBody, "Hello") {
