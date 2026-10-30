@@ -382,6 +382,7 @@ func (s *Server) handleAppUpdateStart(w http.ResponseWriter, r *http.Request, se
 		writeError(w, http.StatusConflict, "UP_TO_DATE", "The installed release is already "+current+".")
 		return
 	}
+	_ = s.setSetting(r.Context(), "system.latest_version", targetVersion, sess.User.ID)
 
 	jobID, err := randomToken(12)
 	if err != nil {
@@ -596,6 +597,8 @@ func (s *Server) reconcileAppUpdateJob(ctx context.Context, job *appUpdateJob) *
 			"targetVersion": job.TargetVersion, "currentVersion": current,
 		})
 	if status == "completed" {
+		_ = s.setSetting(ctx, "system.latest_version", job.TargetVersion, "")
+		_ = s.setSetting(ctx, "system.update_checked_at", time.Now().UTC().Format(time.RFC3339), "")
 		s.notifyEvent(ctx, "system.updated", map[string]any{
 			"source": "app", "job": job.ID, "fromVersion": job.FromVersion,
 			"version": job.TargetVersion,
@@ -606,6 +609,22 @@ func (s *Server) reconcileAppUpdateJob(ctx context.Context, job *appUpdateJob) *
 		})
 	}
 	return refreshed
+}
+
+// runAppUpdateMonitor reconciles jobs after the updater restarts the control
+// plane. Without it, the completion audit would wait for an operator to open
+// the System page or poll the job endpoint.
+func (s *Server) runAppUpdateMonitor(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.reconcileAppUpdateJobs(ctx)
+		}
+	}
 }
 
 func (s *Server) reloadAppUpdateJob(ctx context.Context, id string, fallback *appUpdateJob) *appUpdateJob {

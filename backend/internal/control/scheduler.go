@@ -29,6 +29,7 @@ func (s *Server) Start(ctx context.Context) {
 	}
 
 	go s.runServiceMonitor(ctx)
+	go s.runAppUpdateMonitor(ctx)
 	go s.runHostBroadcast(ctx)
 	go s.runBlocklistScheduler(ctx)
 	go s.runSecurityReportMonitor(ctx)
