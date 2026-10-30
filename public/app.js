@@ -1697,7 +1697,9 @@ function showError(error) {
    auth / boot
    ============================================================ */
 const AUTH_SPLASH_HOLD_MS = 5000;
+const LOGOUT_SPLASH_MS = 6000;
 let bootSplashHideTimer = null;
+let logoutInProgress = false;
 
 function hideBootSplash() {
   if (!bootSplash) return;
@@ -1710,11 +1712,53 @@ function showBootSplash(note = "Restoring your secure session and mailbox…") {
   if (!bootSplash) return;
   clearTimeout(bootSplashHideTimer);
   bootSplash.hidden = false;
-  bootSplash.classList.remove("is-hiding");
+  bootSplash.classList.remove("is-hiding", "is-logout");
+  bootSplash.setAttribute("aria-label", "Opening Alt8Mail");
+  const heading = bootSplash.querySelector("h1");
+  if (heading) heading.textContent = "Opening your workspace";
   const copy = bootSplash.querySelector("p:not(.eyebrow)");
   if (copy) copy.textContent = note;
   // Restart the progress animation when the splash is shown a second time.
   void bootSplash.offsetWidth;
+}
+
+function showLogoutSplash() {
+  if (!bootSplash) return;
+  clearTimeout(bootSplashHideTimer);
+  bootSplash.hidden = false;
+  bootSplash.classList.remove("is-hiding");
+  bootSplash.classList.add("is-logout");
+  bootSplash.setAttribute("aria-label", "Closing Alt8Mail");
+  const heading = bootSplash.querySelector("h1");
+  if (heading) heading.textContent = "Closing your workspace.";
+  const copy = bootSplash.querySelector("p:not(.eyebrow)");
+  if (copy) copy.textContent = "Your session is ending. Signing out of your inbox...";
+  void bootSplash.offsetWidth;
+}
+
+function clearThemeAccentForLogout() {
+  // The login card must not inherit the previous account's accent. Remove the
+  // pre-sign-in cache and any legacy accent cookie, then restore the default.
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (/accent/i.test(key)) localStorage.removeItem(key);
+    }
+  } catch {}
+  try {
+    for (const entry of document.cookie.split(";")) {
+      const name = entry.split("=")[0].trim();
+      if (name && /accent/i.test(name)) {
+        document.cookie = `${name}=; Max-Age=0; path=/; SameSite=Lax`;
+      }
+    }
+  } catch {}
+  state.accent = "blue";
+  document.documentElement.style.setProperty("--accent", ACCENTS.blue.value);
+  $$("[data-set-accent]").forEach((button) => {
+    const active = button.getAttribute("data-set-accent") === "blue";
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-checked", active ? "true" : "false");
+  });
 }
 
 function resetLoginButtons() {
@@ -2312,24 +2356,35 @@ function showRecoveryCodes(codes, note) {
 }
 
 async function logout() {
-  // Persist the open/minimized compose state before the session is revoked so
-  // the next sign-in, on this or another computer, restores it exactly.
-  await persistComposeSessions();
-  try { await api("/api/session", { method: "DELETE" }); } catch {}
-  state.user = null;
-  state.csrf = null;
-  state.messages = [];
-  state.people = [];
-  state.aliases = [];
-  state.sieve = null;
-  state.quota = null;
-  state.outbound = null;
-  state.pendingSends = [];
-  state.selectedThreadId = null;
-  state.selectedIds.clear();
-  rebuildIndex();
-  if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
-  showLogin();
+  if (logoutInProgress) return;
+  logoutInProgress = true;
+  const startedAt = Date.now();
+  showLogoutSplash();
+  try {
+    // Persist the open/minimized compose state before the session is revoked so
+    // the next sign-in, on this or another computer, restores it exactly.
+    try { await persistComposeSessions(); } catch {}
+    try { await api("/api/session", { method: "DELETE" }); } catch {}
+  } finally {
+    state.user = null;
+    state.csrf = null;
+    state.messages = [];
+    state.people = [];
+    state.aliases = [];
+    state.sieve = null;
+    state.quota = null;
+    state.outbound = null;
+    state.pendingSends = [];
+    state.selectedThreadId = null;
+    state.selectedIds.clear();
+    rebuildIndex();
+    clearThemeAccentForLogout();
+    if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    const remaining = LOGOUT_SPLASH_MS - (Date.now() - startedAt);
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+    showLogin();
+    logoutInProgress = false;
+  }
 }
 
 async function loadBootstrap({ restoreDrafts = false, quiet = false } = {}) {

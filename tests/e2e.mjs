@@ -907,8 +907,21 @@ try {
   await sleep(500);
 
   console.log("\n[11b] Passkey sign-in");
+  await page.eval("localStorage.setItem('a8m.accent', 'rose'); document.documentElement.style.setProperty('--accent', '#b8336a')");
+  const logoutStartedAt = Date.now();
   await page.click("#railLogout");
-  await page.waitFor(() => !document.getElementById("loginScreen").hidden, 5000);
+  await page.waitFor(() => !document.getElementById("bootSplash").hidden && document.getElementById("bootSplash").classList.contains("is-logout"), 3000);
+  check(await page.eval("document.querySelector('#bootSplash h1')?.textContent === 'Closing your workspace.'"), "logout shows the closing splash heading");
+  check(await page.eval("document.querySelector('#bootSplash p:not(.eyebrow)')?.textContent.includes('Signing out of your inbox')"), "logout shows the closing session copy");
+  check(await page.eval("Boolean(document.querySelector('#bootSplash .boot-lock svg'))"), "logout splash includes the lock icon");
+  await sleep(2200);
+  check(await page.eval("Number(getComputedStyle(document.querySelector('#bootSplash .boot-lock')).opacity) > 0.5"), "the envelope fades into a visible lock during sign-out");
+  check(await page.eval("getComputedStyle(document.querySelector('#bootSplash .boot-progress span')).animationName.includes('boot-progress-drain')"), "the sign-out progress bar drains instead of loading");
+  check(await page.eval("getComputedStyle(document.querySelector('#bootSplash .boot-progress span')).backgroundColor === 'rgb(149, 162, 181)'"), "the sign-out progress bar uses a neutral grey");
+  await page.waitFor(() => !document.getElementById("loginScreen").hidden, 8000);
+  check(Date.now() - logoutStartedAt >= 5800, "login appears only after the six-second closing sequence");
+  check(await page.eval("localStorage.getItem('a8m.accent') === null"), "logout clears the cached accent");
+  check(await page.eval("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#0f6cbd'"), "the login screen returns to the default system accent");
   await fillDemoLogin();
   await page.click("#loginSubmit");
   await page.waitFor(() => !document.getElementById("twoFactorForm").hidden, 8000);
