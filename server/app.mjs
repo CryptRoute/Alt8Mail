@@ -2102,7 +2102,7 @@ export async function createApp(options = {}) {
           cc: [], bcc: [],
           subject: String(body.subject || "Injected test message").slice(0, 500),
           snippet: "",
-          bodyHtml: textToHtml(body.bodyText || "Test message"),
+          bodyHtml: body.bodyHtml ? String(body.bodyHtml) : textToHtml(body.bodyText || "Test message"),
           bodyText: String(body.bodyText || "Test message"),
           date: nowIso(),
           unread: true,

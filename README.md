@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.5** release renders the original HTML, layout and images inside reply and forward compose, using a compact Gmail-style quote with a show/hide control. Quoted images load through the privacy proxy in the editor and are restored to their original external URLs when sent; the composer stays a normal compose window instead of expanding into an email page.
+
 The **0.3.4** release keeps delegated mailboxes out of move and rule destinations, stops the migration mapping form from refreshing while an administrator edits it, and clears source credentials after a migration is dismissed.
 
 The **0.3.3** release preserves the branded HTML of account and migration notification emails (server-generated, escaped) and surfaces notification failures in migration results.

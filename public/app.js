@@ -107,6 +107,7 @@ function safeEmailHtml(html, { message = null, allowImages = true } = {}) {
     }
     if (node.tagName === "IMG") {
       const source = node.getAttribute("src") || "";
+      if (source) node.setAttribute("data-email-src", source);
       let cidKey = /^cid:/i.test(source) ? source.slice(4).replace(/^<|>$/g, "").toLowerCase() : "";
       if (cidKey.includes("%")) {
         try { cidKey = decodeURIComponent(cidKey); } catch {}
@@ -4031,6 +4032,39 @@ function replyQuoteText(message) {
   return `On ${formatFullWhen(message.date)}, ${sender} wrote:\n${body.split("\n").map((line) => "> " + line).join("\n")}`;
 }
 
+function composeQuoteFor(message, kind = "reply") {
+  const sender = message.from?.name && message.from.name !== message.from.email
+    ? `${message.from.name} <${message.from.email}>`
+    : (message.from?.email || "the sender");
+  const imagesAllowed = message.folder !== "spam" && (state.preferences.autoLoadImages !== false || state.imageOverrides.has(message.id));
+  const original = safeEmailHtml(message.bodyHtml || textToEditorHTML(message.bodyText || ""), { message, allowImages: imagesAllowed });
+  if (kind === "forward") {
+    const to = (message.to || []).map((person) => person.name && person.name !== person.email ? `${person.name} <${person.email}>` : person.email).filter(Boolean).join(", ");
+    return {
+      text: `\n\n---------- Forwarded message ----------\nFrom: ${sender}\nDate: ${formatFullWhen(message.date)}\nSubject: ${message.subject}\nTo: ${to}\n\n${message.bodyText || htmlToText(message.bodyHtml || "")}`,
+      html: `<div class="compose-quote" data-compose-quote="forward"><p class="compose-quote-lead">---------- Forwarded message ----------</p><div class="compose-quote-meta"><span><b>From:</b> ${esc(sender)}</span><span><b>Date:</b> ${esc(formatFullWhen(message.date))}</span><span><b>Subject:</b> ${esc(message.subject)}</span><span><b>To:</b> ${esc(to || "undisclosed recipients")}</span></div><blockquote class="email-quote">${original}</blockquote></div>`
+    };
+  }
+  return {
+    text: replyQuoteText(message),
+    html: `<div class="compose-quote" data-compose-quote="reply"><p class="compose-quote-lead">On ${esc(formatFullWhen(message.date))}, ${esc(sender)} wrote:</p><blockquote class="email-quote">${original}</blockquote></div>`
+  };
+}
+
+function restoreComposeImageSources(html) {
+  const template = document.createElement("template");
+  template.innerHTML = String(html || "");
+  template.content.querySelectorAll("img[data-email-src]").forEach((image) => {
+    const original = String(image.getAttribute("data-email-src") || "").trim();
+    if (/^https?:\/\//i.test(original) || /^\/\//.test(original)) {
+      image.setAttribute("src", original.startsWith("//") ? `https:${original}` : original);
+    }
+    image.removeAttribute("data-email-src");
+    image.removeAttribute("data-blocked-src");
+  });
+  return template.innerHTML;
+}
+
 function replyToMessage(message, all = false) {
   if (!message) return;
   if (message.delegateOwnerId && message.delegateCanSend !== true) {
@@ -4040,11 +4074,13 @@ function replyToMessage(message, all = false) {
   const plan = replyRecipients(message, all);
   const receivedAlias = state.aliases.find((alias) => alias.canSend && (message.to || []).some((person) => normalizeEmail(person.email) === normalizeEmail(alias.email)));
   const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
+  const quote = composeQuoteFor(message, "reply");
   openCompose({
     toText: plan.to,
     ccText: all ? plan.cc.join(", ") : "",
     subject,
-    bodyText: replyQuoteText(message),
+    bodyText: quote.text,
+    bodyHtml: quote.html,
     fromEmail: receivedAlias ? receivedAlias.email : (state.aliases.find((alias) => alias.id === "primary") || state.aliases[0] || {}).email,
     threadId: message.threadId,
     inReplyTo: message.messageId,
@@ -4059,18 +4095,20 @@ async function replyWithAi(thread = currentThread()) {
   const plan = replyRecipients(target, false);
   const receivedAlias = state.aliases.find((alias) => alias.canSend && (target.to || []).some((person) => normalizeEmail(person.email) === normalizeEmail(alias.email)));
   const subject = /^re:/i.test(target.subject) ? target.subject : `Re: ${target.subject}`;
-  const quote = replyQuoteText(target);
+  const quoteData = composeQuoteFor(target, "reply");
   const session = openCompose({
     toText: plan.to,
     ccText: "",
     subject,
-    bodyText: quote,
+    bodyText: quoteData.text,
+    bodyHtml: quoteData.html,
     fromEmail: receivedAlias ? receivedAlias.email : (state.aliases.find((alias) => alias.id === "primary") || state.aliases[0] || {}).email,
     threadId: target.threadId,
     inReplyTo: target.messageId,
     kind: "reply"
   });
   if (!session) return;
+  const quote = quoteData.text;
   session.aiReplyPending = true;
   const status = session.el?.querySelector("[data-compose-status]");
   if (status) status.textContent = "AI is drafting a reply from the conversation…";
@@ -4097,10 +4135,12 @@ async function replyWithAi(thread = currentThread()) {
 
 function forwardMessage(message) {
   if (!message) return;
+  const quote = composeQuoteFor(message, "forward");
   openCompose({
     toText: "",
     subject: /^fwd:/i.test(message.subject) ? message.subject : `Fwd: ${message.subject}`,
-    bodyText: `\n\n---------- Forwarded message ----------\nFrom: ${message.from.name} <${message.from.email}>\nDate: ${formatFullWhen(message.date)}\nSubject: ${message.subject}\n\n${message.bodyText || htmlToText(message.bodyHtml)}`,
+    bodyText: quote.text,
+    bodyHtml: quote.html,
     fromEmail: (state.aliases.find((alias) => alias.id === "primary") || state.aliases[0] || {}).email,
     threadId: null,
     inReplyTo: null,
@@ -5106,6 +5146,7 @@ function composeEditorToolbar(session) {
     <label class="editor-color-wrap" title="Text color"><span class="editor-color-glyph">A</span><input type="color" data-editor-color value="#172230" title="Text color" aria-label="Text color"></label>
     <label class="editor-color-wrap" title="Highlight color"><span class="editor-color-glyph editor-highlight-glyph"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><input type="color" data-editor-highlight value="#fff2a8" title="Highlight color" aria-label="Highlight color"></label>
     ${button("removeFormat", "Tx", "Clear formatting", "Tx")}
+    ${session.hasQuote ? `<span class="editor-sep"></span><button type="button" data-compose-action="toggle-quote" class="compose-quote-toggle${session.quoteCollapsed ? " is-active" : ""}" title="${session.quoteCollapsed ? "Show quoted message" : "Hide quoted message"}" aria-pressed="${session.quoteCollapsed ? "true" : "false"}">❝ Quote</button>` : ""}
     <span class="compose-toolbar-mode">
       <button type="button" data-compose-action="mode" data-mode="html" class="${session.htmlMode ? "is-active" : ""}">HTML</button>
       <button type="button" data-compose-action="mode" data-mode="plain" class="${session.htmlMode ? "" : "is-active"}">Plain</button>
@@ -5124,7 +5165,7 @@ function composeTemplate(session) {
   const modeSwitch = `<span class="compose-toolbar-mode"><button type="button" data-compose-action="mode" data-mode="html" class="${htmlMode ? "is-active" : ""}">HTML</button><button type="button" data-compose-action="mode" data-mode="plain" class="${htmlMode ? "" : "is-active"}">Plain</button></span>`;
   const aiButton = state.ai.enabled ? `<button type="button" class="compose-ai-btn" data-compose-action="ai" title="AI writing assistant" aria-label="AI writing assistant"><svg class="icon" aria-hidden="true" style="width:15px;height:15px"><use href="#i-sparkles"/></svg></button>` : "";
   const bodyField = htmlMode
-    ? `<div class="compose-editor-wrap">${composeEditorToolbar(session)}<div class="compose-editor" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…">${editorHTML}</div></div>`
+    ? `<div class="compose-editor-wrap">${composeEditorToolbar(session)}<div class="compose-editor${session.quoteCollapsed ? " is-quote-collapsed" : ""}" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…">${editorHTML}</div></div>`
     : `<div class="compose-editor-wrap"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${modeSwitch}${aiButton}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea></div>`;
   return `<section class="compose${htmlMode ? " has-html-editor" : ""}" data-compose-id="${esc(session.id)}" role="dialog" aria-label="${esc(title)}">
     <div class="compose-head" data-compose-head>
@@ -5239,6 +5280,8 @@ function openCompose(prefill = {}, options = {}) {
   } else if (!bodyHtml && bodyText) {
     bodyHtml = textToEditorHTML(bodyText);
   }
+  const hasQuote = htmlMode && /class="compose-quote"/.test(bodyHtml);
+  const quoteIsRich = hasQuote && (/<img/i.test(bodyHtml) || bodyHtml.length > 1400);
   const session = {
     id,
     draftId,
@@ -5251,6 +5294,8 @@ function openCompose(prefill = {}, options = {}) {
     body: bodyText,
     bodyHtml,
     htmlMode,
+    hasQuote,
+    quoteCollapsed: quoteIsRich,
     fromEmail,
     autoSignature: signatureItem ? { id: signatureItem.id, text: signatureText, html: signatureHTML } : null,
     signatureContext: context,
@@ -5414,6 +5459,19 @@ function updateComposeFiles(session) {
   box.innerHTML = session.files.map((file, index) => composeFileCard(file, index)).join("");
 }
 
+function toggleComposeQuote(session) {
+  if (!session?.el || !session.hasQuote) return;
+  session.quoteCollapsed = !session.quoteCollapsed;
+  const editor = session.el.querySelector("[data-compose-editor]");
+  if (editor) editor.classList.toggle("is-quote-collapsed", session.quoteCollapsed);
+  const button = session.el.querySelector('[data-compose-action="toggle-quote"]');
+  if (button) {
+    button.classList.toggle("is-active", session.quoteCollapsed);
+    button.setAttribute("aria-pressed", session.quoteCollapsed ? "true" : "false");
+    button.title = session.quoteCollapsed ? "Show quoted message" : "Hide quoted message";
+  }
+}
+
 function reRenderCompose(session) {
   if (!session?.el) return;
   const wrapper = document.createElement("div");
@@ -5422,6 +5480,7 @@ function reRenderCompose(session) {
   if (!next) return;
   session.el.replaceWith(next);
   session.el = next;
+  if (session.quoteCollapsed) next.querySelector("[data-compose-editor]")?.classList.add("is-quote-collapsed");
   updateComposeWindow(session);
   updateComposeFiles(session);
   updateComposeStatus(session);
@@ -6462,7 +6521,7 @@ function composeSendPayload(session, extra = {}) {
     bcc: session.bcc,
     subject: session.subject,
     bodyText: session.body,
-    bodyHtml: session.htmlMode ? session.bodyHtml : "",
+    bodyHtml: session.htmlMode ? restoreComposeImageSources(session.bodyHtml) : "",
     attachments: session.files,
     threadId: session.threadId,
     inReplyTo: session.inReplyTo,
@@ -11895,6 +11954,7 @@ function bindEvents() {
         });
       } else if (kind === "attach") { openComposeAttach(session.id); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
+      else if (kind === "toggle-quote") { toggleComposeQuote(session); }
       else if (kind === "insert-signature") { openSignaturePicker(session); }
       else if (kind === "ai") { toggleComposeAi(session); }
       else if (kind === "cc") {

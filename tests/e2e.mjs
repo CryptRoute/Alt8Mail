@@ -13,7 +13,7 @@ await fs.mkdir(artifacts, { recursive: true });
 
 const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "a8m-e2e-"));
 const dataFile = path.join(tempDir, "db.json");
-const app = await createApp({ dataFile, holdMs: 4000, undoTtlMs: 15000 });
+const app = await createApp({ dataFile, holdMs: 4000, undoTtlMs: 15000, allowDevOutbox: true });
 const address = await app.listen(0);
 const base = `http://127.0.0.1:${address.port}`;
 let browser;
@@ -218,6 +218,9 @@ try {
   await page.pressKey("r");
   await sleep(400);
   check(await page.eval("[...document.querySelectorAll('.compose [data-compose-field=\"subject\"]')].at(-1)?.value.startsWith('Re:')"), "R opens a reply with a Re: subject");
+  check(await page.eval("Boolean(document.querySelector('.compose .compose-quote .email-quote'))"), "reply keeps the original HTML in a quoted message block");
+  check(await page.eval("document.querySelector('.compose .compose-quote-lead')?.textContent.startsWith('On ')"), "reply shows the compact On … wrote: quote lead");
+  check(await page.eval("Boolean(document.querySelector('.compose [data-compose-action=\"toggle-quote\"]'))"), "reply exposes a quote show/hide control");
   await page.eval("window.__a8mAutoConfirm = true");
   const replyId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
   await page.click(`[data-compose-id="${replyId}"] [data-compose-action="discard"]`);
@@ -836,6 +839,39 @@ try {
   check(await mobile.eval("!!document.querySelector('.folder-item[data-open-scheduled]')"), "mobile folder drawer exposes Scheduled");
   await mobile.screenshot(path.join(artifacts, "14-mobile-drawer.png"));
   await mobile.close();
+
+  console.log("\n[11a] HTML reply quote with images");
+  await page.eval(`(() => {
+    const csrf = decodeURIComponent((document.cookie.match(/(?:^|; )a8m_csrf=([^;]*)/) || [])[1] || "");
+    return fetch('/api/dev/inject', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({
+        subject: 'HTML reply fixture',
+        bodyText: 'The original message keeps its layout and image.',
+        bodyHtml: '<div style="background:#f4f7fb;padding:18px"><p style="font-size:18px;font-weight:700">The original message keeps its layout and image.</p><img src="https://images.example.test/logo.png" alt="Brand logo"></div>'
+      })
+    });
+  })()`);
+  await page.click('[data-folder="inbox"]');
+  await sleep(500);
+  await page.eval(`(() => {
+    const row = [...document.querySelectorAll('.msg')].find((item) => item.textContent.includes('HTML reply fixture'));
+    if (row) row.click();
+  })()`);
+  await sleep(400);
+  await page.click('.reader-toolbar [data-action="reply"]');
+  await sleep(500);
+  const htmlReplyId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
+  check(await page.eval(`Boolean(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote .email-quote img[src^="/api/mail/image"]'))`), "reply renders the original image through the privacy proxy");
+  check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote img')?.getAttribute('data-email-src') === 'https://images.example.test/logo.png'`), "the quoted image keeps its original URL for sending");
+  check(await page.eval(`Boolean(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote .email-quote p'))`), "reply preserves the original HTML layout inside the quote");
+  check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]').classList.contains('is-quote-collapsed')`), "rich replies start with the quote compacted");
+  await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="toggle-quote"]`);
+  await sleep(200);
+  check(await page.eval(`!document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]').classList.contains('is-quote-collapsed')`), "the quote control expands the original HTML");
+  await page.screenshot(path.join(artifacts, "11b-html-reply.png"));
+  await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="discard"]`);
+  await sleep(500);
 
   console.log("\n[11b] Passkey sign-in");
   await page.click("#railLogout");

@@ -32,6 +32,26 @@ func TestSanitizeComposeHTMLFonts(t *testing.T) {
 	}
 }
 
+func TestSanitizeComposeHTMLImages(t *testing.T) {
+	clean := sanitizeComposeHTML(`<p>Hello</p><img src="https://images.example.test/logo.png" alt="Logo" onerror="alert(1)"><img src="javascript:alert(1)"><img src="/api/mail/image?url=https%3A%2F%2Fimages.example.test%2Fquoted.png" data-email-src="https://images.example.test/quoted.png">`)
+	if !strings.Contains(clean, "https://images.example.test/logo.png") {
+		t.Fatalf("safe quoted image was removed: %s", clean)
+	}
+	if !strings.Contains(clean, "/api/mail/image") || !strings.Contains(clean, "data-email-src") {
+		t.Fatalf("draft image proxy was removed: %s", clean)
+	}
+	quoted := sanitizeComposeHTML(`<div class="compose-quote" style="border-top:1px solid #ccc"><p class="compose-quote-lead">On Monday, A wrote:</p><blockquote class="email-quote"><p>Hi</p></blockquote></div><div class="evil-class">x</div>`)
+	if !strings.Contains(quoted, `class="compose-quote"`) || !strings.Contains(quoted, `class="email-quote"`) {
+		t.Fatalf("quoted-message structure was removed from a draft: %s", quoted)
+	}
+	if strings.Contains(quoted, "evil-class") {
+		t.Fatalf("unsafe class attribute survived: %s", quoted)
+	}
+	if strings.Contains(strings.ToLower(clean), "onerror") || strings.Contains(strings.ToLower(clean), "javascript:") {
+		t.Fatalf("unsafe image attribute survived: %s", clean)
+	}
+}
+
 func TestNormalizeComposeBody(t *testing.T) {
 	htmlBody, textBody := normalizeComposeBody("", "Hello\n\nTeam")
 	if !strings.Contains(htmlBody, "<p>Hello</p>") || !strings.Contains(textBody, "Hello") {

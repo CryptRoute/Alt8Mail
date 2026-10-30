@@ -17,10 +17,12 @@ var composeHTMLPolicy = func() *bluemonday.Policy {
 	elements := []string{
 		"p", "br", "div", "span", "strong", "b", "em", "i", "u", "s", "strike",
 		"ul", "ol", "li", "blockquote", "h1", "h2", "h3", "h4", "pre", "code",
-		"a", "hr", "table", "thead", "tbody", "tr", "td", "th",
+		"a", "hr", "table", "thead", "tbody", "tr", "td", "th", "img",
 	}
 	policy.AllowElements(elements...)
 	policy.AllowAttrs("href", "title").OnElements("a")
+	policy.AllowAttrs("src", "alt", "title", "width", "height", "data-email-src").OnElements("img")
+	policy.AllowAttrs("class").Matching(regexp.MustCompile(`^(compose-quote|compose-quote-lead|compose-quote-meta|email-quote)$`)).OnElements("div", "p", "blockquote", "span")
 	policy.AllowAttrs("style").OnElements(elements...)
 	policy.AllowStyles("text-align").MatchingEnum("left", "center", "right", "justify").OnElements(elements...)
 	policy.AllowStyles("color", "background-color").Matching(composeColorPattern).OnElements(elements...)
@@ -30,6 +32,9 @@ var composeHTMLPolicy = func() *bluemonday.Policy {
 	policy.AllowStyles("font-size").Matching(composeFontSizePattern).OnElements(elements...)
 	policy.AllowStyles("text-decoration").Matching(composeTextDecorationPattern).OnElements(elements...)
 	policy.AllowURLSchemes("http", "https", "mailto")
+	// Draft bodies may reference Alt8Mail's same-origin image proxy. Outbound
+	// sends restore the original remote URL in the browser before submission.
+	policy.AllowRelativeURLs(true)
 	return policy
 }()
 
