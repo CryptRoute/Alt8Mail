@@ -37,6 +37,7 @@ func (s *Server) registerServerRoutes(mux *http.ServeMux) {
 }
 
 func (s *Server) handleServerSettings(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
+	s.seedServerIdentity(r.Context())
 	settings, err := s.allSettings(r.Context())
 	if err != nil {
 		writeFromError(w, err)

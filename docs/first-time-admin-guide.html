@@ -1,0 +1,1502 @@
+<title>Alt8Mail First Install</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="A first-time administrator's runbook for installing Alt8Mail on Debian 12, completing DNS and TLS, and taking the platform live safely.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;family=Source+Sans+3:wght@400;500;600&amp;display=swap">
+<style>
+/* Layout: an airmail field manual. Deep ink hero, cool paper body, postal blue for action, orange only for risk. */
+:root {
+  color-scheme: light;
+  --bg: #eef3f6;
+  --surface: #ffffff;
+  --surface-2: #e7eef3;
+  --surface-3: #dbe7ee;
+  --ink: #15242f;
+  --ink-2: #243947;
+  --muted: #5b6f7e;
+  --line: #d2dde5;
+  --line-2: #b7c6d2;
+  --accent: #0a5aa8;
+  --accent-2: #08457f;
+  --accent-soft: #e2eef9;
+  --accent-ink: #ffffff;
+  --signal: #a84800;
+  --signal-soft: #fff0e1;
+  --success: #086b50;
+  --success-soft: #e0f3ec;
+  --warning: #8a5300;
+  --warning-soft: #fff2d6;
+  --danger: #a72018;
+  --danger-soft: #fbe6e3;
+  --hero: #0b1b29;
+  --hero-2: #11314b;
+  --hero-ink: #edf5fb;
+  --hero-muted: #b7c9d9;
+  --hero-line: rgba(255, 255, 255, .18);
+  --code-bg: #0b1822;
+  --code-2: #102433;
+  --code-ink: #d9e8f4;
+  --code-muted: #8fa9bd;
+  --code-line: #20384a;
+  --shadow: 0 18px 45px rgba(17, 38, 56, .08);
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #091117;
+    --surface: #101b24;
+    --surface-2: #172631;
+    --surface-3: #1d2f3c;
+    --ink: #e7eef5;
+    --ink-2: #f3f8fc;
+    --muted: #9eb0bf;
+    --line: #283b4a;
+    --line-2: #3b5263;
+    --accent: #78b9f2;
+    --accent-2: #a5d3ff;
+    --accent-soft: #13324a;
+    --accent-ink: #07131e;
+    --signal: #f3b45f;
+    --signal-soft: #33230f;
+    --success: #5fd3a6;
+    --success-soft: #102d25;
+    --warning: #f5c15c;
+    --warning-soft: #32260e;
+    --danger: #f28b82;
+    --danger-soft: #351a18;
+    --hero: #07121c;
+    --hero-2: #0d2437;
+    --hero-ink: #edf5fb;
+    --hero-muted: #b3c6d6;
+    --hero-line: rgba(255, 255, 255, .2);
+    --code-bg: #060d13;
+    --code-2: #0b1a24;
+    --code-ink: #d7e7f4;
+    --code-muted: #88a2b5;
+    --code-line: #1b3140;
+    --shadow: 0 22px 60px rgba(0, 0, 0, .4);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #091117;
+  --surface: #101b24;
+  --surface-2: #172631;
+  --surface-3: #1d2f3c;
+  --ink: #e7eef5;
+  --ink-2: #f3f8fc;
+  --muted: #9eb0bf;
+  --line: #283b4a;
+  --line-2: #3b5263;
+  --accent: #78b9f2;
+  --accent-2: #a5d3ff;
+  --accent-soft: #13324a;
+  --accent-ink: #07131e;
+  --signal: #f3b45f;
+  --signal-soft: #33230f;
+  --success: #5fd3a6;
+  --success-soft: #102d25;
+  --warning: #f5c15c;
+  --warning-soft: #32260e;
+  --danger: #f28b82;
+  --danger-soft: #351a18;
+  --hero: #07121c;
+  --hero-2: #0d2437;
+  --hero-ink: #edf5fb;
+  --hero-muted: #b3c6d6;
+  --hero-line: rgba(255, 255, 255, .2);
+  --code-bg: #060d13;
+  --code-2: #0b1a24;
+  --code-ink: #d7e7f4;
+  --code-muted: #88a2b5;
+  --code-line: #1b3140;
+  --shadow: 0 22px 60px rgba(0, 0, 0, .4);
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.65;
+  overflow-x: clip;
+}
+::selection { background: var(--accent-soft); color: var(--ink); }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: var(--accent-2); }
+:where(a, button, summary, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+img, svg { max-width: 100%; }
+.airmail {
+  height: 5px;
+  background: repeating-linear-gradient(135deg, var(--accent) 0 14px, var(--bg) 14px 28px, var(--signal) 28px 42px, var(--bg) 42px 56px);
+  opacity: .86;
+}
+.shell {
+  width: 100%;
+  max-width: 1240px;
+  margin-inline: auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.site-head { border-bottom: 1px solid var(--line); }
+.site-head .shell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-block: 15px;
+}
+.brand { display: inline-flex; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; }
+.brand:hover { color: var(--ink); }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 600 .78rem var(--font-mono);
+  letter-spacing: -.06em;
+}
+.brand-copy { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.brand-name { font: 700 1.02rem var(--font-display); letter-spacing: -.02em; }
+.brand-sub { font: 500 .64rem var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.head-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); font: 500 .7rem var(--font-mono); letter-spacing: .04em; }
+.head-pill { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 4px 9px; color: var(--ink-2); }
+.hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, .72fr);
+  gap: clamp(22px, 4vw, 48px);
+  margin-top: 24px;
+  padding: clamp(26px, 4.4vw, 54px);
+  border-radius: 24px;
+  background: linear-gradient(145deg, var(--hero) 0%, var(--hero-2) 100%);
+  color: var(--hero-ink);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,.14) 1px, transparent 0);
+  background-size: 18px 18px;
+  opacity: .22;
+  pointer-events: none;
+}
+.hero-copy, .hero-card { position: relative; z-index: 1; min-width: 0; }
+.eyebrow {
+  margin: 0 0 16px;
+  color: var(--hero-muted);
+  font: 500 .69rem var(--font-mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+.hero h1 {
+  margin: 0;
+  max-width: 13ch;
+  color: var(--hero-ink);
+  font: 700 clamp(2.45rem, 5vw, 4.4rem)/.98 var(--font-display);
+  letter-spacing: -.045em;
+  text-wrap: balance;
+}
+.hero-lede {
+  max-width: 58ch;
+  margin: 20px 0 0;
+  color: var(--hero-muted);
+  font-size: clamp(1rem, 1.4vw, 1.14rem);
+  line-height: 1.6;
+}
+.hero-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 26px; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: 600 .88rem var(--font-body);
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: var(--accent-ink); }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--line-2); }
+.btn.ghost:hover { background: var(--surface-2); color: var(--ink); }
+.hero .btn.ghost { color: var(--hero-ink); border-color: var(--hero-line); }
+.hero .btn.ghost:hover { background: rgba(255,255,255,.08); color: var(--hero-ink); }
+.hero-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 56ch;
+  margin-top: 22px;
+  color: var(--hero-muted);
+  font-size: .8rem;
+  line-height: 1.55;
+}
+.hero-note svg { flex: none; margin-top: 2px; color: #8fc5f0; }
+.hero-card {
+  align-self: start;
+  padding: 54px 20px 20px;
+  border: 1px solid var(--hero-line);
+  border-radius: 18px;
+  background: rgba(255,255,255,.055);
+}
+.stamp {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  transform: rotate(3deg);
+  border: 1px dashed var(--hero-line);
+  border-radius: 5px;
+  padding: 5px 8px;
+  color: var(--hero-muted);
+  font: 500 .61rem/1.35 var(--font-mono);
+  letter-spacing: .08em;
+  text-align: center;
+}
+.card-kicker { margin: 0 0 13px; color: var(--hero-muted); font: 500 .63rem var(--font-mono); letter-spacing: .13em; text-transform: uppercase; }
+.mini-phases { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.mini-phases li { display: grid; grid-template-columns: 27px minmax(0, 1fr); gap: 9px; }
+.mini-phases .n { color: var(--hero-muted); font: 500 .68rem var(--font-mono); padding-top: 2px; }
+.mini-phases b { display: block; color: var(--hero-ink); font: 600 .82rem var(--font-display); letter-spacing: -.01em; }
+.mini-phases small { display: block; margin-top: 1px; color: var(--hero-muted); font-size: .75rem; line-height: 1.45; }
+.card-foot { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--hero-line); color: var(--hero-muted); font-size: .75rem; line-height: 1.5; }
+.facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.fact {
+  min-width: 0;
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+}
+.fact-label { display: block; color: var(--muted); font: 500 .63rem var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+.fact-value { display: block; margin-top: 4px; color: var(--ink); font: 600 1rem var(--font-display); letter-spacing: -.015em; }
+.fact-note { display: block; margin-top: 1px; color: var(--muted); font-size: .75rem; line-height: 1.4; }
+.doc-layout {
+  display: grid;
+  grid-template-columns: 218px minmax(0, 1fr);
+  gap: clamp(24px, 4vw, 52px);
+  margin-top: 46px;
+}
+.toc { position: sticky; top: 24px; align-self: start; min-width: 0; }
+.toc-title { margin: 0 0 10px; color: var(--muted); font: 500 .65rem var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+.toc ol { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.toc a {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 6px;
+  padding: 6px 7px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.4;
+  text-decoration: none;
+}
+.toc a:hover { background: var(--surface); color: var(--ink); }
+.toc .n { color: var(--line-2); font: 500 .66rem var(--font-mono); padding-top: 2px; }
+.doc { min-width: 0; max-width: 840px; }
+.phase { padding-block: 36px; border-top: 1px solid var(--line); scroll-margin-top: 24px; }
+.phase:first-child { border-top: 0; padding-top: 0; }
+.phase-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 9px;
+  color: var(--accent);
+  font: 500 .68rem var(--font-mono);
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+.phase-label::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+.phase h2 {
+  margin: 0 0 10px;
+  color: var(--ink-2);
+  font: 700 clamp(1.65rem, 3.2vw, 2.15rem)/1.08 var(--font-display);
+  letter-spacing: -.035em;
+  text-wrap: balance;
+}
+.phase-intro { max-width: 66ch; margin: 0 0 22px; color: var(--muted); font-size: 1rem; }
+.doc h3 {
+  margin: 28px 0 8px;
+  color: var(--ink);
+  font: 600 1.06rem/1.3 var(--font-display);
+  letter-spacing: -.015em;
+}
+.doc h4 { margin: 20px 0 6px; color: var(--ink); font: 600 .92rem var(--font-body); }
+.doc p, .doc li { max-width: 68ch; }
+.doc p { margin: 0 0 13px; }
+.doc ul, .doc ol { margin: 8px 0 15px; padding-left: 1.2rem; }
+.doc li { margin: 3px 0; }
+.doc li::marker { color: var(--accent); }
+.doc strong { color: var(--ink); font-weight: 600; }
+.doc code {
+  padding: .08em .34em;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font: 400 .84em var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin: 20px 0;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 11px 11px 0;
+  background: var(--accent-soft);
+  color: var(--ink-2);
+  font-size: .9rem;
+  line-height: 1.55;
+}
+.callout svg { flex: none; margin-top: 2px; color: var(--accent); }
+.callout strong { display: block; margin-bottom: 2px; color: var(--ink); font-weight: 600; }
+.callout p:last-child { margin-bottom: 0; }
+.callout.risk { border-left-color: var(--signal); background: var(--signal-soft); }
+.callout.risk svg { color: var(--signal); }
+.callout.good { border-left-color: var(--success); background: var(--success-soft); }
+.callout.good svg { color: var(--success); }
+.callout.danger { border-left-color: var(--danger); background: var(--danger-soft); }
+.callout.danger svg { color: var(--danger); }
+.table-wrap {
+  margin: 12px 0 20px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  -webkit-overflow-scrolling: touch;
+}
+table.data { width: 100%; min-width: 560px; border-collapse: collapse; font-size: .86rem; font-variant-numeric: tabular-nums; }
+table.data th {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  font: 500 .65rem var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+table.data td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.data tr:last-child td { border-bottom: 0; }
+table.data td:first-child { color: var(--ink); font-weight: 600; }
+table.data code { white-space: nowrap; }
+table.data .wrap code { white-space: normal; }
+table.data .muted { color: var(--muted); }
+.door-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 16px 0 22px; }
+.door {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.door-kicker { display: flex; align-items: center; gap: 7px; color: var(--muted); font: 500 .62rem var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.door-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.door-url { display: block; margin-top: 8px; color: var(--accent); font: 500 .76rem/1.45 var(--font-mono); overflow-wrap: anywhere; }
+.door-name { display: block; margin-top: 7px; color: var(--ink); font: 600 .9rem var(--font-display); }
+.door p { margin: 3px 0 0; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.code {
+  margin: 12px 0 18px;
+  overflow: hidden;
+  border: 1px solid var(--code-line);
+  border-radius: 10px;
+  background: var(--code-bg);
+  box-shadow: 0 8px 20px rgba(5, 16, 25, .12);
+}
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--code-line);
+  background: var(--code-2);
+}
+.code-label { color: var(--code-muted); font: 500 .64rem var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.copy {
+  min-height: 25px;
+  padding: 3px 8px;
+  border: 1px solid var(--code-line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--code-muted);
+  font: 500 .64rem var(--font-mono);
+  cursor: pointer;
+}
+.copy:hover { color: var(--code-ink); border-color: var(--code-muted); }
+.code pre { margin: 0; padding: 13px 15px; overflow-x: auto; color: var(--code-ink); font: 400 .8rem/1.62 var(--font-mono); tab-size: 2; }
+.code code { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; white-space: pre; }
+.steps { display: grid; gap: 10px; margin: 14px 0 20px; }
+.step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
+.step-n { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--line-2); border-radius: 50%; color: var(--accent); font: 500 .66rem var(--font-mono); }
+.step b { display: block; color: var(--ink); font-weight: 600; line-height: 1.4; }
+.step p { margin: 1px 0 0; color: var(--muted); font-size: .87rem; line-height: 1.5; }
+.check-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 18px; }
+.progress-track { flex: 1 1 150px; height: 7px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.progress-fill { display: block; width: 0; height: 100%; background: var(--accent); border-radius: inherit; transition: width .2s ease; }
+.check-count { color: var(--muted); font: 500 .7rem var(--font-mono); white-space: nowrap; }
+.btn.small { min-height: 31px; padding: 5px 10px; font-size: .78rem; border-color: var(--line-2); background: var(--surface); color: var(--ink-2); }
+.btn.small:hover { background: var(--surface-2); color: var(--ink); }
+.check-group { margin-top: 20px; }
+.check-group h3 { margin-bottom: 8px; }
+.checks { display: grid; gap: 7px; }
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: .87rem;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.check:hover { border-color: var(--line-2); }
+.check input { flex: none; width: 15px; height: 15px; margin: 3px 0 0; accent-color: var(--accent); }
+.check input:checked + span { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.faq { margin-top: 14px; }
+.faq details { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.faq summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+  color: var(--ink);
+  font: 600 .94rem/1.45 var(--font-body);
+  list-style: none;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; flex: none; color: var(--accent); font: 500 1.05rem var(--font-mono); }
+.faq details[open] summary::after { content: "−"; }
+.faq details p { margin: 9px 0 0; color: var(--muted); font-size: .91rem; line-height: 1.6; max-width: 66ch; }
+.faq details code { overflow-wrap: anywhere; }
+.phase-end {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 22px 0 0;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line-2);
+  color: var(--muted);
+  font-size: .84rem;
+}
+.phase-end svg { flex: none; margin-top: 2px; color: var(--success); }
+.phase-end strong { color: var(--ink); font-weight: 600; }
+.site-foot { border-top: 1px solid var(--line); margin-top: 22px; padding-block: 22px 30px; color: var(--muted); font-size: .8rem; }
+.site-foot .foot-row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.site-foot strong { color: var(--ink); font-weight: 600; }
+.mono { font-family: var(--font-mono); }
+.nowrap { white-space: nowrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (max-width: 1020px) {
+  .hero { grid-template-columns: 1fr; }
+  .hero h1 { max-width: 15ch; }
+  .hero-card { max-width: none; }
+  .doc-layout { grid-template-columns: 1fr; gap: 24px; }
+  .toc { position: static; border-block: 1px solid var(--line); padding-block: 12px; }
+  .toc-title { margin-bottom: 7px; }
+  .toc ol { display: flex; flex-wrap: wrap; gap: 4px; }
+  .toc a { grid-template-columns: auto; gap: 5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface); font-size: .78rem; }
+  .toc .n { padding-top: 1px; }
+  .doc { max-width: 840px; }
+}
+@media (max-width: 720px) {
+  .facts { grid-template-columns: 1fr 1fr; }
+  .door-grid { grid-template-columns: 1fr; }
+  .hero { padding: 24px; border-radius: 18px; }
+  .hero h1 { font-size: clamp(2.25rem, 11vw, 3.2rem); }
+  .hero-actions .btn { flex: 1 1 100%; }
+  .site-head .shell { align-items: flex-start; }
+  .head-meta { width: 100%; }
+  .phase { padding-block: 28px; }
+  .phase h2 { font-size: 1.65rem; }
+  .phase-intro { font-size: .96rem; }
+  .site-foot .shell { display: block; }
+}
+@media (max-width: 460px) {
+  .facts { grid-template-columns: 1fr; }
+  .hero { padding: 20px; }
+  .hero-card { padding: 50px 15px 16px; }
+  .stamp { top: 12px; right: 12px; }
+  .brand-copy { display: block; }
+  .brand-sub { display: block; margin-top: 1px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}
+</style>
+
+<div class="airmail" aria-hidden="true"></div>
+<header class="site-head">
+  <div class="shell">
+    <a class="brand" href="#top" aria-label="Alt8Mail First Install, back to top">
+      <span class="brand-mark" aria-hidden="true">A8</span>
+      <span class="brand-copy">
+        <span class="brand-name">Alt8Mail</span>
+        <span class="brand-sub">First install guide</span>
+      </span>
+    </a>
+    <div class="head-meta">
+      <span class="head-pill">v0.3.12</span>
+      <span class="head-pill">Debian 12</span>
+      <span>Administrator runbook</span>
+    </div>
+  </div>
+</header>
+
+<main id="top" class="shell">
+  <section class="hero" aria-labelledby="heroTitle">
+    <div class="hero-copy">
+      <p class="eyebrow">First-time administrator runbook</p>
+      <h1 id="heroTitle">From bare Debian to a working mail domain.</h1>
+      <p class="hero-lede">A practical installation and hand-over guide for the person who will own Alt8Mail. Follow the phases in order. Each one ends with a check you can verify before moving on.</p>
+      <div class="hero-actions">
+        <a class="btn primary" href="#preflight">Start with preflight</a>
+        <a class="btn ghost" href="#checklist">Open the go-live checklist</a>
+      </div>
+      <p class="hero-note">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.2v3.5M8 5.1h.01"/></svg>
+        <span>This guide contains no credentials. Keep generated passwords in your password manager, never in chat or email.</span>
+      </p>
+    </div>
+    <aside class="hero-card" aria-label="The seven installation phases">
+      <div class="stamp">ALT8MAIL<br>0.3.12<br>DEBIAN 12</div>
+      <p class="card-kicker">The shape of the job</p>
+      <ol class="mini-phases">
+        <li><span class="n">01</span><div><b>Preflight</b><small>Host, names, DNS and ports</small></div></li>
+        <li><span class="n">02</span><div><b>Install</b><small>Run the installer and verify the stack</small></div></li>
+        <li><span class="n">03</span><div><b>First sign-in</b><small>Webmail, customer admin, System Control</small></div></li>
+        <li><span class="n">04</span><div><b>Secure</b><small>MFA, SSH, 8808 and admin access</small></div></li>
+        <li><span class="n">05</span><div><b>Make mail flow</b><small>DNS, TLS, inbound and outbound</small></div></li>
+        <li><span class="n">06</span><div><b>Add people</b><small>Users, import, policy and pilot</small></div></li>
+        <li><span class="n">07</span><div><b>Operate</b><small>Updates, backups and recovery</small></div></li>
+      </ol>
+      <p class="card-foot">Written against Alt8Mail 0.3.12. If your release is newer, use the same phases and check the release notes for changed paths.</p>
+    </aside>
+  </section>
+
+  <section class="facts" aria-label="Installation at a glance">
+    <div class="fact"><span class="fact-label">Operating system</span><span class="fact-value">Debian 12</span><span class="fact-note">bookworm, 64-bit, fresh host</span></div>
+    <div class="fact"><span class="fact-label">Typical install</span><span class="fact-value">15–30 min</span><span class="fact-note">plus package and signature downloads</span></div>
+    <div class="fact"><span class="fact-label">Administration</span><span class="fact-value">3 planes</span><span class="fact-note">separate identities and sessions</span></div>
+    <div class="fact"><span class="fact-label">First blocker</span><span class="fact-value">Port 25</span><span class="fact-note">confirm with your provider before installing</span></div>
+  </section>
+
+  <div class="doc-layout">
+    <nav class="toc" aria-label="Guide contents">
+      <p class="toc-title">Contents</p>
+      <ol>
+        <li><a href="#preflight"><span class="n">01</span><span>Preflight</span></a></li>
+        <li><a href="#install"><span class="n">02</span><span>Install</span></a></li>
+        <li><a href="#signin"><span class="n">03</span><span>First sign-in</span></a></li>
+        <li><a href="#secure"><span class="n">04</span><span>Secure it</span></a></li>
+        <li><a href="#mailflow"><span class="n">05</span><span>Make mail flow</span></a></li>
+        <li><a href="#people"><span class="n">06</span><span>Add people</span></a></li>
+        <li><a href="#operate"><span class="n">07</span><span>Operate and recover</span></a></li>
+        <li><a href="#reference"><span class="n">08</span><span>Quick reference</span></a></li>
+        <li><a href="#troubleshooting"><span class="n">09</span><span>Troubleshooting</span></a></li>
+        <li><a href="#checklist"><span class="n">10</span><span>Go-live checklist</span></a></li>
+      </ol>
+    </nav>
+
+    <article class="doc">
+      <section class="phase" id="preflight">
+        <p class="phase-label">Phase 01 · Preflight</p>
+        <h2>Prepare the server and the names.</h2>
+        <p class="phase-intro">The installer is opinionated. Give it a fresh Debian 12 host, a public IPv4 address and working DNS, and the first installation is predictable. Solve the provider-level questions now, while nothing is live.</p>
+        <p>The commands in this guide assume a root shell. If you sign in with a sudo account, prefix host-level commands with <code>sudo</code>.</p>
+
+        <h3>Server baseline</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Item</th><th>Requirement</th></tr></thead>
+            <tbody>
+              <tr><td>Operating system</td><td>Debian 12 (bookworm), 64-bit. The installer refuses other distributions.</td></tr>
+              <tr><td>Access</td><td><code>root</code>, or a sudo account that can become root.</td></tr>
+              <tr><td>CPU and RAM</td><td>2 vCPU and 4 GB as a practical floor. Use 4 vCPU and 8 GB or more for production, then watch the dashboard under real load.</td></tr>
+              <tr><td>Disk</td><td>50 GB minimum for evaluation. Size production for Maildirs, attachments, PostgreSQL growth, logs and backup headroom.</td></tr>
+              <tr><td>Network</td><td>Public IPv4 address plus control of the provider firewall and reverse DNS.</td></tr>
+              <tr><td>Host state</td><td>Fresh host with no other mail or web stack. Take a provider snapshot first.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The installer adds a 2 GiB swap file when the host has less than 2 GiB of swap, sets the host time zone to UTC and sets the mail hostname. Keep UTC on the host; each user chooses their own time zone in the workspace.</p>
+
+        <h3>Choose the five names</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Value</th><th>Example</th><th>Meaning and rule</th></tr></thead>
+            <tbody>
+              <tr><td>Mail domain</td><td><code>example.com</code></td><td>The domain in users' addresses. The owner address must end in <code>@example.com</code>.</td></tr>
+              <tr><td>Mail hostname</td><td><code>mail.example.com</code></td><td>MX target and the name on the TLS certificate.</td></tr>
+              <tr><td>Tenant name</td><td>Example Corp</td><td>Display name for the organization.</td></tr>
+              <tr><td>Tenant slug</td><td><code>example</code></td><td>Lowercase letters, digits and hyphens. No spaces.</td></tr>
+              <tr><td>System Control email</td><td><code>sysadmin@example.com</code></td><td>A separate login for the host control plane. It does not create a mailbox.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>DNS before installation</h3>
+        <p>If you want an automatic Let's Encrypt certificate, create both A records before running the installer. The installer requests one certificate covering the bare domain and the mail hostname.</p>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Why</th></tr></thead>
+            <tbody>
+              <tr><td>A</td><td><code>mail.example.com</code></td><td class="wrap"><code>YOUR_SERVER_IPV4</code></td><td>Webmail, TLS and MX target</td></tr>
+              <tr><td>A</td><td><code>example.com</code></td><td class="wrap"><code>YOUR_SERVER_IPV4</code></td><td>Part of the standard certificate request</td></tr>
+              <tr><td>PTR / rDNS</td><td>Your server IPv4</td><td class="wrap"><code>mail.example.com</code></td><td>Set at the VPS provider; improves outbound reputation</td></tr>
+              <tr><td>CAA</td><td><code>example.com</code></td><td class="wrap">Include <code>letsencrypt.org</code></td><td>Only if you already publish CAA; a restrictive record blocks issuance</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout risk">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 1.8 14.5 13.5H1.5L8 1.8Z"/><path d="M8 6v3.2M8 11.5h.01"/></svg>
+          <div><strong>Make the mail record DNS-only.</strong>If <code>mail.example.com</code> is behind Cloudflare or another HTTP proxy, it cannot carry SMTP or IMAP. Turn the proxy off for that record. If the bare domain has to stay with a different website, use a dedicated mail domain instead of forcing the standard certificate path.</div>
+        </div>
+        <p>Check the basics from your workstation:</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · DNS preflight</span><button class="copy" type="button" aria-label="Copy DNS preflight commands">Copy</button></div>
+          <pre><code>dig +short A mail.example.com
+dig +short A example.com
+dig -x YOUR_SERVER_IPV4 +short
+dig +short CAA example.com</code></pre>
+        </div>
+        <p>Both A records should return the server address, and reverse DNS should return <code>mail.example.com.</code> once the provider has applied it. Keep the TTL low, between 300 and 3600 seconds, while you are setting this up.</p>
+
+        <h3>Ports the installer expects</h3>
+        <p>The installer configures UFW, but it cannot override a provider firewall. Open the same ports in the provider's security group.</p>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Port</th><th>Purpose</th><th>Who needs it</th></tr></thead>
+            <tbody>
+              <tr><td>22 / your SSH port</td><td>Administration</td><td>You only</td></tr>
+              <tr><td>80</td><td>ACME challenge and HTTP redirect</td><td>Public</td></tr>
+              <tr><td>443</td><td>Webmail, customer admin, TLS</td><td>Public</td></tr>
+              <tr><td>25</td><td>Inbound SMTP</td><td>Public; <strong>provider must allow it</strong></td></tr>
+              <tr><td>587</td><td>Authenticated submission</td><td>Mail clients</td></tr>
+              <tr><td>993</td><td>IMAPS</td><td>Mail clients</td></tr>
+              <tr><td>995</td><td>POP3S</td><td>Mail clients that use POP</td></tr>
+              <tr><td>4190</td><td>ManageSieve</td><td>Optional; close it if unused</td></tr>
+              <tr><td>8808</td><td>System Control</td><td>Administrators only; root-equivalent</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout risk">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.3"/><path d="M8 4.8v4M8 11.1h.01"/></svg>
+          <div><strong>Confirm port 25 with the provider before you install.</strong>Ask for inbound and outbound TCP 25 to be open. UFW cannot fix an upstream block. Outbound 25 can be handled with a smarthost later; inbound 25 cannot, because remote mail servers must reach your MX directly.</div>
+        </div>
+        <p>Never expose PostgreSQL <code>5432</code>, Redis <code>6379</code>, the Go backends on <code>8080</code>/<code>8081</code>, or System Control without an access restriction.</p>
+
+        <h3>Preflight checklist</h3>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="prep-1"><span>Fresh Debian 12 host with a public IPv4 address and a provider snapshot</span></label>
+          <label class="check"><input type="checkbox" id="prep-2"><span><code>mail.example.com</code> and the bare domain both point at this host</span></label>
+          <label class="check"><input type="checkbox" id="prep-3"><span>Reverse DNS points to <code>mail.example.com</code></span></label>
+          <label class="check"><input type="checkbox" id="prep-4"><span>Provider confirms inbound and outbound TCP 25 are open</span></label>
+          <label class="check"><input type="checkbox" id="prep-5"><span>Provider firewall mirrors the public port list</span></label>
+        </div>
+        <p class="phase-end"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5"/></svg><span><strong>You are ready to install when</strong> the host, DNS and port 25 all answer correctly.</span></p>
+      </section>
+
+      <section class="phase" id="install">
+        <p class="phase-label">Phase 02 · Install</p>
+        <h2>Run the installer once, then prove the stack.</h2>
+        <p class="phase-intro">Use the prebuilt release bundle when possible. It avoids a server-side Go build and gives you a checksum to verify before anything runs.</p>
+
+        <h3>Upload and verify the release</h3>
+        <p>Download the release bundle and its checksum from the repository's GitHub Releases page, then copy both to the server.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">workstation · upload 0.3.12</span><button class="copy" type="button" aria-label="Copy upload commands">Copy</button></div>
+          <pre><code>scp alt8mail-0.3.12.tar.gz alt8mail-0.3.12.tar.gz.sha256 root@YOUR_SERVER_IP:/root/</code></pre>
+        </div>
+        <div class="code">
+          <div class="code-head"><span class="code-label">server · verify and extract</span><button class="copy" type="button" aria-label="Copy verification commands">Copy</button></div>
+          <pre><code>cd /root
+sha256sum -c alt8mail-0.3.12.tar.gz.sha256
+tar -xzf alt8mail-0.3.12.tar.gz
+cd alt8mail-0.3.12</code></pre>
+        </div>
+        <p>If you are installing from a source checkout, use one of the private transfer paths below. Do not clone the private repository with an account password, and do not copy the development working tree to the server.</p>
+
+        <h3>Private transfer from GitHub</h3>
+        <h4>Option A · The server pulls the tag from GitHub (recommended)</h4>
+        <p>Create a repository-scoped deploy key on the server before running the installer. The installer reuses this key for future updates, so one credential covers both the initial clone and <code>alt8mail-update</code>.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">server · create the deploy key</span><button class="copy" type="button" aria-label="Copy deploy key commands">Copy</button></div>
+          <pre><code>apt-get update &amp;&amp; apt-get install -y git openssh-client
+install -d -m 0755 /etc/a8m
+ssh-keygen -t ed25519 -N '' -C "alt8mail-$(hostname)" -f /etc/a8m/github_readonly
+chmod 0600 /etc/a8m/github_readonly
+cat /etc/a8m/github_readonly.pub</code></pre>
+        </div>
+        <p>Add the public key in GitHub under <strong>Repository → Settings → Deploy keys → Add deploy key</strong>. Name it <code>alt8mail-server</code> and leave <strong>Allow write access</strong> off. Then test the key and clone the immutable release tag:</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">server · test and clone v0.3.12</span><button class="copy" type="button" aria-label="Copy clone commands">Copy</button></div>
+          <pre><code>GIT_SSH_COMMAND='ssh -i /etc/a8m/github_readonly -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new' ssh -T git@github.com
+GIT_SSH_COMMAND='ssh -i /etc/a8m/github_readonly -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new' \
+  git clone --branch v0.3.12 git@github.com:CryptRoute/Alt8Mail.git /root/Alt8Mail
+cd /root/Alt8Mail
+git describe --tags</code></pre>
+        </div>
+        <p>GitHub shows a success message instead of a shell, so a nonzero exit from <code>ssh -T</code> is normal. If it reports <code>Permission denied</code>, the key is not on this repository or organization SSO needs the deploy key authorized.</p>
+
+        <h4>Option B · Copy a tagged source archive over SSH</h4>
+        <p>If the cloud server must not connect to GitHub, create an archive from the immutable tag on this workstation and copy it directly over SSH.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">workstation · archive and copy</span><button class="copy" type="button" aria-label="Copy archive transfer commands">Copy</button></div>
+          <pre><code>git archive --format=tar.gz --prefix=alt8mail-0.3.12/ -o dist/alt8mail-0.3.12-source.tar.gz v0.3.12
+scp -P 22 -i "$HOME/.ssh/alt8mail_server" dist/alt8mail-0.3.12-source.tar.gz root@YOUR_SERVER_IP:/root/</code></pre>
+        </div>
+        <div class="code">
+          <div class="code-head"><span class="code-label">server · extract the tagged source</span><button class="copy" type="button" aria-label="Copy source extraction commands">Copy</button></div>
+          <pre><code>cd /root
+tar -xzf alt8mail-0.3.12-source.tar.gz
+cd alt8mail-0.3.12</code></pre>
+        </div>
+        <p>The archive contains only tracked files from the tag. It excludes ignored local secrets, the <code>data/</code> workspace and uncommitted changes. It is source-only, so the installer downloads Go and builds the binaries. The installer generates <code>/etc/a8m/github_readonly</code>; add its <code>.pub</code> to GitHub after installation. If the server can never reach GitHub, updates stay manual: repeat this archive and copy step for each release.</p>
+        <p>On PowerShell, use <code>$HOME\.ssh\alt8mail_server</code> for the key path, or omit <code>-i</code> if your default key is configured. Use <code>ssh -p</code> and <code>scp -P</code> for a nonstandard SSH port.</p>
+
+        <h3>Run the installer</h3>
+        <p>Run this as root. If you sign in with a sudo account, use <code>sudo bash install.sh</code>.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · install 0.3.12</span><button class="copy" type="button" aria-label="Copy installation command">Copy</button></div>
+          <pre><code>bash install.sh \
+  --domain example.com \
+  --hostname mail.example.com \
+  --admin-name "Jane Doe" \
+  --admin-email owner@example.com \
+  --tenant-name "Example Corp" \
+  --tenant-slug example \
+  --control-email sysadmin@example.com \
+  --tls letsencrypt \
+  --tls-email admin@example.com</code></pre>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Flag</th><th>What it sets</th></tr></thead>
+            <tbody>
+              <tr><td><code>--domain</code></td><td>Bare mail domain used in addresses. The owner address must use this domain.</td></tr>
+              <tr><td><code>--hostname</code></td><td>MX target and TLS name. Defaults to <code>mail.&lt;domain&gt;</code>.</td></tr>
+              <tr><td><code>--admin-email</code>, <code>--admin-name</code></td><td>First tenant owner identity.</td></tr>
+              <tr><td><code>--tenant-name</code>, <code>--tenant-slug</code></td><td>Organization display name and lowercase identifier.</td></tr>
+              <tr><td><code>--control-email</code></td><td>First System Control superadmin. Separate from webmail.</td></tr>
+              <tr><td><code>--tls letsencrypt</code>, <code>--tls-email</code></td><td>Public certificate and Let's Encrypt account email.</td></tr>
+              <tr><td><code>--non-interactive</code></td><td>Optional. Fail instead of prompting if a required value is missing.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Do not use <code>--skip-packages</code> on a real host. Do not use <code>--tls selfsigned</code> for production unless you are deliberately working in a lab and will replace the certificate before users arrive.</p>
+        <div class="callout">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.2v3.5M8 5.1h.01"/></svg>
+          <div><strong>The installer is safe to re-run for repair.</strong>It preserves generated secrets and existing accounts, but it reapplies its own nginx, Postfix and UFW configuration. Review custom changes before re-running it.</div>
+        </div>
+
+        <h3>What the installer changes</h3>
+        <div class="steps">
+          <div class="step"><span class="step-n">01</span><div><b>Installs the Debian mail stack.</b><p>PostgreSQL 15, Redis 7, Dovecot, Postfix, Rspamd, ClamAV, nginx, certbot, fail2ban and supporting tools.</p></div></div>
+          <div class="step"><span class="step-n">02</span><div><b>Sets the host identity.</b><p>Hostname, UTC and, when needed, a 2 GiB swap file.</p></div></div>
+          <div class="step"><span class="step-n">03</span><div><b>Creates the database and first tenant.</b><p>Database <code>a8m</code>, application and mail roles, migrations, tenant, domain, owner and mailbox.</p></div></div>
+          <div class="step"><span class="step-n">04</span><div><b>Installs the application.</b><p>Release under <code>/opt/a8m/current</code>, environment under <code>/etc/a8m</code>, secrets under <code>/opt/a8m/secrets</code>.</p></div></div>
+          <div class="step"><span class="step-n">05</span><div><b>Wires mail delivery.</b><p>Dovecot SQL authentication, Postfix virtual domains, Rspamd DKIM signing, ClamAV scanning and LMTP delivery.</p></div></div>
+          <div class="step"><span class="step-n">06</span><div><b>Obtains TLS and starts services.</b><p>Certificate for both names, renewal hook, systemd units and background DKIM/mailbox provisioners.</p></div></div>
+          <div class="step"><span class="step-n">07</span><div><b>Opens the firewall.</b><p>UFW reset, SSH port kept, mail/web/control ports opened. Provider firewall still has to match.</p></div></div>
+          <div class="step"><span class="step-n">08</span><div><b>Writes the hand-over files.</b><p>Root-only credentials and DNS records, plus an updater SSH key to register as a read-only deploy key.</p></div></div>
+        </div>
+        <div class="callout risk">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 1.8 14.5 13.5H1.5L8 1.8Z"/><path d="M8 6v3.2M8 11.5h.01"/></svg>
+          <div><strong>The installer does not finish your DNS or provider setup.</strong>It does not create registrar records, set reverse DNS, open the provider firewall, harden SSH, create offsite backups, or create your staff accounts. Those are Phases 04 and 05.</div>
+        </div>
+
+        <h3>Verify the stack</h3>
+        <p>The installer ends with <code>installation complete</code> and prints the webmail and control URLs. If it reports a failed health check, stop and read the log before changing anything.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · health checks</span><button class="copy" type="button" aria-label="Copy health check commands">Copy</button></div>
+          <pre><code>systemctl is-active postgresql redis-server dovecot postfix rspamd clamav-daemon nginx a8m-server a8m-admin alt8mail-control
+curl -fsS https://mail.example.com/api/health
+curl -fsS http://127.0.0.1:8081/api/health
+curl -kfsS https://127.0.0.1:8808/healthz</code></pre>
+        </div>
+        <p>Every service should print <code>active</code>, the public health endpoint should return JSON with <code>"ok":true</code>, and the admin and control health endpoints should answer. The <code>-k</code> flag is only for the loopback control check; browse to the panel by hostname.</p>
+        <p>If the installer exited at the service-check stage:</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · diagnose a failed install</span><button class="copy" type="button" aria-label="Copy failure diagnosis commands">Copy</button></div>
+          <pre><code>tail -n 100 /var/log/a8m-install.log
+systemctl --failed
+systemctl status clamav-daemon clamav-freshclam --no-pager</code></pre>
+        </div>
+        <p>ClamAV's first signature download can take several minutes on a new host. Wait for <code>clamav-daemon</code> to become active, then re-run the installer. Do not delete the release or the secrets directory to start over.</p>
+
+        <h3>Record the credentials and register the update key</h3>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · hand-over files</span><button class="copy" type="button" aria-label="Copy hand-over file commands">Copy</button></div>
+          <pre><code>less /root/alt8mail-initial-credentials.txt
+cat /etc/a8m/github_readonly.pub</code></pre>
+        </div>
+        <p>Copy the credentials into your password manager over an SSH session you control. The file contains the owner web password, owner mailbox password, System Control email and password, and the paths to the secret store. It is written only when it does not already exist, so a repair run does not overwrite your copy.</p>
+        <p>Register the public key as a read-only deploy key on the repository: <strong>Repository → Settings → Deploy keys → Add deploy key</strong>, with write access off. If you installed from your own fork or mirror, edit <code>/etc/a8m/update.conf</code> and set <code>A8M_REPO</code> before relying on updates.</p>
+        <p class="phase-end"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5"/></svg><span><strong>You are done with Phase 02 when</strong> every service is active, all health endpoints answer, and your credentials are stored.</span></p>
+      </section>
+
+      <section class="phase" id="signin">
+        <p class="phase-label">Phase 03 · First sign-in</p>
+        <h2>Open all three doors, separately.</h2>
+        <p class="phase-intro">The webmail, customer admin and System Control are separate sessions. Sign in to each one deliberately and verify the identity before you change policy.</p>
+
+        <div class="door-grid">
+          <div class="door">
+            <span class="door-kicker"><span class="door-dot"></span>Mailbox plane</span>
+            <span class="door-url">https://mail.example.com/</span>
+            <span class="door-name">Webmail</span>
+            <p>Owner email plus the generated owner web password.</p>
+          </div>
+          <div class="door">
+            <span class="door-kicker"><span class="door-dot"></span>Administration plane</span>
+            <span class="door-url">https://mail.example.com/admin/</span>
+            <span class="door-name">Customer admin</span>
+            <p>Same Alt8Mail identity, separate admin session and CSRF cookie.</p>
+          </div>
+          <div class="door">
+            <span class="door-kicker"><span class="door-dot"></span>Host control plane</span>
+            <span class="door-url">https://mail.example.com:8808/</span>
+            <span class="door-name">System Control</span>
+            <p>Separate control account. Root-equivalent access, so restrict it.</p>
+          </div>
+        </div>
+
+        <h3>Webmail as the owner</h3>
+        <p>Open <code>https://mail.example.com/</code> and sign in with the owner email and owner web password. The installer-created owner has a generated password and is not forced through the onboarding password-change screen. Treat it as a break-glass credential.</p>
+        <ol>
+          <li>Open <strong>Settings → Account</strong> and set the display name.</li>
+          <li>Open <strong>Settings → Appearance</strong> and <strong>Settings → Regional</strong> for theme, time zone and formats.</li>
+          <li>Open <strong>Settings → Security</strong> and enroll an authenticator or passkey. Save the recovery codes offline.</li>
+          <li>Store the generated owner password in your vault.</li>
+          <li>Create a named admin account for daily administration instead of sharing the owner.</li>
+        </ol>
+        <div class="callout">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.2v3.5M8 5.1h.01"/></svg>
+          <div><strong>To rotate the owner password,</strong> use <strong>Customer admin → Users → owner → Reset password</strong>. The reset signs out existing sessions. Sign back in with the temporary password, then complete the forced change at the next webmail sign-in. The new web password also rotates the Dovecot mailbox password, so mail clients use the new credential afterward.</div>
+        </div>
+
+        <h3>Customer admin</h3>
+        <p>Open <code>https://mail.example.com/admin/</code> and sign in with the same owner identity. Include the trailing slash. The installer owner has system-administrator entitlement, so the console can switch tenants.</p>
+        <p>For day-to-day work, create a named administrator with only the permissions they need. The console supports owners/admins, tenant-scoped custom roles, and member/readonly accounts. The owner remains the break-glass identity.</p>
+
+        <h3>System Control</h3>
+        <p>Open <code>https://mail.example.com:8808/</code> and sign in with the control email and password from the credentials file. Use the hostname, not the bare IP. The certificate is issued for the mail hostname, so browsing by IP will produce a browser warning.</p>
+        <ol>
+          <li>Change the control password.</li>
+          <li>Enable TOTP and store the recovery codes offline.</li>
+          <li>Create a named operator account instead of sharing the superadmin.</li>
+          <li>Restrict port 8808 to your administration network.</li>
+          <li>Review <strong>Server &amp; network</strong> and <strong>TLS</strong> before making changes.</li>
+        </ol>
+        <div class="callout danger">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 1.8 14.5 13.5H1.5L8 1.8Z"/><path d="M8 6v3.2M8 11.5h.01"/></svg>
+          <div><strong>System Control is root-equivalent.</strong>It can start and stop services, edit Postfix configuration, read logs, issue certificates, run a terminal and restore backups. A compromised superadmin session is as serious as compromised root SSH.</div>
+        </div>
+
+        <h3>Credential map</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Credential</th><th>Used for</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>Owner web password</td><td>Webmail and customer admin</td><td>Generated by the installer; store in your vault</td></tr>
+              <tr><td>Owner mailbox password</td><td>IMAP, POP and SMTP</td><td>Used until the first web password change; then the web password is synced to Dovecot</td></tr>
+              <tr><td>Control password</td><td>System Control only</td><td>Separate identity, separate audit and sessions</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="phase-end"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5"/></svg><span><strong>You are done with Phase 03 when</strong> all three doors open, and you know which identity owns each one.</span></p>
+      </section>
+
+      <section class="phase" id="secure">
+        <p class="phase-label">Phase 04 · Secure it</p>
+        <h2>Close the doors you do not need.</h2>
+        <p class="phase-intro">A fresh installation is functional, not finished. The owner, the admin console, SSH and the root-level control panel all need deliberate protection before real users arrive.</p>
+
+        <h3>Put credentials and MFA in order</h3>
+        <ul>
+          <li>Store the initial credentials file in a password manager, not a shared drive.</li>
+          <li>Enable TOTP for the owner, every customer admin and every System Control operator.</li>
+          <li>Store recovery codes offline, separate from the authenticator device.</li>
+          <li>In <strong>Customer admin → Policies → Security</strong>, turn on MFA for administrators first, then for all users once your pilot users have enrolled.</li>
+          <li>Set an admin idle timeout and session lifetime that match your organization's policy.</li>
+        </ul>
+        <div class="callout risk">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 1.8 14.5 13.5H1.5L8 1.8Z"/><path d="M8 6v3.2M8 11.5h.01"/></svg>
+          <div><strong>Do not enable an IP allowlist until you have tested it.</strong>Confirm your own egress address and test with a second administrator. A bad allowlist can lock out the console while SSH remains your only recovery path.</div>
+        </div>
+
+        <h3>Harden SSH</h3>
+        <p>The installer opens your current SSH port; it does not change <code>sshd_config</code>. Add and test a key before applying a stricter policy.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">workstation · add a key, then harden</span><button class="copy" type="button" aria-label="Copy SSH hardening commands">Copy</button></div>
+          <pre><code>ssh-keygen -t ed25519 -C "you@workstation"
+ssh-copy-id -i ~/.ssh/id_ed25519.pub root@YOUR_SERVER_IP
+ssh root@YOUR_SERVER_IP '
+  install -m 0644 /opt/a8m/current/deploy/ssh/99-alt8mail-hardening.conf /etc/ssh/sshd_config.d/ &&
+  sshd -t &&
+  systemctl reload ssh
+'</code></pre>
+        </div>
+        <p>The shipped drop-in disables external password and keyboard-interactive authentication, keeps key-based root access for break-glass use, and allows password authentication only on loopback so the System Control terminal can work. Keep an existing root session open until you have verified a new key-based session. If you use a non-root sudo account daily, create and test it before disabling root key access.</p>
+
+        <h3>Restrict System Control</h3>
+        <p>The installer opens <code>8808/tcp</code> to every source. Restrict it at both the host and provider firewalls:</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · restrict 8808</span><button class="copy" type="button" aria-label="Copy firewall restriction commands">Copy</button></div>
+          <pre><code>ufw delete allow 8808/tcp
+ufw allow from YOUR_ADMIN_IP to any port 8808 proto tcp
+ufw status verbose</code></pre>
+        </div>
+        <p>Use a single trusted IP or a VPN egress range. Keep SSH access open while you test. Do not disable TLS verification to avoid a certificate warning; fix the certificate or use the correct hostname instead.</p>
+
+        <h3>Treat the customer admin as an administrative surface</h3>
+        <p><code>/admin/</code> is served on the same public hostname as webmail. Do not leave it publicly reachable without MFA and a network policy. Choose one of these:</p>
+        <ul>
+          <li>Put <code>/admin/</code> behind your VPN or zero-trust proxy.</li>
+          <li>Restrict access with an nginx allowlist at the edge.</li>
+          <li>Set a tested admin IP policy in <strong>Policies → Security</strong>.</li>
+          <li>Publish the console on a separate <code>admin.example.com</code> hostname with its own certificate and network controls.</li>
+        </ul>
+        <p>The project's own guidance is explicit: do not expose <code>/admin/</code> publicly on a production mail host without admin policy and network controls.</p>
+
+        <h3>Mirror the firewall and keep secrets private</h3>
+        <ul>
+          <li>UFW is the host firewall, not the cloud firewall. Make the provider security group match the port table.</li>
+          <li><code>/opt/a8m/secrets</code> is mode 0700 and owned by the <code>a8m</code> service account. Do not loosen it.</li>
+          <li><code>/etc/a8m/app.env</code> and <code>/etc/a8m/control.env</code> contain database and signing secrets. Keep them root-owned and mode 0640/0600.</li>
+          <li>Only System Control runs as root because it manages host services. That is why its port must be restricted.</li>
+        </ul>
+        <p class="phase-end"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5"/></svg><span><strong>You are done with Phase 04 when</strong> MFA is on, SSH is key-based, 8808 is restricted and the admin surface has a network boundary.</span></p>
+      </section>
+
+      <section class="phase" id="mailflow">
+        <p class="phase-label">Phase 05 · Make mail flow</p>
+        <h2>Publish the records and prove both directions.</h2>
+        <p class="phase-intro">Mail is not working because the web page loads. It is working when an external server can deliver to you, your server can deliver to an external provider, and the receiving side reports SPF, DKIM and DMARC passing.</p>
+
+        <h3>Add the mail DNS records</h3>
+        <p>Use the live domain drawer in <strong>Customer admin → Domains</strong> as the source of truth. The installer's <code>/root/alt8mail-dns-records.txt</code> is an initial convenience; the drawer also shows the ownership record and any later changes.</p>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>MX</td><td><code>example.com</code></td><td class="wrap"><code>10 mail.example.com.</code></td><td>One MX is enough for a single host</td></tr>
+              <tr><td>TXT</td><td><code>example.com</code></td><td class="wrap"><code>v=spf1 mx -all</code></td><td>Exactly one SPF record at this name</td></tr>
+              <tr><td>TXT</td><td><code>a8m._domainkey.example.com</code></td><td class="wrap"><code>v=DKIM1; k=rsa; p=...</code></td><td>Copy the full value from the admin drawer</td></tr>
+              <tr><td>TXT</td><td><code>_dmarc.example.com</code></td><td class="wrap"><code>v=DMARC1; p=none; rua=mailto:dmarc@example.com</code></td><td>Start at <code>p=none</code>, then tighten</td></tr>
+              <tr><td>TXT</td><td><code>_a8m-verification.example.com</code></td><td class="wrap"><code>a8m-verify=TOKEN</code></td><td>Proves ownership; add it for the primary domain too</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The DKIM key is generated after the domain exists. If the drawer still says <strong>Provisioning</strong>, give the timer a minute or start the provisioner:</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · provision DKIM</span><button class="copy" type="button" aria-label="Copy DKIM provisioning commands">Copy</button></div>
+          <pre><code>systemctl start a8m-dkimprovision.service
+systemctl status a8m-dkimprovision.service --no-pager</code></pre>
+        </div>
+        <p>The timer runs every minute and retries failures. Copy the DKIM TXT value exactly; a truncated or reformatted value will fail verification. The default selector is <code>a8m</code>.</p>
+        <div class="callout">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.2v3.5M8 5.1h.01"/></svg>
+          <div><strong>MTA-STS is optional and comes later.</strong>Enable it only after basic mail and HTTPS work. It needs an <code>_mta-sts</code> TXT record and an HTTPS policy served for <code>mta-sts.example.com</code> with a trusted certificate. The admin drawer shows the exact expected values.</div>
+        </div>
+
+        <h3>Verify DNS and TLS</h3>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · DNS checks</span><button class="copy" type="button" aria-label="Copy DNS verification commands">Copy</button></div>
+          <pre><code>dig +short MX example.com
+dig +short TXT example.com
+dig +short TXT a8m._domainkey.example.com
+dig +short TXT _dmarc.example.com
+dig +short TXT _a8m-verification.example.com</code></pre>
+        </div>
+        <p>Then open the domain in the customer admin and choose <strong>Run DNS verification</strong>. Aim for green checks on ownership, MX, SPF, DKIM and DMARC. MTA-STS can remain disabled until you are ready to operate it.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · TLS checks</span><button class="copy" type="button" aria-label="Copy TLS verification commands">Copy</button></div>
+          <pre><code>curl -I https://mail.example.com/
+echo | openssl s_client -connect mail.example.com:443 -servername mail.example.com 2>/dev/null \
+  | openssl x509 -noout -issuer -subject -dates</code></pre>
+        </div>
+        <p>The issuer should be a public CA, the subject should cover <code>mail.example.com</code>, and the expiry should be in the future. Let's Encrypt renewal is handled by <code>certbot.timer</code>; keep port 80 open for the webroot challenge. Inspect the inventory and run a dry run in <strong>System Control → TLS</strong>.</p>
+
+        <h3>Test mail from outside</h3>
+        <p>Do not test only from the same host. Loopback delivery can succeed while public DNS or port 25 is broken.</p>
+        <ol>
+          <li>Send from an external mailbox to <code>owner@example.com</code>.</li>
+          <li>Confirm it arrives in webmail.</li>
+          <li>Reply from webmail to the external address.</li>
+          <li>In the delivered message's original headers, confirm <code>spf=pass</code>, <code>dkim=pass</code> and <code>dmarc=pass</code> for your domain.</li>
+          <li>Check the queue and logs if anything is delayed.</li>
+        </ol>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · queue and mail logs</span><button class="copy" type="button" aria-label="Copy queue and log commands">Copy</button></div>
+          <pre><code>mailq
+journalctl -u postfix -u dovecot -u rspamd -n 100 --no-pager
+tail -n 100 /var/log/mail.log</code></pre>
+        </div>
+        <div class="callout risk">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 1.8 14.5 13.5H1.5L8 1.8Z"/><path d="M8 6v3.2M8 11.5h.01"/></svg>
+          <div><strong>Queued outbound mail with connection timeouts</strong> usually means outbound port 25 is blocked. Ask the provider to unblock it, or configure a smarthost in <strong>System Control → Delivery</strong>. Inbound mail that never reaches the logs is an MX, inbound-25 or provider-filtering problem.</div>
+        </div>
+
+        <h3>Mail client settings</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td>IMAP server</td><td><code>mail.example.com</code></td></tr>
+              <tr><td>IMAP port</td><td><code>993</code>, SSL/TLS</td></tr>
+              <tr><td>SMTP submission</td><td><code>mail.example.com</code>, port <code>587</code>, STARTTLS, authentication required</td></tr>
+              <tr><td>POP3S (optional)</td><td><code>mail.example.com</code>, port <code>995</code>, SSL/TLS</td></tr>
+              <tr><td>ManageSieve (optional)</td><td><code>mail.example.com</code>, port <code>4190</code>, STARTTLS</td></tr>
+              <tr><td>Username</td><td>Full email address</td></tr>
+              <tr><td>Password</td><td>Mailbox password; after a self-service web password change, the new web password</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Ports 143, 110 and 465 are not part of the default installation. Do not configure clients to use them unless you deliberately add those listeners. App passwords are for CalDAV/CardDAV clients, not IMAP/SMTP; IMAP and SMTP use the Dovecot mailbox password, which stays in sync with the web password.</p>
+        <p class="phase-end"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5"/></svg><span><strong>You are done with Phase 05 when</strong> an external round-trip works, all three authentication checks pass and the queue is empty.</span></p>
+      </section>
+
+      <section class="phase" id="people">
+        <p class="phase-label">Phase 06 · Add people</p>
+        <h2>Create a pilot before you create a company.</h2>
+        <p class="phase-intro">Start with one named administrator and one pilot user. Prove the onboarding, mail client and external delivery experience before importing a directory.</p>
+
+        <h3>Create a named administrator</h3>
+        <p>In <strong>Customer admin → Users → New user</strong>, create an administrator with a real name and address. Give the account only the role it needs. Admin-created users go through the guided onboarding flow on first sign-in: display name, time zone, language, theme and password change. Enroll MFA before adding more administrators.</p>
+
+        <h3>Import users from CSV or XLSX</h3>
+        <p>Use <strong>Customer admin → Users → Import users</strong>. Full name and email are required. Unknown roles become <code>member</code>.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">csv · user import template</span><button class="copy" type="button" aria-label="Copy CSV template">Copy</button></div>
+          <pre><code>name,email,role,quota_gb,notify_email
+Jane Doe,jane@example.com,member,16,jane.doe@example.net
+Sam Rivera,sam@example.com,admin,16,</code></pre>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Column</th><th>Required</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>name</code> or <code>full_name</code></td><td>Yes</td><td>Display name</td></tr>
+              <tr><td><code>email</code></td><td>Yes</td><td>Must use a verified domain</td></tr>
+              <tr><td><code>role</code></td><td>No</td><td><code>owner</code>, <code>admin</code>, <code>member</code> or <code>readonly</code></td></tr>
+              <tr><td><code>quota_gb</code></td><td>No</td><td>Defaults to 16 GB</td></tr>
+              <tr><td><code>notify_email</code></td><td>No</td><td>Alternate address for the branded credentials notification</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Validate the preview before starting the job. The generated web and mailbox passwords are shown only in the result view, so download the results CSV and deliver credentials through a secure channel. The optional notification email only works after outbound mail is healthy.</p>
+
+        <h3>What users experience</h3>
+        <ul>
+          <li>New users must complete onboarding before they can use the mailbox.</li>
+          <li>They set their display name, time zone, language, theme and a new password.</li>
+          <li>The new web password is synchronized to Dovecot, so the same credential works for webmail and mail clients.</li>
+          <li>MFA enrollment can be encouraged during onboarding and required by policy afterward.</li>
+          <li>Recovery codes are shown once; users must store them.</li>
+        </ul>
+
+        <h3>Add the organization's structure</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Feature</th><th>Where it lives</th><th>Use it for</th></tr></thead>
+            <tbody>
+              <tr><td>Aliases</td><td>User detail page</td><td>Send-as or receive-only addresses</td></tr>
+              <tr><td>Groups</td><td>Customer admin → Groups</td><td>Distribution and security groups; Postfix expands active members at delivery</td></tr>
+              <tr><td>Org units</td><td>Customer admin → Organization</td><td>Reporting structure and directory views</td></tr>
+              <tr><td>Delegates</td><td>User detail page</td><td>Grant another user access to a mailbox</td></tr>
+              <tr><td>Vacation</td><td>User detail page</td><td>Automatic replies with internal and external copy</td></tr>
+              <tr><td>Mailbox migration</td><td>Mailboxes → Import/migrate</td><td>Resumable IMAP or POP3 migration from an old provider</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Run mailbox migrations after basic mail flow works, not before. The wizard validates source credentials, maps source mailboxes to existing or new users, and runs a resumable background job with progress and results.</p>
+
+        <h3>Policy checklist</h3>
+        <ul>
+          <li><strong>Security:</strong> MFA for admins then all users; password length and history; session limits; admin IP ranges only after testing.</li>
+          <li><strong>Mail:</strong> IMAP/POP access, SMTP access, forwarding, retention, attachment limits and Junk release policy.</li>
+          <li><strong>Sharing and directory:</strong> external sharing, directory visibility and profile editing.</li>
+          <li><strong>Branding:</strong> organization name, logo and colors.</li>
+          <li><strong>AI assistant:</strong> optional. Configure an OpenAI-compatible endpoint or Anthropic, then use <strong>Save &amp; test</strong>. The API key is sealed and never returned to the browser; keep <code>policies.manage</code> restricted.</li>
+        </ul>
+        <p>The default Junk behavior lets users release their own Junk. If you want administrator-only release, enable <strong>Restrict Junk release to administrators</strong>. Users then see the administrator-release state and an authorized administrator handles the quarantine queue.</p>
+        <div class="callout good">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5"/></svg>
+          <div><strong>Pilot gate:</strong> one user completes onboarding, signs in with a mail client, sends to an external address and receives a reply with SPF, DKIM and DMARC passing. Only then import the rest of the company.</div>
+        </div>
+        <p class="phase-end"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5"/></svg><span><strong>You are done with Phase 06 when</strong> the pilot user can work entirely through Alt8Mail without an administrator touching the server.</span></p>
+      </section>
+
+      <section class="phase" id="operate">
+        <p class="phase-label">Phase 07 · Operate and recover</p>
+        <h2>Make updates boring and recovery real.</h2>
+        <p class="phase-intro">The installation is a starting point. The operating habits below decide whether the platform is still healthy six months from now.</p>
+
+        <h3>Application updates</h3>
+        <p>Application updates are tag-based and transactional:</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · update Alt8Mail</span><button class="copy" type="button" aria-label="Copy update commands">Copy</button></div>
+          <pre><code>sudo alt8mail-update --check
+sudo alt8mail-update</code></pre>
+        </div>
+        <p>The updater fetches the latest stable tag, builds it, backs up the database and configuration under <code>/var/backups/alt8mail/update-TIMESTAMP</code>, applies migrations, switches the release symlink and checks all three services. If readiness fails, it restores the previous release and database.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · update evidence</span><button class="copy" type="button" aria-label="Copy update inspection commands">Copy</button></div>
+          <pre><code>tail -n 100 /var/log/alt8mail-update.log
+ls -lt /var/backups/alt8mail | head
+cat /opt/a8m/current/VERSION</code></pre>
+        </div>
+        <p>Run updates in a maintenance window. Mail queues rather than message content are affected during the short service restart. Do not edit files under <code>/opt/a8m/current</code>; it is a release symlink and will be replaced.</p>
+        <p>Operating-system packages are separate: use <strong>System Control → Infrastructure → Software updates</strong> for apt packages and reboot status.</p>
+
+        <h3>Backups: two layers, not one</h3>
+        <p><strong>Layer 1, the control-plane archive.</strong> <strong>System Control → Infrastructure → Backups</strong> creates a <code>.tar.gz</code> of selectable contents: PostgreSQL, Postfix, Dovecot, DKIM, Let's Encrypt and Maildirs. The default selection does <strong>not</strong> include Maildirs; select <strong>Maildir message stores</strong> for a full mail backup.</p>
+        <p><strong>Layer 2, the critical configuration and secrets.</strong> The control-plane archive does not include <code>/opt/a8m/secrets</code> or <code>/etc/a8m</code>. Without those, a full disaster recovery is incomplete.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · critical config archive</span><button class="copy" type="button" aria-label="Copy critical config backup command">Copy</button></div>
+          <pre><code>tar -C / -czf /root/alt8mail-critical-$(date -u +%F).tar.gz \
+  opt/a8m/secrets \
+  etc/a8m \
+  etc/nginx \
+  etc/redis/a8m.conf \
+  etc/ssl/alt8mail
+chmod 600 /root/alt8mail-critical-$(date -u +%F).tar.gz</code></pre>
+        </div>
+        <p>Download the control-plane archive from the Backups table in System Control. Then pull the critical configuration archive over SSH:</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">workstation · pull the backup</span><button class="copy" type="button" aria-label="Copy backup download command">Copy</button></div>
+          <pre><code>scp root@YOUR_SERVER_IP:/root/alt8mail-critical-*.tar.gz ./</code></pre>
+        </div>
+        <div class="callout risk">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 1.8 14.5 13.5H1.5L8 1.8Z"/><path d="M8 6v3.2M8 11.5h.01"/></svg>
+          <div><strong>The control-plane archive is a plain <code>.tar.gz</code>.</strong>It is not encrypted at rest. Move it over SSH or TLS, then store it encrypted in a vault or object store you control. A backup on the same lost server is not disaster recovery.</div>
+        </div>
+        <p>Test a restore on a separate Debian host before you need one. At minimum, verify that the database dump restores, the Maildir tree is readable and the restored host can start the three services with the same secrets.</p>
+
+        <h3>Monitor what fails first</h3>
+        <ul>
+          <li><strong>System Control dashboard:</strong> service health, CPU, memory, disk, mail volume, queue, certificate expiry and update state.</li>
+          <li><strong>Notifications:</strong> configure at least one handle (email, Slack, Discord, Telegram or webhook) and send a test.</li>
+          <li><strong>Queue:</strong> investigate deferred mail before it becomes a delivery incident.</li>
+          <li><strong>Disk:</strong> watch <code>/var/vmail</code> and <code>/var/backups/alt8mail</code>; both grow.</li>
+          <li><strong>TLS:</strong> keep port 80 open and check the certificate inventory and renewal state.</li>
+          <li><strong>Logs:</strong> Postfix, Dovecot, Rspamd and the three Alt8Mail services are in journald and <code>/var/log/mail.log</code>.</li>
+        </ul>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · operational health</span><button class="copy" type="button" aria-label="Copy operational health commands">Copy</button></div>
+          <pre><code>systemctl is-active postgresql redis-server dovecot postfix rspamd clamav-daemon nginx a8m-server a8m-admin alt8mail-control
+curl -fsS https://mail.example.com/api/health
+curl -fsS http://127.0.0.1:8081/api/health
+curl -kfsS https://127.0.0.1:8808/healthz
+mailq
+df -h /var/vmail /var/backups/alt8mail</code></pre>
+        </div>
+
+        <h3>TLS renewal</h3>
+        <p>When installed with Let's Encrypt, <code>certbot.timer</code> is enabled and a deploy hook copies the renewed certificate to nginx, Postfix, Dovecot and System Control and reloads the affected services. Keep port 80 reachable.</p>
+        <div class="code">
+          <div class="code-head"><span class="code-label">bash · certificate renewal check</span><button class="copy" type="button" aria-label="Copy certificate renewal commands">Copy</button></div>
+          <pre><code>systemctl list-timers 'certbot*' --no-pager
+certbot renew --dry-run</code></pre>
+        </div>
+        <p>The dry run should complete without changing the live certificate. If you replace certificates with a CA-issued pair, use <strong>System Control → TLS</strong> to import and assign them rather than editing certificate paths by hand.</p>
+
+        <h3>Disaster recovery outline</h3>
+        <ol>
+          <li>Build a new Debian 12 host with the same hostname and domain plan.</li>
+          <li>Install the same Alt8Mail release.</li>
+          <li>Stop the application and mail services.</li>
+          <li>Restore the PostgreSQL dump, <code>/var/vmail</code>, mail configuration and <code>/opt/a8m/secrets</code>.</li>
+          <li>Restore <code>/etc/a8m</code>, TLS material, nginx and systemd units.</li>
+          <li>Start the stack and verify health, login, inbound mail, outbound mail and DKIM.</li>
+          <li>Repoint DNS and reverse DNS only after the restored host is healthy.</li>
+        </ol>
+        <p>Rehearse this on a scratch host. Do not make the first restore attempt during an outage.</p>
+        <p class="phase-end"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5"/></svg><span><strong>You are done with Phase 07 when</strong> a backup has been downloaded, a restore has been rehearsed and someone is responsible for updates and alerts.</span></p>
+      </section>
+
+      <section class="phase" id="reference">
+        <p class="phase-label">Reference</p>
+        <h2>The facts you will look up later.</h2>
+        <p class="phase-intro">Keep this section beside the deployment. It contains no secrets and is safe to share with another administrator.</p>
+
+        <h3>URLs and paths</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Item</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td>Webmail</td><td><code>https://mail.example.com/</code></td></tr>
+              <tr><td>Customer admin</td><td><code>https://mail.example.com/admin/</code></td></tr>
+              <tr><td>System Control</td><td><code>https://mail.example.com:8808/</code></td></tr>
+              <tr><td>Active release</td><td><code>/opt/a8m/current</code></td></tr>
+              <tr><td>Secrets</td><td><code>/opt/a8m/secrets</code></td></tr>
+              <tr><td>Application configuration</td><td><code>/etc/a8m/app.env</code></td></tr>
+              <tr><td>Control configuration</td><td><code>/etc/a8m/control.env</code></td></tr>
+              <tr><td>Maildirs</td><td><code>/var/vmail</code></td></tr>
+              <tr><td>Backups</td><td><code>/var/backups/alt8mail</code></td></tr>
+              <tr><td>Installer log</td><td><code>/var/log/a8m-install.log</code></td></tr>
+              <tr><td>Updater log</td><td><code>/var/log/alt8mail-update.log</code></td></tr>
+              <tr><td>Mail events</td><td><code>/var/log/mail.log</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Services and defaults</h3>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Group</th><th>Values</th></tr></thead>
+            <tbody>
+              <tr><td>Core services</td><td><code>postgresql</code>, <code>redis-server</code>, <code>dovecot</code>, <code>postfix</code>, <code>rspamd</code>, <code>clamav-daemon</code>, <code>nginx</code></td></tr>
+              <tr><td>Alt8Mail services</td><td><code>a8m-server</code>, <code>a8m-admin</code>, <code>alt8mail-control</code></td></tr>
+              <tr><td>Provisioners</td><td><code>a8m-mailprovision.timer</code>, <code>a8m-dkimprovision.timer</code></td></tr>
+              <tr><td>Database</td><td><code>a8m</code>; application role <code>a8m_app</code>, mail role <code>a8m_mail</code></td></tr>
+              <tr><td>Go API</td><td><code>127.0.0.1:8080</code></td></tr>
+              <tr><td>Admin API</td><td><code>127.0.0.1:8081</code></td></tr>
+              <tr><td>System Control</td><td><code>0.0.0.0:8808</code></td></tr>
+              <tr><td>DKIM selector</td><td><code>a8m</code></td></tr>
+              <tr><td>Host time zone</td><td>UTC</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>System Control uses port <strong>8808</strong>, never 88008. The valid TCP range ends at 65535.</p>
+      </section>
+
+      <section class="phase" id="troubleshooting">
+        <p class="phase-label">Troubleshooting</p>
+        <h2>Start with the layer that failed.</h2>
+        <p class="phase-intro">Most first-install failures are DNS, provider firewall or a service that has not finished starting. Read the log before changing configuration.</p>
+
+        <div class="faq">
+          <details>
+            <summary>Let's Encrypt did not issue a certificate</summary>
+            <p>Check both A records, the proxy status for <code>mail</code>, port 80 and any CAA record. Inspect <code>/var/log/letsencrypt/letsencrypt.log</code>. If the host fell back to self-signed, fix DNS and port 80, then re-run the installer with <code>--tls letsencrypt</code> or issue a certificate through <strong>System Control → TLS</strong>.</p>
+          </details>
+          <details>
+            <summary>The installer stopped at a health check</summary>
+            <p>Read <code>/var/log/a8m-install.log</code> and run <code>systemctl --failed</code>. On a fresh host the usual cause is ClamAV still loading its first signature database. Wait for <code>clamav-daemon</code> to become active, then re-run the installer. Do not delete the release or the secrets directory to start over.</p>
+          </details>
+          <details>
+            <summary>Webmail loads but the owner cannot sign in</summary>
+            <p>Use the exact owner email and the web password, not the mailbox password. Check <code>systemctl status a8m-server</code> and <code>journalctl -u a8m-server -n 100</code>. Confirm the account is active in the customer admin. If the owner password is lost, use the customer admin reset flow.</p>
+          </details>
+          <details>
+            <summary><code>/admin/</code> returns 404 or cannot be reached</summary>
+            <p>Include the trailing slash: <code>https://mail.example.com/admin/</code>. Check <code>systemctl status a8m-admin</code>, <code>curl http://127.0.0.1:8081/api/health</code> and the nginx configuration. The admin UI is served by the Go admin binary, not as a static file.</p>
+          </details>
+          <details>
+            <summary>System Control will not open</summary>
+            <p>Use <code>https://mail.example.com:8808/</code>, not port 88008 and not the plain HTTPS port. Check the provider firewall, <code>ufw status</code> and <code>curl -kfsS https://127.0.0.1:8808/healthz</code>. A warning when browsing by IP is expected if the certificate is issued only for the hostname. Restrict 8808 rather than disabling TLS verification.</p>
+          </details>
+          <details>
+            <summary>Domain verification fails</summary>
+            <p>Read the per-check details in the domain drawer. Common causes: missing or wrong ownership token, MX not pointing at the mail hostname, multiple SPF records, a truncated DKIM <code>p=</code> value, or an invalid DMARC policy. Wait for propagation, then run verification again. The installer creates the initial domain as <code>manual</code>; the real records are still required for reliable mail.</p>
+          </details>
+          <details>
+            <summary>Inbound mail does not arrive</summary>
+            <p>Check MX, inbound port 25 at the provider, <code>journalctl -u postfix</code>, <code>/var/log/mail.log</code> and <code>mailq</code>. A missing MX or a provider-level port-25 block is more likely than a Dovecot problem on a new installation.</p>
+          </details>
+          <details>
+            <summary>Outbound mail stays queued</summary>
+            <p>Check outbound port 25 first. Then check PTR, SPF, DKIM and DMARC, and read the queue reason with <code>mailq</code>. A provider that blocks outbound 25 can be handled with a smarthost in <strong>System Control → Delivery</strong>. A provider that blocks inbound 25 cannot receive direct MX mail and needs a different host or a front relay.</p>
+          </details>
+          <details>
+            <summary>A mail client rejects the password</summary>
+            <p>Use the full email address as the username and the current mailbox password. Use IMAPS 993 and submission 587 with STARTTLS. Confirm IMAP/POP access is enabled in policy. After a web password change, use the new password; the mailbox hash is synchronized. App passwords are for CalDAV/CardDAV, not IMAP/SMTP.</p>
+          </details>
+          <details>
+            <summary>An application update fails</summary>
+            <p>Confirm <code>/etc/a8m/github_readonly.pub</code> is registered as a read-only deploy key on the configured repository, then read <code>/var/log/alt8mail-update.log</code>. The updater restores the previous release and database when readiness fails; the backup path is printed in the failure message and in the log.</p>
+          </details>
+        </div>
+      </section>
+
+      <section class="phase" id="checklist">
+        <p class="phase-label">Go-live checklist</p>
+        <h2>Do not call it live until these are true.</h2>
+        <p class="phase-intro">This checklist is deliberately short. It covers the decisions that are expensive to discover after users arrive.</p>
+        <div class="check-toolbar">
+          <div class="progress-track" aria-hidden="true"><span class="progress-fill" id="checkProgress"></span></div>
+          <span class="check-count" id="checkCount" aria-live="polite">0 of 0 complete</span>
+          <button class="btn small" type="button" id="resetChecks">Reset</button>
+        </div>
+
+        <div class="check-group">
+          <h3>Access and identity</h3>
+          <div class="checks">
+            <label class="check"><input type="checkbox" id="live-1"><span>Owner credentials stored in a password manager</span></label>
+            <label class="check"><input type="checkbox" id="live-2"><span>Owner TOTP enrolled and recovery codes stored offline</span></label>
+            <label class="check"><input type="checkbox" id="live-3"><span>Named customer administrator created</span></label>
+            <label class="check"><input type="checkbox" id="live-4"><span>Named System Control operator created</span></label>
+            <label class="check"><input type="checkbox" id="live-5"><span>MFA required for administrators</span></label>
+            <label class="check"><input type="checkbox" id="live-6"><span>SSH key login tested; external password login disabled</span></label>
+            <label class="check"><input type="checkbox" id="live-7"><span>Port 8808 restricted to the administration network</span></label>
+            <label class="check"><input type="checkbox" id="live-8"><span>Provider firewall matches the host firewall</span></label>
+            <label class="check"><input type="checkbox" id="live-9"><span><code>/admin/</code> protected by network policy, VPN or admin IP policy</span></label>
+          </div>
+        </div>
+
+        <div class="check-group">
+          <h3>DNS and TLS</h3>
+          <div class="checks">
+            <label class="check"><input type="checkbox" id="live-10"><span><code>mail.example.com</code> A record points to the host</span></label>
+            <label class="check"><input type="checkbox" id="live-11"><span>Bare-domain A record points to the host, or a dedicated mail domain is used</span></label>
+            <label class="check"><input type="checkbox" id="live-12"><span>Reverse DNS points to <code>mail.example.com</code></span></label>
+            <label class="check"><input type="checkbox" id="live-13"><span>MX, SPF, DKIM, DMARC and ownership TXT records are published</span></label>
+            <label class="check"><input type="checkbox" id="live-14"><span>Domain verification is green in the customer admin</span></label>
+            <label class="check"><input type="checkbox" id="live-15"><span>Certificate is publicly trusted and covers the mail hostname</span></label>
+            <label class="check"><input type="checkbox" id="live-16"><span>Certbot renewal dry run passes</span></label>
+            <label class="check"><input type="checkbox" id="live-17"><span>Port 80 remains open for ACME renewals</span></label>
+          </div>
+        </div>
+
+        <div class="check-group">
+          <h3>Mail flow</h3>
+          <div class="checks">
+            <label class="check"><input type="checkbox" id="live-18"><span>External inbound message arrives</span></label>
+            <label class="check"><input type="checkbox" id="live-19"><span>Outbound reply is accepted by an external provider</span></label>
+            <label class="check"><input type="checkbox" id="live-20"><span>SPF, DKIM and DMARC pass on the delivered message</span></label>
+            <label class="check"><input type="checkbox" id="live-21"><span>Queue is empty after the test</span></label>
+            <label class="check"><input type="checkbox" id="live-22"><span>Mail client works over IMAPS 993 and submission 587</span></label>
+            <label class="check"><input type="checkbox" id="live-23"><span>Port 25 is confirmed open in both directions at the provider</span></label>
+          </div>
+        </div>
+
+        <div class="check-group">
+          <h3>People</h3>
+          <div class="checks">
+            <label class="check"><input type="checkbox" id="live-24"><span>A pilot user completes onboarding</span></label>
+            <label class="check"><input type="checkbox" id="live-25"><span>Pilot user sends and receives external mail</span></label>
+            <label class="check"><input type="checkbox" id="live-26"><span>User import template is prepared with the correct columns</span></label>
+            <label class="check"><input type="checkbox" id="live-27"><span>Credential delivery process is defined</span></label>
+            <label class="check"><input type="checkbox" id="live-28"><span>Support contact and recovery process communicated</span></label>
+          </div>
+        </div>
+
+        <div class="check-group">
+          <h3>Recovery and operations</h3>
+          <div class="checks">
+            <label class="check"><input type="checkbox" id="live-29"><span>First full backup created, including Maildirs</span></label>
+            <label class="check"><input type="checkbox" id="live-30"><span>Critical secrets and configuration archive created</span></label>
+            <label class="check"><input type="checkbox" id="live-31"><span>Both archives downloaded off-host and encrypted</span></label>
+            <label class="check"><input type="checkbox" id="live-32"><span>Restore tested on a separate host</span></label>
+            <label class="check"><input type="checkbox" id="live-33"><span>System Control notification handle configured and tested</span></label>
+            <label class="check"><input type="checkbox" id="live-34"><span>Disk, certificate and queue alerts enabled</span></label>
+            <label class="check"><input type="checkbox" id="live-35"><span>Update deploy key registered and <code>sudo alt8mail-update --check</code> works</span></label>
+            <label class="check"><input type="checkbox" id="live-36"><span>Runbook owner and maintenance window agreed</span></label>
+          </div>
+        </div>
+
+        <div class="callout good" style="margin-top:22px">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 8 3.2 3.2L13 4.5"/></svg>
+          <div><strong>Hand-over complete.</strong>A first-time administrator should now be able to sign in, add a user, prove external mail flow, update the platform and recover it from an off-site backup.</div>
+        </div>
+      </section>
+    </article>
+  </div>
+
+  <footer class="site-foot">
+    <div class="foot-row">
+      <span><strong>Alt8Mail First Install</strong> · v0.3.12 · Debian 12 · No credentials appear in this guide.</span>
+      <span>Repository: CryptRoute/Alt8Mail · Keep System Control on port 8808.</span>
+    </div>
+  </footer>
+</main>
+
+<script>
+(function () {
+  function fallbackCopy(text) {
+    var area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    area.style.left = "-1000px";
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand("copy"); } catch (error) { /* selection remains for the viewer */ }
+    document.body.removeChild(area);
+  }
+  document.querySelectorAll(".copy").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var code = button.closest(".code");
+      var pre = code ? code.querySelector("pre") : null;
+      if (!pre) return;
+      var text = pre.innerText;
+      var done = function () {
+        var original = button.textContent;
+        button.textContent = "Copied";
+        window.setTimeout(function () { button.textContent = original; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () {
+          fallbackCopy(text);
+          done();
+        });
+      } else {
+        fallbackCopy(text);
+        done();
+      }
+    });
+  });
+
+  var boxes = Array.prototype.slice.call(document.querySelectorAll(".check input[type=checkbox]"));
+  var count = document.getElementById("checkCount");
+  var fill = document.getElementById("checkProgress");
+  var reset = document.getElementById("resetChecks");
+  var storageKey = "a8m-first-install-checks-v1";
+  function readState() {
+    try { return JSON.parse(localStorage.getItem(storageKey) || "{}") || {}; } catch (error) { return {}; }
+  }
+  function writeState() {
+    var state = {};
+    boxes.forEach(function (box) { if (box.checked) state[box.id] = true; });
+    try { localStorage.setItem(storageKey, JSON.stringify(state)); } catch (error) { /* storage can be blocked; the checklist still works */ }
+  }
+  function renderCount() {
+    var complete = boxes.filter(function (box) { return box.checked; }).length;
+    if (count) count.textContent = complete + " of " + boxes.length + " complete";
+    if (fill) fill.style.width = (boxes.length ? (complete / boxes.length) * 100 : 0) + "%";
+  }
+  var saved = readState();
+  boxes.forEach(function (box) {
+    if (saved[box.id]) box.checked = true;
+    box.addEventListener("change", function () { writeState(); renderCount(); });
+  });
+  if (reset) {
+    reset.addEventListener("click", function () {
+      boxes.forEach(function (box) { box.checked = false; });
+      try { localStorage.removeItem(storageKey); } catch (error) { /* ignore */ }
+      renderCount();
+    });
+  }
+  renderCount();
+})();
+</script>

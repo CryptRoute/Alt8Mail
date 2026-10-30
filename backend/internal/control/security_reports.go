@@ -12,6 +12,7 @@ func (s *Server) registerSecurityReportRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /control/api/security/reports", s.require("security.read", s.handleSecurityReports))
 	mux.HandleFunc("GET /control/api/security/reports/{id}", s.require("security.read", s.handleSecurityReportDetail))
 	mux.HandleFunc("PATCH /control/api/security/reports/{id}", s.require("security.manage", s.handleSecurityReportReview))
+	mux.HandleFunc("POST /control/api/security/reports/{id}/undo", s.require("security.manage", s.handleSecurityReportUndo))
 }
 
 func (s *Server) securityReportSummary(ctx context.Context) map[string]any {
@@ -207,6 +208,56 @@ func (s *Server) handleSecurityReportReview(w http.ResponseWriter, r *http.Reque
 	})
 	s.hub.Broadcast("security.report_reviewed", map[string]any{"id": id, "status": status})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": status, "blockScope": scope})
+}
+
+func (s *Server) handleSecurityReportUndo(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
+	var body struct {
+		Confirm string `json:"confirm"`
+	}
+	if err := decodeJSON(w, r, &body, 16<<10); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(body.Confirm), "UNDO") {
+		writeError(w, http.StatusBadRequest, "CONFIRM", "Type UNDO to reverse a confirmed threat")
+		return
+	}
+	id := pathID(r)
+	var sender, subject, statusValue string
+	if err := s.db.QueryRow(r.Context(), `
+		SELECT sender_email::text, subject, status FROM public.security_reports WHERE id=$1
+	`, id).Scan(&sender, &subject, &statusValue); err != nil {
+		writeError(w, http.StatusNotFound, "REPORT_NOT_FOUND", "Security report not found")
+		return
+	}
+	if statusValue != "confirmed" {
+		writeError(w, http.StatusConflict, "NOT_CONFIRMED", "Only a confirmed threat can be undone")
+		return
+	}
+	resolution := "Threat confirmation undone by reviewer; sender unblocked"
+	tag, err := s.db.Exec(r.Context(), `
+		UPDATE public.security_reports
+		SET status='dismissed', block_scope='none', resolution=$2, reviewed_by=$3,
+		    reviewed_at=now(), updated_at=now()
+		WHERE id=$1 AND status='confirmed'
+	`, id, resolution, sess.User.Email)
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusConflict, "NOT_CONFIRMED", "The report is no longer confirmed")
+		return
+	}
+	s.actorAudit(r, sess, "security.report_confirmation_undone", sender,
+		"Undid a confirmed threat and removed the sender block",
+		map[string]any{"reportId": id, "status": "dismissed", "blockScope": "none", "subject": subject})
+	s.notifyEvent(r.Context(), "security.report_reviewed", map[string]any{
+		"reportId": id, "sender": sender, "subject": subject, "status": "dismissed",
+		"blockScope": "none", "undone": true,
+	})
+	s.hub.Broadcast("security.report_reviewed", map[string]any{"id": id, "status": "dismissed", "undone": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "dismissed", "blockScope": "none"})
 }
 
 func (s *Server) runSecurityReportMonitor(ctx context.Context) {

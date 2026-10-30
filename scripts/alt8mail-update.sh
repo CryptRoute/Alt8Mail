@@ -22,9 +22,43 @@ die() { printf '[%s] ERROR: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
 # shellcheck disable=SC1090
 . "$CONFIG"
 A8M_REPO="${A8M_REPO:-git@github.com:CryptRoute/Alt8Mail.git}"
+A8M_REPO_HTTPS="${A8M_REPO_HTTPS:-}"
 A8M_GIT_KEY="${A8M_GIT_KEY:-/etc/a8m/github_readonly}"
 A8M_CHANNEL="${A8M_CHANNEL:-stable}"
 A8M_SERVICES="${A8M_SERVICES:-a8m-server a8m-admin alt8mail-control}"
+
+# Derive an HTTPS fallback for GitHub SSH remotes. This keeps existing hosts
+# working when their update.conf predates A8M_REPO_HTTPS.
+if [[ -z "$A8M_REPO_HTTPS" && "$A8M_REPO" =~ ^git@github\.com:(.+)$ ]]; then
+  A8M_REPO_HTTPS="https://github.com/${BASH_REMATCH[1]}"
+fi
+
+repo_is_http() {
+  [[ "$1" == http://* || "$1" == https://* ]]
+}
+
+repo_git() {
+  local repo="$1"
+  shift
+  if repo_is_http "$repo"; then
+    env -u GIT_SSH_COMMAND git "$@"
+    return
+  fi
+  [[ -r "$A8M_GIT_KEY" ]] || return 1
+  GIT_SSH_COMMAND="ssh -i \"$A8M_GIT_KEY\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes" git "$@"
+}
+
+REPO_CANDIDATES=()
+add_repo_candidate() {
+  local candidate="$1" existing
+  [[ -n "$candidate" ]] || return 0
+  for existing in "${REPO_CANDIDATES[@]:-}"; do
+    [[ "$existing" == "$candidate" ]] && return 0
+  done
+  REPO_CANDIDATES+=("$candidate")
+}
+add_repo_candidate "$A8M_REPO"
+add_repo_candidate "$A8M_REPO_HTTPS"
 
 CHECK_ONLY=0
 TARGET_TAG=""
@@ -51,14 +85,29 @@ cd /tmp
 CURRENT_VERSION="$(tr -d '[:space:]' < "$CURRENT/VERSION")"
 [[ -n "$CURRENT_VERSION" ]] || die "cannot read the installed version"
 
-if [[ ! -r "$A8M_GIT_KEY" ]]; then
-  die "missing read-only Git key $A8M_GIT_KEY"
-fi
-export GIT_SSH_COMMAND="ssh -i $A8M_GIT_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
-
-log "checking $A8M_REPO ($A8M_CHANNEL) against installed $CURRENT_VERSION"
-TAG_REFS="$(git ls-remote --tags --refs "$A8M_REPO" 'refs/tags/v*' | awk '{print $2}')"
-[[ -n "$TAG_REFS" ]] || die "no release tags found in $A8M_REPO"
+log "checking $A8M_REPO ($A8M_CHANNEL) against installed $CURRENT_VERSION (SSH/HTTPS fallback)"
+ACTIVE_REPO=""
+TAG_REFS=""
+for repo in "${REPO_CANDIDATES[@]}"; do
+  if ! repo_is_http "$repo" && [[ ! -r "$A8M_GIT_KEY" ]]; then
+    log "skipping SSH repository (missing key $A8M_GIT_KEY): $repo"
+    continue
+  fi
+  if raw_tags="$(repo_git "$repo" ls-remote --tags --refs "$repo" 'refs/tags/v*' 2>&1)"; then
+    tags="$(printf '%s\n' "$raw_tags" | awk '$2 ~ /^refs\/tags\// {print $2}' | sed '/^$/d')"
+    if [[ -n "$tags" ]]; then
+      ACTIVE_REPO="$repo"
+      TAG_REFS="$tags"
+      log "using repository: $repo"
+      break
+    fi
+    log "no release tags found via $repo"
+  else
+    log "repository check failed via $repo: $(printf '%s\n' "$raw_tags" | tail -n 1)"
+  fi
+done
+[[ -n "$ACTIVE_REPO" ]] || die "no release tags reachable through SSH or HTTPS"
+[[ -n "$TAG_REFS" ]] || die "no release tags found in $ACTIVE_REPO"
 LATEST_VERSION="$(printf '%s\n' "$TAG_REFS" | sed 's#refs/tags/v##' | sort -V | tail -1)"
 LATEST_TAG="v$LATEST_VERSION"
 if [[ -n "$TARGET_TAG" ]]; then
@@ -96,7 +145,27 @@ cleanup() {
 trap cleanup EXIT
 
 log "fetching $LATEST_TAG"
-git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$LATEST_TAG" "$A8M_REPO" "$WORK/src"
+CLONE_ORDER=("$ACTIVE_REPO")
+for repo in "${REPO_CANDIDATES[@]}"; do
+  [[ "$repo" == "$ACTIVE_REPO" ]] && continue
+  CLONE_ORDER+=("$repo")
+done
+CLONED=0
+for repo in "${CLONE_ORDER[@]}"; do
+  if ! repo_is_http "$repo" && [[ ! -r "$A8M_GIT_KEY" ]]; then
+    log "skipping clone via SSH (missing key): $repo"
+    continue
+  fi
+  rm -rf "$WORK/src"
+  log "cloning $LATEST_TAG via $repo"
+  if repo_git "$repo" -c advice.detachedHead=false clone --quiet --depth 1 --branch "$LATEST_TAG" "$repo" "$WORK/src"; then
+    ACTIVE_REPO="$repo"
+    CLONED=1
+    break
+  fi
+  log "clone failed via $repo; trying the next transport"
+done
+[[ "$CLONED" -eq 1 ]] || die "could not clone $LATEST_TAG over SSH or HTTPS"
 [[ -r "$WORK/src/scripts/build-release.sh" ]] || die "tag $LATEST_TAG has no build-release.sh"
 
 log "building $LATEST_VERSION"

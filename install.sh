@@ -253,7 +253,7 @@ install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$SECRETS_DIR" "$INSTAL
 install -d -m 0755 "$RELEASES_DIR" "$CONFIG_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT/bin"
 install -d -m 0700 /var/backups/alt8mail /etc/ssl/alt8mail /etc/cron.d
 install -d -m 0750 -o vmail -g vmail /var/vmail
-install -d -m 0755 /var/www/certbot
+install -d -m 0755 /var/www/certbot /etc/letsencrypt /var/lib/letsencrypt
 
 rand_hex() { openssl rand -hex "$1"; }
 rand_password() { openssl rand -base64 36 | tr -d '/+=\n' | cut -c1-28; }
@@ -448,6 +448,7 @@ fi
 log "updater deploy key: $UPDATE_KEY.pub (register it as a read-only repository deploy key)"
 cat > "$CONFIG_ROOT/update.conf" <<EOF
 A8M_REPO=git@github.com:CryptRoute/Alt8Mail.git
+A8M_REPO_HTTPS=https://github.com/CryptRoute/Alt8Mail.git
 A8M_GIT_KEY=$UPDATE_KEY
 A8M_CHANNEL=stable
 A8M_SERVICES="a8m-server a8m-admin alt8mail-control"
@@ -738,6 +739,21 @@ if [[ "$(runuser -u postgres -- psql -d a8m -Atqc "SELECT COUNT(*) FROM control.
   printf '%s\n' "$CONTROL_ADMIN_PASSWORD" | "$CONTROL_ROOT/bin/alt8mail-control" admin \
     --email "$CONTROL_EMAIL" --name 'System Administrator' --role superadmin --password-stdin >/dev/null
 fi
+log "seeding System Control server identity"
+runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q \
+  -v host="$MAIL_HOSTNAME" -v webmail="https://$MAIL_HOSTNAME" \
+  -v public_ip="$PUBLIC_IP" -v mail_from="postmaster@$DOMAIN" <<'SQL'
+INSERT INTO control.settings (key, value) VALUES
+  ('server.hostname', to_jsonb(:'host'::text)),
+  ('server.mail_hostname', to_jsonb(:'host'::text)),
+  ('server.webmail_url', to_jsonb(:'webmail'::text)),
+  ('server.public_ipv4', to_jsonb(:'public_ip'::text)),
+  ('server.mail_from', to_jsonb(:'mail_from'::text))
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+WHERE control.settings.value IS NULL
+   OR control.settings.value = 'null'::jsonb
+   OR control.settings.value = '""'::jsonb;
+SQL
 systemctl enable --now alt8mail-control >/dev/null
 systemctl restart alt8mail-control
 

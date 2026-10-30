@@ -11,12 +11,13 @@ import {
   renderTLS, renderAccess, renderAPIKeys, renderWebhooks, renderNotifications,
 } from './views-security.js';
 import { renderSecurityReports } from './views-security-reports.js';
+import { renderSystem } from './views-system.js';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '0.11.0-control';
+const APP_VERSION = '0.3.13';
 
 const state = {
   csrf: '',
@@ -70,6 +71,7 @@ const NAV_GROUPS = [
     { key: 'notifications', label: 'Notifications', icon: 'bell', href: '#/notifications', perm: 'notifications.read', desc: 'Slack, Discord, Telegram and email alerts' },
   ] },
   { label: 'Infrastructure', items: [
+    { key: 'system', label: 'System', icon: 'power', href: '#/system', perm: 'server.read', desc: 'Release updates, version history and host reboot' },
     { key: 'services', label: 'Services', icon: 'server', href: '#/services', perm: 'services.read', desc: 'systemd health and lifecycle actions' },
     { key: 'updates', label: 'Software updates', icon: 'download', href: '#/updates', perm: 'server.read', desc: 'OS package updates with live command output' },
     { key: 'terminal', label: 'Terminal', icon: 'terminal', href: '#/terminal', perm: 'server.manage', desc: 'Authenticated SSH shell on this host' },
@@ -105,6 +107,7 @@ const ROUTE_DEFS = {
   webhooks: { title: 'Webhooks', crumb: 'Security', nav: 'webhooks', perm: 'notifications.read', render: renderWebhooks },
   notifications: { title: 'Notifications', crumb: 'Security', nav: 'notifications', perm: 'notifications.read', render: renderNotifications },
   services: { title: 'Services', crumb: 'Infrastructure', nav: 'services', perm: 'services.read', render: renderServices },
+  system: { title: 'System', crumb: 'Infrastructure', nav: 'system', perm: 'server.read', render: renderSystem },
   updates: { title: 'Software updates', crumb: 'Infrastructure', nav: 'updates', perm: 'server.read', render: renderUpdates },
   terminal: { title: 'Terminal', crumb: 'Infrastructure', nav: 'terminal', perm: 'server.manage', render: renderTerminal },
   ports: { title: 'Mail listeners', crumb: 'Infrastructure', nav: 'ports', perm: 'services.read', render: renderPorts },

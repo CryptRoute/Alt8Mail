@@ -10,6 +10,12 @@ import (
 // is the infrastructure observer, so these jobs are intentionally independent
 // from any customer request.
 func (s *Server) Start(ctx context.Context) {
+	// Seed the identity fields the installer already knows, then reconcile a
+	// reboot or release update that may have completed while the panel was down.
+	s.seedServerIdentity(ctx)
+	s.reconcileRebootState(ctx)
+	s.reconcileAppUpdateJobs(ctx)
+
 	logIngestor := newLogIngestor(s)
 	logIngestor.Start(ctx)
 	s.StartImportWorker(ctx)

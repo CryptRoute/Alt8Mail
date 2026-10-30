@@ -438,8 +438,8 @@ export function diffBlock(lines, empty = 'No changes') {
   }).join('\n')}</pre>`;
 }
 
-export function kv(rows) {
-  return `<dl class="kv-grid">${rows.filter(Boolean).map(([key, value]) => `<div><dt>${esc(key)}</dt><dd>${value ?? '—'}</dd></div>`).join('')}</dl>`;
+export function kv(rows, className = '') {
+  return `<dl class="kv-grid${className ? ` ${className}` : ''}">${rows.filter(Boolean).map(([key, value]) => `<div><dt>${esc(key)}</dt><dd>${value ?? '—'}</dd></div>`).join('')}</dl>`;
 }
 
 export function formActions(primary = 'Save changes', { cancel = true, danger = false, extra = '', primaryAttrs = '' } = {}) {

@@ -120,6 +120,7 @@ export async function renderSecurityReports(ctx) {
     const footer = canManage
       ? `<button class="btn btn-secondary" type="button" data-modal-close>Close</button>
          ${report.status !== 'pending' ? `<button class="btn btn-secondary" type="button" data-report-review="reopen">${ui.icon('refresh', 14)} Reopen</button>` : ''}
+         ${report.status === 'confirmed' ? `<button class="btn btn-secondary" type="button" data-report-undo>${ui.icon('shield-off', 14)} Undo threat</button>` : ''}
          <button class="btn btn-secondary" type="button" data-report-review="dismiss">${ui.icon('check-circle', 14)} Dismiss &amp; unblock</button>
          <button class="btn btn-danger" type="button" data-report-review="domain">${ui.icon('shield', 14)} Block sender domain</button>
          <button class="btn btn-danger" type="button" data-report-review="confirm">${ui.icon('alert-circle', 14)} Confirm threat</button>`
@@ -145,6 +146,29 @@ export async function renderSecurityReports(ctx) {
         </div>`,
       footer,
       onMount: (root, close) => {
+        root.querySelector('[data-report-undo]')?.addEventListener('click', async (event) => {
+          const button = event.currentTarget;
+          const confirmed = await ctx.confirm({
+            title: 'Undo threat confirmation',
+            message: `Remove the Postfix block for ${report.senderEmail || 'this sender'} and mark the report dismissed? This reverses the confirmation and unblocks the sender.`,
+            confirmLabel: 'Undo and unblock',
+            tone: 'danger',
+            requireText: 'UNDO',
+          });
+          if (!confirmed) return;
+          button.disabled = true;
+          try {
+            await ctx.api(`/control/api/security/reports/${encodeURIComponent(reportID)}/undo`, {
+              method: 'POST', body: { confirm: 'UNDO' },
+            });
+            ui.toast('Threat confirmation undone; sender unblocked.', 'good');
+            close();
+            await load();
+          } catch (error) {
+            button.disabled = false;
+            ui.toast(errorText(error), 'critical', { title: 'Could not undo the threat' });
+          }
+        });
         root.querySelectorAll('[data-report-review]').forEach((button) => {
           button.addEventListener('click', async () => {
             const action = button.getAttribute('data-report-review');
