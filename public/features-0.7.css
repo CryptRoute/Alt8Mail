@@ -153,7 +153,7 @@
 .compose-editor pre { padding: 10px; white-space: pre-wrap; }
 .compose-editor a { color: var(--accent-ink); }
 .compose-editor .compose-quote { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--border); }
-.compose-editor .compose-quote-inner { width: 100%; max-width: 720px; margin: 0 auto; }
+.compose-editor .compose-quote-inner { width: 100%; max-width: 720px; margin: 0; }
 .compose-editor .compose-quote-lead { margin: 0 0 8px; color: var(--text-3); font-size: .78rem; font-style: italic; }
 .compose-editor .compose-quote-meta { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; color: var(--text-3); font-size: .72rem; }
 .compose-editor .compose-quote-meta b { color: var(--text-2); font-weight: 600; }
@@ -182,19 +182,19 @@
   padding: 0 10px;
   border: 0;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 68%, #6d4aff));
+  background: #7c3aed;
   color: #fff;
   font-size: .66rem;
   font-weight: 800;
   letter-spacing: .04em;
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 42%, transparent);
+  box-shadow: 0 0 0 0 rgba(124, 58, 237, .42);
   animation: compose-ai-pulse 2.3s ease-in-out infinite;
 }
-.compose-editor-toolbar .compose-ai-btn:hover { background: var(--accent-hover); color: #fff; }
+.compose-editor-toolbar .compose-ai-btn:hover { background: #6d28d9; color: #fff; }
 .compose-editor-toolbar .compose-ai-btn svg { width: 16px; height: 16px; stroke-width: 2.5; }
 .compose-ai-label { line-height: 1; }
 @keyframes compose-ai-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 42%, transparent); transform: scale(1); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, .42); transform: scale(1); }
   50% { box-shadow: 0 0 0 6px transparent; transform: scale(1.035); }
 }
 @media (prefers-reduced-motion: reduce) {

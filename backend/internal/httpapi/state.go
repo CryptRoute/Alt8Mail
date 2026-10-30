@@ -296,8 +296,9 @@ func colorFor(value string) string {
 
 func snippet(text string) string {
 	text = strings.TrimSpace(text)
-	if len(text) > 180 {
-		return text[:180]
+	runes := []rune(text)
+	if len(runes) > 180 {
+		return string(runes[:180])
 	}
 	return text
 }

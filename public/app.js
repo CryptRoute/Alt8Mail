@@ -4053,12 +4053,12 @@ function composeQuoteFor(message, kind = "reply") {
     const to = (message.to || []).map((person) => person.name && person.name !== person.email ? `${person.name} <${person.email}>` : person.email).filter(Boolean).join(", ");
     return {
       text: `\n\n---------- Forwarded message ----------\nFrom: ${sender}\nDate: ${formatFullWhen(message.date)}\nSubject: ${message.subject}\nTo: ${to}\n\n${message.bodyText || htmlToText(message.bodyHtml || "")}`,
-      html: `<div class="compose-quote" data-compose-quote="forward"><div class="compose-quote-inner"><p class="compose-quote-lead">---------- Forwarded message ----------</p><div class="compose-quote-meta"><span><b>From:</b> ${esc(sender)}</span><span><b>Date:</b> ${esc(formatFullWhen(message.date))}</span><span><b>Subject:</b> ${esc(message.subject)}</span><span><b>To:</b> ${esc(to || "undisclosed recipients")}</span></div><blockquote class="email-quote">${original}</blockquote></div></div>`
+      html: `<p><br></p><div class="compose-quote" data-compose-quote="forward"><div class="compose-quote-inner"><p class="compose-quote-lead">---------- Forwarded message ----------</p><div class="compose-quote-meta"><span><b>From:</b> ${esc(sender)}</span><span><b>Date:</b> ${esc(formatFullWhen(message.date))}</span><span><b>Subject:</b> ${esc(message.subject)}</span><span><b>To:</b> ${esc(to || "undisclosed recipients")}</span></div><blockquote class="email-quote">${original}</blockquote></div></div>`
     };
   }
   return {
-    text: replyQuoteText(message),
-    html: `<div class="compose-quote" data-compose-quote="reply"><div class="compose-quote-inner"><p class="compose-quote-lead">On ${esc(formatFullWhen(message.date))}, ${esc(sender)} wrote:</p><blockquote class="email-quote">${original}</blockquote></div></div>`
+    text: `\n\n${replyQuoteText(message)}`,
+    html: `<p><br></p><div class="compose-quote" data-compose-quote="reply"><div class="compose-quote-inner"><p class="compose-quote-lead">On ${esc(formatFullWhen(message.date))}, ${esc(sender)} wrote:</p><blockquote class="email-quote">${original}</blockquote></div></div>`
   };
 }
 

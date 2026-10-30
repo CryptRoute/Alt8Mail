@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.9** release fixes reply/forward draft autosave when a quoted line ends in a multibyte character, returns readable raw message source instead of base64, places the typing caret on a blank left-aligned line above the quote, and uses a solid purple pulsing AI action.
+
 The **0.3.8** release honours numeric image widths from quoted email HTML even when the sender also supplied width:100%, preventing logos and banners from stretching to the composer width.
 
 The **0.3.7** release shows quoted HTML automatically in reply and forward (no Quote click required), constrains it to an Outlook-style centered reading column with the original image dimensions, fixes raw message source loading for real IMAP mail, restores readable danger-button contrast, gives priority choices distinct color signals, and moves a pulsing AI assistant action directly after Quote.

@@ -878,6 +878,8 @@ try {
   check(await page.eval(`Boolean(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote .email-quote p'))`), "reply preserves the original HTML layout inside the quote");
   check(await page.eval(`Math.abs(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote img[alt="Sized logo"]').getBoundingClientRect().width - 240) < 2`), "quoted image keeps its designed width instead of filling the composer");
   check(await page.eval(`!document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]').classList.contains('is-quote-collapsed')`), "reply shows the original quote automatically");
+  check(await page.eval(`(() => { const editor = document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]'); const inner = editor.querySelector('.compose-quote-inner'); return Math.abs(inner.getBoundingClientRect().left - editor.getBoundingClientRect().left - 14) < 12; })()`), "the quoted message stays aligned with the left writing edge");
+  check(await page.eval(`(() => { const editor = document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]'); const quote = editor.querySelector('.compose-quote'); const before = quote?.previousElementSibling; return before?.tagName === 'P' && !before.textContent.trim(); })()`), "compose has a blank writing line immediately above the quote");
   check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-priority="normal"]')?.classList.contains('is-active')`), "normal priority is selected by default");
   await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="options"]`);
   await sleep(200);

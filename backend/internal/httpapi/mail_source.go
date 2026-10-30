@@ -61,7 +61,7 @@ func (s *Server) messageSource(w http.ResponseWriter, r *http.Request) {
 	payload := map[string]any{
 		"messageId":   stateString(message, "id"),
 		"headers":     headers,
-		"source":      raw,
+		"source":      string(raw),
 		"truncated":   truncated,
 		"headerCount": countHeaderLines(headers),
 		"sizeBytes":   len(raw),
