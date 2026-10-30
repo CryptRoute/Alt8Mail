@@ -216,6 +216,28 @@ func (s *Server) markRead(w http.ResponseWriter, r *http.Request) {
 	ids := uniqueStrings(body.IDs, 500)
 	changed := 0
 	mutations := []imapAction{}
+	delegatedIDs := []string{}
+	localIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if strings.HasPrefix(id, delegatedIDPrefix) {
+			delegatedIDs = append(delegatedIDs, id)
+		} else {
+			localIDs = append(localIDs, id)
+		}
+	}
+	if len(delegatedIDs) > 0 {
+		delegatedChanged, err := s.applyDelegatedActions(r.Context(), sess.User, "markRead", delegatedIDs)
+		if err != nil {
+			writeFromError(w, err)
+			return
+		}
+		changed += delegatedChanged
+	}
+	if len(localIDs) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "changed": changed})
+		return
+	}
+	ids = localIDs
 	err := s.withMailState(r.Context(), sess.User, ids, false, func(state map[string]any) error {
 		for _, id := range ids {
 			message := findMessageIn(state, id)
@@ -288,6 +310,29 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "BAD_FOLDER", "Choose a valid destination folder")
 		return
 	}
+	delegatedIDs := []string{}
+	localIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if strings.HasPrefix(id, delegatedIDPrefix) {
+			delegatedIDs = append(delegatedIDs, id)
+		} else {
+			localIDs = append(localIDs, id)
+		}
+	}
+	delegatedChanged := 0
+	if len(delegatedIDs) > 0 {
+		changed, err := s.applyDelegatedActions(r.Context(), sess.User, body.Action, delegatedIDs)
+		if err != nil {
+			writeFromError(w, err)
+			return
+		}
+		delegatedChanged = changed
+	}
+	if len(localIDs) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "changed": delegatedChanged})
+		return
+	}
+	ids = localIDs
 	var response map[string]any
 	mutations := []imapAction{}
 	policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)

@@ -26,6 +26,7 @@ const state = {
   catalog: [],
   permissions: [],
   view: "overview",
+  routeParam: "",
   csrf: "",
   selectedUsers: new Set(),
   userFilter: { q: "", status: "", role: "", page: 1, limit: 25, admin: false, deleted: false },
@@ -268,19 +269,30 @@ async function logout() {
 /* ------------------------------------------------------------
    Navigation / route
 ------------------------------------------------------------ */
-const views = new Set(["overview", "users", "groups", "org-units", "domains", "roles", "policies", "ai", "quarantine", "audit", "tenants", "settings"]);
+const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "policies", "ai", "quarantine", "audit", "tenants", "settings"]);
 
 function route() {
   if (!state.admin) return;
-  const view = (location.hash || "#/overview").replace(/^#\//, "").split("?")[0];
+  const raw = (location.hash || "#/overview").replace(/^#\//, "").split("?")[0];
+  const parts = raw.split("/").filter(Boolean);
+  let view = parts[0] || "overview";
+  let routeParam = "";
+  if (view === "users" && parts[1] === "import") view = "import-users";
+  else if (view === "users" && parts[1]) { view = "user-detail"; routeParam = parts[1]; }
+  else if (view === "mailboxes" && parts[1] === "import") view = "import-mailboxes";
+  state.routeParam = routeParam;
   state.view = views.has(view) ? view : "overview";
-  const required = { overview: "tenant.read", users: "users.read", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", policies: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
+  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", policies: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
   if (required && !can(required)) { state.view = "overview"; location.hash = "#/overview"; return; }
-  $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === state.view));
+  const navView = ["user-detail", "import-users", "import-mailboxes"].includes(state.view) ? "users" : state.view;
+  $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === navView));
   $("#sidebar").classList.remove("open");
   switch (state.view) {
     case "overview": renderOverview(); break;
     case "users": renderUsers(); break;
+    case "user-detail": renderUserPage(state.routeParam); break;
+    case "import-users": renderImportUsers(); break;
+    case "import-mailboxes": renderImportMailboxes(); break;
     case "groups": renderGroups(); break;
     case "org-units": renderOrgUnits(); break;
     case "domains": renderDomains(); break;
@@ -316,6 +328,7 @@ async function renderOverview() {
     const domains = stats.domains || {};
     const posture = stats.posture || {};
     const storage = stats.storage || {};
+    const mailImports = stats.mailImports || {};
     const usedPercent = storage.quotaBytes > 0 ? Math.round((storage.usedBytes / storage.quotaBytes) * 100) : 0;
     $("#viewRoot").innerHTML = `
       <div class="view-head">
@@ -328,6 +341,7 @@ async function renderOverview() {
         <div class="stat-card"><span class="stat-label">${icon("globe")}Domains</span><span class="stat-value">${domains.total ?? 0}</span><span class="stat-meta">${domains.pending ? `${domains.pending} awaiting DNS` : "All domains verified"}</span></div>
         <div class="stat-card"><span class="stat-label">${icon("grid")}Storage used</span><span class="stat-value">${esc(formatBytes(storage.usedBytes))}</span><span class="stat-meta">of ${esc(formatBytes(storage.quotaBytes))} · ${usedPercent}%</span></div>
       </div>
+      ${(mailImports.active || mailImports.awaitingMapping) ? `<a class="import-alert" href="#/mailboxes/import"><span class="import-alert-icon">${icon("refresh")}</span><div><b>Mailbox migration in progress</b><small>${mailImports.active || 0} running · ${mailImports.awaitingMapping || 0} awaiting mapping · ${mailImports.importedMessages || 0} messages copied so far</small></div><span class="import-alert-link">Open migration ${icon("chevron-right")}</span></a>` : ""}
       <div class="dashboard-grid">
         <div class="card">
           <div class="card-head"><div><h2>Security posture</h2><p>Controls that protect this organization.</p></div><span class="badge ${mfaScore(posture)}">${(posture.mfaCoverage || 0) >= 90 ? "Strong" : (posture.mfaCoverage || 0) >= 50 ? "Improving" : "Needs attention"}</span></div>
@@ -349,6 +363,8 @@ async function renderOverview() {
           <div class="card-head"><div><h2>Quick actions</h2><p>Common administration tasks.</p></div></div>
           <div class="quick-grid">
             ${can("users.create") ? quick("users", "plus", "Add a user", "Create a mailbox and identity", "new-user") : ""}
+            ${can("users.create") ? quick("list", "arrow-up", "Import users", "CSV or Excel account creation", "import-users") : ""}
+            ${can("users.create") ? quick("mail", "arrow-up", "Import mailboxes", "Bring mail from another provider", "import-mailboxes") : ""}
             ${can("groups.manage") ? quick("group", "plus", "Create a group", "Distribution and security groups", "new-group") : ""}
             ${can("domains.manage") ? quick("globe", "plus", "Add a domain", "Start DNS verification", "new-domain") : ""}
             ${can("policies.manage") ? quick("shield", "sliders", "Review policies", "MFA, mail and sharing controls", "go-policies") : ""}
@@ -410,7 +426,7 @@ function renderUsersView() {
   $("#viewRoot").innerHTML = `
     <div class="view-head">
       <div><h1>Users</h1><p>Manage identities, access, quotas and mailbox configuration across ${esc(state.activeTenant.name)}.</p></div>
-      <div class="view-actions">${can("users.create") ? `<button class="btn primary" data-action="new-user">${icon("plus")}Add user</button>` : ""}</div>
+      <div class="view-actions">${can("users.create") ? `<button class="btn secondary" data-action="import-users">${icon("list")}Import users</button><button class="btn secondary" data-action="import-mailboxes">${icon("refresh")}Import mailboxes</button><button class="btn primary" data-action="new-user">${icon("plus")}Add user</button>` : ""}</div>
     </div>
     <div class="toolbar">
       <div class="search-box">${icon("search")}<input id="userSearch" type="search" placeholder="Search name, email, title…" value="${esc(state.userFilter.q)}"></div>
@@ -608,7 +624,7 @@ async function loadUserSessions(userId) {
 
 /* User actions */
 async function userAction(action, id, button) {
-  if (action === "open") return openUserDrawer(id);
+  if (action === "open") { location.hash = "#/users/" + encodeURIComponent(id); return; }
   if (action === "edit") {
     const data = await api("users/" + encodeURIComponent(id));
     state.drawerUser = data.user;
@@ -632,7 +648,7 @@ async function resetPasswordModal(id) {
   try {
     const data = await api(`users/${encodeURIComponent(id)}/reset-password`, { method: "POST", body: {} });
     showCredentials("Temporary credentials", data, "The user must sign in with these credentials. They will not be shown again.");
-    if (state.drawerUser) openUserDrawer(id);
+    if (state.drawerUser && state.view !== "user-detail") openUserDrawer(id);
   } catch (error) { showError(error); }
 }
 
@@ -677,7 +693,7 @@ async function toggleUserStatus(id, action) {
   try {
     await api("users/" + encodeURIComponent(id), { method: "PATCH", body: { status: action === "suspend" ? "suspended" : "active" } });
     toast(action === "suspend" ? "User suspended" : "User activated");
-    if (state.drawerUser) await openUserDrawer(id);
+    if (state.drawerUser && state.view !== "user-detail") await openUserDrawer(id);
     await loadUsers();
   } catch (error) { showError(error); }
 }
@@ -817,7 +833,8 @@ async function submitUserForm(formId, userId) {
     const data = await api("users/" + encodeURIComponent(userId), { method: "PATCH", body });
     toast("User updated");
     closeModal();
-    await openUserDrawer(userId);
+    if (state.view === "user-detail") await renderUserPage(userId);
+    else await openUserDrawer(userId);
     await loadUsers();
     return;
   }
@@ -1155,7 +1172,8 @@ async function submitAssignRoleForm(user) {
   await api(`roles/${encodeURIComponent(roleId)}/assign`, { method: "POST", body: { userId, expiresAt: expires ? new Date(expires).toISOString() : "" } });
   toast("Admin role assigned");
   closeModal();
-  if (state.drawerUser) openUserDrawer(userId);
+  if (state.view === "user-detail") renderUserPage(userId);
+  else if (state.drawerUser) openUserDrawer(userId);
 }
 
 /* ------------------------------------------------------------
@@ -1684,7 +1702,7 @@ function paletteSearch(event) {
 
 function bindPaletteResults() {
   $$("[data-palette-nav]").forEach((item) => item.addEventListener("click", () => { closeCommandPalette(); location.hash = "#/" + item.dataset.paletteNav; }));
-  $$("[data-palette-user]").forEach((item) => item.addEventListener("click", () => { closeCommandPalette(); state.view = "users"; location.hash = "#/users"; setTimeout(() => openUserDrawer(item.dataset.paletteUser), 250); }));
+  $$("[data-palette-user]").forEach((item) => item.addEventListener("click", () => { closeCommandPalette(); location.hash = "#/users/" + encodeURIComponent(item.dataset.paletteUser); }));
 }
 bindPaletteResults();
 
@@ -1706,6 +1724,9 @@ document.addEventListener("click", async (event) => {
   if (actionEl) {
     const action = actionEl.dataset.action;
     if (action === "new-user") return openNewUserModal();
+    if (action === "import-users") { location.hash = "#/users/import"; return; }
+    if (action === "import-mailboxes") { location.hash = "#/mailboxes/import"; return; }
+    if (action === "back-users") { location.hash = "#/users"; return; }
     if (action === "new-group") return openNewGroupModal();
     if (action === "new-org-unit") return orgUnitModal();
     if (action === "new-domain") return openNewDomainModal();
@@ -1733,7 +1754,7 @@ document.addEventListener("click", async (event) => {
     return userAction(userActionEl.dataset.userAction, userActionEl.dataset.userId, userActionEl);
   }
   const row = event.target.closest("tr[data-user-id]");
-  if (row && !event.target.closest("button, input, a")) return openUserDrawer(row.dataset.userId);
+  if (row && !event.target.closest("button, input, a")) { location.hash = "#/users/" + encodeURIComponent(row.dataset.userId); return; }
   const submit = event.target.closest("[data-modal-submit]");
   if (submit) {
     const formId = submit.dataset.modalSubmit;

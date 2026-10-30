@@ -49,6 +49,8 @@ type Server struct {
 	sieveSyncMu     sync.Mutex
 	sieveSyncActive map[string]bool
 	sieveSyncAgain  map[string]bool
+	importMu        sync.Mutex
+	activeImports   map[string]bool
 	webAuthn        *webauthn.WebAuthn
 }
 
@@ -72,6 +74,7 @@ func New(opts Options) *Server {
 		davAuthCache:    map[string]davAuthEntry{},
 		sieveSyncActive: map[string]bool{},
 		sieveSyncAgain:  map[string]bool{},
+		activeImports:   map[string]bool{},
 		adminLimit:      newLoginLimiter(opts.Config.AdminRateLimitMax, opts.Config.AdminRateWindow),
 	}
 	wa, err := webauthn.New(&webauthn.Config{
@@ -131,6 +134,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/messages/actions", s.requireUser(s.messageActions))
 	mux.HandleFunc("GET /api/messages/{id}/trust", s.requireUser(s.messageTrust))
 	mux.HandleFunc("POST /api/messages/{id}/trust", s.requireUser(s.messageTrust))
+	mux.HandleFunc("GET /api/messages/{id}/source", s.requireUser(s.messageSource))
 	mux.HandleFunc("POST /api/undo/{token}", s.requireUser(s.undoAction))
 
 	mux.HandleFunc("GET /api/drafts", s.requireUser(s.getDrafts))
@@ -545,6 +549,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		}
 		folders = foldersAny
 	}
+	folders, messages = s.applyDelegatedMailboxes(ctx, sess.User, folders, messages)
 	sieve := publicSieve(state, sess.User.Email)
 	tasks, _ := s.loadTasks(ctx, sess.User.ID)
 	files, _ := s.loadFiles(ctx, sess.User, "")

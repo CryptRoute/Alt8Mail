@@ -216,61 +216,71 @@ func (s *Server) deliverSMTP(item map[string]any, attachments []outboundAttachme
 	if err != nil {
 		return nil, err
 	}
+	if err := s.submitSMTPMessage(fromEmail, recipients, raw); err != nil {
+		return nil, err
+	}
+	return &deliveredMail{MessageID: messageID, Raw: raw}, nil
+}
+
+// submitSMTPMessage delivers one already-built RFC 822 message through the
+// authenticated submission service. It is shared by the compose pipeline and
+// the account-notification mailer used by user and mailbox imports.
+func (s *Server) submitSMTPMessage(fromEmail string, recipients []string, raw []byte) error {
 	tlsConfig, err := s.mailTLSConfig(s.cfg.SMTPTLSName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	conn, err := net.DialTimeout("tcp", s.cfg.SMTPAddr, 10*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("connect to submission service: %w", err)
+		return fmt.Errorf("connect to submission service: %w", err)
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(45 * time.Second))
 	client, err := smtp.NewClient(conn, s.cfg.SMTPTLSName)
 	if err != nil {
-		return nil, fmt.Errorf("submission greeting: %w", err)
+		return fmt.Errorf("submission greeting: %w", err)
 	}
 	defer client.Close()
 	if ok, _ := client.Extension("STARTTLS"); !ok {
-		return nil, fmt.Errorf("submission service does not offer STARTTLS")
+		return fmt.Errorf("submission service does not offer STARTTLS")
 	}
 	if err := client.StartTLS(tlsConfig); err != nil {
-		return nil, fmt.Errorf("submission TLS: %w", err)
+		return fmt.Errorf("submission TLS: %w", err)
 	}
 	if ok, _ := client.Extension("AUTH"); !ok {
-		return nil, fmt.Errorf("submission service does not offer authentication")
+		return fmt.Errorf("submission service does not offer authentication")
 	}
 	loginUser, loginPassword, err := s.mailLoginForUser(fromEmail)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	auth := smtp.PlainAuth("", loginUser, loginPassword, s.cfg.SMTPTLSName)
 	if err := client.Auth(auth); err != nil {
-		return nil, fmt.Errorf("submission authentication: %w", err)
+		return fmt.Errorf("submission authentication: %w", err)
 	}
 	if err := client.Mail(fromEmail); err != nil {
-		return nil, fmt.Errorf("submission MAIL FROM: %w", err)
+		return fmt.Errorf("submission MAIL FROM: %w", err)
 	}
 	for _, recipient := range recipients {
 		if err := client.Rcpt(recipient); err != nil {
-			return nil, fmt.Errorf("submission RCPT TO %s: %w", recipient, err)
+			return fmt.Errorf("submission RCPT TO %s: %w", recipient, err)
 		}
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return nil, fmt.Errorf("submission DATA: %w", err)
+		return fmt.Errorf("submission DATA: %w", err)
 	}
 	if _, err := writer.Write(raw); err != nil {
 		_ = writer.Close()
-		return nil, fmt.Errorf("write message: %w", err)
+		return fmt.Errorf("write message: %w", err)
 	}
 	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("finish message: %w", err)
+		return fmt.Errorf("finish message: %w", err)
 	}
 	if err := client.Quit(); err != nil {
-		return nil, fmt.Errorf("submission quit: %w", err)
+		return fmt.Errorf("submission quit: %w", err)
 	}
-	return &deliveredMail{MessageID: messageID, Raw: raw}, nil
+	return nil
 }
 
 func buildMIMEMessage(item map[string]any, messageID string, attachments []outboundAttachment) ([]byte, error) {

@@ -23,6 +23,26 @@
 .email-image-blocked span { display: block; margin-top: 1px; color: var(--text-3); font-size: .63rem; }
 .email-image-blocked .btn-secondary { flex: none; }
 
+/* ---------- delegated mailbox ---------- */
+.delegation-banner {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin: 0 0 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 12px; background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+}
+.delegation-badge {
+  width: 30px; height: 30px; flex: none; display: grid; place-items: center;
+  border-radius: 9px; background: var(--accent-soft); color: var(--accent-strong);
+}
+.delegation-badge svg { width: 16px; height: 16px; }
+.delegation-banner > div { flex: 1; min-width: 0; }
+.delegation-banner strong { display: block; color: var(--text); font-size: .72rem; }
+.delegation-banner p { margin: 2px 0 0; color: var(--text-2); font-size: .63rem; line-height: 1.45; }
+.delegation-chip {
+  flex: none; align-self: center; padding: 3px 8px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-2);
+  font-size: .58rem; font-weight: 600; white-space: nowrap;
+}
+
 /* ---------- Junk / spam quarantine ---------- */
 .spam-quarantine-banner {
   display: flex; align-items: flex-start; gap: 11px; padding: 12px 13px; margin: 0 0 12px;

@@ -124,6 +124,19 @@ served by the same mux.
 | GET | `/users/:id` | users.read |
 | POST | `/users/:id/reset-password`, `/reset-mfa`, `/revoke-sessions` | corresponding permission |
 | POST/DELETE | `/users/:id/aliases`, `/users/:id/aliases/:aliasId` | users.aliases |
+| PATCH | `/users/:id/aliases/:aliasId` | users.aliases; label, send permission and active state |
+| GET/POST | `/users/:id/signatures` | users.read / users.update |
+| PATCH/DELETE | `/users/:id/signatures/:signatureId` | users.update |
+| GET/PUT | `/users/:id/identity-signatures` | users.read / users.update |
+| GET/PUT | `/users/:id/vacation` | users.read / users.update; pushes the Dovecot vacation rule |
+| GET/POST | `/users/:id/delegates` | users.read / users.update |
+| PATCH/DELETE | `/users/:id/delegates/:delegateId` | users.update |
+| POST | `/users/import` | users.create; row-based CSV/XLSX account import |
+| GET | `/users/import/jobs`, `/users/import/jobs/:id` | users.read; passwords require users.create |
+| POST | `/mail-import/jobs` | users.create; validate old IMAP/POP3 credentials |
+| GET | `/mail-import/jobs`, `/mail-import/jobs/:id` | users.read; result passwords require users.create |
+| PUT | `/mail-import/jobs/:id/mapping` | users.update; confirm target mailbox mapping and start copy |
+| POST | `/mail-import/jobs/:id/cancel` | users.update |
 | POST | `/users/bulk` | users.update |
 | GET | `/users/:id/sessions` | sessions.manage |
 | GET/POST/GET/PATCH/DELETE | `/groups`, `/groups/:id` | groups.* |

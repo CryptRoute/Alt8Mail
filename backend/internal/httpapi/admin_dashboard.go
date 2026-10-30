@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
+	"github.com/jackc/pgx/v5"
 )
 
 func (s *Server) adminTenantStats(ctx context.Context, tenantID string) (map[string]any, error) {
@@ -38,6 +38,14 @@ func (s *Server) adminTenantStats(ctx context.Context, tenantID string) (map[str
 	_ = s.store.DB.QueryRow(ctx, `SELECT COUNT(*) FROM mail_domains WHERE tenant_id = $1`, tenantID).Scan(&domains)
 	_ = s.store.DB.QueryRow(ctx, `SELECT COUNT(*) FROM mail_domains WHERE tenant_id = $1 AND status NOT IN ('verified', 'manual')`, tenantID).Scan(&pendingDomains)
 	_ = s.store.DB.QueryRow(ctx, `SELECT COUNT(*) FROM mailboxes WHERE tenant_id = $1 AND active = true`, tenantID).Scan(&mailboxes)
+	var activeImports, pendingImports int
+	var importedMessages int64
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE status IN ('validating','queued','running')),
+		       COUNT(*) FILTER (WHERE status = 'awaiting_mapping'),
+		       COALESCE(SUM(imported_messages), 0)
+		FROM mail_import_jobs WHERE tenant_id = $1
+	`, tenantID).Scan(&activeImports, &pendingImports, &importedMessages)
 	var adminRoleUsers, logins24h int
 	_ = s.store.DB.QueryRow(ctx, `
 		SELECT COUNT(DISTINCT u.id) FROM users u
@@ -71,6 +79,9 @@ func (s *Server) adminTenantStats(ctx context.Context, tenantID string) (map[str
 	stats["orgUnits"] = orgUnits
 	stats["domains"] = map[string]any{"total": domains, "pending": pendingDomains}
 	stats["mailboxes"] = mailboxes
+	stats["mailImports"] = map[string]any{
+		"active": activeImports, "awaitingMapping": pendingImports, "importedMessages": importedMessages,
+	}
 	stats["storage"] = map[string]any{"usedBytes": storageUsed, "quotaBytes": storageQuota}
 	stats["logins24h"] = logins24h
 	stats["posture"] = map[string]any{

@@ -688,7 +688,16 @@ func (s *Server) attachmentIsQuarantined(ctx context.Context, userID, attachment
 func (s *Server) attachmentContent(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	id := r.PathValue("id")
-	if s.attachmentIsQuarantined(r.Context(), sess.User.ID, id) {
+	ownerID := strings.TrimSpace(r.URL.Query().Get("owner"))
+	lookupUserID := sess.User.ID
+	if ownerID != "" {
+		if _, allowed := s.delegationFor(r.Context(), sess.User.TenantID, ownerID, sess.User.ID); !allowed {
+			writeError(w, http.StatusForbidden, "DELEGATE_FORBIDDEN", "You do not have access to this mailbox")
+			return
+		}
+		lookupUserID = ownerID
+	}
+	if s.attachmentIsQuarantined(r.Context(), lookupUserID, id) {
 		writeError(w, http.StatusForbidden, "SPAM_ATTACHMENT_BLOCKED", "Attachments in Junk are blocked. Move the message to Inbox first.")
 		return
 	}
@@ -698,7 +707,7 @@ func (s *Server) attachmentContent(w http.ResponseWriter, r *http.Request) {
 	err := s.store.DB.QueryRow(r.Context(), `
 		SELECT name, mime, size_bytes, stored_path, previewable
 		FROM attachments WHERE id=$1 AND user_id=$2
-	`, id, sess.User.ID).Scan(&name, &mime, &sizeBytes, &storedName, &previewable)
+	`, id, lookupUserID).Scan(&name, &mime, &sizeBytes, &storedName, &previewable)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "Attachment not found")
 		return

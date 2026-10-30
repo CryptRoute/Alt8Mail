@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.0** platform release turns the customer admin into an onboarding and migration workspace: CSV/XLSX user import with generated credentials and branded notification email, a resumable IMAP/POP3 mailbox migration engine with validation, mailbox mapping, live progress and dashboard visibility, a dedicated user page with alias editing, signature and per-address signature management, vacation responders and delegated mailbox access, a raw RFC 822 message source viewer in webmail, and an edge-to-edge webmail layout.
+
 The **0.2.8** platform release lets users manage their own Junk by default: **Report Not Spam** and **Move to Inbox** work unless an organization turns on **Restrict Junk release to administrators** in the admin Mail policy. When enabled, members see an "Administrator release required" state in the Junk banner and the reader action is locked, while tenant administrators release mail from the Quarantine queue. The policy is returned to the webmail bootstrap so the UI and API agree.
 
 The **0.2.7** platform release adds privacy-proxied remote and inline email images with a default-on display preference (Junk always blocks images and attachments), a Junk quarantine banner with **Report Not Spam** and **Move to Inbox**, automatic sender rules when mail is marked Junk, a cross-tenant **Security reports** review queue in System Control with immediate Postfix-policy sender blocking, custom folders with rich hover/right-click actions, a searchable **Move to** panel with recent folders and rule mode, and a slim reader subject bar with close and previous/next navigation.

@@ -986,6 +986,58 @@ func (s *Server) adminAddUserAlias(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "alias": map[string]any{"id": id, "email": body.Email, "label": label, "kind": "alias", "canSend": canSend, "active": true}})
 }
 
+func (s *Server) adminUpdateUserAlias(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireAdminSession(r)
+	user, err := s.adminUserByID(r.Context(), r.PathValue("id"))
+	if err != nil || user.TenantID != sess.ActiveTenantID {
+		writeError(w, http.StatusNotFound, "USER_NOT_FOUND", "User not found")
+		return
+	}
+	aliasID := r.PathValue("aliasId")
+	var kind, currentLabel string
+	var currentCanSend, currentActive bool
+	if err := s.store.DB.QueryRow(r.Context(), `
+		SELECT kind, label, can_send, active FROM user_aliases WHERE id=$1 AND user_id=$2 AND tenant_id=$3
+	`, aliasID, user.ID, sess.ActiveTenantID).Scan(&kind, &currentLabel, &currentCanSend, &currentActive); err != nil {
+		writeError(w, http.StatusNotFound, "ALIAS_NOT_FOUND", "Alias not found")
+		return
+	}
+	if kind == "primary" {
+		writeError(w, http.StatusBadRequest, "PRIMARY_ALIAS", "The primary address cannot be changed")
+		return
+	}
+	var body struct {
+		Label   *string `json:"label"`
+		CanSend *bool   `json:"canSend"`
+		Active  *bool   `json:"active"`
+	}
+	if err := decodeJSON(w, r, &body, 32*1024); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+		return
+	}
+	label, canSend, active := currentLabel, currentCanSend, currentActive
+	if body.Label != nil {
+		label = truncate(strings.TrimSpace(*body.Label), 80)
+		if label == "" {
+			label = "Alias"
+		}
+	}
+	if body.CanSend != nil {
+		canSend = *body.CanSend
+	}
+	if body.Active != nil {
+		active = *body.Active
+	}
+	if _, err := s.store.DB.Exec(r.Context(), `
+		UPDATE user_aliases SET label=$2, can_send=$3, active=$4 WHERE id=$1 AND user_id=$5
+	`, aliasID, label, canSend, active, user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "ALIAS", "Could not update the alias")
+		return
+	}
+	s.recordAdminAudit(r.Context(), sess, sess.User, "admin.alias_updated", user.Email, "Updated alias "+label, map[string]any{"userId": user.ID, "aliasId": aliasID})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "alias": map[string]any{"id": aliasID, "label": label, "canSend": canSend, "active": active}})
+}
+
 func (s *Server) adminDeleteUserAlias(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	user, err := s.adminUserByID(r.Context(), r.PathValue("id"))

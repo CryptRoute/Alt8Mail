@@ -734,6 +734,8 @@ const newMenu = document.getElementById("newMenu");
 const moveMenu = document.getElementById("moveMenu");
 const detailsOverlay = document.getElementById("detailsOverlay");
 const detailsBody = document.getElementById("detailsBody");
+let detailsCurrentId = "";
+let detailsSourceMessage = null;
 const eventOverlay = document.getElementById("eventOverlay");
 const bulkBar = document.getElementById("bulkBar");
 const bulkCount = document.getElementById("bulkCount");
@@ -2862,7 +2864,7 @@ function renderFolders() {
           <span class="folder-name">${esc(folder.label)}</span>
           ${badge ? `<span class="folder-badge${badge.neutral ? " neutral" : ""}" data-folder-badge="${esc(folder.id)}">${badge.count > 999 ? "999+" : badge.count}</span>` : ""}
         </button>
-        <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"><span aria-hidden="true">⋯</span></button>
+        <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"${folder.delegated ? " hidden" : ""}><span aria-hidden="true">⋯</span></button>
       </div>`;
     });
     if (section.key === "favorites") {
@@ -2907,7 +2909,7 @@ function folderMenuHTML(folder) {
 
 function openFolderMenu(folderId, event) {
   const folder = (state.folders || []).find((item) => item.id === folderId);
-  if (!folder || !folderMenu) return;
+  if (!folder || !folderMenu || folder.delegated) return;
   state.folderMenuTarget = folderId;
   folderMenu.innerHTML = folderMenuHTML(folder);
   folderMenu.hidden = false;
@@ -3311,6 +3313,21 @@ function externalBannerMarkup(thread) {
   </div>`;
 }
 
+function delegationBanner(message) {
+  if (!message.delegateOwnerId) return "";
+  const canSend = message.delegateCanSend === true;
+  return `<div class="delegation-banner">
+    <span class="delegation-badge"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></span>
+    <div><strong>Viewing ${esc(message.delegateOwnerName || "a delegated")}'s Inbox</strong><p>${canSend ? "You have read and reply access. Replies are sent from your own address." : "You have read-only access. Ask the mailbox owner or an administrator for reply permission."}</p></div>
+    <span class="delegation-chip">${canSend ? "Read & reply" : "Read only"}</span>
+  </div>`;
+}
+
+function delegatedThreadReadOnly(thread) {
+  if (!thread || !thread.messages.some((message) => message.delegateOwnerId)) return false;
+  return !thread.messages.some((message) => message.delegateCanSend === true);
+}
+
 function spamMessageBanner(message) {
   if (message.folder !== "spam") return "";
   const locked = !canReleaseQuarantinedMail();
@@ -3349,6 +3366,7 @@ function threadMessageMarkup(message, expanded) {
     ? `<span class="chip-cat" style="--cat:${CATEGORIES[key].color}"><span class="cat-dot"></span>${esc(CATEGORIES[key].label)}</span>`
     : "").join("");
   const body = expanded ? `<div class="thread-body">
+      ${delegationBanner(message)}
       ${spamMessageBanner(message)}
       ${blockedImagesBanner(message, imagesAllowed)}
       <div class="trust-line${trust.tone === "danger" ? " is-external" : ""}">
@@ -3667,10 +3685,11 @@ function syncCommandBar() {
   const hasThread = Boolean(thread);
   const hasSelection = state.selectedIds.size > 0;
   const hasMessage = hasThread || hasSelection;
-  $$(".commandbar [data-action], #cmdMove").forEach((button) => {
+  const delegatedLocked = delegatedThreadReadOnly(thread);
+  $$(".commandbar [data-action], .reader-toolbar [data-action], #cmdMove").forEach((button) => {
     const action = button.getAttribute("data-action");
     const needsMessage = ["reply", "reply-all", "forward", "ai-reply"].includes(action);
-    const enabled = needsMessage ? hasThread : hasMessage;
+    const enabled = needsMessage ? hasThread && !(delegatedLocked && ["reply", "reply-all", "forward"].includes(action)) : hasMessage;
     button.classList.toggle("is-disabled", !enabled);
     if (enabled) button.removeAttribute("aria-disabled");
     else button.setAttribute("aria-disabled", "true");
@@ -3705,7 +3724,7 @@ function attachmentMarkup(files, message = null) {
   const blocked = message?.folder === "spam";
   return `<div class="attachments${blocked ? " is-blocked" : ""}" data-attachment-message="${esc(messageId)}">
     <div class="attach-title-row"><h3 class="attach-title"><svg class="icon" aria-hidden="true"><use href="#${blocked ? "i-lock" : "i-shield-check"}"/></svg>${files.length} attachment${files.length === 1 ? "" : "s"} · ${blocked ? "Blocked in Junk" : "Scanned"}</h3>
-      ${messageId && !blocked ? `<button class="link-btn attach-save-all" data-save-all-attachments="${esc(messageId)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg>Save all to Cabinet</button>` : ""}
+      ${messageId && !blocked && !message?.delegateOwnerId ? `<button class="link-btn attach-save-all" data-save-all-attachments="${esc(messageId)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg>Save all to Cabinet</button>` : ""}
     </div>
     <div class="attach-grid">
       ${files.map((file) => `<div class="attach-item">
@@ -4014,6 +4033,10 @@ function replyQuoteText(message) {
 
 function replyToMessage(message, all = false) {
   if (!message) return;
+  if (message.delegateOwnerId && message.delegateCanSend !== true) {
+    showToast("This delegated mailbox is read-only");
+    return;
+  }
   const plan = replyRecipients(message, all);
   const receivedAlias = state.aliases.find((alias) => alias.canSend && (message.to || []).some((person) => normalizeEmail(person.email) === normalizeEmail(alias.email)));
   const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
@@ -7116,7 +7139,18 @@ function openDetails(messageOrId) {
     ["DKIM", auth.dkim || "none", auth.signer ? `Signature domain ${auth.signer}` : "No valid signature"],
     ["DMARC", auth.dmarc || "none", message.external ? "Domain alignment policy" : "Internal domain policy"]
   ];
-  detailsBody.innerHTML = `<div class="details-security">
+  detailsCurrentId = message.id;
+  detailsSourceMessage = null;
+  detailsBody.closest(".dialog")?.classList.remove("is-source");
+  detailsBody.innerHTML = `<div class="details-tabs" role="tablist">
+      <button class="details-tab is-active" data-details-tab="details" type="button" role="tab" aria-selected="true">Details</button>
+      <button class="details-tab" data-details-tab="source" type="button" role="tab" aria-selected="false">Raw source</button>
+      <span class="details-tabs-spacer"></span>
+      <button class="details-source-action" data-copy-headers type="button" hidden>Copy headers</button>
+      <button class="details-source-action" data-download-source type="button" hidden>Download .eml</button>
+    </div>
+    <div data-details-panel="details">
+    <div class="details-security">
       <div class="details-security-head">
         <span class="trust-shield ${showExternalTag && message.external && !message.trusted ? "is-warn" : ""}"><svg class="icon" aria-hidden="true"><use href="#${showExternalTag && message.external ? "i-alert" : "i-shield-check"}"/></svg></span>
         <div><strong>${message.external ? (showExternalTag ? (message.trusted ? "Trusted external sender" : "External sender") : (message.trusted ? "Trusted sender · authentication verified" : externalLabel)) : "Verified internal sender"}</strong><span>${message.external ? "Evaluated by Alt8Mail DKIM, DMARC and DNS checks" : "Verified by the Alt8Mail directory"}</span></div>
@@ -7126,13 +7160,99 @@ function openDetails(messageOrId) {
       ${message.external && showExternalTag ? `<div class="details-trust-actions"><button class="btn-secondary" data-trust-toggle="${esc(message.id)}" data-trust-value="${message.trusted ? "false" : "true"}" type="button">${message.trusted ? "Remove sender trust" : "Mark sender as trusted"}</button><span>Trusting a sender suppresses the external warning for this address.</span></div>` : ""}
     </div>
     <div class="details-grid">${rows.map(([key, value]) => `<div class="details-row"><dt>${esc(key)}</dt><dd>${esc(value)}</dd></div>`).join("")}</div>
-    <p class="details-note">Transport results come from the receiving MTA. In production, wire this panel to internal/dkim, DNS DMARC lookups and your policy engine.</p>`;
+    <p class="details-note">Transport results come from the receiving MTA. Open <strong>Raw source</strong> for the complete RFC 822 header block, including every Received hop and originating IP.</p>
+    </div>
+    <div data-details-panel="source" hidden>
+      <div class="source-meta"><span>Complete header block and message body preview</span><span data-source-meta>Waiting to load…</span></div>
+      <p class="source-note" data-source-note hidden></p>
+      <pre class="source-view" data-source-view>Select Raw source to load the full message headers.</pre>
+    </div>`;
   detailsOverlay.hidden = false;
   setTimeout(() => document.getElementById("detailsClose").focus(), 30);
 }
 
 function closeDetails() {
   detailsOverlay.hidden = true;
+  detailsSourceMessage = null;
+  detailsCurrentId = "";
+}
+
+function selectDetailsTab(tab) {
+  detailsBody.closest(".dialog")?.classList.toggle("is-source", tab === "source");
+  detailsBody.querySelectorAll("[data-details-tab]").forEach((button) => {
+    const active = button.getAttribute("data-details-tab") === tab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  detailsBody.querySelectorAll("[data-details-panel]").forEach((panel) => {
+    panel.hidden = panel.getAttribute("data-details-panel") !== tab;
+  });
+  detailsBody.querySelectorAll("[data-copy-headers], [data-download-source]").forEach((button) => {
+    button.hidden = tab !== "source";
+  });
+  if (tab === "source") loadDetailsSource();
+}
+
+async function loadDetailsSource() {
+  const view = detailsBody.querySelector("[data-source-view]");
+  const meta = detailsBody.querySelector("[data-source-meta]");
+  const note = detailsBody.querySelector("[data-source-note]");
+  if (!view || !detailsCurrentId) return;
+  if (detailsSourceMessage && detailsSourceMessage.id === detailsCurrentId) {
+    renderDetailsSource(view, meta, note);
+    return;
+  }
+  view.textContent = "Loading the complete header block from the mail server…";
+  if (meta) meta.textContent = "Fetching source…";
+  if (note) note.hidden = true;
+  try {
+    const data = await api(`/api/messages/${encodeURIComponent(detailsCurrentId)}/source`);
+    detailsSourceMessage = { id: detailsCurrentId, ...data };
+    renderDetailsSource(view, meta, note);
+  } catch (error) {
+    view.textContent = error && error.message ? error.message : "The message source could not be loaded.";
+    if (meta) meta.textContent = "Unavailable";
+  }
+}
+
+function renderDetailsSource(view, meta, note) {
+  const data = detailsSourceMessage;
+  if (!view || !data) return;
+  view.textContent = data.source || data.headers || "";
+  if (meta) {
+    const size = formatBytes(Number(data.sizeBytes) || 0);
+    meta.textContent = `${data.headerCount || 0} headers · ${size}${data.truncated ? " · preview capped" : ""}`;
+  }
+  if (note) {
+    note.hidden = !data.note;
+    note.textContent = data.note || "";
+  }
+}
+
+async function copyDetailsHeaders() {
+  if (!detailsSourceMessage) return;
+  try {
+    await navigator.clipboard.writeText(detailsSourceMessage.headers || "");
+    showToast("Headers copied to clipboard");
+  } catch {
+    showToast("Clipboard access was denied");
+  }
+}
+
+function downloadDetailsSource() {
+  if (!detailsSourceMessage) return;
+  const message = messageById(detailsCurrentId);
+  const subject = String(message?.subject || "message").replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80);
+  const blob = new Blob([detailsSourceMessage.source || detailsSourceMessage.headers || ""], { type: "message/rfc822" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${subject || "message"}.eml`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("Message downloaded as .eml");
 }
 
 async function toggleTrust(messageId, trusted) {
@@ -10962,6 +11082,10 @@ function bindEvents() {
     }
     const detailsButton = target.closest("[data-details]");
     if (detailsButton) { event.preventDefault(); openDetails(detailsButton.getAttribute("data-details")); return; }
+    const detailsTab = target.closest("[data-details-tab]");
+    if (detailsTab) { event.preventDefault(); selectDetailsTab(detailsTab.getAttribute("data-details-tab")); return; }
+    if (target.closest("[data-copy-headers]")) { event.preventDefault(); copyDetailsHeaders(); return; }
+    if (target.closest("[data-download-source]")) { event.preventDefault(); downloadDetailsSource(); return; }
     const trustSender = target.closest("[data-trust-sender]");
     if (trustSender) { event.preventDefault(); toggleTrust(trustSender.getAttribute("data-trust-sender"), true); return; }
     const trustToggle = target.closest("[data-trust-toggle]");
