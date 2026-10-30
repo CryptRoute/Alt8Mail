@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.10** release ensures the purple pulsing AI compose action always renders its icon and AI label in white.
+
 The **0.3.9** release fixes reply/forward draft autosave when a quoted line ends in a multibyte character, returns readable raw message source instead of base64, places the typing caret on a blank left-aligned line above the quote, and uses a solid purple pulsing AI action.
 
 The **0.3.8** release honours numeric image widths from quoted email HTML even when the sender also supplied width:100%, preventing logos and banners from stretching to the composer width.
