@@ -219,6 +219,29 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
   Failed SSH credentials return 422 and do not expire the panel session.
   Host-key verification is skipped only for `127.0.0.1`.
 
+### System updates and reboot
+
+- **Infrastructure → System** compares the installed release with the latest
+  Git tag, starts transactional release updates outside the control service's
+  cgroup, streams the updater log, and lists installed releases and update
+  jobs. Update checks, starts, completions and failures are written to the
+  panel audit log.
+- The release updater uses `/usr/local/bin/alt8mail-update`. It creates a
+  database and configuration backup, applies migrations, switches the release
+  symlink, runs readiness checks and restores the previous release and database
+  when an update fails.
+- `A8M_REPO` and `A8M_REPO_HTTPS` are tried in order, so a missing SSH key or
+  blocked SSH transport does not prevent a public or otherwise reachable HTTPS
+  checkout. Existing GitHub SSH configurations derive the HTTPS fallback
+  automatically.
+- The same page schedules a host reboot through a transient systemd timer. The
+  control plane records the boot ID, writes an audit request before the host
+  goes down and a completion event when it returns; the browser polls the
+  health endpoint and the new boot ID while the host is offline.
+- The installer and control startup seed `server.hostname`,
+  `server.mail_hostname` and `server.webmail_url` from the installer hostname
+  when those settings are empty. The webmail URL is `https://<mail-hostname>`.
+
 ### Logs and queue
 
 - Ingestion from `/var/log/mail.log` or journald (Postfix, Dovecot, Rspamd).

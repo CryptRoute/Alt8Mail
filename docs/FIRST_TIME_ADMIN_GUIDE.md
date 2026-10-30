@@ -1,6 +1,6 @@
 # Alt8Mail First Install Guide
 
-**Applies to:** Alt8Mail **0.3.12** on **Debian 12 (bookworm)**
+**Applies to:** Alt8Mail **0.3.13** on **Debian 12 (bookworm)**
 **Audience:** the administrator who will install, own and operate the deployment.
 
 This is the practical path from a fresh server to a working mail domain. It covers the decisions you must make before installation, what the installer changes, how to reach the three administration planes, how to complete DNS and TLS, how to prove mail flow, how to add the first users, and the operating habits that keep the platform recoverable.
@@ -141,16 +141,16 @@ The preferred method is the prebuilt release bundle from the repository's GitHub
 On your workstation:
 
 ```bash
-scp alt8mail-0.3.12.tar.gz alt8mail-0.3.12.tar.gz.sha256 root@YOUR_SERVER_IP:/root/
+scp alt8mail-0.3.13.tar.gz alt8mail-0.3.13.tar.gz.sha256 root@YOUR_SERVER_IP:/root/
 ```
 
 On the server:
 
 ```bash
 cd /root
-sha256sum -c alt8mail-0.3.12.tar.gz.sha256
-tar -xzf alt8mail-0.3.12.tar.gz
-cd alt8mail-0.3.12
+sha256sum -c alt8mail-0.3.13.tar.gz.sha256
+tar -xzf alt8mail-0.3.13.tar.gz
+cd alt8mail-0.3.13
 ```
 
 If you install from a source checkout instead, point the installer at the checkout or run it from the repository root. A source install downloads Go and builds the three Go binaries, so it takes longer and needs access to `go.dev` (or its configured mirror).
@@ -176,7 +176,7 @@ Test the key and clone the immutable release tag:
 ```bash
 GIT_SSH_COMMAND='ssh -i /etc/a8m/github_readonly -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new' ssh -T git@github.com
 GIT_SSH_COMMAND='ssh -i /etc/a8m/github_readonly -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new' \
-  git clone --branch v0.3.12 git@github.com:CryptRoute/Alt8Mail.git /root/Alt8Mail
+  git clone --branch v0.3.13 git@github.com:CryptRoute/Alt8Mail.git /root/Alt8Mail
 cd /root/Alt8Mail
 git describe --tags
 ```
@@ -188,16 +188,16 @@ GitHub will show a success message instead of a shell, so a nonzero exit from `s
 If the cloud server must not connect to GitHub, create an archive from the tag on this workstation and copy it directly over SSH. This avoids the private repository entirely for the initial transfer.
 
 ```bash
-git archive --format=tar.gz --prefix=alt8mail-0.3.12/ -o dist/alt8mail-0.3.12-source.tar.gz v0.3.12
-scp -P 22 -i "$HOME/.ssh/alt8mail_server" dist/alt8mail-0.3.12-source.tar.gz root@YOUR_SERVER_IP:/root/
+git archive --format=tar.gz --prefix=alt8mail-0.3.13/ -o dist/alt8mail-0.3.13-source.tar.gz v0.3.13
+scp -P 22 -i "$HOME/.ssh/alt8mail_server" dist/alt8mail-0.3.13-source.tar.gz root@YOUR_SERVER_IP:/root/
 ```
 
 On the server:
 
 ```bash
 cd /root
-tar -xzf alt8mail-0.3.12-source.tar.gz
-cd alt8mail-0.3.12
+tar -xzf alt8mail-0.3.13-source.tar.gz
+cd alt8mail-0.3.13
 ```
 
 This archive contains only tracked files from the tag. It does not include ignored local secrets, the `data/` workspace, or uncommitted changes. It is source-only, so the installer downloads Go and builds the binaries. The installer generates `/etc/a8m/github_readonly`; add its `.pub` to GitHub after installation. If the server can never reach GitHub, application updates remain manual: repeat this archive and copy step for each release.

@@ -562,7 +562,7 @@ table.data .muted { color: var(--muted); }
       </span>
     </a>
     <div class="head-meta">
-      <span class="head-pill">v0.3.12</span>
+      <span class="head-pill">v0.3.13</span>
       <span class="head-pill">Debian 12</span>
       <span>Administrator runbook</span>
     </div>
@@ -585,7 +585,7 @@ table.data .muted { color: var(--muted); }
       </p>
     </div>
     <aside class="hero-card" aria-label="The seven installation phases">
-      <div class="stamp">ALT8MAIL<br>0.3.12<br>DEBIAN 12</div>
+      <div class="stamp">ALT8MAIL<br>0.3.13<br>DEBIAN 12</div>
       <p class="card-kicker">The shape of the job</p>
       <ol class="mini-phases">
         <li><span class="n">01</span><div><b>Preflight</b><small>Host, names, DNS and ports</small></div></li>
@@ -596,7 +596,7 @@ table.data .muted { color: var(--muted); }
         <li><span class="n">06</span><div><b>Add people</b><small>Users, import, policy and pilot</small></div></li>
         <li><span class="n">07</span><div><b>Operate</b><small>Updates, backups and recovery</small></div></li>
       </ol>
-      <p class="card-foot">Written against Alt8Mail 0.3.12. If your release is newer, use the same phases and check the release notes for changed paths.</p>
+      <p class="card-foot">Written against Alt8Mail 0.3.13. If your release is newer, use the same phases and check the release notes for changed paths.</p>
     </aside>
   </section>
 
@@ -731,15 +731,15 @@ dig +short CAA example.com</code></pre>
         <h3>Upload and verify the release</h3>
         <p>Download the release bundle and its checksum from the repository's GitHub Releases page, then copy both to the server.</p>
         <div class="code">
-          <div class="code-head"><span class="code-label">workstation · upload 0.3.12</span><button class="copy" type="button" aria-label="Copy upload commands">Copy</button></div>
-          <pre><code>scp alt8mail-0.3.12.tar.gz alt8mail-0.3.12.tar.gz.sha256 root@YOUR_SERVER_IP:/root/</code></pre>
+          <div class="code-head"><span class="code-label">workstation · upload 0.3.13</span><button class="copy" type="button" aria-label="Copy upload commands">Copy</button></div>
+          <pre><code>scp alt8mail-0.3.13.tar.gz alt8mail-0.3.13.tar.gz.sha256 root@YOUR_SERVER_IP:/root/</code></pre>
         </div>
         <div class="code">
           <div class="code-head"><span class="code-label">server · verify and extract</span><button class="copy" type="button" aria-label="Copy verification commands">Copy</button></div>
           <pre><code>cd /root
-sha256sum -c alt8mail-0.3.12.tar.gz.sha256
-tar -xzf alt8mail-0.3.12.tar.gz
-cd alt8mail-0.3.12</code></pre>
+sha256sum -c alt8mail-0.3.13.tar.gz.sha256
+tar -xzf alt8mail-0.3.13.tar.gz
+cd alt8mail-0.3.13</code></pre>
         </div>
         <p>If you are installing from a source checkout, use one of the private transfer paths below. Do not clone the private repository with an account password, and do not copy the development working tree to the server.</p>
 
@@ -756,10 +756,10 @@ cat /etc/a8m/github_readonly.pub</code></pre>
         </div>
         <p>Add the public key in GitHub under <strong>Repository → Settings → Deploy keys → Add deploy key</strong>. Name it <code>alt8mail-server</code> and leave <strong>Allow write access</strong> off. Then test the key and clone the immutable release tag:</p>
         <div class="code">
-          <div class="code-head"><span class="code-label">server · test and clone v0.3.12</span><button class="copy" type="button" aria-label="Copy clone commands">Copy</button></div>
+          <div class="code-head"><span class="code-label">server · test and clone v0.3.13</span><button class="copy" type="button" aria-label="Copy clone commands">Copy</button></div>
           <pre><code>GIT_SSH_COMMAND='ssh -i /etc/a8m/github_readonly -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new' ssh -T git@github.com
 GIT_SSH_COMMAND='ssh -i /etc/a8m/github_readonly -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new' \
-  git clone --branch v0.3.12 git@github.com:CryptRoute/Alt8Mail.git /root/Alt8Mail
+  git clone --branch v0.3.13 git@github.com:CryptRoute/Alt8Mail.git /root/Alt8Mail
 cd /root/Alt8Mail
 git describe --tags</code></pre>
         </div>
@@ -769,14 +769,14 @@ git describe --tags</code></pre>
         <p>If the cloud server must not connect to GitHub, create an archive from the immutable tag on this workstation and copy it directly over SSH.</p>
         <div class="code">
           <div class="code-head"><span class="code-label">workstation · archive and copy</span><button class="copy" type="button" aria-label="Copy archive transfer commands">Copy</button></div>
-          <pre><code>git archive --format=tar.gz --prefix=alt8mail-0.3.12/ -o dist/alt8mail-0.3.12-source.tar.gz v0.3.12
-scp -P 22 -i "$HOME/.ssh/alt8mail_server" dist/alt8mail-0.3.12-source.tar.gz root@YOUR_SERVER_IP:/root/</code></pre>
+          <pre><code>git archive --format=tar.gz --prefix=alt8mail-0.3.13/ -o dist/alt8mail-0.3.13-source.tar.gz v0.3.13
+scp -P 22 -i "$HOME/.ssh/alt8mail_server" dist/alt8mail-0.3.13-source.tar.gz root@YOUR_SERVER_IP:/root/</code></pre>
         </div>
         <div class="code">
           <div class="code-head"><span class="code-label">server · extract the tagged source</span><button class="copy" type="button" aria-label="Copy source extraction commands">Copy</button></div>
           <pre><code>cd /root
-tar -xzf alt8mail-0.3.12-source.tar.gz
-cd alt8mail-0.3.12</code></pre>
+tar -xzf alt8mail-0.3.13-source.tar.gz
+cd alt8mail-0.3.13</code></pre>
         </div>
         <p>The archive contains only tracked files from the tag. It excludes ignored local secrets, the <code>data/</code> workspace and uncommitted changes. It is source-only, so the installer downloads Go and builds the binaries. The installer generates <code>/etc/a8m/github_readonly</code>; add its <code>.pub</code> to GitHub after installation. If the server can never reach GitHub, updates stay manual: repeat this archive and copy step for each release.</p>
         <p>On PowerShell, use <code>$HOME\.ssh\alt8mail_server</code> for the key path, or omit <code>-i</code> if your default key is configured. Use <code>ssh -p</code> and <code>scp -P</code> for a nonstandard SSH port.</p>
@@ -784,7 +784,7 @@ cd alt8mail-0.3.12</code></pre>
         <h3>Run the installer</h3>
         <p>Run this as root. If you sign in with a sudo account, use <code>sudo bash install.sh</code>.</p>
         <div class="code">
-          <div class="code-head"><span class="code-label">bash · install 0.3.12</span><button class="copy" type="button" aria-label="Copy installation command">Copy</button></div>
+          <div class="code-head"><span class="code-label">bash · install 0.3.13</span><button class="copy" type="button" aria-label="Copy installation command">Copy</button></div>
           <pre><code>bash install.sh \
   --domain example.com \
   --hostname mail.example.com \
@@ -1424,7 +1424,7 @@ certbot renew --dry-run</code></pre>
 
   <footer class="site-foot">
     <div class="foot-row">
-      <span><strong>Alt8Mail First Install</strong> · v0.3.12 · Debian 12 · No credentials appear in this guide.</span>
+      <span><strong>Alt8Mail First Install</strong> · v0.3.13 · Debian 12 · No credentials appear in this guide.</span>
       <span>Repository: CryptRoute/Alt8Mail · Keep System Control on port 8808.</span>
     </div>
   </footer>
