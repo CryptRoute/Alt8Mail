@@ -255,7 +255,7 @@ function mailImportItemStatus(item) {
 function mailImportMappingRow(item) {
   const candidates = mailImportState.candidates || [];
   const match = candidates.find((candidate) => candidate.email && candidate.email.toLowerCase() === item.sourceEmail.toLowerCase());
-  const mode = item.targetMode || (match ? "existing" : "new");
+  const mode = item.targetMode === "existing" || match ? "existing" : "new";
   const disabled = item.status === "auth_failed" || item.status === "skipped";
   if (disabled) {
     return `<div class="mapping-row is-disabled"><div class="mapping-source"><b>${esc(item.sourceEmail)}</b><small>${esc(item.authError || "Credentials could not be validated")}</small></div><span class="badge suspended">Skipped</span></div>`;

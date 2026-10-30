@@ -833,9 +833,12 @@ async function submitUserForm(formId, userId) {
     const data = await api("users/" + encodeURIComponent(userId), { method: "PATCH", body });
     toast("User updated");
     closeModal();
-    if (state.view === "user-detail") await renderUserPage(userId);
-    else await openUserDrawer(userId);
-    await loadUsers();
+    if (state.view === "user-detail") {
+      await renderUserPage(userId);
+    } else {
+      await openUserDrawer(userId);
+      await loadUsers();
+    }
     return;
   }
   const usernameInput = form.querySelector('[data-user-field="username"]');

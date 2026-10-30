@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.2** release finishes the admin detail-page polish: edits stay on the user page, vacation intervals match the Sieve limit, and validated mailboxes are auto-mapped to existing users with the same address.
+
 The **0.3.1** release hardens the onboarding workspace: delegated-mailbox permission and signature-default fixes, faster batched IMAP migration with resumable per-folder checkpoints, IPv6-safe source connections, and clearer migration credentials when a notification email could not be delivered.
 
 The **0.3.0** platform release turns the customer admin into an onboarding and migration workspace: CSV/XLSX user import with generated credentials and branded notification email, a resumable IMAP/POP3 mailbox migration engine with validation, mailbox mapping, live progress and dashboard visibility, a dedicated user page with alias editing, signature and per-address signature management, vacation responders and delegated mailbox access, a raw RFC 822 message source viewer in webmail, and an edge-to-edge webmail layout.
