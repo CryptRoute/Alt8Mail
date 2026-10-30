@@ -1969,6 +1969,30 @@ export async function createApp(options = {}) {
         sendJson(res, 200, { sender, trusted: db.user.trustedSenders.includes(sender) });
         return;
       }
+      const sourceMatch = pathname.match(/^\/api\/messages\/([A-Za-z0-9_-]{1,100})\/source$/);
+      if (sourceMatch && req.method === "GET") {
+        const message = findMessage(sourceMatch[1]);
+        if (!message) throw new ApiError(404, "NOT_FOUND", "Message not found");
+        const from = message.from ? `${message.from.name || ""} <${message.from.email || ""}>`.trim() : "";
+        const to = (message.to || []).map((person) => `${person.name || ""} <${person.email || ""}>`.trim()).join(", ");
+        const headers = [
+          "X-Alt8Mail-Source: reconstructed by the development server",
+          `From: ${from}`,
+          `To: ${to}`,
+          `Date: ${message.date || nowIso()}`,
+          `Subject: ${message.subject || ""}`,
+          `Message-ID: ${message.messageId || ""}`,
+          `Received: from mx (mx.external.example [203.0.113.9]) by mail.a8m.example`
+        ].join("\n");
+        const body = message.bodyText || message.snippet || "";
+        const source = `${headers}\n\n${body}`;
+        sendJson(res, 200, {
+          messageId: message.id, headers, source, truncated: false,
+          headerCount: headers.split("\n").length, sizeBytes: Buffer.byteLength(source),
+          senderIp: message.auth?.ip || "203.0.113.9", generatedAt: nowIso()
+        });
+        return;
+      }
       const trustMatch = pathname.match(/^\/api\/messages\/([A-Za-z0-9_-]{1,100})\/trust$/);
       if (trustMatch && req.method === "GET") {
         const message = findMessage(trustMatch[1]);

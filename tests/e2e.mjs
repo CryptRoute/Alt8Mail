@@ -859,18 +859,47 @@ try {
     if (row) row.click();
   })()`);
   await sleep(400);
+  await page.click(".reader [data-details]");
+  await page.waitFor(() => !document.getElementById("detailsOverlay").hidden, 5000);
+  await page.click('[data-details-tab="source"]');
+  await sleep(450);
+  check(await page.eval("document.querySelector('[data-source-view]').textContent.includes('Subject: HTML reply fixture')"), "raw source shows the complete header block");
+  check(await page.eval("document.querySelector('[data-source-view]').textContent.includes('Received: from mx')"), "raw source includes the receiving hop");
+  check(await page.eval("document.querySelector('[data-source-meta]').textContent.includes('headers')"), "raw source reports the header count and size");
+  await page.screenshot(path.join(artifacts, "11a-raw-source.png"));
+  await page.click("#detailsClose");
+  await sleep(200);
   await page.click('.reader-toolbar [data-action="reply"]');
   await sleep(500);
   const htmlReplyId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
   check(await page.eval(`Boolean(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote .email-quote img[src^="/api/mail/image"]'))`), "reply renders the original image through the privacy proxy");
   check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote img')?.getAttribute('data-email-src') === 'https://images.example.test/logo.png'`), "the quoted image keeps its original URL for sending");
   check(await page.eval(`Boolean(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-quote .email-quote p'))`), "reply preserves the original HTML layout inside the quote");
-  check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]').classList.contains('is-quote-collapsed')`), "rich replies start with the quote compacted");
+  check(await page.eval(`!document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]').classList.contains('is-quote-collapsed')`), "reply shows the original quote automatically");
+  check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-priority="normal"]')?.classList.contains('is-active')`), "normal priority is selected by default");
+  await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="options"]`);
+  await sleep(200);
+  check(await page.eval(`getComputedStyle(document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-priority="normal"]')).backgroundColor !== 'rgba(0, 0, 0, 0)'`), "selected priority has a distinct color treatment");
+  await page.screenshot(path.join(artifacts, "11c-compose-priority.png"));
+  await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="options"]`);
+  await sleep(150);
+  const replyHasAi = await page.eval(`Boolean(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-ai-btn'))`);
+  if (replyHasAi) {
+    check(await page.eval(`(() => { const ai = document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-ai-btn'); const quote = document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-action="toggle-quote"]'); return Boolean(ai) && quote?.nextElementSibling === ai; })()`), "AI assistant sits immediately after the Quote control");
+    check(await page.eval(`getComputedStyle(document.querySelector('[data-compose-id="${htmlReplyId}"] .compose-ai-btn')).animationName.includes('compose-ai-pulse')`), "AI assistant button pulses for visibility");
+  } else {
+    console.log("  - SKIP: the demo workspace has AI disabled; the Go backend enables it per organization");
+  }
+  await page.screenshot(path.join(artifacts, "11b-html-reply.png"));
   await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="toggle-quote"]`);
   await sleep(200);
-  check(await page.eval(`!document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]').classList.contains('is-quote-collapsed')`), "the quote control expands the original HTML");
-  await page.screenshot(path.join(artifacts, "11b-html-reply.png"));
+  check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]').classList.contains('is-quote-collapsed')`), "the quote control can collapse the original HTML");
+  await page.eval("window.__a8mAutoConfirm = false");
   await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="discard"]`);
+  await page.waitFor(() => !document.getElementById("confirmOverlay").hidden, 5000);
+  check(await page.eval("getComputedStyle(document.getElementById('confirmAccept')).color === 'rgb(255, 255, 255)'"), "danger confirmation uses a readable solid red action");
+  await page.click("#confirmAccept");
+  await page.eval("window.__a8mAutoConfirm = true");
   await sleep(500);
 
   console.log("\n[11b] Passkey sign-in");

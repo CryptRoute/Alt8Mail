@@ -113,8 +113,12 @@ function safeEmailHtml(html, { message = null, allowImages = true } = {}) {
         try { cidKey = decodeURIComponent(cidKey); } catch {}
       }
       const cidURL = cidKey ? cidImages.get(cidKey) : "";
-      node.removeAttribute("width");
-      node.removeAttribute("height");
+      // Preserve the designer's intended dimensions (logos are often width="200"
+      // or width="240px"); removing them stretched images to intrinsic size.
+      for (const dimension of ["width", "height"]) {
+        const value = String(node.getAttribute(dimension) || "").trim();
+        if (value && !/^\d{1,5}(?:%|px)?$/i.test(value)) node.removeAttribute(dimension);
+      }
       node.setAttribute("decoding", "async");
       node.setAttribute("referrerpolicy", "no-referrer");
       node.setAttribute("class", "email-image");
@@ -4042,12 +4046,12 @@ function composeQuoteFor(message, kind = "reply") {
     const to = (message.to || []).map((person) => person.name && person.name !== person.email ? `${person.name} <${person.email}>` : person.email).filter(Boolean).join(", ");
     return {
       text: `\n\n---------- Forwarded message ----------\nFrom: ${sender}\nDate: ${formatFullWhen(message.date)}\nSubject: ${message.subject}\nTo: ${to}\n\n${message.bodyText || htmlToText(message.bodyHtml || "")}`,
-      html: `<div class="compose-quote" data-compose-quote="forward"><p class="compose-quote-lead">---------- Forwarded message ----------</p><div class="compose-quote-meta"><span><b>From:</b> ${esc(sender)}</span><span><b>Date:</b> ${esc(formatFullWhen(message.date))}</span><span><b>Subject:</b> ${esc(message.subject)}</span><span><b>To:</b> ${esc(to || "undisclosed recipients")}</span></div><blockquote class="email-quote">${original}</blockquote></div>`
+      html: `<div class="compose-quote" data-compose-quote="forward"><div class="compose-quote-inner"><p class="compose-quote-lead">---------- Forwarded message ----------</p><div class="compose-quote-meta"><span><b>From:</b> ${esc(sender)}</span><span><b>Date:</b> ${esc(formatFullWhen(message.date))}</span><span><b>Subject:</b> ${esc(message.subject)}</span><span><b>To:</b> ${esc(to || "undisclosed recipients")}</span></div><blockquote class="email-quote">${original}</blockquote></div></div>`
     };
   }
   return {
     text: replyQuoteText(message),
-    html: `<div class="compose-quote" data-compose-quote="reply"><p class="compose-quote-lead">On ${esc(formatFullWhen(message.date))}, ${esc(sender)} wrote:</p><blockquote class="email-quote">${original}</blockquote></div>`
+    html: `<div class="compose-quote" data-compose-quote="reply"><div class="compose-quote-inner"><p class="compose-quote-lead">On ${esc(formatFullWhen(message.date))}, ${esc(sender)} wrote:</p><blockquote class="email-quote">${original}</blockquote></div></div>`
   };
 }
 
@@ -5098,6 +5102,11 @@ function composePriorityMarkup(session) {
   ).join("");
 }
 
+function composeAiToolbarButton() {
+  if (!state.ai.enabled) return "";
+  return `<button type="button" class="compose-ai-btn" data-compose-action="ai" title="AI writing assistant" aria-label="AI writing assistant"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span class="compose-ai-label">AI</span></button>`;
+}
+
 function composeEditorToolbar(session) {
   const button = (cmd, label, title, content = label) =>
     `<button type="button" data-editor-cmd="${cmd}" title="${esc(title)}" aria-label="${esc(title)}">${content}</button>`;
@@ -5147,11 +5156,11 @@ function composeEditorToolbar(session) {
     <label class="editor-color-wrap" title="Highlight color"><span class="editor-color-glyph editor-highlight-glyph"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><input type="color" data-editor-highlight value="#fff2a8" title="Highlight color" aria-label="Highlight color"></label>
     ${button("removeFormat", "Tx", "Clear formatting", "Tx")}
     ${session.hasQuote ? `<span class="editor-sep"></span><button type="button" data-compose-action="toggle-quote" class="compose-quote-toggle${session.quoteCollapsed ? " is-active" : ""}" title="${session.quoteCollapsed ? "Show quoted message" : "Hide quoted message"}" aria-pressed="${session.quoteCollapsed ? "true" : "false"}">❝ Quote</button>` : ""}
+    ${composeAiToolbarButton()}
     <span class="compose-toolbar-mode">
       <button type="button" data-compose-action="mode" data-mode="html" class="${session.htmlMode ? "is-active" : ""}">HTML</button>
       <button type="button" data-compose-action="mode" data-mode="plain" class="${session.htmlMode ? "" : "is-active"}">Plain</button>
     </span>
-    ${state.ai.enabled ? `<button type="button" class="compose-ai-btn" data-compose-action="ai" title="AI writing assistant" aria-label="AI writing assistant"><svg class="icon" aria-hidden="true" style="width:15px;height:15px"><use href="#i-sparkles"/></svg></button>` : ""}
   </div>`;
 }
 
@@ -5163,10 +5172,10 @@ function composeTemplate(session) {
   const htmlMode = session.htmlMode !== false;
   const editorHTML = sanitizeEditorHTML(session.bodyHtml || textToEditorHTML(session.body));
   const modeSwitch = `<span class="compose-toolbar-mode"><button type="button" data-compose-action="mode" data-mode="html" class="${htmlMode ? "is-active" : ""}">HTML</button><button type="button" data-compose-action="mode" data-mode="plain" class="${htmlMode ? "" : "is-active"}">Plain</button></span>`;
-  const aiButton = state.ai.enabled ? `<button type="button" class="compose-ai-btn" data-compose-action="ai" title="AI writing assistant" aria-label="AI writing assistant"><svg class="icon" aria-hidden="true" style="width:15px;height:15px"><use href="#i-sparkles"/></svg></button>` : "";
+  const aiButton = composeAiToolbarButton();
   const bodyField = htmlMode
     ? `<div class="compose-editor-wrap">${composeEditorToolbar(session)}<div class="compose-editor${session.quoteCollapsed ? " is-quote-collapsed" : ""}" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…">${editorHTML}</div></div>`
-    : `<div class="compose-editor-wrap"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${modeSwitch}${aiButton}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea></div>`;
+    : `<div class="compose-editor-wrap"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${aiButton}${modeSwitch}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea></div>`;
   return `<section class="compose${htmlMode ? " has-html-editor" : ""}" data-compose-id="${esc(session.id)}" role="dialog" aria-label="${esc(title)}">
     <div class="compose-head" data-compose-head>
       <span class="compose-grip" aria-hidden="true"></span>
@@ -5281,7 +5290,6 @@ function openCompose(prefill = {}, options = {}) {
     bodyHtml = textToEditorHTML(bodyText);
   }
   const hasQuote = htmlMode && /class="compose-quote"/.test(bodyHtml);
-  const quoteIsRich = hasQuote && (/<img/i.test(bodyHtml) || bodyHtml.length > 1400);
   const session = {
     id,
     draftId,
@@ -5295,7 +5303,7 @@ function openCompose(prefill = {}, options = {}) {
     bodyHtml,
     htmlMode,
     hasQuote,
-    quoteCollapsed: quoteIsRich,
+    quoteCollapsed: false,
     fromEmail,
     autoSignature: signatureItem ? { id: signatureItem.id, text: signatureText, html: signatureHTML } : null,
     signatureContext: context,

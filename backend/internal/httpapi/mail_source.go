@@ -43,7 +43,15 @@ func (s *Server) messageSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
-	message := findMessageIn(state, messageID)
+	// Bootstrap messages live in mail_messages, not in the small app_state
+	// document. Load the row directly so the source viewer works for real IMAP
+	// mail as well as older state-resident messages.
+	var message map[string]any
+	if loaded, _, err := s.loadMailMessagesByIDs(r.Context(), sourceUser.ID, []string{messageID}); err == nil && len(loaded) > 0 {
+		message = loaded[0]
+	} else {
+		message = findMessageIn(state, messageID)
+	}
 	if message == nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "Message not found")
 		return

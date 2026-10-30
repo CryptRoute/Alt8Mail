@@ -788,6 +788,18 @@ button.status-quota:hover { background: var(--surface-3); color: var(--text-2); 
 .usage-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 0.625rem; color: var(--text-3); }
 .danger-btn { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 28%, var(--border-strong)); }
 .danger-btn:hover { background: var(--danger-soft); }
+.btn-primary.danger-btn {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .08), 0 6px 16px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+.btn-primary.danger-btn:hover {
+  background: color-mix(in srgb, var(--danger) 86%, #000);
+  border-color: color-mix(in srgb, var(--danger) 86%, #000);
+  color: #fff;
+}
+.btn-primary.danger-btn:focus-visible { outline-color: color-mix(in srgb, var(--danger) 55%, transparent); }
 .about-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .settings-note code { font-family: var(--font-mono); font-size: 0.625rem; padding: 1px 4px; border-radius: 3px; background: var(--surface-3); }
 .settings-block-body .pref-select { max-width: 160px; }

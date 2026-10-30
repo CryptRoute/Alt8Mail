@@ -153,10 +153,19 @@
 .compose-editor pre { padding: 10px; white-space: pre-wrap; }
 .compose-editor a { color: var(--accent-ink); }
 .compose-editor .compose-quote { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--border); }
+.compose-editor .compose-quote-inner { width: 100%; max-width: 720px; margin: 0 auto; }
 .compose-editor .compose-quote-lead { margin: 0 0 8px; color: var(--text-3); font-size: .78rem; font-style: italic; }
 .compose-editor .compose-quote-meta { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; color: var(--text-3); font-size: .72rem; }
 .compose-editor .compose-quote-meta b { color: var(--text-2); font-weight: 600; }
-.compose-editor .email-quote { margin: 0; padding: 0 0 0 12px; border-left: 2px solid var(--border-strong); color: var(--text-2); }
+.compose-editor .email-quote {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #dfe6ee;
+  border-radius: 10px;
+  background: #fff;
+  color: #172230;
+  overflow-x: auto;
+}
 .compose-editor .email-quote, .compose-editor .email-quote * { max-width: 100% !important; box-sizing: border-box; }
 .compose-editor .email-quote img { max-width: 100% !important; height: auto !important; }
 .compose-editor .email-quote table { border-collapse: collapse; }
@@ -165,6 +174,57 @@
 .compose-editor.is-quote-collapsed .compose-quote-meta { display: none; }
 .compose-editor .compose-quote-toggle.is-active,
 .compose-editor-toolbar .compose-quote-toggle.is-active { background: var(--accent-soft-2); color: var(--accent-ink); }
+.compose-editor-toolbar .compose-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 68%, #6d4aff));
+  color: #fff;
+  font-size: .66rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 42%, transparent);
+  animation: compose-ai-pulse 2.3s ease-in-out infinite;
+}
+.compose-editor-toolbar .compose-ai-btn:hover { background: var(--accent-hover); color: #fff; }
+.compose-editor-toolbar .compose-ai-btn svg { width: 16px; height: 16px; stroke-width: 2.5; }
+.compose-ai-label { line-height: 1; }
+@keyframes compose-ai-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 42%, transparent); transform: scale(1); }
+  50% { box-shadow: 0 0 0 6px transparent; transform: scale(1.035); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .compose-editor-toolbar .compose-ai-btn { animation: none; }
+}
+.compose-priority { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.compose-priority-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: .68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.compose-priority-btn:hover { background: var(--surface-3); color: var(--text); }
+.priority-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex: none; }
+.priority-dot.low { background: var(--success); }
+.priority-dot.normal { background: var(--accent); }
+.priority-dot.high { background: var(--danger); }
+.compose-priority-btn.is-active { font-weight: 800; }
+.compose-priority-btn[data-compose-priority="low"].is-active { color: var(--success); border-color: var(--success); background: var(--success-soft); }
+.compose-priority-btn[data-compose-priority="normal"].is-active { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-soft); }
+.compose-priority-btn[data-compose-priority="high"].is-active { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
 .compose-editor table { border-collapse: collapse; width: 100%; }
 .compose-editor td, .compose-editor th { border: 1px solid var(--border); padding: 5px 7px; }
 .compose-toolbar-mode { margin-left: auto; display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }

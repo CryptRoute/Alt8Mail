@@ -22,7 +22,7 @@ var composeHTMLPolicy = func() *bluemonday.Policy {
 	policy.AllowElements(elements...)
 	policy.AllowAttrs("href", "title").OnElements("a")
 	policy.AllowAttrs("src", "alt", "title", "width", "height", "data-email-src").OnElements("img")
-	policy.AllowAttrs("class").Matching(regexp.MustCompile(`^(compose-quote|compose-quote-lead|compose-quote-meta|email-quote)$`)).OnElements("div", "p", "blockquote", "span")
+	policy.AllowAttrs("class").Matching(regexp.MustCompile(`^(compose-quote|compose-quote-inner|compose-quote-lead|compose-quote-meta|email-quote)$`)).OnElements("div", "p", "blockquote", "span")
 	policy.AllowAttrs("style").OnElements(elements...)
 	policy.AllowStyles("text-align").MatchingEnum("left", "center", "right", "justify").OnElements(elements...)
 	policy.AllowStyles("color", "background-color").Matching(composeColorPattern).OnElements(elements...)

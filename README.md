@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.7** release shows quoted HTML automatically in reply and forward (no Quote click required), constrains it to an Outlook-style centered reading column with the original image dimensions, fixes raw message source loading for real IMAP mail, restores readable danger-button contrast, gives priority choices distinct color signals, and moves a pulsing AI assistant action directly after Quote.
+
 The **0.3.6** release keeps the safe spacing, borders, backgrounds and table layout of quoted email HTML in outbound reply and forward messages, not only in the editor.
 
 The **0.3.5** release renders the original HTML, layout and images inside reply and forward compose, using a compact Gmail-style quote with a show/hide control. Quoted images load through the privacy proxy in the editor and are restored to their original external URLs when sent; the composer stays a normal compose window instead of expanding into an email page.
