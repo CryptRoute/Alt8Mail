@@ -10,10 +10,11 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.9.0-r2">
-<link rel="stylesheet" href="/features.css?v=0.9.0-r2">
-<link rel="stylesheet" href="/workspace.css?v=0.9.0-r2">
-<link rel="stylesheet" href="/features-0.7.css?v=0.9.0-r2">
+<link rel="stylesheet" href="/styles.css?v=0.10.0">
+<link rel="stylesheet" href="/features.css?v=0.10.0">
+<link rel="stylesheet" href="/workspace.css?v=0.10.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.10.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.10.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -962,16 +963,16 @@
                       <div class="pref-row">
                         <div class="pref-copy">
                           <strong>Save a copy in Sent</strong>
-                          <span>Every sent message is stored in the Sent folder.</span>
+                          <span>Store sent messages in Sent by default. You can still override it per message in Compose options.</span>
                         </div>
-                        <span class="policy-chip">Enabled</span>
+                        <button class="switch" data-server-pref="saveCopyEnabled" type="button" role="switch" aria-checked="true" aria-label="Save a copy in Sent"><span></span></button>
                       </div>
                       <div class="pref-row">
                         <div class="pref-copy">
                           <strong>Spell check before sending</strong>
-                          <span>Roundcube checks the message as you type.</span>
+                          <span>Alt8Mail Intelligence reviews the subject and message with the built-in English dictionary before a message leaves your outbox.</span>
                         </div>
-                        <span class="policy-chip">Enabled</span>
+                        <button class="switch" data-server-pref="spellCheckEnabled" type="button" role="switch" aria-checked="true" aria-label="Spell check before sending"><span></span></button>
                       </div>
                       <div class="pref-row">
                         <div class="pref-copy">
@@ -993,25 +994,28 @@
                       </div>
                       <div class="pref-row">
                         <div class="pref-copy">
-                          <strong>Signature on new messages</strong>
-                          <span>Insert your signature when you start a new message.</span>
+                          <strong>Insert signatures automatically</strong>
+                          <span>Use your New, Reply and Forward defaults whenever a message starts.</span>
                         </div>
-                        <button class="switch" data-server-pref="signatureEnabled" type="button" role="switch" aria-checked="true" aria-label="Signature on new messages"><span></span></button>
+                        <button class="switch" data-server-pref="signatureEnabled" type="button" role="switch" aria-checked="true" aria-label="Insert signatures automatically"><span></span></button>
                       </div>
                     </div>
                   </div>
                   <div class="settings-block">
-                    <div class="settings-block-head">
-                      <h3>Signature</h3>
-                      <p>Plain text signature inserted beneath new messages. Replies and forwards are left clean.</p>
-                    </div>
-                    <div class="signature-editor">
-                      <textarea id="signatureInput" rows="4" placeholder="Your name, role and contact details"></textarea>
-                      <div class="signature-editor-foot">
-                        <span id="signatureStatus">Server-backed signature</span>
-                        <button class="btn-primary" id="saveSignatureBtn" type="button">Save signature</button>
+                    <div class="settings-block-head settings-block-head-row">
+                      <div>
+                        <h3>Signatures</h3>
+                        <p>Build a reusable signature library and choose which signature is used for New messages, Replies and Forwards. Rich HTML keeps formatting; plain text stays portable.</p>
                       </div>
+                      <button class="btn-secondary btn-small" id="newSignatureBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New signature</button>
                     </div>
+                    <div class="signature-library" id="signatureList"><div class="settings-note">Loading signatures…</div></div>
+                    <div class="signature-defaults">
+                      <label class="form-field"><span>New messages</span><select id="signatureDefaultNew" aria-label="Default signature for new messages"></select></label>
+                      <label class="form-field"><span>Replies</span><select id="signatureDefaultReply" aria-label="Default signature for replies"></select></label>
+                      <label class="form-field"><span>Forwards</span><select id="signatureDefaultForward" aria-label="Default signature for forwards"></select></label>
+                    </div>
+                    <p class="settings-note signature-defaults-note">The automatic insertion switch under Composing controls whether these defaults are added when a message starts.</p>
                   </div>
                 </section>
 
@@ -1080,21 +1084,15 @@
                 </section>
                 <section class="settings-panel" data-settings-panel="identities" hidden>
                   <div class="settings-block">
-                    <div class="settings-block-head">
-                      <h3>Sending identities</h3>
-                      <p>Choose which verified addresses can appear in the From line. Your primary account and organization aliases are managed by IT.</p>
+                    <div class="settings-block-head settings-block-head-row">
+                      <div>
+                        <h3>Sending identities</h3>
+                        <p>Every verified address can carry its own From name, reply-to and signature. Your primary account and organization aliases are managed by IT.</p>
+                      </div>
+                      <button class="btn-secondary btn-small" id="newIdentityBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New identity</button>
                     </div>
                     <div class="identity-list" id="identityList"><div class="settings-note">Loading identities…</div></div>
-                    <div class="identity-add-grid">
-                      <label class="form-field"><span>Display name</span><input id="identityName" maxlength="120" placeholder="Avery Chen · Product"></label>
-                      <label class="form-field"><span>Email address</span><input id="identityEmail" type="email" placeholder="you@partner.com"></label>
-                      <label class="form-field"><span>Reply-to <small class="muted">optional</small></span><input id="identityReplyTo" type="email" placeholder="replies@partner.com"></label>
-                      <label class="form-field"><span>Signature <small class="muted">optional</small></span><textarea id="identitySignature" rows="2" maxlength="4000" placeholder="Signature for this identity"></textarea></label>
-                    </div>
-                    <div class="settings-actions">
-                      <button class="btn-secondary" id="addIdentityBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add identity</button>
-                      <span class="settings-note" id="identityNote">External addresses receive a verification email before they can send.</span>
-                    </div>
+                    <p class="settings-note" id="identityNote" style="margin:10px 0 0">External addresses receive a verification email before they can send.</p>
                   </div>
                   <div class="settings-block">
                     <div class="settings-block-head">
@@ -2229,6 +2227,167 @@
   </div>
 </div>
 
+<div class="onboarding-overlay" id="onboardingOverlay" hidden>
+  <div class="onboarding-shell" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+    <aside class="onboarding-rail">
+      <div class="onboarding-brand"><span class="onboarding-mark">A8</span><div><strong>Alt8Mail</strong><span>Secure enterprise workspace</span></div></div>
+      <div class="onboarding-rail-copy">
+        <span class="eyebrow">Your first sign-in</span>
+        <h1 id="onboardingTitle">Let’s set up your workspace.</h1>
+        <p>Four quick steps make every message carry the right name, time zone and look. You can refine the details later in Settings.</p>
+      </div>
+      <ol class="onboarding-steps" id="onboardingSteps">
+        <li data-onboarding-step-dot="0"><span>1</span><div><strong>Your profile</strong><small>Name and sending identity</small></div></li>
+        <li data-onboarding-step-dot="1"><span>2</span><div><strong>Workspace</strong><small>Time zone, language and theme</small></div></li>
+        <li data-onboarding-step-dot="2"><span>3</span><div><strong>Security</strong><small>Password and two-factor advice</small></div></li>
+        <li data-onboarding-step-dot="3"><span>4</span><div><strong>Ready</strong><small>Review and enter Alt8Mail</small></div></li>
+      </ol>
+      <div class="onboarding-rail-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span>Required setup · encrypted and auditable</span></div>
+    </aside>
+    <section class="onboarding-panel">
+      <div class="onboarding-panel-head">
+        <div><span class="onboarding-progress-label" id="onboardingProgressLabel">Step 1 of 4</span><span class="onboarding-progress-sub" id="onboardingProgressSub">Tell us who you are</span></div>
+        <div class="onboarding-progress" aria-hidden="true"><span id="onboardingProgressBar"></span></div>
+      </div>
+      <div class="onboarding-step" data-onboarding-step="0">
+        <div class="onboarding-step-intro">
+          <div class="onboarding-avatar-preview" id="onboardingAvatar">?</div>
+          <div><h2>Your name and sending identity</h2><p>This is how recipients see you in the From line and in your account profile.</p></div>
+        </div>
+        <div class="onboarding-fields">
+          <label class="form-field"><span>Full name</span><input id="onboardingName" maxlength="120" autocomplete="name" placeholder="e.g. Avery Chen"><small>Use your real first and last name. It replaces the old “Primary” sender label.</small></label>
+          <label class="form-field"><span>Work email</span><input id="onboardingEmail" type="email" readonly></label>
+        </div>
+        <div class="onboarding-tip"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>This updates Profile → Full name and the primary identity on Identities &amp; forwarding automatically.</span></div>
+      </div>
+      <div class="onboarding-step" data-onboarding-step="1" hidden>
+        <div class="onboarding-step-intro"><span class="onboarding-step-icon"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h2>Make the workspace feel right</h2><p>Dates, scheduled sends and interface labels use these choices everywhere.</p></div></div>
+        <div class="onboarding-fields onboarding-fields-grid">
+          <label class="form-field"><span>Time zone</span><select id="onboardingTimeZone"></select></label>
+          <label class="form-field"><span>Preferred language</span><select id="onboardingLanguage"></select></label>
+        </div>
+        <div class="onboarding-field-group"><span class="onboarding-field-label">Time format</span><div class="onboarding-segments" role="group" aria-label="Time format"><button type="button" data-onboarding-time-format="12h">12-hour · 2:30 PM</button><button type="button" data-onboarding-time-format="24h">24-hour · 14:30</button></div></div>
+        <div class="onboarding-field-group"><span class="onboarding-field-label">Theme</span><div class="onboarding-theme-grid" role="group" aria-label="Theme"><button type="button" data-onboarding-theme="light"><span class="onboarding-theme-preview light"></span><strong>Light</strong><small>Crisp paper surfaces</small></button><button type="button" data-onboarding-theme="dark"><span class="onboarding-theme-preview dark"></span><strong>Dark</strong><small>Low-light focus</small></button><button type="button" data-onboarding-theme="system"><span class="onboarding-theme-preview system"></span><strong>System</strong><small>Follow this device</small></button></div></div>
+        <div class="onboarding-field-group"><span class="onboarding-field-label">Accent</span><div class="onboarding-accents" role="group" aria-label="Accent color"><button type="button" data-onboarding-accent="blue" aria-label="Blue accent"><span style="--swatch:#2563eb"></span>Blue</button><button type="button" data-onboarding-accent="teal" aria-label="Teal accent"><span style="--swatch:#0f766e"></span>Teal</button><button type="button" data-onboarding-accent="violet" aria-label="Violet accent"><span style="--swatch:#6d28d9"></span>Violet</button><button type="button" data-onboarding-accent="rose" aria-label="Rose accent"><span style="--swatch:#be123c"></span>Rose</button></div></div>
+      </div>
+      <div class="onboarding-step" data-onboarding-step="2" hidden>
+        <div class="onboarding-step-intro"><span class="onboarding-step-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span><div><h2>Secure your account</h2><p>Update the temporary password now, then add a second factor when you are ready.</p></div></div>
+        <div class="onboarding-password" id="onboardingPasswordSection" hidden>
+          <div class="onboarding-section-label"><span>Password change required</span><span class="onboarding-chip required">Required</span></div>
+          <div class="onboarding-fields onboarding-fields-grid">
+            <label class="form-field"><span>Current password</span><input id="onboardingCurrentPassword" type="password" autocomplete="current-password"></label>
+            <label class="form-field"><span>New password</span><input id="onboardingNewPassword" type="password" autocomplete="new-password"><small>Use at least 8 characters. Your organization’s policy may require more.</small></label>
+            <label class="form-field"><span>Confirm new password</span><input id="onboardingConfirmPassword" type="password" autocomplete="new-password"></label>
+          </div>
+          <p class="onboarding-inline-error" id="onboardingPasswordError" hidden></p>
+        </div>
+        <div class="onboarding-password is-clear" id="onboardingPasswordClear" hidden>
+          <div class="onboarding-section-label"><span>Password</span><span class="onboarding-chip">Set by your administrator</span></div>
+          <p>Your password is already active. You can rotate it any time in Settings → Account.</p>
+        </div>
+        <div class="onboarding-twofactor">
+          <div class="onboarding-twofactor-head"><span class="onboarding-step-icon"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></span><div><strong>Two-factor authentication</strong><p>Recommended · adds a second lock to your mailbox</p></div><span class="onboarding-chip recommended">Recommended</span></div>
+          <ul><li>Authenticator app or passkey on every new sign-in</li><li>One-time recovery codes for emergencies</li><li>App passwords for Outlook, Apple Mail and Thunderbird</li></ul>
+          <button type="button" class="btn-secondary btn-small" id="onboardingTwoFactorBtn">Remind me to set this up</button>
+        </div>
+      </div>
+      <div class="onboarding-step" data-onboarding-step="3" hidden>
+        <div class="onboarding-finish">
+          <span class="onboarding-finish-mark"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>
+          <span class="eyebrow">Everything is ready</span>
+          <h2>Welcome to Alt8Mail, <span id="onboardingFinishName">there</span>.</h2>
+          <p>Your sender name is set, your workspace preferences are saved and your mailbox is secured.</p>
+        </div>
+        <div class="onboarding-summary">
+          <div><span>From name</span><strong id="onboardingSummaryName">—</strong></div>
+          <div><span>Sending identity</span><strong id="onboardingSummaryIdentity">—</strong></div>
+          <div><span>Time zone</span><strong id="onboardingSummaryZone">—</strong></div>
+          <div><span>Time format</span><strong id="onboardingSummaryTime">—</strong></div>
+          <div><span>Language</span><strong id="onboardingSummaryLanguage">—</strong></div>
+          <div><span>Appearance</span><strong id="onboardingSummaryAppearance">—</strong></div>
+          <div class="wide"><span>Next step</span><strong>Compose your first message. Signature tools live in Compose → Options.</strong></div>
+        </div>
+        <p class="onboarding-inline-note"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Finishing writes your profile, regional preferences and sender identity to the server.</p>
+      </div>
+      <p class="onboarding-errors" id="onboardingError" hidden></p>
+      <footer class="onboarding-actions">
+        <button type="button" class="btn-secondary" id="onboardingBack">Back</button>
+        <span class="onboarding-actions-note">This required setup cannot be skipped.</span>
+        <button type="button" class="btn-primary" id="onboardingNext">Continue</button>
+      </footer>
+    </section>
+  </div>
+</div>
+
+<div class="overlay" id="signatureEditorOverlay" hidden>
+  <div class="dialog signature-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="signatureEditorTitle">
+    <div class="dialog-head"><div><h2 id="signatureEditorTitle">New signature</h2><p class="dialog-note" id="signatureEditorSubtitle">Create a reusable signature for your messages.</p></div><button class="icon-btn" id="signatureEditorClose" type="button" aria-label="Close signature editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-body">
+      <div class="signature-editor-meta" id="signatureEditorMeta">
+        <label class="form-field"><span>Signature name</span><input id="signatureEditorName" maxlength="80" placeholder="e.g. Sales follow-up"></label>
+        <div class="signature-default-flags" id="signatureDefaultFlags">
+          <span>Use automatically for</span>
+          <label><input type="checkbox" id="signatureDefaultNewFlag"> New messages</label>
+          <label><input type="checkbox" id="signatureDefaultReplyFlag"> Replies</label>
+          <label><input type="checkbox" id="signatureDefaultForwardFlag"> Forwards</label>
+        </div>
+      </div>
+      <div class="signature-mode-row"><span>Format</span><div class="onboarding-segments compact" role="group" aria-label="Signature format"><button type="button" data-signature-mode="rich">Rich HTML</button><button type="button" data-signature-mode="plain">Plain text</button></div></div>
+      <div class="signature-rich-wrap" id="signatureRichWrap">
+        <div class="signature-editor-toolbar" role="toolbar" aria-label="Signature formatting">
+          <button type="button" data-signature-cmd="bold" title="Bold"><strong>B</strong></button><button type="button" data-signature-cmd="italic" title="Italic"><em>I</em></button><button type="button" data-signature-cmd="underline" title="Underline"><u>U</u></button>
+          <button type="button" data-signature-block="p" title="Normal text">¶</button><button type="button" data-signature-block="h2" title="Heading">H2</button>
+          <button type="button" data-signature-cmd="insertUnorderedList" title="Bulleted list">•</button><button type="button" data-signature-cmd="createLink" title="Insert link">↗</button><button type="button" data-signature-cmd="removeFormat" title="Clear formatting">Tx</button>
+        </div>
+        <div class="signature-rich-editor" id="signatureEditorBody" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="Your name, role, phone and links"></div>
+      </div>
+      <textarea id="signatureEditorPlain" class="signature-plain-editor" rows="8" spellcheck="true" placeholder="Your name, role, phone and links"></textarea>
+      <p class="signature-editor-status" id="signatureEditorStatus"></p>
+    </div>
+    <div class="dialog-foot"><button type="button" class="btn-secondary" id="signatureEditorCancel">Cancel</button><button type="button" class="btn-primary" id="signatureEditorSave">Save signature</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="signaturePickerOverlay" hidden>
+  <div class="dialog signature-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="signaturePickerTitle">
+    <div class="dialog-head"><div><h2 id="signaturePickerTitle">Insert a signature</h2><p class="dialog-note">Choose where this signature should be placed in the message.</p></div><button class="icon-btn" id="signaturePickerClose" type="button" aria-label="Close signature picker"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-body"><div class="signature-picker-list" id="signaturePickerList"></div></div>
+    <div class="dialog-foot"><button type="button" class="btn-secondary" id="signaturePickerCancel">Cancel</button><button type="button" class="btn-primary" id="signaturePickerNew"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New signature</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="spellcheckOverlay" hidden>
+  <div class="dialog spellcheck-dialog" role="dialog" aria-modal="true" aria-labelledby="spellcheckTitle">
+    <div class="dialog-head"><div class="spellcheck-brand"><span class="spellcheck-mark"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><div><h2 id="spellcheckTitle">Alt8Mail Intelligence · Spell check</h2><p class="dialog-note" id="spellcheckSubtitle">Review the words below before sending.</p></div></div><button class="icon-btn" id="spellcheckClose" type="button" aria-label="Back to message"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-body"><div class="spellcheck-issues" id="spellcheckIssues"></div><p class="spellcheck-note"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>Click a suggestion to replace every occurrence in this message. Sending anyway keeps the message unchanged.</p></div>
+    <div class="dialog-foot"><button type="button" class="btn-secondary" id="spellcheckBack">Back to message</button><button type="button" class="btn-secondary" id="spellcheckSendAnyway">Send anyway</button><button type="button" class="btn-primary" id="spellcheckApplySend">Apply fixes &amp; send</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="identityEditorOverlay" hidden>
+  <div class="dialog identity-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="identityEditorTitle">
+    <div class="dialog-head"><div><h2 id="identityEditorTitle">New sending identity</h2><p class="dialog-note" id="identityEditorSubtitle">Verify an address that can appear in your From line.</p></div><button class="icon-btn" id="identityEditorClose" type="button" aria-label="Close identity editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-body">
+      <div class="onboarding-fields onboarding-fields-grid">
+        <label class="form-field"><span>Display name</span><input id="identityEditorName" maxlength="120" placeholder="Avery Chen · Product"></label>
+        <label class="form-field"><span>Email address</span><input id="identityEditorEmail" type="email" placeholder="you@partner.com"></label>
+      </div>
+      <label class="form-field"><span>Reply-to <small class="muted">optional</small></span><input id="identityEditorReplyTo" type="email" placeholder="replies@partner.com"></label>
+      <div class="signature-mode-row"><span>Signature</span><div class="onboarding-segments compact" role="group" aria-label="Identity signature format"><button type="button" data-identity-signature-mode="rich">Rich HTML</button><button type="button" data-identity-signature-mode="plain">Plain text</button></div></div>
+      <div class="signature-rich-wrap" id="identitySignatureRichWrap">
+        <div class="signature-editor-toolbar" role="toolbar" aria-label="Identity signature formatting">
+          <button type="button" data-identity-signature-cmd="bold" title="Bold"><strong>B</strong></button><button type="button" data-identity-signature-cmd="italic" title="Italic"><em>I</em></button><button type="button" data-identity-signature-cmd="underline" title="Underline"><u>U</u></button><button type="button" data-identity-signature-cmd="insertUnorderedList" title="Bulleted list">•</button><button type="button" data-identity-signature-cmd="createLink" title="Insert link">↗</button><button type="button" data-identity-signature-cmd="removeFormat" title="Clear formatting">Tx</button>
+        </div>
+        <div class="signature-rich-editor" id="identityEditorSignature" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="Signature used when this identity is the From address"></div>
+      </div>
+      <textarea id="identityEditorSignaturePlain" class="signature-plain-editor" rows="6" spellcheck="true" placeholder="Signature used when this identity is the From address"></textarea>
+      <p class="settings-note">The identity signature is inserted automatically when this address is selected in Compose.</p>
+      <p class="onboarding-inline-error" id="identityEditorError" hidden></p>
+    </div>
+    <div class="dialog-foot"><button type="button" class="btn-secondary" id="identityEditorCancel">Cancel</button><button type="button" class="btn-primary" id="identityEditorSave">Save identity</button></div>
+  </div>
+</div>
+
 <div class="overlay" id="passwordChangeOverlay" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="passwordChangeTitle">
     <div class="dialog-head">
@@ -2248,6 +2407,7 @@
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="attachInput" multiple hidden>
-<script type="module" src="/app.js?v=0.9.0-r2"></script>
+<script src="/vendor/typo.js"></script>
+<script type="module" src="/app.js?v=0.10.0"></script>
 </body>
 </html>

@@ -64,6 +64,17 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.2.4** platform release adds mandatory first-login onboarding (display
+name, time zone, 12/24-hour time, language, theme and accent, temporary-password
+rotation and optional two-factor guidance), an admin user flow that picks the
+mailbox name and verified domain separately, optional admin-set passwords, a
+named signature library with New/Reply/Forward defaults, per-identity rich/plain
+signatures, a Compose **Insert signature** picker with an inline WYSIWYG creator,
+Alt8Mail Intelligence English spell check before sending, and a working
+Save-a-copy-in-Sent toggle. Completing onboarding writes the account name,
+primary sender label and primary sending identity, so messages no longer leave
+as `Primary <user@domain>`.
+
 The staging webmail release (**0.9.0-staging**) additionally has normalized mail,
 attachment, outbox and undo tables, PostgreSQL full-text search, IMAP IDLE
 push, normalized Tasks/Files/Calendar/Contacts, public guest-share pages,

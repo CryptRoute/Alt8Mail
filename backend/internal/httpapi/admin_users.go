@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/stateinit"
+	"github.com/jackc/pgx/v5"
 )
 
 type adminUserListFilter struct {
@@ -255,6 +255,35 @@ func (s *Server) adminUserDetail(ctx context.Context, user adminUser) (map[strin
 	return map[string]any{"user": payload}, nil
 }
 
+// adminUserCreateDomains is a small, focused list for the add-user form. It
+// only requires users.create instead of the broader domains.read entitlement.
+func (s *Server) adminUserCreateDomains(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireAdminSession(r)
+	rows, err := s.store.DB.Query(r.Context(), `
+		SELECT domain::text, is_primary, status, mx_verified, spf_verified, dkim_verified, dmarc_verified
+		FROM mail_domains
+		WHERE tenant_id = $1 AND status IN ('verified', 'manual')
+		ORDER BY is_primary DESC, domain
+	`, sess.ActiveTenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DOMAINS", "Could not load verified domains")
+		return
+	}
+	defer rows.Close()
+	domains := []map[string]any{}
+	for rows.Next() {
+		var domain, status string
+		var primary, mx, spf, dkim, dmarc bool
+		if rows.Scan(&domain, &primary, &status, &mx, &spf, &dkim, &dmarc) == nil {
+			domains = append(domains, map[string]any{
+				"domain": domain, "isPrimary": primary, "status": status,
+				"mailReady": mx && spf && dkim && dmarc,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"domains": domains, "count": len(domains)})
+}
+
 func (s *Server) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	var body struct {
@@ -360,7 +389,7 @@ func (s *Server) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "DOMAIN", err.Error())
 		return
 	}
-	created, err := provisionUserTx(ctx, tx, sess.ActiveTenantID, body.Name, body.Email, body.Role, webHash, mailHash, body.QuotaBytes, body.OrgUnitID, body.Title, body.Department, body.EmployeeID, body.ManagerEmail, body.Aliases, body.Status, s.cfg.MaildirBase)
+	created, err := provisionUserTx(ctx, tx, sess.ActiveTenantID, body.Name, body.Email, body.Role, webHash, mailHash, body.QuotaBytes, body.OrgUnitID, body.Title, body.Department, body.EmployeeID, body.ManagerEmail, body.Aliases, body.Status, body.Password == "", s.cfg.MaildirBase)
 	if err == nil {
 		var expires any
 		if policy.Security.PasswordExpiryDays > 0 {
@@ -390,12 +419,13 @@ func (s *Server) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"ok": true, "user": detail["user"],
 		"temporaryPassword": temporaryPassword, "mailPassword": mailPassword,
-		"stateReady": stateErr == nil,
-		"message":    "Copy the temporary password now. It will not be shown again.",
+		"passwordProvided": body.Password != "",
+		"stateReady":       stateErr == nil,
+		"message":          "Copy the password now. It will not be shown again.",
 	})
 }
 
-func provisionUserTx(ctx context.Context, tx pgx.Tx, tenantID, name, email, role, webHash, mailHash string, quota int64, orgUnitID, title, department, employeeID, managerEmail string, aliases []string, status, maildirBase string) (string, error) {
+func provisionUserTx(ctx context.Context, tx pgx.Tx, tenantID, name, email, role, webHash, mailHash string, quota int64, orgUnitID, title, department, employeeID, managerEmail string, aliases []string, status string, forcePasswordChange bool, maildirBase string) (string, error) {
 	localPart, domain := splitEmail(email)
 	if localPart == "" || domain == "" {
 		return "", errors.New("invalid email address")
@@ -417,17 +447,17 @@ func provisionUserTx(ctx context.Context, tx pgx.Tx, tenantID, name, email, role
 	err := tx.QueryRow(ctx, `
 		INSERT INTO users (tenant_id, email, name, initials, color, role, status, password_hash,
 		                   mail_password_hash, quota_bytes, org_unit_id, title, department, employee_id,
-		                   manager_email, force_password_change)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, true)
+		                   manager_email, force_password_change, onboarding_required)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true)
 		RETURNING id::text
-	`, tenantID, email, name, initials, color, role, status, webHash, mailHash, quota, orgUnit, title, department, employeeID, manager).Scan(&userID)
+	`, tenantID, email, name, initials, color, role, status, webHash, mailHash, quota, orgUnit, title, department, employeeID, manager, forcePasswordChange).Scan(&userID)
 	if err != nil {
 		return "", err
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO user_aliases (tenant_id, user_id, email, label, kind, can_send, active)
-		VALUES ($1, $2, $3, 'Primary', 'primary', true, true)
-	`, tenantID, userID, email); err != nil {
+		VALUES ($1, $2, $3, $4, 'primary', true, true)
+	`, tenantID, userID, email, name); err != nil {
 		return "", err
 	}
 	for _, alias := range aliases {
@@ -446,7 +476,7 @@ func provisionUserTx(ctx context.Context, tx pgx.Tx, tenantID, name, email, role
 		if !domainAllowed {
 			return "", fmt.Errorf("alias domain %s is not verified for this organization", aliasDomain)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO user_aliases (tenant_id, user_id, email, label, kind, can_send, active) VALUES ($1, $2, $3, 'Alias', 'alias', true, true)`, tenantID, userID, alias); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO user_aliases (tenant_id, user_id, email, label, kind, can_send, active) VALUES ($1, $2, $3, $4, 'alias', true, true)`, tenantID, userID, alias, name); err != nil {
 			return "", err
 		}
 	}
@@ -469,7 +499,7 @@ func provisionAdminUser(ctx context.Context, tx pgx.Tx, tenantID, name, email, r
 	if err != nil {
 		return nil, err
 	}
-	userID, err := provisionUserTx(ctx, tx, tenantID, name, email, role, passwordHash, mailHash, 16*1024*1024*1024, "", "", "", "", "", nil, "active", maildirBase)
+	userID, err := provisionUserTx(ctx, tx, tenantID, name, email, role, passwordHash, mailHash, 16*1024*1024*1024, "", "", "", "", "", nil, "active", forceChange, maildirBase)
 	if err != nil {
 		return nil, err
 	}
@@ -567,8 +597,11 @@ func (s *Server) adminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := map[string]any{}
+	newName := ""
 	if body.Name != nil && strings.TrimSpace(*body.Name) != "" {
-		fields["name"] = truncate(strings.TrimSpace(*body.Name), 120)
+		newName = truncate(strings.TrimSpace(*body.Name), 120)
+		fields["name"] = newName
+		fields["initials"] = initialsForName(newName)
 	}
 	if body.Role != nil {
 		fields["role"] = *body.Role
@@ -637,6 +670,19 @@ func (s *Server) adminUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(ctx, "UPDATE users SET "+strings.Join(setParts, ", ")+" WHERE id = $1", args...); err != nil {
 		writeError(w, http.StatusInternalServerError, "USER", "Could not update user")
 		return
+	}
+	if newName != "" {
+		_, _ = tx.Exec(ctx, `
+			UPDATE user_aliases SET label = $2
+			WHERE user_id = $1 AND (
+				kind = 'primary'
+				OR (kind = 'alias' AND (trim(label) = '' OR lower(label) IN ('primary', 'alias') OR label = $3))
+			)
+		`, user.ID, newName, user.Name)
+		_, _ = tx.Exec(ctx, `
+			UPDATE mail_identities SET display_name = $2, updated_at = now()
+			WHERE user_id = $1 AND email = $3 AND (trim(display_name) = '' OR display_name = $4)
+		`, user.ID, newName, user.Email, user.Name)
 	}
 	if body.Status != nil {
 		active := *body.Status == "active"

@@ -39,6 +39,7 @@ func publicStateUser(state map[string]any, user userRecord, prefs map[string]any
 	out["preferences"] = prefs
 	out["security"] = security
 	out["forcePasswordChange"] = user.ForcePasswordChange
+	out["onboardingRequired"] = user.OnboardingRequired
 	out["passwordChangeRequired"] = passwordChangeRequired(user)
 	out["passwordExpiresAt"] = nullableTime(user.PasswordExpiresAt)
 	return out

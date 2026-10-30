@@ -14,7 +14,8 @@ if (!password) throw new Error("ALT8MAIL_ADMIN_PASSWORD is required");
 const browser = await launchBrowser({ headless: true, width: 1440, height: 1000, ignoreCertificateErrors: false });
 const page = await browser.newPage(base);
 const stamp = Date.now();
-const smokeUser = `ui.smoke.${stamp}@a8m.test`;
+const smokeLocalPart = `ui.smoke.${stamp}`;
+let smokeUser = smokeLocalPart;
 const smokeGroup = `ui-smoke-${stamp}@a8m.test`;
 const smokeRole = `UI smoke role ${stamp}`;
 const smokeUnit = `UI Smoke Unit ${stamp}`;
@@ -52,8 +53,14 @@ try {
   await page.waitFor(() => document.querySelectorAll("tr[data-user-id]").length > 0, 10000);
   await click('[data-action="new-user"]');
   await page.waitFor(() => document.getElementById("newUserForm") !== null, 5000);
+  await page.waitFor(() => {
+    const select = document.querySelector('[data-user-field="domain"]');
+    return select && !select.disabled && select.value;
+  }, 8000);
   await page.setValue('[data-user-field="name"]', "UI Smoke User");
-  await page.setValue('[data-user-field="email"]', smokeUser);
+  await page.setValue('[data-user-field="username"]', smokeLocalPart);
+  const selectedDomain = await page.eval('document.querySelector(\'[data-user-field="domain"]\').value');
+  smokeUser = `${smokeLocalPart}@${selectedDomain}`;
   await page.setValue('[data-user-field="title"]', "Automated verification");
   await page.setValue('[data-user-field="quotaGb"]', "2");
   await click('[data-modal-submit="newUserForm"]');

@@ -129,6 +129,7 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /system/admins/{id}", s.adminRequirePermission("system.admins.manage", s.adminRevokeSystemAdmin))
 
 	mux.HandleFunc("GET /users", s.adminRequirePermission("users.read", s.adminListUsers))
+	mux.HandleFunc("GET /users/domains", s.adminRequirePermission("users.create", s.adminUserCreateDomains))
 	mux.HandleFunc("POST /users", s.adminRequirePermission("users.create", s.adminCreateUser))
 	mux.HandleFunc("GET /users/{id}", s.adminRequirePermission("users.read", s.adminGetUser))
 	mux.HandleFunc("PATCH /users/{id}", s.adminRequirePermission("users.update", s.adminUpdateUser))

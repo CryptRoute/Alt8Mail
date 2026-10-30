@@ -70,6 +70,7 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "PROFILE", "Profile not found")
 		return
 	}
+	previousName := profile.Name
 	if body.Name != nil {
 		profile.Name = strings.TrimSpace(*body.Name)
 	}
@@ -92,6 +93,19 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "PROFILE", "Could not save the profile")
 		return
 	}
+	// The From header uses the alias label, so keep it aligned with the
+	// account holder's real name instead of the legacy "Primary" label.
+	_, _ = s.store.DB.Exec(r.Context(), `
+		UPDATE user_aliases SET label = $2
+		WHERE user_id = $1 AND (
+			kind = 'primary'
+			OR (kind = 'alias' AND (trim(label) = '' OR lower(label) IN ('primary', 'alias') OR label = $3))
+		)
+	`, profile.ID, profile.Name, previousName)
+	_, _ = s.store.DB.Exec(r.Context(), `
+		UPDATE mail_identities SET display_name = $2, updated_at = now()
+		WHERE user_id = $1 AND email = $3 AND (trim(display_name) = '' OR display_name = $4)
+	`, profile.ID, profile.Name, profile.Email, previousName)
 	profile.Initials = initials
 	s.auditRequest(r, sess, "profile.updated", profile.Name, "Updated self-service profile details")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": publicProfile(profile, true)})

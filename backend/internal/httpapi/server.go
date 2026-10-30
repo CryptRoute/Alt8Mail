@@ -109,6 +109,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/enrollment/totp/finish", s.finishEnrollmentTOTP)
 	mux.HandleFunc("POST /api/enrollment/webauthn/begin", s.beginEnrollmentWebAuthn)
 	mux.HandleFunc("POST /api/enrollment/webauthn/finish", s.finishEnrollmentWebAuthn)
+	mux.HandleFunc("GET /api/onboarding", s.requireUser(s.getOnboarding))
+	mux.HandleFunc("POST /api/onboarding/complete", s.requireUser(s.completeOnboarding))
 	mux.HandleFunc("GET /api/bootstrap", s.requireUser(s.bootstrap))
 	mux.HandleFunc("GET /api/folders", s.requireUser(s.getFolders))
 	mux.HandleFunc("GET /api/aliases", s.requireUser(s.getAliases))
@@ -203,10 +205,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/forwarding", s.requireUser(s.saveForwarding))
 	mux.HandleFunc("GET /api/identities", s.requireUser(s.getIdentities))
 	mux.HandleFunc("POST /api/identities", s.requireUser(s.createIdentity))
+	mux.HandleFunc("PUT /api/identities/signature", s.requireUser(s.putIdentitySignature))
+	mux.HandleFunc("PATCH /api/identities/{id}", s.requireUser(s.updateIdentity))
 	mux.HandleFunc("POST /api/identities/{id}/resend", s.requireUser(s.resendIdentity))
 	mux.HandleFunc("DELETE /api/identities/{id}", s.requireUser(s.deleteIdentity))
 	mux.HandleFunc("GET /api/identities/verify", s.identityVerifyPage)
 	mux.HandleFunc("POST /api/identities/verify", s.identityVerifySubmit)
+	mux.HandleFunc("GET /api/signatures", s.requireUser(s.getSignatures))
+	mux.HandleFunc("POST /api/signatures", s.requireUser(s.createSignature))
+	mux.HandleFunc("PATCH /api/signatures/{id}", s.requireUser(s.updateSignature))
+	mux.HandleFunc("DELETE /api/signatures/{id}", s.requireUser(s.deleteSignature))
 	mux.HandleFunc("POST /api/ai/messages/{id}/summary", s.requireUser(s.aiMessageSummary))
 	mux.HandleFunc("POST /api/ai/messages/{id}/translate", s.requireUser(s.aiMessageTranslate))
 	mux.HandleFunc("POST /api/ai/messages/{id}/reply", s.requireUser(s.aiMessageReply))
@@ -273,6 +281,7 @@ type userRecord struct {
 	UsedBytes           int64
 	EnrollmentRequired  bool
 	ForcePasswordChange bool
+	OnboardingRequired  bool
 	PasswordExpiresAt   *time.Time
 }
 
@@ -506,6 +515,11 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		identities = []map[string]any{}
 	}
 	aliases := identityAliases(identities)
+	signatures, err := s.listSignatures(ctx, sess.User)
+	if err != nil {
+		s.logger.Warn("signature load failed", "user", sess.User.ID, "err", err)
+		signatures = []map[string]any{}
+	}
 	stateMap(state, "user")["aliases"] = aliases
 	storedMessages, _, err := s.loadAllMailMessages(ctx, sess.User.ID)
 	if err != nil {
@@ -539,6 +553,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"user":             user,
 		"aliases":          aliases,
 		"identities":       identities,
+		"signatures":       signatures,
 		"folders":          folders,
 		"people":           people,
 		"messages":         messages,
@@ -678,8 +693,12 @@ func (s *Server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in to continue")
 			return
 		}
-		if passwordChangeRequired(sess.User) && r.URL.Path != "/api/password/change" && r.URL.Path != "/api/bootstrap" && r.URL.Path != "/api/session" {
+		if passwordChangeRequired(sess.User) && r.URL.Path != "/api/password/change" && r.URL.Path != "/api/bootstrap" && r.URL.Path != "/api/session" && r.URL.Path != "/api/onboarding" && r.URL.Path != "/api/onboarding/complete" {
 			writeError(w, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED", "Change your password before continuing")
+			return
+		}
+		if sess.User.OnboardingRequired && !onboardingAllowedPath(r.URL.Path) {
+			writeError(w, http.StatusForbidden, "ONBOARDING_REQUIRED", "Complete your Alt8Mail setup before continuing")
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && !s.validCSRF(r, sess) {
@@ -689,6 +708,15 @@ func (s *Server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 		ctx := context.WithValue(r.Context(), sessionContextKey{}, sess)
 		next(w, r.WithContext(ctx))
 	}
+}
+
+func onboardingAllowedPath(path string) bool {
+	switch path {
+	case "/api/onboarding", "/api/onboarding/complete", "/api/password/change",
+		"/api/bootstrap", "/api/session":
+		return true
+	}
+	return false
 }
 
 type sessionContextKey struct{}
@@ -709,7 +737,8 @@ func (s *Server) authenticate(r *http.Request) (*sessionRecord, error) {
 		SELECT s.id, s.user_id::text, s.tenant_id::text, s.csrf_token, s.expires_at,
 		       u.id::text, u.tenant_id::text, u.email::text, u.name, u.initials, u.color,
 		       u.role, u.status, COALESCE(u.password_hash, ''), u.preferences, u.security,
-		       u.quota_bytes, u.used_bytes, u.enrollment_required, u.force_password_change, u.password_expires_at
+		       u.quota_bytes, u.used_bytes, u.enrollment_required, u.force_password_change,
+		       u.onboarding_required, u.password_expires_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		JOIN tenants t ON t.id = u.tenant_id AND t.status = 'active'
@@ -719,7 +748,8 @@ func (s *Server) authenticate(r *http.Request) (*sessionRecord, error) {
 		&sess.User.ID, &sess.User.TenantID, &sess.User.Email, &sess.User.Name, &sess.User.Initials,
 		&sess.User.Color, &sess.User.Role, &sess.User.Status, &sess.User.PasswordHash,
 		&sess.User.Preferences, &sess.User.Security, &sess.User.QuotaBytes, &sess.User.UsedBytes,
-		&sess.User.EnrollmentRequired, &sess.User.ForcePasswordChange, &sess.User.PasswordExpiresAt,
+		&sess.User.EnrollmentRequired, &sess.User.ForcePasswordChange, &sess.User.OnboardingRequired,
+		&sess.User.PasswordExpiresAt,
 	)
 	if err != nil {
 		return nil, err
@@ -775,13 +805,14 @@ func (s *Server) userByEmail(ctx context.Context, email string) (userRecord, err
 	err := s.store.DB.QueryRow(ctx, `
 		SELECT u.id::text, u.tenant_id::text, u.email::text, u.name, u.initials, u.color, u.role, u.status,
 		       COALESCE(u.password_hash, ''), u.preferences, u.security, u.quota_bytes, u.used_bytes, u.enrollment_required,
-		       u.force_password_change, u.password_expires_at
+		       u.force_password_change, u.onboarding_required, u.password_expires_at
 		FROM users u JOIN tenants t ON t.id = u.tenant_id AND t.status = 'active'
 		WHERE u.email = $1 AND u.status = 'active' AND u.deleted_at IS NULL
 	`, email).Scan(
 		&user.ID, &user.TenantID, &user.Email, &user.Name, &user.Initials, &user.Color,
 		&user.Role, &user.Status, &user.PasswordHash, &user.Preferences, &user.Security,
-		&user.QuotaBytes, &user.UsedBytes, &user.EnrollmentRequired, &user.ForcePasswordChange, &user.PasswordExpiresAt,
+		&user.QuotaBytes, &user.UsedBytes, &user.EnrollmentRequired, &user.ForcePasswordChange,
+		&user.OnboardingRequired, &user.PasswordExpiresAt,
 	)
 	return user, err
 }
@@ -926,6 +957,7 @@ func publicUser(user userRecord) map[string]any {
 		"preferences":            preferencesFor(user),
 		"security":               jsonRaw(user.Security),
 		"forcePasswordChange":    user.ForcePasswordChange,
+		"onboardingRequired":     user.OnboardingRequired,
 		"passwordChangeRequired": passwordChangeRequired(user),
 		"passwordExpiresAt":      nullableTime(user.PasswordExpiresAt),
 	}
@@ -941,6 +973,7 @@ func preferencesFor(user userRecord) map[string]any {
 		"timeZone": "UTC", "weekStart": "monday", "workStart": "09:00",
 		"workEnd": "17:00", "workDays": []int{1, 2, 3, 4, 5},
 		"signatureEnabled": true, "signature": "", "autoAdvance": false,
+		"saveCopyEnabled": true, "spellCheckEnabled": true,
 		"theme": "system", "accent": "blue", "density": "comfortable",
 		"markReadOnOpen": true, "inboxView": "grouped", "defaultPriority": "normal", "defaultReceipt": false,
 		"undoSendSeconds": 8, "notifyDesktop": true, "notifySound": false,

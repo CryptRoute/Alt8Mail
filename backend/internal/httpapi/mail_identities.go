@@ -17,10 +17,11 @@ const (
 )
 
 type identityBody struct {
-	Name      string `json:"name"`
-	Email     string `json:"email"`
-	ReplyTo   string `json:"replyTo"`
-	Signature string `json:"signature"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	ReplyTo       string `json:"replyTo"`
+	Signature     string `json:"signature"`
+	SignatureHTML string `json:"signatureHtml"`
 }
 
 // mailIdentities returns the sendable addresses a user can choose in compose:
@@ -32,24 +33,32 @@ func (s *Server) mailIdentities(ctx context.Context, user userRecord) ([]map[str
 	seen := map[string]bool{}
 
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT id::text, email::text, label, kind, can_send
-		FROM user_aliases WHERE user_id = $1 AND active = true ORDER BY created_at
+		SELECT a.id::text, a.email::text, a.label, a.kind, a.can_send,
+		       COALESCE(sig.body_text, ''), COALESCE(sig.body_html, '')
+		FROM user_aliases a
+		LEFT JOIN mail_identity_signatures sig ON sig.user_id = a.user_id AND sig.email = a.email
+		WHERE a.user_id = $1 AND a.active = true ORDER BY a.created_at
 	`, user.ID)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var id, email, label, kind string
+		var id, email, label, kind, signature, signatureHTML string
 		var canSend bool
-		if rows.Scan(&id, &email, &label, &kind, &canSend) == nil {
+		if rows.Scan(&id, &email, &label, &kind, &canSend, &signature, &signatureHTML) == nil {
 			reason := ""
 			if !canSend {
 				reason = "Delegated mailbox · read only"
 			}
+			// Very old aliases carry the internal labels "Primary"/"Alias".
+			// They must never become the visible From name.
+			if strings.TrimSpace(label) == "" || strings.EqualFold(label, "Primary") || strings.EqualFold(label, "Alias") {
+				label = user.Name
+			}
 			item := map[string]any{
 				"id": id, "email": strings.ToLower(email), "label": label, "kind": kind,
 				"canSend": canSend, "status": "verified", "source": "alias",
-				"reason": reason,
+				"reason": reason, "signature": signature, "signatureHtml": signatureHTML,
 			}
 			result = append(result, item)
 			seen[strings.ToLower(email)] = true
@@ -60,24 +69,27 @@ func (s *Server) mailIdentities(ctx context.Context, user userRecord) ([]map[str
 		result = append(result, map[string]any{
 			"id": "primary", "email": strings.ToLower(user.Email), "label": user.Name,
 			"kind": "primary", "canSend": true, "status": "verified",
-			"source": "alias", "reason": "",
+			"source": "alias", "reason": "", "signature": "", "signatureHtml": "",
 		})
 		seen[strings.ToLower(user.Email)] = true
 	}
 
 	rows, err = s.store.DB.Query(ctx, `
-		SELECT id, email::text, display_name, status, COALESCE(reply_to::text, ''), signature,
-		       COALESCE(verification_expires_at, created_at), created_at
-		FROM mail_identities WHERE user_id = $1 ORDER BY created_at
+		SELECT mi.id, mi.email::text, mi.display_name, mi.status, COALESCE(mi.reply_to::text, ''),
+		       COALESCE(sig.body_text, mi.signature), COALESCE(sig.body_html, mi.signature_html),
+		       COALESCE(mi.verification_expires_at, mi.created_at), mi.created_at
+		FROM mail_identities mi
+		LEFT JOIN mail_identity_signatures sig ON sig.user_id = mi.user_id AND sig.email = mi.email
+		WHERE mi.user_id = $1 ORDER BY mi.created_at
 	`, user.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, email, name, status, replyTo, signature string
+		var id, email, name, status, replyTo, signature, signatureHTML string
 		var verificationExpires, created time.Time
-		if rows.Scan(&id, &email, &name, &status, &replyTo, &signature, &verificationExpires, &created) != nil {
+		if rows.Scan(&id, &email, &name, &status, &replyTo, &signature, &signatureHTML, &verificationExpires, &created) != nil {
 			continue
 		}
 		email = strings.ToLower(email)
@@ -96,7 +108,7 @@ func (s *Server) mailIdentities(ctx context.Context, user userRecord) ([]map[str
 		item := map[string]any{
 			"id": id, "email": email, "label": label, "kind": "identity",
 			"canSend": canSend, "status": status, "source": "identity",
-			"reason": reason, "replyTo": replyTo, "signature": signature,
+			"reason": reason, "replyTo": replyTo, "signature": signature, "signatureHtml": signatureHTML,
 			"createdAt": created.UTC().Format(time.RFC3339),
 		}
 		if status == "pending" {
@@ -225,7 +237,7 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := truncate(strings.TrimSpace(body.Name), 120)
-	signature := truncate(strings.TrimSpace(body.Signature), 4000)
+	signature, signatureHTML := normalizeIdentitySignature(body.Signature, body.SignatureHTML)
 
 	var id, status string
 	err := s.store.DB.QueryRow(r.Context(), `
@@ -236,7 +248,15 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "IDENTITY_EXISTS", "That address is already a verified identity")
 			return
 		}
-		// Resend for an existing pending row.
+		// Refresh the editable details and signature before resending the
+		// verification link for an existing pending row.
+		_, _ = s.store.DB.Exec(r.Context(), `
+			UPDATE mail_identities SET display_name=$2, reply_to=NULLIF($3,''), signature=$4, signature_html=$5, updated_at=now()
+			WHERE id=$1 AND user_id=$6
+		`, id, name, replyTo, signature, signatureHTML, sess.User.ID)
+		if err := s.saveIdentitySignature(r.Context(), sess.User, email, signature, signatureHTML); err != nil {
+			s.logger.Warn("identity signature save failed", "err", err, "email", email)
+		}
 		s.resendIdentityVerification(w, r, sess, id)
 		return
 	}
@@ -259,15 +279,18 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 		sentAt = now
 	}
 	_, err = s.store.DB.Exec(r.Context(), `
-		INSERT INTO mail_identities (id, tenant_id, user_id, email, display_name, reply_to, signature,
+		INSERT INTO mail_identities (id, tenant_id, user_id, email, display_name, reply_to, signature, signature_html,
 			status, verification_token_hash, verification_expires_at, verification_sent_at, verified_at)
-		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12)
-	`, id, sess.User.TenantID, sess.User.ID, email, name, replyTo, signature, status,
+		VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12,$13)
+	`, id, sess.User.TenantID, sess.User.ID, email, name, replyTo, signature, signatureHTML, status,
 		tokenHash, expires, sentAt, verifiedAt,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "IDENTITY", "Could not save the identity")
 		return
+	}
+	if err := s.saveIdentitySignature(r.Context(), sess.User, email, signature, signatureHTML); err != nil {
+		s.logger.Warn("identity signature save failed", "err", err, "email", email)
 	}
 	response := map[string]any{
 		"ok": true, "id": id, "email": email, "status": status,
@@ -284,6 +307,103 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	s.auditRequest(r, sess, "identity.created", email, "Added a sending identity")
 	writeJSON(w, http.StatusCreated, response)
+}
+
+func normalizeIdentitySignature(bodyText, bodyHTML string) (string, string) {
+	bodyText = strings.TrimSpace(truncate(bodyText, 12_000))
+	bodyHTML = sanitizeComposeHTML(truncate(bodyHTML, 24_000))
+	if bodyHTML != "" && strings.TrimSpace(htmlToPlainText(bodyHTML)) == "" {
+		bodyHTML = ""
+	}
+	if bodyText == "" && bodyHTML != "" {
+		bodyText = htmlToPlainText(bodyHTML)
+	}
+	if bodyHTML == "" && bodyText != "" {
+		bodyHTML = textToHTML(bodyText)
+	}
+	return bodyText, bodyHTML
+}
+
+func (s *Server) saveIdentitySignature(ctx context.Context, user userRecord, email, bodyText, bodyHTML string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if strings.TrimSpace(bodyText) == "" && strings.TrimSpace(bodyHTML) == "" {
+		_, err := s.store.DB.Exec(ctx, `DELETE FROM mail_identity_signatures WHERE user_id=$1 AND email=$2`, user.ID, email)
+		return err
+	}
+	_, err := s.store.DB.Exec(ctx, `
+		INSERT INTO mail_identity_signatures (tenant_id, user_id, email, body_text, body_html, updated_at)
+		VALUES ($1,$2,$3,$4,$5,now())
+		ON CONFLICT (user_id, email) DO UPDATE
+		SET body_text=EXCLUDED.body_text, body_html=EXCLUDED.body_html, updated_at=now()
+	`, user.TenantID, user.ID, email, bodyText, bodyHTML)
+	return err
+}
+
+func (s *Server) putIdentitySignature(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	var body struct {
+		Email         string `json:"email"`
+		Signature     string `json:"signature"`
+		SignatureHTML string `json:"signatureHtml"`
+	}
+	if !s.decodeBody(w, r, &body, 64*1024) {
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	var allowed bool
+	_ = s.store.DB.QueryRow(r.Context(), `
+		SELECT EXISTS(SELECT 1 FROM user_aliases WHERE user_id=$1 AND email=$2 AND active=true)
+		    OR EXISTS(SELECT 1 FROM mail_identities WHERE user_id=$1 AND email=$2)
+	`, sess.User.ID, email).Scan(&allowed)
+	if !allowed {
+		writeError(w, http.StatusNotFound, "IDENTITY_NOT_FOUND", "That address is not one of your sending identities")
+		return
+	}
+	bodyText, bodyHTML := normalizeIdentitySignature(body.Signature, body.SignatureHTML)
+	if err := s.saveIdentitySignature(r.Context(), sess.User, email, bodyText, bodyHTML); err != nil {
+		writeError(w, http.StatusInternalServerError, "IDENTITY_SIGNATURE", "Could not save the identity signature")
+		return
+	}
+	if _, err := s.store.DB.Exec(r.Context(), `
+		UPDATE mail_identities SET signature=$2, signature_html=$3, updated_at=now()
+		WHERE user_id=$1 AND email=$4
+	`, sess.User.ID, bodyText, bodyHTML, email); err != nil {
+		s.logger.Warn("identity signature compatibility update failed", "err", err)
+	}
+	s.auditRequest(r, sess, "identity.signature_saved", email, "Updated the sending identity signature")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "email": email, "signature": bodyText, "signatureHtml": bodyHTML})
+}
+
+func (s *Server) updateIdentity(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	var body identityBody
+	if !s.decodeBody(w, r, &body, 128*1024) {
+		return
+	}
+	replyTo := strings.ToLower(strings.TrimSpace(body.ReplyTo))
+	if replyTo != "" && !sieveEmailPattern.MatchString(replyTo) {
+		writeError(w, http.StatusBadRequest, "REPLY_TO", "Reply-to must be a valid email address")
+		return
+	}
+	name := truncate(strings.TrimSpace(body.Name), 120)
+	signature, signatureHTML := normalizeIdentitySignature(body.Signature, body.SignatureHTML)
+	var email string
+	err := s.store.DB.QueryRow(r.Context(), `
+		UPDATE mail_identities SET display_name=$3, reply_to=NULLIF($4,''), signature=$5, signature_html=$6, updated_at=now()
+		WHERE id=$1 AND user_id=$2
+		RETURNING email::text
+	`, r.PathValue("id"), sess.User.ID, name, replyTo, signature, signatureHTML).Scan(&email)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "IDENTITY_NOT_FOUND", "Identity not found")
+		return
+	}
+	if err := s.saveIdentitySignature(r.Context(), sess.User, email, signature, signatureHTML); err != nil {
+		writeError(w, http.StatusInternalServerError, "IDENTITY_SIGNATURE", "Could not save the identity signature")
+		return
+	}
+	s.auditRequest(r, sess, "identity.updated", email, "Updated a sending identity")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": r.PathValue("id"), "email": email,
+		"name": name, "replyTo": replyTo, "signature": signature, "signatureHtml": signatureHTML})
 }
 
 func (s *Server) resendIdentity(w http.ResponseWriter, r *http.Request) {

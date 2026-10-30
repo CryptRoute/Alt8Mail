@@ -60,16 +60,26 @@ try {
   await sleep(300);
   await page.click("[data-server-pref='signatureEnabled']");
   await sleep(300);
-  await page.setValue("#signatureInput", "Avery Chen\nAlt8Mail staging\nReal signature");
-  await page.click("#saveSignatureBtn");
-  await sleep(500);
+  const signatureName = `Staging signature ${Date.now()}`;
+  await page.click("#newSignatureBtn");
+  await sleep(300);
+  await page.setValue("#signatureEditorName", signatureName);
+  await page.eval(`(() => {
+    const editor = document.getElementById("signatureEditorBody");
+    editor.innerHTML = "<p><strong>Avery Chen</strong><br>Alt8Mail staging<br>Real signature</p>";
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  await page.click("#signatureEditorSave");
+  await sleep(700);
+  const signatureState = await page.eval("fetch('/api/signatures').then(r=>r.json())");
+  assert.ok((signatureState.signatures || []).some((item) => item.name === signatureName), "named signature saved in DB");
+  assert.ok((signatureState.signatures || []).some((item) => item.name === signatureName && item.defaultNew), "first signature becomes the new-message default");
   await assertPref("markReadOnOpen", false, "read-on-open saved in DB");
   await assertPref("autoAdvance", true, "auto-advance saved in DB");
   await assertPref("defaultPriority", "high", "default priority saved in DB");
   await assertPref("defaultReceipt", true, "default receipt saved in DB");
   await assertPref("undoSendSeconds", 10, "undo window saved in DB");
   await assertPref("signatureEnabled", false, "signature toggle saved in DB");
-  await assertPref("signature", "Avery Chen\nAlt8Mail staging\nReal signature", "signature saved in DB");
 
   // Notifications (desktop permission prompts are intentionally avoided in headless)
   await page.click("[data-settings-tab='notifications']");

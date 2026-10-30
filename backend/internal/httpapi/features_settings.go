@@ -290,7 +290,7 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 			}
 			assign("signature", text)
 		}
-		for _, key := range []string{"signatureEnabled", "autoAdvance", "markReadOnOpen", "defaultReceipt", "notifyDesktop", "notifySound", "notifyCalendar", "externalWarnings"} {
+		for _, key := range []string{"signatureEnabled", "saveCopyEnabled", "spellCheckEnabled", "autoAdvance", "markReadOnOpen", "defaultReceipt", "notifyDesktop", "notifySound", "notifyCalendar", "externalWarnings"} {
 			if value, ok := patch[key]; ok {
 				flag, valid := value.(bool)
 				if !valid {

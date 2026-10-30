@@ -367,6 +367,8 @@ const DEFAULT_PREFERENCES = {
   defaultFrom: "",
   signatureEnabled: false,
   signature: "",
+  saveCopyEnabled: true,
+  spellCheckEnabled: true,
   autoAdvance: false,
   theme: "system",
   accent: "blue",
@@ -438,6 +440,7 @@ const state = {
   csrf: null,
   aliases: [],
   identities: [],
+  signatures: [],
   ai: { enabled: false, languages: [], styles: [] },
   recentAudit: [],
   aiReader: null,
@@ -503,6 +506,14 @@ const state = {
   notifyDesktop: true,
   notifySound: false,
   notifyCalendar: true,
+  saveCopyEnabled: true,
+  spellCheckEnabled: true,
+  onboarding: { step: 0, saving: false, passwordChanged: false },
+  signatureEditor: null,
+  signaturePickerSessionId: null,
+  identityEditor: null,
+  spellcheck: null,
+  spellChecker: null,
   knownInboxIds: null,
   mailClient: null,
   mailMonitorTimer: null,
@@ -698,6 +709,11 @@ const storageCredentialFields = document.getElementById("storageCredentialFields
 const storageCredentialStatus = document.getElementById("storageCredentialStatus");
 const confirmOverlay = document.getElementById("confirmOverlay");
 const domainBlockedOverlay = document.getElementById("domainBlockedOverlay");
+const onboardingOverlay = document.getElementById("onboardingOverlay");
+const signatureEditorOverlay = document.getElementById("signatureEditorOverlay");
+const signaturePickerOverlay = document.getElementById("signaturePickerOverlay");
+const spellcheckOverlay = document.getElementById("spellcheckOverlay");
+const identityEditorOverlay = document.getElementById("identityEditorOverlay");
 let confirmResolver = null;
 
 function appConfirm({ title = "Confirm action", message = "", confirmLabel = "Confirm", cancelLabel = "Cancel", tone = "default", icon = "i-alert" } = {}) {
@@ -758,8 +774,6 @@ const workEndInput = document.getElementById("workEndInput");
 const workdayRow = document.getElementById("workdayRow");
 const regionalPreview = document.getElementById("regionalPreview");
 const defaultFromSelect = document.getElementById("defaultFromSelect");
-const signatureInput = document.getElementById("signatureInput");
-const signatureStatus = document.getElementById("signatureStatus");
 const autoReplyToggle = document.getElementById("autoReplyToggle");
 const autoReplyRangeToggle = document.getElementById("autoReplyRangeToggle");
 const autoReplyRangeFields = document.getElementById("autoReplyRangeFields");
@@ -851,6 +865,10 @@ async function api(path, options = {}) {
 function maybeShowPasswordChange() {
   const overlay = document.getElementById("passwordChangeOverlay");
   if (!overlay) return;
+  if (state.user && state.user.onboardingRequired) {
+    overlay.hidden = true;
+    return;
+  }
   const required = Boolean(state.user && state.user.passwordChangeRequired);
   if (!required) {
     overlay.hidden = true;
@@ -894,6 +912,300 @@ async function submitPasswordChange() {
     button.textContent = "Save new password";
   }
 }
+
+/* ============================================================
+   Mandatory first-login onboarding
+   ============================================================ */
+function onboardingDisplayNameFallback() {
+  const email = state.user?.email || "";
+  const local = email.split("@")[0] || "there";
+  return local.split(/[._-]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ") || "there";
+}
+
+function onboardingName() {
+  return String(document.getElementById("onboardingName")?.value || "").trim();
+}
+
+function onboardingSelection() {
+  const selected = state.onboarding || {};
+  return {
+    timeFormat: selected.timeFormat || state.preferences.timeFormat || "12h",
+    theme: selected.theme || state.preferences.theme || "system",
+    accent: selected.accent || state.preferences.accent || "blue"
+  };
+}
+
+function maybeShowOnboarding() {
+  if (!onboardingOverlay) return false;
+  const required = Boolean(state.user && state.user.onboardingRequired);
+  if (!required) {
+    onboardingOverlay.hidden = true;
+    document.body.classList.remove("onboarding-active");
+    if (app) app.inert = false;
+    return false;
+  }
+  if (!onboardingOverlay.hidden) return true;
+  state.onboarding = {
+    step: 0,
+    saving: false,
+    passwordChanged: false,
+    timeFormat: state.preferences.timeFormat || "12h",
+    theme: state.preferences.theme || "system",
+    accent: state.preferences.accent || "blue"
+  };
+  const name = state.user.name && !/^primary$/i.test(state.user.name) && state.user.name !== state.user.email
+    ? state.user.name
+    : onboardingDisplayNameFallback();
+  document.getElementById("onboardingName").value = name;
+  document.getElementById("onboardingEmail").value = state.user.email || "";
+  const zoneSelect = document.getElementById("onboardingTimeZone");
+  zoneSelect.innerHTML = timeZoneOptions().map((zone) => `<option value="${esc(zone)}">${esc(zone.replace(/_/g, " "))}</option>`).join("");
+  zoneSelect.value = state.preferences.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const language = document.getElementById("onboardingLanguage");
+  populateLanguageSelect(language);
+  language.value = state.preferences.language || "en-US";
+  const passwordRequired = Boolean(state.user.passwordChangeRequired);
+  document.getElementById("onboardingPasswordSection").hidden = !passwordRequired;
+  document.getElementById("onboardingPasswordClear").hidden = passwordRequired;
+  document.getElementById("onboardingPasswordError").hidden = true;
+  document.getElementById("onboardingTwoFactorBtn").disabled = false;
+  document.getElementById("onboardingTwoFactorBtn").textContent = "Remind me to set this up";
+  updateOnboardingAvatar();
+  updateOnboardingControls();
+  setOnboardingStep(0);
+  onboardingOverlay.hidden = false;
+  document.body.classList.add("onboarding-active");
+  if (app) app.inert = true;
+  setTimeout(() => document.getElementById("onboardingName")?.focus(), 120);
+  return true;
+}
+
+function updateOnboardingAvatar() {
+  const name = onboardingName() || onboardingDisplayNameFallback();
+  document.getElementById("onboardingAvatar").textContent = initialsFrom(name);
+  const finishName = document.getElementById("onboardingFinishName");
+  if (finishName) finishName.textContent = name.split(/\s+/)[0] || "there";
+}
+
+function updateOnboardingControls() {
+  const selection = onboardingSelection();
+  $$("[data-onboarding-time-format]").forEach((button) => {
+    const active = button.getAttribute("data-onboarding-time-format") === selection.timeFormat;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  $$("[data-onboarding-theme]").forEach((button) => {
+    const active = button.getAttribute("data-onboarding-theme") === selection.theme;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  $$("[data-onboarding-accent]").forEach((button) => {
+    const active = button.getAttribute("data-onboarding-accent") === selection.accent;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function setOnboardingStep(step) {
+  const next = Math.max(0, Math.min(3, Number(step) || 0));
+  state.onboarding.step = next;
+  $$(".onboarding-step", onboardingOverlay).forEach((panel) => { panel.hidden = Number(panel.getAttribute("data-onboarding-step")) !== next; });
+  $$("[data-onboarding-step-dot]", onboardingOverlay).forEach((dot) => {
+    const index = Number(dot.getAttribute("data-onboarding-step-dot"));
+    dot.classList.toggle("is-active", index === next);
+    dot.classList.toggle("is-complete", index < next);
+  });
+  const labels = ["Tell us who you are", "Set your workspace defaults", "Secure the account", "Review and finish"];
+  document.getElementById("onboardingProgressLabel").textContent = `Step ${next + 1} of 4`;
+  document.getElementById("onboardingProgressSub").textContent = labels[next];
+  document.getElementById("onboardingProgressBar").style.width = `${((next + 1) / 4) * 100}%`;
+  const back = document.getElementById("onboardingBack");
+  back.disabled = next === 0 || state.onboarding.saving;
+  const nextButton = document.getElementById("onboardingNext");
+  nextButton.textContent = next === 3 ? "Finish setup" : "Continue";
+  nextButton.disabled = false;
+  const error = document.getElementById("onboardingError");
+  error.hidden = true;
+  if (next === 3) updateOnboardingSummary();
+  const focusTarget = next === 0 ? document.getElementById("onboardingName") : next === 1 ? document.getElementById("onboardingTimeZone") : next === 2 ? document.getElementById("onboardingCurrentPassword") : document.getElementById("onboardingNext");
+  setTimeout(() => focusTarget?.focus(), 60);
+}
+
+function updateOnboardingSummary() {
+  const name = onboardingName();
+  const selection = onboardingSelection();
+  const zone = document.getElementById("onboardingTimeZone").value || state.preferences.timeZone || "UTC";
+  const languageSelect = document.getElementById("onboardingLanguage");
+  const language = languageSelect.options[languageSelect.selectedIndex]?.textContent || selection.language || "English";
+  document.getElementById("onboardingSummaryName").textContent = name || "—";
+  document.getElementById("onboardingSummaryIdentity").textContent = name ? `${name} <${state.user.email}>` : state.user.email;
+  document.getElementById("onboardingSummaryZone").textContent = zone.replace(/_/g, " ");
+  document.getElementById("onboardingSummaryTime").textContent = selection.timeFormat === "24h" ? "24-hour" : "12-hour";
+  document.getElementById("onboardingSummaryLanguage").textContent = language;
+  const themeLabel = { light: "Light", dark: "Dark", system: "System" }[selection.theme] || selection.theme;
+  const accentLabel = selection.accent.charAt(0).toUpperCase() + selection.accent.slice(1);
+  document.getElementById("onboardingSummaryAppearance").textContent = `${themeLabel} · ${accentLabel} accent`;
+  updateOnboardingAvatar();
+}
+
+function onboardingError(message) {
+  const error = document.getElementById("onboardingError");
+  if (!error) return;
+  error.textContent = message;
+  error.hidden = !message;
+}
+
+async function submitOnboardingPassword() {
+  const current = document.getElementById("onboardingCurrentPassword");
+  const next = document.getElementById("onboardingNewPassword");
+  const confirm = document.getElementById("onboardingConfirmPassword");
+  const error = document.getElementById("onboardingPasswordError");
+  error.hidden = true;
+  if (!state.user.passwordChangeRequired || state.onboarding.passwordChanged) return true;
+  if (state.onboarding.saving) return false;
+  if (!current.value) { error.textContent = "Enter your current password."; error.hidden = false; current.focus(); return false; }
+  if (next.value.length < 8) { error.textContent = "Choose a new password of at least 8 characters."; error.hidden = false; next.focus(); return false; }
+  if (next.value !== confirm.value) { error.textContent = "The new passwords do not match."; error.hidden = false; confirm.focus(); return false; }
+  state.onboarding.saving = true;
+  const button = document.getElementById("onboardingNext");
+  button.disabled = true;
+  button.textContent = "Updating password…";
+  try {
+    await api("/api/password/change", { method: "POST", body: { currentPassword: current.value, newPassword: next.value } });
+    state.user.passwordChangeRequired = false;
+    state.onboarding.passwordChanged = true;
+    current.value = ""; next.value = ""; confirm.value = "";
+    document.getElementById("onboardingPasswordSection").hidden = true;
+    const clear = document.getElementById("onboardingPasswordClear");
+    clear.hidden = false;
+    clear.innerHTML = `<div class="onboarding-section-label"><span>Password</span><span class="onboarding-chip verified">Updated</span></div><p>Your new password is active. Keep it in a password manager and continue.</p>`;
+    return true;
+  } catch (changeError) {
+    error.textContent = changeError.message || "Could not change the password.";
+    error.hidden = false;
+    return false;
+  } finally {
+    state.onboarding.saving = false;
+    button.disabled = false;
+    button.textContent = "Continue";
+  }
+}
+
+async function advanceOnboarding() {
+  if (state.onboarding.saving) return;
+  const step = state.onboarding.step;
+  if (step === 0) {
+    if (!onboardingName()) { onboardingError("Enter your full name so the From line is correct."); document.getElementById("onboardingName").focus(); return; }
+    setOnboardingStep(1);
+    return;
+  }
+  if (step === 1) {
+    if (!document.getElementById("onboardingTimeZone").value) { onboardingError("Choose your time zone."); return; }
+    if (!document.getElementById("onboardingLanguage").value) { onboardingError("Choose your preferred language."); return; }
+    setOnboardingStep(2);
+    return;
+  }
+  if (step === 2) {
+    if (!(await submitOnboardingPassword())) return;
+    setOnboardingStep(3);
+    return;
+  }
+  await finishOnboarding();
+}
+
+async function finishOnboarding() {
+  if (!onboardingName()) { setOnboardingStep(0); onboardingError("Enter your full name so the From line is correct."); return; }
+  const selection = onboardingSelection();
+  const zone = document.getElementById("onboardingTimeZone").value;
+  const language = document.getElementById("onboardingLanguage").value;
+  const button = document.getElementById("onboardingNext");
+  state.onboarding.saving = true;
+  button.disabled = true;
+  button.textContent = "Saving your workspace…";
+  onboardingError("");
+  try {
+    const data = await api("/api/onboarding/complete", {
+      method: "POST",
+      body: {
+        displayName: onboardingName(),
+        timeZone: zone,
+        timeFormat: selection.timeFormat,
+        language,
+        theme: selection.theme,
+        accent: selection.accent
+      }
+    });
+    if (data.user) {
+      state.user.onboardingRequired = false;
+      state.user.name = data.user.name || state.user.name;
+      state.user.initials = data.user.initials || state.user.initials;
+      state.user.passwordChangeRequired = false;
+    }
+    if (data.preferences) state.preferences = { ...state.preferences, ...data.preferences };
+    onboardingOverlay.hidden = true;
+    document.body.classList.remove("onboarding-active");
+    if (app) app.inert = false;
+    applyServerPreferences();
+    applyPreferenceChrome();
+    syncPreferencesUi();
+    renderAccountChrome();
+    await loadBootstrap({ restoreDrafts: false, quiet: true });
+    showToast("Workspace ready — your sender name is set");
+  } catch (error) {
+    if (error.code === "PASSWORD_CHANGE_REQUIRED") {
+      state.user.passwordChangeRequired = true;
+      document.getElementById("onboardingPasswordSection").hidden = false;
+      setOnboardingStep(2);
+      onboardingError("Set a new password before finishing setup.");
+    } else {
+      onboardingError(error.message || "Could not finish setup. Try again.");
+    }
+  } finally {
+    state.onboarding.saving = false;
+    button.disabled = false;
+    button.textContent = state.onboarding.step === 3 ? "Finish setup" : "Continue";
+  }
+}
+
+onboardingOverlay?.addEventListener("input", (event) => {
+  if (event.target.id === "onboardingName") {
+    updateOnboardingAvatar();
+    updateOnboardingSummary();
+  }
+});
+onboardingOverlay?.addEventListener("click", (event) => {
+  const timeFormat = event.target.closest("[data-onboarding-time-format]");
+  if (timeFormat) {
+    state.onboarding.timeFormat = timeFormat.getAttribute("data-onboarding-time-format");
+    updateOnboardingControls();
+    updateOnboardingSummary();
+    return;
+  }
+  const theme = event.target.closest("[data-onboarding-theme]");
+  if (theme) {
+    state.onboarding.theme = theme.getAttribute("data-onboarding-theme");
+    setTheme(state.onboarding.theme, false);
+    updateOnboardingControls();
+    updateOnboardingSummary();
+    return;
+  }
+  const accent = event.target.closest("[data-onboarding-accent]");
+  if (accent) {
+    state.onboarding.accent = accent.getAttribute("data-onboarding-accent");
+    setAccent(state.onboarding.accent, false);
+    updateOnboardingControls();
+    updateOnboardingSummary();
+    return;
+  }
+  if (event.target.closest("#onboardingBack")) { setOnboardingStep(state.onboarding.step - 1); return; }
+  if (event.target.closest("#onboardingNext")) { advanceOnboarding(); return; }
+  if (event.target.closest("#onboardingTwoFactorBtn")) {
+    const twoFactor = event.target.closest("#onboardingTwoFactorBtn");
+    twoFactor.disabled = true;
+    twoFactor.textContent = "Reminder noted — enable it in Settings → Security & privacy";
+    return;
+  }
+});
 
 function handleSessionExpired() {
   if (loginScreen.hidden) {
@@ -1140,8 +1452,6 @@ function syncPreferencesUi() {
     const fallback = aliasesForSelect()[0] ? aliasesForSelect()[0].email : "";
     defaultFromSelect.value = preferences.defaultFrom || fallback;
   }
-  if (signatureInput && document.activeElement !== signatureInput) signatureInput.value = preferences.signature || "";
-  if (signatureStatus) signatureStatus.textContent = "Server-backed signature";
   $$("[data-server-pref]").forEach((control) => {
     const key = control.getAttribute("data-server-pref");
     control.setAttribute("aria-checked", state.preferences[key] ? "true" : "false");
@@ -1343,6 +1653,16 @@ function showLogin() {
   stopOutboxPolling();
   const passwordOverlay = document.getElementById("passwordChangeOverlay");
   if (passwordOverlay) passwordOverlay.hidden = true;
+  if (onboardingOverlay) onboardingOverlay.hidden = true;
+  if (signatureEditorOverlay) signatureEditorOverlay.hidden = true;
+  if (signaturePickerOverlay) signaturePickerOverlay.hidden = true;
+  if (spellcheckOverlay) spellcheckOverlay.hidden = true;
+  if (identityEditorOverlay) identityEditorOverlay.hidden = true;
+  state.signatureEditor = null;
+  state.identityEditor = null;
+  state.spellcheck = null;
+  document.body.classList.remove("onboarding-active");
+  if (app) app.inert = false;
   if (state.pendingSends.length && state.user) {
     // A signed-out tab cannot cancel; data remains in the server queue.
   }
@@ -1909,6 +2229,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.mailboxMode = data.mailboxMode || "demo";
   state.aliases = data.aliases || [];
   state.identities = data.identities || state.identities || [];
+  state.signatures = data.signatures || state.signatures || [];
   state.ai = data.ai || { enabled: false };
   state.mailClient = data.mailClient || state.mailClient || null;
   state.recentAudit = data.recentAudit || [];
@@ -1948,6 +2269,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   updateScheduledUi();
   startOutboxPolling();
   syncPreferencesUi();
+  renderSignatureLibrary();
   if (["account", "security", "regional", "autoreply", "storage"].includes(state.settingsTab)) renderSettingsDynamic();
   if (state.task === "settings" && ["rules", "audit"].includes(state.settingsTab)) renderSettingsDynamic();
   if (!quiet && previousThread && !threadById(previousThread)) state.selectedThreadId = null;
@@ -1971,7 +2293,8 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   syncCommandBar();
   if (restoreDrafts) restoreDraftSessions();
   state.knownPendingIds = new Set(state.pendingSends.map((item) => item.id));
-  maybeShowPasswordChange();
+  const onboardingShown = maybeShowOnboarding();
+  if (!onboardingShown) maybeShowPasswordChange();
 }
 
 function applyPreferenceChrome() {
@@ -2320,7 +2643,8 @@ async function saveProfile() {
       state.user.initials = data.profile.initials;
       renderAccountChrome();
     }
-    showToast("Profile saved");
+    await refreshIdentities();
+    showToast("Profile saved — sender name updated");
   } catch (error) {
     showError(error);
   } finally {
@@ -4287,6 +4611,7 @@ function composeTemplate(session) {
         </button>
         <div class="compose-options-panel" data-compose-options-panel ${session.optionsOpen ? "" : "hidden"}>
           <label class="compose-option"><span>From</span><select data-compose-field="fromEmail">${fromOptions}</select></label>
+          <div class="compose-option compose-signature-action"><span>Signature</span><button class="compose-insert-signature" data-compose-action="insert-signature" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Insert signature</button></div>
           <div class="compose-option"><span>Priority</span><div class="compose-priority" role="radiogroup" aria-label="Priority">${composePriorityMarkup(session)}</div></div>
           <label class="compose-check"><input type="checkbox" data-compose-field="receipt" ${session.receipt ? "checked" : ""}>Return receipt</label>
           <label class="compose-check"><input type="checkbox" data-compose-field="delivery" ${session.delivery ? "checked" : ""}>Delivery status notification</label>
@@ -4326,13 +4651,29 @@ function openCompose(prefill = {}, options = {}) {
   const primary = state.aliases.find((alias) => alias.id === "primary" && alias.canSend) || aliasesForSelect()[0] || { email: state.user?.email || "" };
   const isNewMessage = !options.restoring && !data.inReplyTo && !data.kind;
   const defaultAlias = aliasForEmail(state.preferences.defaultFrom) || primary;
-  const signature = isNewMessage && state.preferences.signatureEnabled ? String(state.preferences.signature || "").trim() : "";
   const requestedFrom = data.fromEmail || (isNewMessage ? defaultAlias.email : primary.email);
   const requestedAlias = aliasForEmail(requestedFrom);
   const fromEmail = requestedAlias && requestedAlias.canSend ? requestedFrom : defaultAlias.email;
   const htmlMode = data.htmlMode != null ? !!data.htmlMode : state.preferences.composeMode !== "plain";
-  const bodyText = data.bodyText != null && data.bodyText !== "" ? data.bodyText : (signature || "");
-  const bodyHtml = data.bodyHtml || textToEditorHTML(bodyText);
+  const context = data.kind === "reply" ? "reply" : data.kind === "forward" ? "forward" : "new";
+  const signatureItem = options.restoring ? null : defaultSignatureForCompose(context, fromEmail);
+  const signatureText = signatureItem ? signaturePlainValue(signatureItem) : "";
+  const signatureHTML = signatureItem ? signatureRichValue(signatureItem) : "";
+  const rawBodyText = data.bodyText != null && data.bodyText !== "" ? data.bodyText : "";
+  const rawBodyHTML = data.bodyHtml || "";
+  let bodyText = rawBodyText;
+  let bodyHtml = rawBodyHTML;
+  if (signatureItem && (signatureText || signatureHTML)) {
+    if (!rawBodyText && !rawBodyHTML) {
+      bodyText = signatureText;
+      bodyHtml = signatureHTML;
+    } else {
+      bodyText = [signatureText, rawBodyText].filter((value) => value && value.trim()).join("\n\n");
+      bodyHtml = `${signatureHTML}${signatureHTML && (rawBodyHTML || rawBodyText) ? "<p><br></p>" : ""}${rawBodyHTML || textToEditorHTML(rawBodyText)}`;
+    }
+  } else if (!bodyHtml && bodyText) {
+    bodyHtml = textToEditorHTML(bodyText);
+  }
   const session = {
     id,
     draftId,
@@ -4346,10 +4687,12 @@ function openCompose(prefill = {}, options = {}) {
     bodyHtml,
     htmlMode,
     fromEmail,
+    autoSignature: signatureItem ? { id: signatureItem.id, text: signatureText, html: signatureHTML } : null,
+    signatureContext: context,
     priority: data.priority || state.defaultPriority,
     receipt: data.receipt != null ? !!data.receipt : state.defaultReceipt === true,
     delivery: !!data.delivery,
-    saveCopy: data.saveCopy !== false,
+    saveCopy: data.saveCopy != null ? !!data.saveCopy : state.preferences.saveCopyEnabled !== false,
     files: Array.isArray(data.attachments) ? data.attachments.map((file) => ({ ...file })) : [],
     threadId: data.threadId || null,
     inReplyTo: data.inReplyTo || null,
@@ -5242,6 +5585,186 @@ function upsertDraftMessage(draft) {
   else state.messages.push(draft);
 }
 
+/* ============================================================
+   Alt8Mail Intelligence · pre-send spell check
+   ============================================================ */
+const SPELLCHECK_PRODUCT_WORDS = new Set(["alt8mail", "a8m", "lynxkeep", "webmail", "dovecot", "postfix", "rspamd", "clamav"]);
+
+function spellcheckIgnoredWords() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("a8m_spell_ignored") || "[]");
+    return new Set(Array.isArray(parsed) ? parsed.map((word) => String(word).toLowerCase()) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function addSpellIgnoredWord(word) {
+  const key = String(word || "").toLowerCase();
+  if (!key) return;
+  const ignored = spellcheckIgnoredWords();
+  ignored.add(key);
+  try { localStorage.setItem("a8m_spell_ignored", JSON.stringify(Array.from(ignored).slice(-500))); } catch {}
+}
+
+function spellSuggestionCase(source, suggestion) {
+  if (!suggestion) return suggestion;
+  if (source && source === source.toUpperCase()) return suggestion.toUpperCase();
+  if (source && /^[A-Z]/.test(source)) return suggestion.charAt(0).toUpperCase() + suggestion.slice(1);
+  return suggestion;
+}
+
+async function loadSpellChecker() {
+  if (state.spellChecker) return state.spellChecker;
+  if (typeof window.Typo !== "function") throw new Error("Spell-check dictionary is unavailable");
+  const [aff, dic] = await Promise.all([
+    fetch("/vendor/en_US.aff", { credentials: "same-origin", cache: "force-cache" }).then((response) => {
+      if (!response.ok) throw new Error("Spell-check dictionary could not be loaded");
+      return response.text();
+    }),
+    fetch("/vendor/en_US.dic", { credentials: "same-origin", cache: "force-cache" }).then((response) => {
+      if (!response.ok) throw new Error("Spell-check dictionary could not be loaded");
+      return response.text();
+    })
+  ]);
+  state.spellChecker = new window.Typo("en_US", aff, dic);
+  return state.spellChecker;
+}
+
+function collectSpellIssues(checker, text) {
+  const cleaned = String(text || "")
+    .replace(/https?:\/\/\S+|www\.\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b[\w-]+\.(?:png|jpe?g|gif|pdf|docx?|xlsx?|pptx?|zip|txt)\b/gi, " ");
+  const ignored = spellcheckIgnoredWords();
+  const seen = new Map();
+  const words = [];
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    const segmenter = new Intl.Segmenter("en", { granularity: "word" });
+    for (const part of segmenter.segment(cleaned)) {
+      if (part.isWordLike) words.push(part.segment);
+    }
+  } else {
+    words.push(...(cleaned.match(/[A-Za-z][A-Za-z'’-]*/g) || []));
+  }
+  for (const raw of words) {
+    const word = String(raw || "").replace(/^['’-]+|['’-]+$/g, "");
+    if (word.length < 3 || /\d/.test(word)) continue;
+    if (/^[A-Z]{2,6}$/.test(word)) continue;
+    const key = word.toLowerCase();
+    if (ignored.has(key) || SPELLCHECK_PRODUCT_WORDS.has(key)) continue;
+    if (checker.check(word) || checker.check(key)) continue;
+    let issue = seen.get(key);
+    if (!issue) {
+      const suggestions = (checker.suggest(key, 4) || [])
+        .filter((suggestion) => suggestion && suggestion.toLowerCase() !== key)
+        .slice(0, 4)
+        .map((suggestion) => spellSuggestionCase(word, suggestion));
+      issue = { word, count: 0, suggestions };
+      seen.set(key, issue);
+    }
+    issue.count += 1;
+    if (seen.size >= 50) break;
+  }
+  return Array.from(seen.values());
+}
+
+function renderSpellcheckDialog(issues) {
+  const holder = document.getElementById("spellcheckIssues");
+  holder.innerHTML = issues.map((issue) => `
+    <div class="spellcheck-issue" data-spell-issue="${esc(issue.word.toLowerCase())}">
+      <div class="spellcheck-word"><strong>${esc(issue.word)}</strong><span>${issue.count} occurrence${issue.count === 1 ? "" : "s"}</span></div>
+      <div class="spellcheck-suggestions">
+        ${issue.suggestions.length ? issue.suggestions.map((suggestion) => `<button type="button" data-spell-word="${esc(issue.word)}" data-spell-suggestion="${esc(suggestion)}">${esc(suggestion)}</button>`).join("") : `<span class="spellcheck-no-suggestion">No suggestions</span>`}
+        <button type="button" class="spellcheck-ignore" data-spell-ignore="${esc(issue.word)}">Ignore</button>
+        <button type="button" class="spellcheck-ignore" data-spell-add="${esc(issue.word)}">Add to dictionary</button>
+      </div>
+    </div>`).join("");
+}
+
+function openSpellcheckDialog(session, issues, action) {
+  state.spellcheck = { sessionId: session.id, issues, choices: new Map(), action: action === "schedule" ? "schedule" : "send" };
+  document.getElementById("spellcheckSubtitle").textContent = `${issues.length} word${issues.length === 1 ? " needs" : "s need"} a second look before this message leaves your outbox.`;
+  renderSpellcheckDialog(issues);
+  spellcheckOverlay.hidden = false;
+  const status = session.el?.querySelector("[data-compose-status]");
+  if (status) status.textContent = "Review spelling before sending";
+  setTimeout(() => document.querySelector("#spellcheckIssues [data-spell-suggestion]")?.focus(), 80);
+}
+
+function closeSpellcheckDialog() {
+  const sessionId = state.spellcheck?.sessionId;
+  spellcheckOverlay.hidden = true;
+  state.spellcheck = null;
+  const session = sessionId ? sessionById(sessionId) : null;
+  if (session) updateComposeStatus(session);
+}
+
+async function runSpellCheckBeforeSend(session, action = "send") {
+  if (!session || !state.preferences.spellCheckEnabled || session.spellCheckBypass) return true;
+  if (!String(state.preferences.language || "en").toLowerCase().startsWith("en")) return true;
+  const status = session.el?.querySelector("[data-compose-status]");
+  if (status) status.textContent = "Alt8Mail Intelligence is checking spelling…";
+  try {
+    const checker = await loadSpellChecker();
+    const issues = collectSpellIssues(checker, `${session.subject}\n${session.body}`);
+    if (!issues.length) {
+      updateComposeStatus(session);
+      return true;
+    }
+    openSpellcheckDialog(session, issues, action);
+    return false;
+  } catch {
+    updateComposeStatus(session);
+    showToast("Spell check is unavailable right now — sending without it", "error");
+    return true;
+  }
+}
+
+function applySpellcheckChoices() {
+  const review = state.spellcheck;
+  const session = review ? sessionById(review.sessionId) : null;
+  if (!review || !session) return;
+  const replacements = [];
+  for (const [key, value] of review.choices.entries()) {
+    if (value == null) continue;
+    const issue = review.issues.find((item) => item.word.toLowerCase() === key);
+    if (issue) replacements.push({ source: issue.word, value });
+  }
+  if (!replacements.length) return;
+  const replaceText = (text) => {
+    let output = String(text || "");
+    for (const replacement of replacements) {
+      const pattern = new RegExp(`\\b${escapeRegExp(replacement.source)}\\b`, "gi");
+      output = output.replace(pattern, (match) => spellSuggestionCase(match, replacement.value));
+    }
+    return output;
+  };
+  session.subject = replaceText(session.subject);
+  const title = session.el?.querySelector("[data-compose-title]");
+  if (title) title.textContent = session.subject.trim() || "New message";
+  if (session.htmlMode) {
+    const editor = session.el?.querySelector("[data-compose-editor]");
+    if (editor) {
+      const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      for (const node of nodes) {
+        const next = replaceText(node.nodeValue);
+        if (next !== node.nodeValue) node.nodeValue = next;
+      }
+      updateComposeEditor(session, editor);
+    }
+  } else {
+    const textarea = session.el?.querySelector('[data-compose-field="body"]');
+    const next = replaceText(session.body);
+    session.body = next;
+    session.bodyHtml = textToEditorHTML(next);
+    if (textarea) textarea.value = next;
+    updateComposeStatus(session);
+    scheduleComposeSave(session);
+  }
+  renderComposeDockTabs();
+}
+
 async function sendComposeSession(id) {
   const session = sessionById(id);
   if (!session || !session.el) return;
@@ -5249,6 +5772,11 @@ async function sendComposeSession(id) {
   const sendButton = session.el.querySelector('[data-compose-action="send"]');
   if (sendButton) sendButton.disabled = true;
   try {
+    const spellingOK = await runSpellCheckBeforeSend(session);
+    if (!spellingOK) {
+      if (sendButton) sendButton.disabled = false;
+      return;
+    }
     await flushDraft(session);
     const data = await api("/api/send", {
       method: "POST",
@@ -5540,6 +6068,8 @@ async function confirmScheduledSend() {
   button.disabled = true;
   button.textContent = "Scheduling…";
   try {
+    const spellingOK = await runSpellCheckBeforeSend(session, "schedule");
+    if (!spellingOK) return;
     await flushDraft(session);
     const data = await api("/api/send", {
       method: "POST",
@@ -5577,6 +6107,41 @@ function closeScheduleDialog() {
   scheduleSession = null;
 }
 
+function swapComposeIdentitySignature(session, fromEmail) {
+  const current = session.autoSignature;
+  if (!current || (!current.text && !current.html)) return;
+  const next = defaultSignatureForCompose(session.signatureContext || "new", fromEmail);
+  const nextText = next ? signaturePlainValue(next) : "";
+  const nextHTML = next ? signatureRichValue(next) : "";
+  let changed = false;
+  if (session.htmlMode) {
+    const oldHTML = current.html || textToEditorHTML(current.text);
+    const replacement = nextHTML || textToEditorHTML(nextText);
+    if (oldHTML && session.bodyHtml.includes(oldHTML)) {
+      session.bodyHtml = sanitizeEditorHTML(session.bodyHtml.replace(oldHTML, replacement));
+      const editor = session.el?.querySelector("[data-compose-editor]");
+      if (editor) editor.innerHTML = session.bodyHtml;
+      session.body = editorPlainText(session.bodyHtml);
+      changed = true;
+    }
+  } else {
+    const oldText = current.text || htmlToText(current.html);
+    if (oldText && session.body.trimStart().startsWith(oldText.trimStart())) {
+      const rest = session.body.slice(session.body.indexOf(oldText) + oldText.length).replace(/^\s*\n+/, "");
+      session.body = [nextText, rest].filter((part) => part && part.trim()).join("\n\n");
+      session.bodyHtml = textToEditorHTML(session.body);
+      const textarea = session.el?.querySelector('[data-compose-field="body"]');
+      if (textarea) textarea.value = session.body;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  session.autoSignature = next ? { id: next.id, text: nextText, html: nextHTML } : null;
+  session.dirty = true;
+  updateComposeStatus(session);
+  scheduleComposeSave(session);
+}
+
 function updateComposeField(session, target) {
   const field = target.getAttribute("data-compose-field");
   if (!field) return;
@@ -5592,6 +6157,7 @@ function updateComposeField(session, target) {
   }
   const value = target.type === "checkbox" ? target.checked : target.value;
   session[field] = value;
+  if (field === "fromEmail") swapComposeIdentitySignature(session, value);
   session.dirty = true;
   session.error = null;
   if (field === "to") {
@@ -6099,7 +6665,8 @@ function openSettings(tab) {
 function renderSettingsDynamic() {
   if (state.task !== "settings" && !["rules", "audit", "account", "security", "regional", "autoreply", "identities"].includes(state.settingsTab)) return;
   if (state.settingsTab === "rules") renderRules();
-  else if (["appearance", "mail", "compose", "notifications"].includes(state.settingsTab)) syncPreferencesUi();
+  else if (state.settingsTab === "mail") { syncPreferencesUi(); renderSignatureLibrary(); loadSignatures(); }
+  else if (["appearance", "compose", "notifications"].includes(state.settingsTab)) syncPreferencesUi();
   else if (state.settingsTab === "storage") renderStorageSettings();
   else if (state.settingsTab === "identities") { renderIdentities(); refreshIdentities(); loadForwardingSettings(); }
   else if (state.settingsTab === "autoreply") renderAutoReply();
@@ -6384,7 +6951,9 @@ function renderIdentities() {
     const pending = item.status === "pending" || (!item.canSend && item.source === "identity");
     const custom = item.source === "identity";
     const status = pending ? "Pending verification" : item.canSend ? "Verified" : esc(item.reason || "Read only");
+    const hasSignature = Boolean(String(item.signature || "").trim() || String(item.signatureHtml || "").trim());
     const actions = [
+      `<button class="link-btn" data-edit-identity="${esc(item.id)}" data-identity-email="${esc(item.email)}" type="button">Edit signature</button>`,
       pending ? `<button class="link-btn" data-resend-identity="${esc(item.id)}" type="button">Resend verification</button>` : "",
       custom ? `<button class="link-btn" data-delete-identity="${esc(item.id)}" type="button">Remove</button>` : ""
     ].join("");
@@ -6393,51 +6962,390 @@ function renderIdentities() {
       <div class="identity-copy">
         <strong>${esc(item.label || item.email)}</strong>
         <span>${esc(item.email)}${item.replyTo ? ` · reply-to ${esc(item.replyTo)}` : ""}</span>
-        <span>${esc(item.kind === "primary" ? "Primary account" : item.kind === "alias" ? "Organization alias" : item.kind === "shared" ? "Shared mailbox · read only" : "Personal sending identity")}</span>
+        <span>${esc(item.kind === "primary" ? "Primary account" : item.kind === "alias" ? "Organization alias" : item.kind === "shared" ? "Shared mailbox · read only" : "Personal sending identity")} · <span class="identity-signature-state${hasSignature ? " has-signature" : ""}">${hasSignature ? "Signature set" : "No signature"}</span></span>
       </div>
       <div class="identity-actions"><span class="identity-status${pending ? " pending" : ""}">${status}</span>${actions}</div>
     </div>`;
   }).join("");
 }
 
-async function addIdentity() {
-  const name = document.getElementById("identityName");
-  const email = document.getElementById("identityEmail");
-  const replyTo = document.getElementById("identityReplyTo");
-  const signature = document.getElementById("identitySignature");
-  const note = document.getElementById("identityNote");
-  const value = email ? email.value.trim() : "";
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
-    showToast("Enter a valid identity email address");
-    email?.focus();
+/* ============================================================
+   Sending identity editor
+   ============================================================ */
+function identityEditorFormatPayload() {
+  const format = state.identityEditor?.format === "plain" ? "plain" : "rich";
+  const editor = document.getElementById("identityEditorSignature");
+  const plain = document.getElementById("identityEditorSignaturePlain");
+  if (format === "plain") {
+    const bodyText = String(plain?.value || "").trim();
+    return { signature: bodyText, signatureHtml: "" };
+  }
+  const bodyHtml = sanitizeEditorHTML(editor?.innerHTML || "");
+  const bodyText = editorPlainText(bodyHtml) || htmlToText(bodyHtml);
+  return { signature: bodyText, signatureHtml: bodyHtml };
+}
+
+function setIdentitySignatureMode(mode) {
+  if (!state.identityEditor) return;
+  const next = mode === "plain" ? "plain" : "rich";
+  const previous = state.identityEditor.format;
+  const editor = document.getElementById("identityEditorSignature");
+  const plain = document.getElementById("identityEditorSignaturePlain");
+  if (previous === "rich" && next === "plain" && plain) {
+    plain.value = editorPlainText(editor?.innerHTML || "");
+  }
+  if (previous === "plain" && next === "rich" && editor) {
+    editor.innerHTML = textToEditorHTML(plain?.value || "");
+  }
+  state.identityEditor.format = next;
+  document.getElementById("identitySignatureRichWrap").hidden = next !== "rich";
+  if (plain) plain.hidden = next !== "plain";
+  $$("[data-identity-signature-mode]").forEach((button) => button.classList.toggle("is-active", button.getAttribute("data-identity-signature-mode") === next));
+}
+
+function openIdentityEditor(identity = null) {
+  const existing = identity || null;
+  state.identityEditor = {
+    mode: existing ? "edit" : "create",
+    id: existing?.id || "",
+    source: existing?.source || "identity",
+    email: existing?.email || "",
+    format: existing?.signatureHtml ? "rich" : "plain"
+  };
+  const title = document.getElementById("identityEditorTitle");
+  const subtitle = document.getElementById("identityEditorSubtitle");
+  const name = document.getElementById("identityEditorName");
+  const email = document.getElementById("identityEditorEmail");
+  const replyTo = document.getElementById("identityEditorReplyTo");
+  const editor = document.getElementById("identityEditorSignature");
+  const plain = document.getElementById("identityEditorSignaturePlain");
+  const error = document.getElementById("identityEditorError");
+  const managed = existing && existing.source !== "identity";
+  title.textContent = existing ? "Edit sending identity" : "New sending identity";
+  subtitle.textContent = existing
+    ? (managed ? "This address is managed by IT. You can give it its own signature." : "Update the From name, reply-to and signature for this identity.")
+    : "Verify an external address and give it its own From name and signature.";
+  name.value = existing?.label || "";
+  name.disabled = Boolean(managed);
+  email.value = existing?.email || "";
+  email.disabled = Boolean(existing);
+  replyTo.value = existing?.replyTo || "";
+  replyTo.disabled = Boolean(managed);
+  const signatureHtml = existing?.signatureHtml || "";
+  const signatureText = existing?.signature || "";
+  editor.innerHTML = sanitizeEditorHTML(signatureHtml || (signatureText ? textToEditorHTML(signatureText) : ""));
+  plain.value = signatureText || (signatureHtml ? htmlToText(signatureHtml) : "");
+  error.hidden = true;
+  setIdentitySignatureMode(state.identityEditor.format);
+  identityEditorOverlay.hidden = false;
+  setTimeout(() => (existing ? editor : name).focus(), 80);
+}
+
+function closeIdentityEditor() {
+  identityEditorOverlay.hidden = true;
+  state.identityEditor = null;
+}
+
+async function saveIdentityEditor() {
+  const data = state.identityEditor;
+  if (!data) return;
+  const error = document.getElementById("identityEditorError");
+  const name = document.getElementById("identityEditorName");
+  const emailInput = document.getElementById("identityEditorEmail");
+  const replyTo = document.getElementById("identityEditorReplyTo");
+  const button = document.getElementById("identityEditorSave");
+  error.hidden = true;
+  const email = String(emailInput.value || "").trim().toLowerCase();
+  if (data.mode === "create" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    error.textContent = "Enter a valid email address for the sending identity.";
+    error.hidden = false;
+    emailInput.focus();
     return;
   }
-  const button = document.getElementById("addIdentityBtn");
-  if (button) button.disabled = true;
+  button.disabled = true;
+  button.textContent = "Saving…";
   try {
-    const data = await api("/api/identities", {
-      method: "POST",
-      body: {
-        name: name ? name.value.trim() : "",
-        email: value,
-        replyTo: replyTo ? replyTo.value.trim() : "",
-        signature: signature ? signature.value.trim() : ""
-      }
-    });
-    if (name) name.value = "";
-    if (email) email.value = "";
-    if (replyTo) replyTo.value = "";
-    if (signature) signature.value = "";
+    const signature = identityEditorFormatPayload();
+    if (data.mode === "create") {
+      const result = await api("/api/identities", {
+        method: "POST",
+        body: { name: name.value.trim(), email, replyTo: replyTo.value.trim(), ...signature }
+      });
+      closeIdentityEditor();
+      await refreshIdentities();
+      if (result.verified) showToast("Sending identity added");
+      else if (result.delivery === "sent") showToast("Verification email sent — check the external inbox");
+      else showToast(result.message || "Identity saved. Use Resend verification in a moment.");
+      return;
+    }
+    if (data.source === "identity") {
+      await api(`/api/identities/${encodeURIComponent(data.id)}`, {
+        method: "PATCH",
+        body: { name: name.value.trim(), replyTo: replyTo.value.trim(), ...signature }
+      });
+    } else {
+      await api("/api/identities/signature", {
+        method: "PUT",
+        body: { email: data.email, ...signature }
+      });
+    }
+    closeIdentityEditor();
     await refreshIdentities();
-    if (data.verified) showToast("Sending identity added");
-    else if (data.delivery === "sent") showToast("Verification email sent — check the external inbox");
-    else showToast(data.message || "Identity saved. Use Resend verification once mail delivery is available.");
-    if (note) note.textContent = data.verified ? "Internal alias verified by the organization." : "Verification is required before this address can send.";
-  } catch (error) {
-    showError(error);
+    showToast(data.source === "identity" ? "Sending identity updated" : "Identity signature saved");
+  } catch (saveError) {
+    error.textContent = saveError.message || "Could not save the sending identity.";
+    error.hidden = false;
   } finally {
-    if (button) button.disabled = false;
+    button.disabled = false;
+    button.textContent = "Save identity";
   }
+}
+
+/* ============================================================
+   Named signature library
+   ============================================================ */
+function signaturePlainValue(signature) {
+  return String(signature?.bodyText || (signature?.bodyHtml ? htmlToText(signature.bodyHtml) : "") || "");
+}
+
+function signatureRichValue(signature) {
+  return sanitizeEditorHTML(signature?.bodyHtml || textToEditorHTML(signaturePlainValue(signature)));
+}
+
+function renderSignatureLibrary() {
+  const holder = document.getElementById("signatureList");
+  if (!holder) return;
+  const signatures = state.signatures || [];
+  if (!signatures.length) {
+    holder.innerHTML = `<div class="signature-empty"><span class="signature-empty-mark"><svg class="icon" aria-hidden="true"><use href="#i-mark"/></svg></span><div><strong>No signatures yet</strong><p>Create your first signature to use it in Compose and set it as the default for new messages, replies and forwards.</p></div><button class="btn-secondary btn-small" id="signatureEmptyCreate" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Create signature</button></div>`;
+  } else {
+    holder.innerHTML = signatures.map((signature) => {
+      const chips = [
+        signature.defaultNew ? `<span class="signature-chip new">New</span>` : "",
+        signature.defaultReply ? `<span class="signature-chip reply">Reply</span>` : "",
+        signature.defaultForward ? `<span class="signature-chip forward">Forward</span>` : ""
+      ].filter(Boolean).join("");
+      const preview = signaturePlainValue(signature).replace(/\s+/g, " ").trim();
+      return `<article class="signature-card" data-signature-card="${esc(signature.id)}">
+        <span class="signature-card-mark"><svg class="icon" aria-hidden="true"><use href="#i-mark"/></svg></span>
+        <div class="signature-card-copy"><strong>${esc(signature.name)}</strong><p>${esc(preview.slice(0, 180) || "Empty signature")}</p><div class="signature-chips">${chips || `<span class="signature-chip muted">No automatic use</span>`}</div></div>
+        <div class="signature-card-actions"><button class="link-btn" data-edit-signature="${esc(signature.id)}" type="button">Edit</button><button class="link-btn danger" data-delete-signature="${esc(signature.id)}" type="button">Delete</button></div>
+      </article>`;
+    }).join("");
+  }
+  renderSignatureDefaults();
+}
+
+function renderSignatureDefaults() {
+  const signatures = state.signatures || [];
+  const config = [
+    ["new", "signatureDefaultNew", "defaultNew"],
+    ["reply", "signatureDefaultReply", "defaultReply"],
+    ["forward", "signatureDefaultForward", "defaultForward"]
+  ];
+  for (const [, id, flag] of config) {
+    const select = document.getElementById(id);
+    if (!select) continue;
+    select.innerHTML = `<option value="">No signature</option>` + signatures.map((signature) =>
+      `<option value="${esc(signature.id)}"${signature[flag] ? " selected" : ""}>${esc(signature.name)}</option>`
+    ).join("");
+    const current = signatures.find((signature) => signature[flag]);
+    select.value = current ? current.id : "";
+  }
+}
+
+async function loadSignatures() {
+  try {
+    const data = await api("/api/signatures");
+    state.signatures = data.signatures || [];
+  } catch {
+    state.signatures = state.signatures || [];
+  }
+  renderSignatureLibrary();
+}
+
+function signatureEditorFormatPayload() {
+  const format = state.signatureEditor?.format === "plain" ? "plain" : "rich";
+  const editor = document.getElementById("signatureEditorBody");
+  const plain = document.getElementById("signatureEditorPlain");
+  if (format === "plain") {
+    return { bodyText: String(plain?.value || "").trim(), bodyHtml: "" };
+  }
+  const bodyHtml = sanitizeEditorHTML(editor?.innerHTML || "");
+  return { bodyText: editorPlainText(bodyHtml) || htmlToText(bodyHtml), bodyHtml };
+}
+
+function setSignatureEditorMode(mode) {
+  if (!state.signatureEditor) return;
+  const next = mode === "plain" ? "plain" : "rich";
+  const previous = state.signatureEditor.format;
+  const editor = document.getElementById("signatureEditorBody");
+  const plain = document.getElementById("signatureEditorPlain");
+  if (previous === "rich" && next === "plain" && plain) {
+    plain.value = editorPlainText(editor?.innerHTML || "");
+  }
+  if (previous === "plain" && next === "rich" && editor) {
+    editor.innerHTML = textToEditorHTML(plain?.value || "");
+  }
+  state.signatureEditor.format = next;
+  document.getElementById("signatureRichWrap").hidden = next !== "rich";
+  if (plain) plain.hidden = next !== "plain";
+  $$("[data-signature-mode]").forEach((button) => button.classList.toggle("is-active", button.getAttribute("data-signature-mode") === next));
+}
+
+function openSignatureEditor(signature = null, { onSaved = null } = {}) {
+  state.signatureEditor = {
+    id: signature?.id || "",
+    format: signature?.bodyHtml ? "rich" : (signature ? "plain" : "rich"),
+    onSaved
+  };
+  document.getElementById("signatureEditorTitle").textContent = signature ? "Edit signature" : "New signature";
+  document.getElementById("signatureEditorSubtitle").textContent = signature
+    ? "Update the name, content and automatic uses for this signature."
+    : "Name the signature and write it once. Use it in any message or make it the automatic default.";
+  document.getElementById("signatureEditorName").value = signature?.name || "";
+  document.getElementById("signatureEditorBody").innerHTML = sanitizeEditorHTML(signature?.bodyHtml || (signature?.bodyText ? textToEditorHTML(signature.bodyText) : ""));
+  document.getElementById("signatureEditorPlain").value = signature?.bodyText || (signature?.bodyHtml ? htmlToText(signature.bodyHtml) : "");
+  document.getElementById("signatureDefaultNewFlag").checked = signature ? Boolean(signature.defaultNew) : !(state.signatures || []).length;
+  document.getElementById("signatureDefaultReplyFlag").checked = Boolean(signature?.defaultReply);
+  document.getElementById("signatureDefaultForwardFlag").checked = Boolean(signature?.defaultForward);
+  document.getElementById("signatureEditorStatus").textContent = "";
+  setSignatureEditorMode(state.signatureEditor.format);
+  signatureEditorOverlay.hidden = false;
+  setTimeout(() => (signature ? document.getElementById("signatureEditorBody") : document.getElementById("signatureEditorName")).focus(), 80);
+}
+
+function closeSignatureEditor() {
+  signatureEditorOverlay.hidden = true;
+  state.signatureEditor = null;
+}
+
+async function saveSignatureEditor() {
+  const editorState = state.signatureEditor;
+  if (!editorState) return;
+  const name = String(document.getElementById("signatureEditorName").value || "").trim();
+  const status = document.getElementById("signatureEditorStatus");
+  if (!name) {
+    status.textContent = "Give this signature a name before saving.";
+    document.getElementById("signatureEditorName").focus();
+    return;
+  }
+  const payload = signatureEditorFormatPayload();
+  if (!payload.bodyText && !payload.bodyHtml) {
+    status.textContent = "Write something in the signature before saving.";
+    return;
+  }
+  payload.name = name;
+  payload.defaultNew = document.getElementById("signatureDefaultNewFlag").checked;
+  payload.defaultReply = document.getElementById("signatureDefaultReplyFlag").checked;
+  payload.defaultForward = document.getElementById("signatureDefaultForwardFlag").checked;
+  const button = document.getElementById("signatureEditorSave");
+  const onSaved = editorState.onSaved;
+  button.disabled = true;
+  button.textContent = "Saving…";
+  try {
+    const data = editorState.id
+      ? await api(`/api/signatures/${encodeURIComponent(editorState.id)}`, { method: "PATCH", body: payload })
+      : await api("/api/signatures", { method: "POST", body: payload });
+    closeSignatureEditor();
+    await loadSignatures();
+    showToast(editorState.id ? "Signature updated" : "Signature created");
+    if (typeof onSaved === "function" && data.signature) onSaved(data.signature);
+  } catch (error) {
+    status.textContent = error.message || "Could not save the signature.";
+  } finally {
+    button.disabled = false;
+    button.textContent = "Save signature";
+  }
+}
+
+async function deleteSignature(id) {
+  const signature = (state.signatures || []).find((item) => item.id === id);
+  if (!(await appConfirm({ title: "Delete signature?", message: `“${signature?.name || "This signature"}” will be removed from every message and default.`, confirmLabel: "Delete signature", tone: "danger" }))) return;
+  try {
+    await api(`/api/signatures/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await loadSignatures();
+    showToast("Signature deleted");
+  } catch (error) { showError(error); }
+}
+
+async function setSignatureDefault(kind, id) {
+  const flags = { new: "defaultNew", reply: "defaultReply", forward: "defaultForward" };
+  const flag = flags[kind];
+  const current = (state.signatures || []).find((signature) => signature[flag]);
+  try {
+    if (current && current.id !== id) {
+      await api(`/api/signatures/${encodeURIComponent(current.id)}`, { method: "PATCH", body: { [flag]: false } });
+    }
+    if (id) {
+      await api(`/api/signatures/${encodeURIComponent(id)}`, { method: "PATCH", body: { [flag]: true } });
+    }
+    await loadSignatures();
+    showToast("Signature defaults saved");
+  } catch (error) { showError(error); await loadSignatures(); }
+}
+
+function defaultSignatureForCompose(context, fromEmail) {
+  if (state.preferences.signatureEnabled === false) return null;
+  const identity = (state.identities || []).find((item) =>
+    normalizeEmail(item.email) === normalizeEmail(fromEmail) && (String(item.signature || "").trim() || String(item.signatureHtml || "").trim())
+  );
+  if (identity) {
+    return { id: `identity:${identity.email}`, name: `${identity.label || identity.email} signature`, bodyText: identity.signature || "", bodyHtml: identity.signatureHtml || "" };
+  }
+  const flag = context === "reply" ? "defaultReply" : context === "forward" ? "defaultForward" : "defaultNew";
+  return (state.signatures || []).find((signature) => signature[flag]) || null;
+}
+
+function insertSignatureIntoCompose(sessionId, signature) {
+  const session = sessionById(sessionId);
+  if (!session || !signature) return;
+  const text = signaturePlainValue(signature);
+  const html = signatureRichValue(signature);
+  if (session.htmlMode) {
+    const editor = session.el?.querySelector("[data-compose-editor]");
+    if (editor) {
+      const existing = editor.innerHTML.trim();
+      editor.innerHTML = sanitizeEditorHTML(`${existing}${existing ? "<p><br></p>" : ""}<div class="a8m-signature">${html}</div>`);
+      updateComposeEditor(session, editor);
+      editor.focus();
+    }
+  } else {
+    const textarea = session.el?.querySelector('[data-compose-field="body"]');
+    const existing = String(textarea?.value || session.body || "");
+    const value = `${existing}${existing.trim() ? "\n\n" : ""}${text}`;
+    setComposeBodyText(session, value);
+    textarea?.focus();
+  }
+  showToast("Signature inserted");
+}
+
+function openSignaturePicker(session) {
+  if (!session) return;
+  state.signaturePickerSessionId = session.id;
+  if (!(state.signatures || []).length) {
+    openSignatureEditor(null, { onSaved: (signature) => insertSignatureIntoCompose(session.id, signature) });
+    return;
+  }
+  const holder = document.getElementById("signaturePickerList");
+  holder.innerHTML = state.signatures.map((signature) => {
+    const preview = signaturePlainValue(signature).replace(/\s+/g, " ").trim();
+    return `<button class="signature-picker-item" type="button" data-insert-signature="${esc(signature.id)}"><span class="signature-picker-mark"><svg class="icon" aria-hidden="true"><use href="#i-mark"/></svg></span><span><strong>${esc(signature.name)}</strong><small>${esc(preview.slice(0, 140) || "Empty signature")}</small></span><span class="signature-picker-add">Insert</span></button>`;
+  }).join("");
+  signaturePickerOverlay.hidden = false;
+}
+
+function closeSignaturePicker() {
+  signaturePickerOverlay.hidden = true;
+  state.signaturePickerSessionId = null;
+}
+
+function insertPickedSignature(id) {
+  const session = sessionById(state.signaturePickerSessionId);
+  const signature = (state.signatures || []).find((item) => item.id === id);
+  if (!session || !signature) { closeSignaturePicker(); return; }
+  closeSignaturePicker();
+  insertSignatureIntoCompose(session.id, signature);
 }
 
 async function resendIdentity(id) {
@@ -9039,23 +9947,35 @@ function handleFeatureClick(event) {
     patchPreferences({ workDays: Array.from(days).sort() });
     return true;
   }
-  if (target.closest("#saveSignatureBtn")) {
-    event.preventDefault();
-    const signature = signatureInput.value.slice(0, 4000);
-    patchPreferences({ signature }, "Signature saved").then((ok) => {
-      if (ok && signatureStatus) signatureStatus.textContent = "Saved just now";
-    });
-    return true;
-  }
   if (target.closest("#viewRecoveryCodes")) { event.preventDefault(); openRecoveryCodes(); return true; }
   if (target.closest("#createAppPasswordBtn")) { event.preventDefault(); createAppPassword(); return true; }
   const copyAppToken = target.closest("[data-copy-app-token]");
   if (copyAppToken) { event.preventDefault(); copyText(copyAppToken.getAttribute("data-copy-app-token")); return true; }
-  if (target.closest("#addIdentityBtn")) { event.preventDefault(); addIdentity(); return true; }
+  if (target.closest("#newIdentityBtn") || target.closest("#addIdentityBtn")) { event.preventDefault(); openIdentityEditor(); return true; }
   const resendIdentityButton = target.closest("[data-resend-identity]");
   if (resendIdentityButton) { event.preventDefault(); resendIdentity(resendIdentityButton.getAttribute("data-resend-identity")); return true; }
   const deleteIdentityButton = target.closest("[data-delete-identity]");
   if (deleteIdentityButton) { event.preventDefault(); deleteIdentity(deleteIdentityButton.getAttribute("data-delete-identity")); return true; }
+  const editIdentityButton = target.closest("[data-edit-identity]");
+  if (editIdentityButton) {
+    event.preventDefault();
+    const identity = (state.identities || []).find((item) => item.id === editIdentityButton.getAttribute("data-edit-identity")) ||
+      (state.identities || []).find((item) => normalizeEmail(item.email) === normalizeEmail(editIdentityButton.getAttribute("data-identity-email")));
+    openIdentityEditor(identity);
+    return true;
+  }
+  if (target.closest("#newSignatureBtn") || target.closest("#signatureEmptyCreate")) { event.preventDefault(); openSignatureEditor(); return true; }
+  const editSignatureButton = target.closest("[data-edit-signature]");
+  if (editSignatureButton) {
+    event.preventDefault();
+    const signature = (state.signatures || []).find((item) => item.id === editSignatureButton.getAttribute("data-edit-signature"));
+    openSignatureEditor(signature);
+    return true;
+  }
+  const deleteSignatureButton = target.closest("[data-delete-signature]");
+  if (deleteSignatureButton) { event.preventDefault(); deleteSignature(deleteSignatureButton.getAttribute("data-delete-signature")); return true; }
+  const pickSignatureButton = target.closest("[data-insert-signature]");
+  if (pickSignatureButton) { event.preventDefault(); insertPickedSignature(pickSignatureButton.getAttribute("data-insert-signature")); return true; }
   if (target.closest("#forwardingEnabled")) { event.preventDefault(); toggleSwitch(target.closest("#forwardingEnabled")); return true; }
   if (target.closest("#forwardingPermanent")) {
     event.preventDefault();
@@ -9337,6 +10257,23 @@ function handleFeatureClick(event) {
   if (target.closest("#sendNowConfirm")) { event.preventDefault(); confirmSendNow(); return true; }
 
   return false;
+}
+
+function applySignatureRichCommand(editor, command, value = null) {
+  if (!editor) return;
+  editor.focus();
+  try { document.execCommand("styleWithCSS", false, true); } catch {}
+  if (command === "createLink") {
+    const href = window.prompt("Link URL", "https://");
+    if (!href || !/^(https?:\/\/|mailto:)/i.test(href.trim())) return;
+    document.execCommand("createLink", false, href.trim());
+    return;
+  }
+  if (command === "formatBlock") {
+    document.execCommand("formatBlock", false, value || "p");
+    return;
+  }
+  document.execCommand(command, false, value);
 }
 
 function bindEvents() {
@@ -9994,7 +10931,6 @@ function bindEvents() {
   });
   document.addEventListener("input", (event) => {
     const target = event.target;
-    if (target.id === "signatureInput") { if (signatureStatus) signatureStatus.textContent = "Unsaved changes"; return; }
     if (["autoReplyInternalSubject", "autoReplyInternalMessage", "autoReplyExternalSubject", "autoReplyExternalMessage", "autoReplyStart", "autoReplyEnd"].includes(target.id)) {
       updateAutoReplyPreview();
       return;
@@ -10116,6 +11052,7 @@ function bindEvents() {
         });
       } else if (kind === "attach") { openComposeAttach(session.id); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
+      else if (kind === "insert-signature") { openSignaturePicker(session); }
       else if (kind === "ai") { toggleComposeAi(session); }
       else if (kind === "cc") {
         session.ccOpen = !session.ccOpen;
@@ -10295,6 +11232,104 @@ function bindEvents() {
     });
   }
 
+  /* Signature library editor, identity editor and spell-check review */
+  signatureEditorOverlay?.addEventListener("mousedown", (event) => {
+    if (event.target.closest(".signature-editor-toolbar button")) event.preventDefault();
+  });
+  signatureEditorOverlay?.addEventListener("click", (event) => {
+    if (event.target === signatureEditorOverlay || event.target.closest("#signatureEditorClose") || event.target.closest("#signatureEditorCancel")) {
+      closeSignatureEditor();
+      return;
+    }
+    const mode = event.target.closest("[data-signature-mode]");
+    if (mode) { setSignatureEditorMode(mode.getAttribute("data-signature-mode")); return; }
+    const command = event.target.closest("[data-signature-cmd]");
+    if (command) { applySignatureRichCommand(document.getElementById("signatureEditorBody"), command.getAttribute("data-signature-cmd")); return; }
+    const block = event.target.closest("[data-signature-block]");
+    if (block) { applySignatureRichCommand(document.getElementById("signatureEditorBody"), "formatBlock", block.getAttribute("data-signature-block")); return; }
+    if (event.target.closest("#signatureEditorSave")) { saveSignatureEditor(); return; }
+  });
+  signaturePickerOverlay?.addEventListener("click", (event) => {
+    if (event.target === signaturePickerOverlay || event.target.closest("#signaturePickerClose") || event.target.closest("#signaturePickerCancel")) {
+      closeSignaturePicker();
+      return;
+    }
+    if (event.target.closest("#signaturePickerNew")) {
+      const sessionId = state.signaturePickerSessionId;
+      closeSignaturePicker();
+      openSignatureEditor(null, { onSaved: (signature) => insertSignatureIntoCompose(sessionId, signature) });
+      return;
+    }
+  });
+  identityEditorOverlay?.addEventListener("mousedown", (event) => {
+    if (event.target.closest(".signature-editor-toolbar button")) event.preventDefault();
+  });
+  identityEditorOverlay?.addEventListener("click", (event) => {
+    if (event.target === identityEditorOverlay || event.target.closest("#identityEditorClose") || event.target.closest("#identityEditorCancel")) {
+      closeIdentityEditor();
+      return;
+    }
+    const mode = event.target.closest("[data-identity-signature-mode]");
+    if (mode) { setIdentitySignatureMode(mode.getAttribute("data-identity-signature-mode")); return; }
+    const command = event.target.closest("[data-identity-signature-cmd]");
+    if (command) { applySignatureRichCommand(document.getElementById("identityEditorSignature"), command.getAttribute("data-identity-signature-cmd")); return; }
+    if (event.target.closest("#identityEditorSave")) { saveIdentityEditor(); return; }
+  });
+  for (const [id, kind] of [["signatureDefaultNew", "new"], ["signatureDefaultReply", "reply"], ["signatureDefaultForward", "forward"]]) {
+    document.getElementById(id)?.addEventListener("change", (event) => { setSignatureDefault(kind, event.target.value); });
+  }
+  spellcheckOverlay?.addEventListener("click", (event) => {
+    if (event.target === spellcheckOverlay || event.target.closest("#spellcheckClose") || event.target.closest("#spellcheckBack")) {
+      closeSpellcheckDialog();
+      return;
+    }
+    if (event.target.closest("#spellcheckSendAnyway")) {
+      const review = state.spellcheck;
+      const session = review ? sessionById(review.sessionId) : null;
+      const action = review?.action === "schedule" ? "schedule" : "send";
+      closeSpellcheckDialog();
+      if (session) {
+        session.spellCheckBypass = true;
+        if (action === "schedule") confirmScheduledSend(); else sendComposeSession(session.id);
+      }
+      return;
+    }
+    if (event.target.closest("#spellcheckApplySend")) {
+      const review = state.spellcheck;
+      const session = review ? sessionById(review.sessionId) : null;
+      const action = review?.action === "schedule" ? "schedule" : "send";
+      applySpellcheckChoices();
+      closeSpellcheckDialog();
+      if (session) {
+        session.spellCheckBypass = true;
+        if (action === "schedule") confirmScheduledSend(); else sendComposeSession(session.id);
+      }
+      return;
+    }
+    const suggestion = event.target.closest("[data-spell-suggestion]");
+    if (suggestion) {
+      const word = suggestion.getAttribute("data-spell-word");
+      const value = suggestion.getAttribute("data-spell-suggestion");
+      state.spellcheck.choices.set(word.toLowerCase(), value);
+      suggestion.closest(".spellcheck-issue")?.querySelectorAll("[data-spell-suggestion]").forEach((button) => button.classList.toggle("is-picked", button === suggestion));
+      return;
+    }
+    const ignore = event.target.closest("[data-spell-ignore]");
+    if (ignore) {
+      const word = ignore.getAttribute("data-spell-ignore");
+      state.spellcheck.choices.set(word.toLowerCase(), null);
+      ignore.closest(".spellcheck-issue")?.classList.add("is-ignored");
+      return;
+    }
+    const addWord = event.target.closest("[data-spell-add]");
+    if (addWord) {
+      const word = addWord.getAttribute("data-spell-add");
+      addSpellIgnoredWord(word);
+      state.spellcheck.choices.set(word.toLowerCase(), null);
+      addWord.closest(".spellcheck-issue")?.classList.add("is-ignored");
+    }
+  });
+
   window.addEventListener("resize", () => {
     if (!isDrawer()) closeDrawer();
     if (!isMobile()) document.body.classList.remove("search-open", "reader-open", "person-open");
@@ -10341,6 +11376,23 @@ function bindEvents() {
 
   document.addEventListener("keydown", (event) => {
     if (loginScreen.hidden === false) return;
+    if (state.user && state.user.onboardingRequired) return;
+    if (spellcheckOverlay && !spellcheckOverlay.hidden) {
+      if (event.key === "Escape") { event.preventDefault(); closeSpellcheckDialog(); }
+      return;
+    }
+    if (signatureEditorOverlay && !signatureEditorOverlay.hidden) {
+      if (event.key === "Escape") { event.preventDefault(); closeSignatureEditor(); }
+      return;
+    }
+    if (signaturePickerOverlay && !signaturePickerOverlay.hidden) {
+      if (event.key === "Escape") { event.preventDefault(); closeSignaturePicker(); }
+      return;
+    }
+    if (identityEditorOverlay && !identityEditorOverlay.hidden) {
+      if (event.key === "Escape") { event.preventDefault(); closeIdentityEditor(); }
+      return;
+    }
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       if (state.task === "settings" || state.task === "calendar") return;

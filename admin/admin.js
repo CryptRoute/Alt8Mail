@@ -30,6 +30,7 @@ const state = {
   selectedUsers: new Set(),
   userFilter: { q: "", status: "", role: "", page: 1, limit: 25, admin: false, deleted: false },
   users: { items: [], total: 0 },
+  domains: [],
   drawerUser: null,
   commandOpen: false,
   theme: localStorage.getItem("a8m_admin_theme") || "light"
@@ -686,7 +687,8 @@ function showCredentials(title, data, description) {
     title,
     subtitle: description,
     body: `<div class="detail-list">
-      ${data.temporaryPassword ? `<div class="mini-section" style="margin-top:0"><h3>Temporary web password</h3><div class="copy-box"><span>${esc(data.temporaryPassword)}</span><button class="icon-button" data-copy="${esc(data.temporaryPassword)}" aria-label="Copy password">${icon("list")}</button></div></div>` : ""}
+      ${data.temporaryPassword && !data.passwordProvided ? `<div class="mini-section" style="margin-top:0"><h3>Temporary web password</h3><div class="copy-box"><span>${esc(data.temporaryPassword)}</span><button class="icon-button" data-copy="${esc(data.temporaryPassword)}" aria-label="Copy password">${icon("list")}</button></div></div>` : ""}
+      ${data.passwordProvided ? `<div class="mini-section" style="margin-top:0"><h3>Web password</h3><p class="muted" style="font-size:11px;margin:0">The password you entered is active. The user will be asked to complete guided setup at first sign-in.</p></div>` : ""}
       ${data.mailPassword ? `<div class="mini-section"><h3>Mailbox password</h3><div class="copy-box"><span>${esc(data.mailPassword)}</span><button class="icon-button" data-copy="${esc(data.mailPassword)}" aria-label="Copy mailbox password">${icon("list")}</button></div><p class="muted" style="font-size:10.5px;margin:6px 0 0">Used by IMAP/SMTP mail clients. Store it in a password manager.</p></div>` : ""}
       ${data.owner?.email ? `<div class="mini-section"><h3>Owner account</h3><div class="detail-row"><span>Email</span><b>${esc(data.owner.email)}</b></div></div>` : ""}
     </div>`,
@@ -710,23 +712,67 @@ function userFormBody(root) {
 }
 
 function userFormFields(user = {}) {
-  return `<div class="field-row"><label class="field"><span>Full name</span><input data-user-field="name" value="${esc(user.name || "")}" placeholder="Avery Chen" required></label><label class="field"><span>Email</span><input data-user-field="email" type="email" value="${esc(user.email || "")}" placeholder="name@${esc(activeDomain())}" ${user.id ? "disabled" : "required"}></label></div>
+  const editing = Boolean(user.id);
+  const emailField = editing
+    ? `<label class="field"><span>Email</span><input data-user-field="email" type="email" value="${esc(user.email || "")}" disabled></label>`
+    : `<label class="field"><span>Email address</span><div class="email-builder"><input data-user-field="username" value="" placeholder="avery.chen" autocomplete="off" autocapitalize="none" spellcheck="false" required><span class="email-at">@</span><select data-user-field="domain" aria-label="Email domain"><option value="">Loading domains…</option></select></div><span class="field-hint" data-user-form-hint>Choose a verified domain for this mailbox.</span></label>`;
+  const passwordFields = editing ? "" : `<div class="field-row"><label class="field"><span>Password <small class="muted">optional</small></span><input data-user-field="password" type="password" autocomplete="new-password" placeholder="Set a password"><span class="field-hint">Leave blank to generate a one-time temporary password.</span></label><label class="field"><span>Confirm password</span><input data-password-confirm type="password" autocomplete="new-password" placeholder="Repeat the password"></label></div>`;
+  return `<div class="field-row"><label class="field"><span>Full name</span><input data-user-field="name" value="${esc(user.name || "")}" placeholder="Avery Chen" required></label>${emailField}</div>
+    ${passwordFields}
     <div class="field-row"><label class="field"><span>Base role</span><select data-user-field="role">${(can("roles.manage") ? ["member", "admin", "owner", "readonly"] : ["member", "readonly"]).map((role) => `<option value="${role}" ${user.role === role ? "selected" : ""}>${roleLabel(role)}</option>`).join("")}</select></label><label class="field"><span>Status</span><select data-user-field="status">${["active", "invited", "suspended"].map((status) => `<option value="${status}" ${user.status === status ? "selected" : ""}>${status[0].toUpperCase() + status.slice(1)}</option>`).join("")}</select></label></div>
     <div class="field-row"><label class="field"><span>Title</span><input data-user-field="title" value="${esc(user.title || "")}" placeholder="Product lead"></label><label class="field"><span>Department</span><input data-user-field="department" value="${esc(user.department || "")}" placeholder="Product"></label></div>
     <div class="field-row"><label class="field"><span>Employee ID</span><input data-user-field="employeeId" value="${esc(user.employeeId || "")}" placeholder="EMP-1042"></label><label class="field"><span>Manager email</span><input data-user-field="managerEmail" type="email" value="${esc(user.managerEmail || "")}" placeholder="manager@company.com"></label></div>
     <div class="field-row"><label class="field"><span>Storage quota (GB)</span><input data-user-field="quotaGb" data-number="true" type="number" min="1" max="1024" value="${Math.round((user.quotaBytes || 17179869184) / 1073741824)}"></label><label class="field"><span>Org unit</span><select data-user-field="orgUnitId"><option value="">Unassigned</option>${state.orgUnitOptions || ""}</select></label></div>
-    ${user.id ? "" : `<label class="field"><span>Additional aliases (comma separated)</span><input data-user-field="aliases" placeholder="sales@company.com, support@company.com"></label>`}`;
+    ${editing ? "" : `<label class="field"><span>Additional aliases <small class="muted">optional</small></span><input data-user-field="aliases" placeholder="sales@company.com, support@company.com"><span class="field-hint">Full addresses, separated by commas. Their domain must also be verified.</span></label>`}`;
 }
 
 function openNewUserModal() {
   openModal({
     title: "Add a user",
-    subtitle: "Create a real mailbox identity with a temporary password. The credentials are shown once.",
+    subtitle: "Pick the verified domain, enter the mailbox name and optionally set the first password.",
     wide: true,
-    body: `<form id="newUserForm">${userFormFields({ status: "active" })}<p class="muted" style="font-size:10.5px">The user receives a temporary web password and a Dovecot mailbox password. Share them through a secure channel.</p></form>`,
-    footer: `<button class="btn secondary" data-modal-close>Cancel</button><button class="btn primary" data-modal-submit="newUserForm">Create user</button>`,
-    onMount: () => loadOrgUnitOptions()
+    body: `<form id="newUserForm">${userFormFields({ status: "active" })}<p class="muted" style="font-size:10.5px">The user receives a Dovecot mailbox password and completes a guided first sign-in to set their display name, time zone, language and theme.</p></form>`,
+    footer: `<button class="btn secondary" data-modal-close>Cancel</button><button class="btn primary" id="newUserSubmit" data-modal-submit="newUserForm" disabled>Create user</button>`,
+    onMount: () => { loadUserFormDomains(); loadOrgUnitOptions(); }
   });
+}
+
+async function loadUserFormDomains() {
+  const select = $('[data-user-field="domain"]');
+  const submit = $("#newUserSubmit");
+  const hint = $("[data-user-form-hint]");
+  if (!select) return;
+  try {
+    const data = await api("users/domains");
+    state.domains = data.domains || [];
+    const usable = state.domains.filter((domain) => domain.status === "verified" || domain.status === "manual");
+    if (!usable.length) {
+      select.innerHTML = `<option value="">No verified domain</option>`;
+      select.disabled = true;
+      if (submit) submit.disabled = true;
+      if (hint) hint.innerHTML = `Add and verify a domain in <a href="#/domains" data-open-domains>Domains</a> before creating users.`;
+      return;
+    }
+    select.innerHTML = usable.map((domain) => `<option value="${esc(domain.domain)}" ${domain.isPrimary ? "selected" : ""}>${esc(domain.domain)}${domain.isPrimary ? " · primary" : ""}${domain.mailReady ? "" : " · DNS pending"}</option>`).join("");
+    select.disabled = false;
+    if (submit) submit.disabled = false;
+    const usernameInput = $('[data-user-field="username"]');
+    const renderPreview = () => {
+      if (!hint || !usernameInput) return;
+      const local = usernameInput.value.trim().toLowerCase();
+      hint.innerHTML = local && select.value
+        ? `Mailbox address: <b style="color:var(--ink-2)">${esc(local)}@${esc(select.value)}</b>`
+        : "Only verified domains can receive a mailbox.";
+    };
+    usernameInput?.addEventListener("input", renderPreview);
+    select.addEventListener("change", renderPreview);
+    renderPreview();
+  } catch (error) {
+    select.innerHTML = `<option value="">Domains unavailable</option>`;
+    select.disabled = true;
+    if (submit) submit.disabled = true;
+    if (hint) hint.textContent = error.message || "Could not load verified domains.";
+  }
 }
 
 async function loadOrgUnitOptions(selected = "") {
@@ -739,7 +785,9 @@ async function loadOrgUnitOptions(selected = "") {
 }
 
 function activeDomain() {
-  return "company.com";
+  const domains = state.domains || [];
+  const primary = domains.find((domain) => domain.isPrimary) || domains[0];
+  return primary?.domain || "company.com";
 }
 
 function editUserModal(user) {
@@ -763,6 +811,9 @@ async function submitUserForm(formId, userId) {
   if (userId) {
     delete body.email;
     delete body.aliases;
+    delete body.username;
+    delete body.domain;
+    delete body.password;
     const data = await api("users/" + encodeURIComponent(userId), { method: "PATCH", body });
     toast("User updated");
     closeModal();
@@ -770,10 +821,46 @@ async function submitUserForm(formId, userId) {
     await loadUsers();
     return;
   }
+  const usernameInput = form.querySelector('[data-user-field="username"]');
+  const domainSelect = form.querySelector('[data-user-field="domain"]');
+  const passwordInput = form.querySelector('[data-user-field="password"]');
+  const passwordConfirm = form.querySelector("[data-password-confirm]");
+  const username = String(usernameInput?.value || "").trim().toLowerCase();
+  const domain = String(domainSelect?.value || "").trim().toLowerCase();
+  if (!domain) {
+    toast("Add and verify a domain before creating users", "error");
+    return;
+  }
+  if (!/^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?$/.test(username) || username.includes("..") || username.includes("@")) {
+    toast("Enter only the mailbox name before @", "error");
+    usernameInput?.focus();
+    return;
+  }
+  body.email = `${username}@${domain}`;
+  delete body.username;
+  delete body.domain;
+  const password = String(passwordInput?.value || "");
+  if (password) {
+    if (password.length < 8) {
+      toast("Use a password of at least 8 characters", "error");
+      passwordInput?.focus();
+      return;
+    }
+    if (password !== String(passwordConfirm?.value || "")) {
+      toast("The passwords do not match", "error");
+      passwordConfirm?.focus();
+      return;
+    }
+    body.password = password;
+  } else {
+    delete body.password;
+  }
   if (typeof body.aliases === "string") body.aliases = body.aliases.split(",").map((value) => value.trim()).filter(Boolean);
   const data = await api("users", { method: "POST", body });
   closeModal();
-  showCredentials("User created", data, "Share these one-time credentials with the user. The mailbox password is separate from the web password.");
+  showCredentials("User created", data, data.passwordProvided
+    ? "The web password you set is active. The separate mailbox password is shown once."
+    : "Share these one-time credentials with the user. The mailbox password is separate from the web password.");
   await loadUsers();
 }
 
@@ -1608,6 +1695,13 @@ document.addEventListener("keydown", (event) => {
 
 /* Delegated clicks */
 document.addEventListener("click", async (event) => {
+  const domainsLink = event.target.closest("[data-open-domains]");
+  if (domainsLink) {
+    event.preventDefault();
+    closeModal();
+    location.hash = "#/domains";
+    return;
+  }
   const actionEl = event.target.closest("[data-action]");
   if (actionEl) {
     const action = actionEl.dataset.action;
