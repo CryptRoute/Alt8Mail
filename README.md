@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.12** release ships the padlock markup for the six-second sign-out sequence so the envelope completes its close animation into a lock on every deployment.
+
 The **0.3.11** release adds a six-second sign-out sequence with reverse envelope/lock, outward dot and grey draining progress animations, and resets the cached accent to the default on logout so the login card never inherits the previous account colour.
 
 The **0.3.10** release ensures the purple pulsing AI compose action always renders its icon and AI label in white.
