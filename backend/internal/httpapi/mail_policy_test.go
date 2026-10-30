@@ -56,6 +56,20 @@ func TestQuarantineReleaseRequiresAdministrator(t *testing.T) {
 	}
 }
 
+func TestUsersReleaseQuarantineByDefault(t *testing.T) {
+	if defaultTenantPolicy().Mail.Quarantine {
+		t.Fatal("quarantine administration must be off by default")
+	}
+	unset := tenantPolicyFromSettings(nil)
+	if unset.Mail.Quarantine {
+		t.Fatal("a tenant without a stored mail policy must allow users to release Junk")
+	}
+	enabled := tenantPolicyFromSettings(mustJSON(map[string]any{"mail": map[string]any{"quarantine": true}}))
+	if !enabled.Mail.Quarantine {
+		t.Fatal("an organization must be able to require administrator release")
+	}
+}
+
 func TestPasswordChangeRequiredByExpiryAndFlag(t *testing.T) {
 	future := time.Now().Add(time.Hour)
 	past := time.Now().Add(-time.Hour)

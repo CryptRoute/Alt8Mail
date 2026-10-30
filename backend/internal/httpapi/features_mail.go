@@ -312,7 +312,7 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 		if policy.Mail.Quarantine && !webmailAdminRole(sess.User.Role) {
 			for _, message := range targets {
 				if stateString(message, "folder") == "spam" && quarantineReleaseAction(body.Action, body.Folder) {
-					return fail(http.StatusForbidden, "QUARANTINE_ADMIN_ONLY", "Quarantined messages can only be released by an administrator")
+					return fail(http.StatusForbidden, "QUARANTINE_ADMIN_ONLY", "Your organization requires an administrator to release quarantined mail")
 				}
 			}
 		}

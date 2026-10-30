@@ -251,7 +251,7 @@ Current enforcement:
 | POP access | Dovecot rejects POP3 authentication on 995 |
 | External / internal auto-forwarding | Sieve redirects are validated at save time and existing generated scripts are re-pushed after a policy change; blocked rules stay stored but are omitted from the live script |
 | Retention | Daily worker and an audited "Run retention" action remove messages older than the policy from synchronized folders using UID EXPUNGE; Drafts, Junk and Trash are excluded |
-| Quarantine admin only | Non-admin users cannot move a message out of Junk; a delegate with `users.security` can release any tenant mailbox message from the admin Quarantine view, which moves it to INBOX and audits the action |
+| Restrict Junk release to administrators | Off by default, so users can report not spam or move their own Junk to Inbox. When on, non-admin users cannot move a message out of Junk; a delegate with `users.security` must release any tenant mailbox message from the admin Quarantine view, which moves it to INBOX and audits the action |
 | External sharing | Link creation is refused when external sharing is off, link access is disabled, or a domain allowlist is configured (a bearer link cannot prove a viewer domain); a view-only default caps edit links. Public guest pages at `/files/s/<token>` support expiry, revocation and optional file replacement |
 | External sender tag | When off, the reading pane hides the external banner/chip, removes “external” wording from the trust line/details and disables the user warning toggle |
 | External directory | When off, personal contacts outside the tenant's mail domains are omitted from directory/search for members; admins retain their override |

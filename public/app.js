@@ -3277,6 +3277,16 @@ function tenantExternalTag() {
   return !policy.mail || policy.mail.externalTag !== false;
 }
 
+function tenantQuarantineAdminOnly() {
+  const policy = state.tenantPolicy || {};
+  return Boolean(policy.mail && policy.mail.quarantine === true);
+}
+
+function canReleaseQuarantinedMail() {
+  if (!tenantQuarantineAdminOnly()) return true;
+  return ["owner", "admin"].includes(String(state.user?.role || "").toLowerCase());
+}
+
 function externalBannerMarkup(thread) {
   if (!state.externalWarnings || !tenantExternalTag()) return "";
   const external = thread.messages.filter((message) => message.external && !message.trusted);
@@ -3303,15 +3313,21 @@ function externalBannerMarkup(thread) {
 
 function spamMessageBanner(message) {
   if (message.folder !== "spam") return "";
-  return `<div class="spam-quarantine-banner" data-spam-banner="${esc(message.id)}">
+  const locked = !canReleaseQuarantinedMail();
+  const copy = locked
+    ? "Remote images, attachment previews/downloads and saving files are blocked. Your organization's policy requires an administrator to release this message from Junk."
+    : "Remote images, attachment previews/downloads and saving files are blocked for your safety. Report it as not spam to trust this sender, or move it to Inbox once.";
+  return `<div class="spam-quarantine-banner${locked ? " is-admin-only" : ""}" data-spam-banner="${esc(message.id)}">
     <span class="spam-shield"><svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg></span>
     <div class="spam-banner-copy">
       <strong>Alt8Mail flagged this message as Junk</strong>
-      <p>Remote images, attachment previews/downloads and saving files are blocked for your safety. Report it as not spam to trust this sender, or move it to Inbox once.</p>
+      <p>${copy}</p>
     </div>
     <div class="spam-banner-actions">
-      <button class="btn-primary small" data-report-not-spam="${esc(message.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Report Not Spam</button>
-      <button class="btn-secondary small" data-move-inbox="${esc(message.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-inbox"/></svg>Move to Inbox</button>
+      ${locked
+        ? `<span class="spam-locked"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Administrator release required</span>`
+        : `<button class="btn-primary small" data-report-not-spam="${esc(message.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Report Not Spam</button>
+      <button class="btn-secondary small" data-move-inbox="${esc(message.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-inbox"/></svg>Move to Inbox</button>`}
     </div>
   </div>`;
 }
@@ -3630,11 +3646,13 @@ function syncReaderToolbar(enabled) {
   }
   if (readerSpamBtn) {
     const isSpam = Boolean(thread && thread.messages.some((message) => message.folder === "spam"));
+    const locked = isSpam && !canReleaseQuarantinedMail();
+    readerSpamBtn.disabled = locked;
     const label = isSpam ? "Not junk" : "Junk";
     if (readerSpamLabel) readerSpamLabel.textContent = label;
     if (readerSpamIcon) readerSpamIcon.setAttribute("href", isSpam ? "#i-inbox" : "#i-alert");
-    readerSpamBtn.setAttribute("aria-label", isSpam ? "Not junk — move back to Inbox" : "Mark as spam");
-    readerSpamBtn.setAttribute("title", isSpam ? "Not junk — move back to Inbox" : "Mark as spam");
+    readerSpamBtn.setAttribute("aria-label", locked ? "An administrator must release this message from Junk" : isSpam ? "Not junk — move back to Inbox" : "Mark as spam");
+    readerSpamBtn.setAttribute("title", locked ? "Your organization requires an administrator to release quarantined mail" : isSpam ? "Not junk — move back to Inbox" : "Mark as spam");
   }
 }
 
@@ -4159,19 +4177,26 @@ async function sendSpamActionForMessage(messageId, action) {
 }
 
 async function reportNotSpamMessage(messageId) {
+  if (!canReleaseQuarantinedMail()) {
+    showToast("Your organization requires an administrator to release quarantined mail");
+    return;
+  }
   const message = messageById(messageId);
   if (!message) return;
   const email = normalizeEmail(message.from?.email);
+  if (!(await sendSpamActionForMessage(messageId, "notSpam"))) return;
   if (email) {
     await updateSenderRules([email], "inbox", { message: "Sender trusted — future mail goes to Inbox" });
   }
-  if (await sendSpamActionForMessage(messageId, "notSpam")) {
-    showToast("Reported not spam · sender will reach Inbox");
-  }
+  showToast("Reported not spam · sender will reach Inbox");
   renderFolders();
 }
 
 async function moveSpamMessageToInbox(messageId) {
+  if (!canReleaseQuarantinedMail()) {
+    showToast("Your organization requires an administrator to release quarantined mail");
+    return;
+  }
   if (await sendSpamActionForMessage(messageId, "notSpam")) {
     showToast("Moved to Inbox · no sender rule created");
   }
@@ -4181,6 +4206,11 @@ async function performBulkAction(action, folderValue, options = {}) {
   const threads = state.selectedIds.size ? selectedThreads() : currentThread() ? [currentThread()] : [];
   if (!threads.length) {
     showToast("Select a conversation first");
+    return;
+  }
+  const releasingQuarantine = action === "notSpam" && threads.some((thread) => thread.messages.some((message) => message.folder === "spam"));
+  if (releasingQuarantine && !canReleaseQuarantinedMail()) {
+    showToast("Your organization requires an administrator to release quarantined mail");
     return;
   }
   if (action === "notSpam" && !options.confirmed) {

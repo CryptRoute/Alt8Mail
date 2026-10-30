@@ -190,7 +190,9 @@ func defaultTenantPolicy() adminTenantPolicy {
 			SMTPAccess: true, MaxAttachmentMB: 25,
 			BlockedExtensions:         []string{"exe", "js", "vbs", "bat", "cmd", "scr", "ps1", "jar", "msi"},
 			AllowedExternalRecipients: []string{}, SpamSensitivity: "medium",
-			RetentionDays: 0, Quarantine: true, ExternalTag: true,
+			// Users release their own Junk by default. Organizations that need
+			// review can turn on "Restrict Junk release to administrators".
+			RetentionDays: 0, Quarantine: false, ExternalTag: true,
 		},
 		Sharing:   adminSharingPolicy{ExternalSharing: false, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
 		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: true},

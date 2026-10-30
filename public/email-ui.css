@@ -40,6 +40,13 @@
 .spam-banner-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .spam-banner-actions .btn-primary, .spam-banner-actions .btn-secondary { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .spam-banner-actions svg { width: 13px; height: 13px; }
+.spam-locked {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent); border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--text-2);
+  font-size: .63rem; font-weight: 600; white-space: nowrap;
+}
+.spam-locked svg { width: 12px; height: 12px; color: var(--text-3); }
 .attachments.is-blocked { border-color: color-mix(in srgb, var(--danger) 22%, var(--border)); background: color-mix(in srgb, var(--danger-soft) 35%, var(--surface)); }
 .attach.is-blocked { cursor: not-allowed; opacity: .78; }
 .attach-blocked-note { display: flex; align-items: flex-start; gap: 6px; margin: 8px 1px 0; color: var(--danger); font-size: .62rem; line-height: 1.45; }

@@ -1215,7 +1215,7 @@ function policySections(policy) {
       <div class="setting-row"><div class="setting-copy"><b>Allowed external recipients</b><small>Optional allowlist of domains or addresses. Empty allows all external recipients.</small></div><div class="setting-control"><input class="input" data-policy-input="mail.allowedExternalRecipients" value="${esc((mail.allowedExternalRecipients || []).join(", "))}" placeholder="partner.com"></div></div>
       <div class="setting-row"><div class="setting-copy"><b>Spam sensitivity</b><small>How aggressively Rspamd should quarantine inbound mail.</small></div><div class="setting-control"><select class="input" data-policy-input="mail.spamSensitivity">${["low", "medium", "high"].map((value) => `<option value="${value}" ${mail.spamSensitivity === value ? "selected" : ""}>${value[0].toUpperCase() + value.slice(1)}</option>`).join("")}</select></div></div>
       <div class="setting-row"><div class="setting-copy"><b>Retention</b><small>Days to retain mail before deletion. 0 keeps mail until user action.</small></div><div class="setting-control"><input class="input" type="number" min="0" max="3650" data-policy-input="mail.retentionDays" value="${mail.retentionDays}"></div></div>
-      ${toggleRow("Quarantine admin only", "Only administrators can release quarantined messages.", "mail.quarantine", mail.quarantine)}
+      ${toggleRow("Restrict Junk release to administrators", "When on, users cannot move mail out of Junk and an administrator must release it from the Quarantine view. Off by default so users can report not spam or move their own Junk.", "mail.quarantine", mail.quarantine)}
       ${toggleRow("Tag external mail", "Show an external sender banner in the reading pane.", "mail.externalTag", mail.externalTag)}
     </div>
   </section>
@@ -1386,7 +1386,7 @@ async function renderQuarantine() {
     const items = data.items || [];
     $("#viewRoot").innerHTML = `
       <div class="view-head">
-        <div><h1>Quarantine</h1><p>Review mail held in Junk across ${esc(state.activeTenant.name)}. ${data.adminOnly ? "Tenant policy allows only administrators to release quarantined mail." : "Users can currently release their own quarantined mail."}</p></div>
+        <div><h1>Quarantine</h1><p>Review mail held in Junk across ${esc(state.activeTenant.name)}. ${data.adminOnly ? "Organization policy restricts Junk release to administrators, so users cannot move these messages themselves." : "Users can release their own Junk, and administrators can also release any message below."}</p></div>
         <div class="view-actions"><span class="badge ${data.adminOnly ? "system" : "neutral"}">${items.length} message${items.length === 1 ? "" : "s"}</span></div>
       </div>
       <div class="table-wrap">

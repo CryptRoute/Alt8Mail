@@ -1513,10 +1513,11 @@ Observed on 2026-10-28:
 - Disabling external sharing returned `SHARING_DISABLED`; a view-only link
   default rejected an edit link and allowed a view link. Configuring an allowed
   sharing domain returned `SHARING_DOMAIN_RESTRICTED` for a bearer link.
-- A self-delivered message reached INBOX, was moved to Junk, and a member was
-  denied release with `QUARANTINE_ADMIN_ONLY`. The item appeared in the
-  tenant-wide admin Quarantine queue; an administrator released it through the
-  admin API, and it returned to the member's INBOX.
+- With the admin-only Junk release policy enabled, a self-delivered message
+  reached INBOX, was moved to Junk, and a member was denied release with
+  `QUARANTINE_ADMIN_ONLY`. The item appeared in the tenant-wide admin
+  Quarantine queue; an administrator released it through the admin API, and it
+  returned to the member's INBOX.
 - A 2020 message appended directly to Archive was deleted by the retention
   endpoint while no recent message was touched. The worker used UIDPLUS
   `UID EXPUNGE` and pruned the webmail state.

@@ -570,7 +570,10 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"storageProviders": providers,
 		"defaultStorage":   s.defaultStorageProvider(ctx, sess.User.ID),
 		"tenantPolicy": map[string]any{
-			"mail": map[string]any{"externalTag": policy.Mail.ExternalTag},
+			"mail": map[string]any{
+				"externalTag": policy.Mail.ExternalTag,
+				"quarantine":  policy.Mail.Quarantine,
+			},
 			"directory": map[string]any{
 				"contactSharing":    policy.Directory.ContactSharing || webmailAdminRole(sess.User.Role),
 				"externalDirectory": policy.Directory.ExternalDirectory,
