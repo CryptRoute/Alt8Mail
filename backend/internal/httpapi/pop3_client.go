@@ -124,11 +124,13 @@ func (p *minimalPOP3) list() ([]int, error) {
 	}
 }
 
-func (p *minimalPOP3) retrieve(index int) ([]byte, error) {
+func (p *minimalPOP3) retrieve(index int, maxBytes int64) ([]byte, error) {
 	if _, err := p.command("RETR %d", index); err != nil {
 		return nil, err
 	}
 	var buffer strings.Builder
+	var total int64
+	tooLarge := false
 	for {
 		line, err := p.text.ReadLine()
 		if err != nil {
@@ -140,8 +142,17 @@ func (p *minimalPOP3) retrieve(index int) ([]byte, error) {
 		if strings.HasPrefix(line, "..") {
 			line = line[1:]
 		}
+		size := int64(len(line) + 2)
+		if maxBytes > 0 && total+size > maxBytes {
+			tooLarge = true
+			continue
+		}
+		total += size
 		buffer.WriteString(line)
 		buffer.WriteString("\r\n")
+	}
+	if tooLarge {
+		return nil, errMailImportMessageTooLarge
 	}
 	return []byte(buffer.String()), nil
 }

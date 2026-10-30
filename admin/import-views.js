@@ -4,7 +4,7 @@
    another IMAP/POP3 provider. Both jobs continue on the server after the page
    is closed; the dashboard and history blocks expose their live progress. */
 let importUsersState = { rows: [], sourceName: "", jobId: "", timer: null, job: null, items: [] };
-let mailImportState = { jobId: "", timer: null, job: null, items: [], candidates: [], manualRows: [], source: { protocol: "imap", host: "", port: 993, security: "ssl", includeJunk: false, includeTrash: false, includeDrafts: true } };
+let mailImportState = { jobId: "", timer: null, job: null, items: [], candidates: [], manualRows: [], source: { protocol: "imap", host: "", port: 993, security: "ssl", includeJunk: false, includeTrash: false, includeDrafts: true, maxMessageMB: 50 } };
 
 function stopImportPolling() {
   if (importUsersState.timer) clearTimeout(importUsersState.timer);
@@ -223,7 +223,7 @@ function renderMailImportSetup() {
       <label class="switch-inline"><input type="checkbox" id="mailImportJunk" ${source.includeJunk ? "checked" : ""}><span>Include Junk / Spam</span></label>
       <label class="switch-inline"><input type="checkbox" id="mailImportTrash" ${source.includeTrash ? "checked" : ""}><span>Include Trash / Deleted</span></label>
       <label class="switch-inline"><input type="checkbox" id="mailImportDrafts" ${source.includeDrafts !== false ? "checked" : ""}><span>Include Drafts</span></label>
-      <span class="muted">Messages above 50 MB are skipped for safety.</span>
+      <span class="muted">Messages above ${Number(source.maxMessageMB) || 50} MB are skipped for safety.</span>
     </div>
     <div class="import-step" style="margin-top:22px"><span>2</span><div><h2>Add mailbox credentials</h2><p>Upload a CSV with <code>email</code> and <code>password</code>, plus optional <code>notify_email</code>, or add rows manually.</p></div></div>
     <label class="import-drop" id="mailImportDrop">${icon("arrow-up")}<b>Drop the mailbox CSV here</b><span>email, password, notify_email</span><input type="file" id="mailImportFile" accept=".csv,.tsv,.txt,.xlsx,.xlsm" hidden></label>
@@ -237,7 +237,7 @@ function renderMailImportJob(job, items) {
   const progress = job.total ? Math.round(((job.validated || 0) + (job.completed || 0)) / Math.max(job.total, 1) * 100) : 0;
   const header = `<div class="import-step"><span>${job.status === "completed" ? icon("check") : job.status === "awaiting_mapping" ? icon("sliders") : job.status === "failed" ? icon("alert") : icon("refresh")}</span><div><h2>${job.protocol.toUpperCase()} migration · ${esc(job.host)}</h2><p>${job.status === "validating" ? "Validating each source login…" : job.status === "awaiting_mapping" ? "Credentials validated. Map each source mailbox to a destination." : job.status === "queued" ? "Queued for import…" : job.status === "running" ? `Importing ${esc(job.currentItem || "")}` : job.status === "completed" ? "Migration complete" : job.status === "cancelled" ? "Migration cancelled" : "Migration failed"}</p></div><span class="badge ${mailImportStatusClass(job.status)}">${esc(job.status.replace(/_/g, " "))}</span></div>`;
   if (job.status === "validating") {
-    return `<section class="card import-card">${header}<div class="import-progress"><span style="width:${job.total ? Math.round((job.validated || 0) / job.total * 100) : 15}%"></span></div><div class="mailbox-status-list">${items.map((item) => mailImportItemStatus(item)).join("")}</div><div class="import-actions"><button class="btn secondary" type="button" id="mailImportBack">Start another</button><button class="btn danger" type="button" id="mailImportCancel">Cancel</button></div></section>`;
+    return `<section class="card import-card">${header}<div class="import-progress"><span style="width:${job.total ? Math.round(((job.validated || 0) + (job.failed || 0)) / job.total * 100) : 15}%"></span></div><div class="mailbox-status-list">${items.map((item) => mailImportItemStatus(item)).join("")}</div><div class="import-actions"><button class="btn secondary" type="button" id="mailImportBack">Start another</button><button class="btn danger" type="button" id="mailImportCancel">Cancel</button></div></section>`;
   }
   if (job.status === "awaiting_mapping") {
     return `<section class="card import-card">${header}<div class="mapping-list">${items.map((item) => mailImportMappingRow(item)).join("")}</div><div class="import-actions"><button class="btn secondary" type="button" id="mailImportBack">Cancel</button><button class="btn primary" type="button" id="mailImportStart">${icon("arrow-up")}Start migration</button></div></section>`;
@@ -278,12 +278,25 @@ function mailImportMappingRow(item) {
 function bindImportMailboxes() {
   $("#mailImportProtocol")?.addEventListener("change", (event) => {
     mailImportState.source.protocol = event.target.value;
-    mailImportState.source.port = event.target.value === "pop3" ? 995 : 993;
+    mailImportState.source.port = mailImportState.source.security === "ssl"
+      ? (event.target.value === "pop3" ? 995 : 993)
+      : (event.target.value === "pop3" ? 110 : 143);
     renderImportMailboxes();
   });
   $("#mailImportHost")?.addEventListener("input", (event) => { mailImportState.source.host = event.target.value; });
   $("#mailImportPort")?.addEventListener("input", (event) => { mailImportState.source.port = Number(event.target.value) || 0; });
-  $("#mailImportSecurity")?.addEventListener("change", (event) => { mailImportState.source.security = event.target.value; });
+  $("#mailImportSecurity")?.addEventListener("change", (event) => {
+    mailImportState.source.security = event.target.value;
+    const portInput = $("#mailImportPort");
+    const port = Number(portInput?.value) || 0;
+    if (event.target.value === "ssl" && (port === 143 || port === 110)) {
+      mailImportState.source.port = mailImportState.source.protocol === "pop3" ? 995 : 993;
+      if (portInput) portInput.value = String(mailImportState.source.port);
+    } else if (event.target.value !== "ssl" && (port === 993 || port === 995)) {
+      mailImportState.source.port = mailImportState.source.protocol === "pop3" ? 110 : 143;
+      if (portInput) portInput.value = String(mailImportState.source.port);
+    }
+  });
   $("#mailImportJunk")?.addEventListener("change", (event) => { mailImportState.source.includeJunk = event.target.checked; });
   $("#mailImportTrash")?.addEventListener("change", (event) => { mailImportState.source.includeTrash = event.target.checked; });
   $("#mailImportDrafts")?.addEventListener("change", (event) => { mailImportState.source.includeDrafts = event.target.checked; });
@@ -342,26 +355,53 @@ async function startMailImportValidation() {
     security: $("#mailImportSecurity").value,
     includeJunk: $("#mailImportJunk").checked,
     includeTrash: $("#mailImportTrash").checked,
-    includeDrafts: $("#mailImportDrafts").checked
+    includeDrafts: $("#mailImportDrafts").checked,
+    maxMessageMB: Number(mailImportState.source.maxMessageMB) || 50
   };
   if (!source.host) { toast("Enter the old mail server hostname", "error"); return; }
+  if (!Number.isInteger(source.port) || source.port < 1 || source.port > 65535) { toast("The source port must be between 1 and 65535", "error"); return; }
+  const securePort = source.protocol === "pop3" ? 995 : 993;
+  const plainPort = source.protocol === "pop3" ? 110 : 143;
+  if (source.security === "ssl" && source.port === plainPort) {
+    toast(`Port ${plainPort} normally uses STARTTLS or no encryption. Use port ${securePort} for SSL/TLS.`, "error");
+    return;
+  }
+  if (source.security !== "ssl" && source.port === securePort) {
+    toast(`Port ${securePort} normally uses SSL/TLS. Select SSL/TLS or use port ${plainPort}.`, "error");
+    return;
+  }
+  const incomplete = mailImportState.manualRows.find((row) => {
+    const email = String(row.email || "").trim();
+    const password = String(row.password || "");
+    return (email || password) && (!email || !password);
+  });
+  if (incomplete) { toast("Every mailbox row needs both an email address and a password", "error"); return; }
   const items = mailImportState.manualRows
     .map((row) => ({
       email: String(row.email || "").trim().toLowerCase(),
       password: String(row.password || ""),
       notifyEmail: String(row.notifyEmail || "").trim().toLowerCase()
     }))
-    .filter((row) => row.email && row.password);
+    .filter((row) => row.email);
   if (!items.length) { toast("Add at least one mailbox with an email and password", "error"); return; }
-  const invalid = items.find((row) => !row.email.includes("@"));
+  const invalid = items.find((row) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email));
   if (invalid) { toast("Every mailbox needs a valid email address", "error"); return; }
+  const seen = new Set();
+  const duplicate = items.find((row) => { if (seen.has(row.email)) return true; seen.add(row.email); return false; });
+  if (duplicate) { toast(`${duplicate.email} appears more than once in the mailbox list`, "error"); return; }
   mailImportState.source = source;
   const button = $("#mailImportValidate");
   setBusy(button, true, "Starting validation…");
   try {
-    const data = await api("mail-import/jobs", { method: "POST", body: { ...source, items, options: { includeJunk: source.includeJunk, includeTrash: source.includeTrash, includeDrafts: source.includeDrafts } } });
+    const data = await api("mail-import/jobs", { method: "POST", body: {
+      protocol: source.protocol, host: source.host, port: source.port, security: source.security, items,
+      options: {
+        includeJunk: source.includeJunk, includeTrash: source.includeTrash,
+        includeDrafts: source.includeDrafts, maxMessageMB: source.maxMessageMB
+      }
+    } });
     mailImportState.jobId = data.jobId;
-    mailImportState.job = { id: data.jobId, protocol: source.protocol, host: source.host, port: source.port, security: source.security, status: "validating", total: data.total, validated: 0, completed: 0, failed: 0, importedMessages: 0 };
+    mailImportState.job = { id: data.jobId, protocol: source.protocol, host: source.host, port: source.port, security: source.security, status: "validating", total: data.total, validated: 0, completed: 0, failed: 0, importedMessages: 0, options: { includeJunk: source.includeJunk, includeTrash: source.includeTrash, includeDrafts: source.includeDrafts, maxMessageMB: source.maxMessageMB } };
     mailImportState.items = [];
     renderImportMailboxes();
   } catch (error) { showError(error); setBusy(button, false); }

@@ -1,6 +1,98 @@
 package httpapi
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestMailImportRequestAcceptsNestedAndLegacyOptions(t *testing.T) {
+	payloads := []string{
+		`{"protocol":"imap","host":"mail.example.com","port":993,"security":"ssl","items":[{"email":"one@example.com","password":"secret"}],"options":{"includeJunk":true,"includeTrash":true,"includeDrafts":false,"maxMessageMB":25}}`,
+		`{"protocol":"imap","host":"mail.example.com","port":993,"security":"ssl","items":[{"email":"one@example.com","password":"secret"}],"includeJunk":true,"includeTrash":true,"includeDrafts":false,"maxMessageMB":25,"options":{"includeJunk":true,"includeTrash":true,"includeDrafts":false,"maxMessageMB":25}}`,
+	}
+	for _, payload := range payloads {
+		var body mailImportRequestBody
+		decoder := json.NewDecoder(strings.NewReader(payload))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&body); err != nil {
+			t.Fatalf("request body was rejected: %v", err)
+		}
+		options := body.normalizedOptions()
+		if options["includeJunk"] != true || options["includeTrash"] != true || options["includeDrafts"] != false || options["maxMessageMB"] != 25 {
+			t.Fatalf("unexpected normalized options: %#v", options)
+		}
+	}
+}
+
+func TestMailImportOptionsNormalization(t *testing.T) {
+	body := mailImportRequestBody{
+		Options: &mailImportRequestOptions{
+			IncludeJunk:   boolPtr(true),
+			IncludeDrafts: boolPtr(false),
+			MaxMessageMB:  intPtr(125),
+		},
+	}
+	options := body.normalizedOptions()
+	if options["includeJunk"] != true || options["includeTrash"] != false || options["includeDrafts"] != false {
+		t.Fatalf("unexpected flag normalization: %#v", options)
+	}
+	if options["maxMessageMB"] != mailImportHardMaxMB {
+		t.Fatalf("max message size was not clamped: %#v", options)
+	}
+	if got := mailImportMaxBytes(options); got != int64(mailImportHardMaxMB)<<20 {
+		t.Fatalf("max bytes = %d", got)
+	}
+
+	legacy := mailImportRequestBody{IncludeJunk: boolPtr(true), IncludeDrafts: boolPtr(false), MaxMessageMB: intPtr(25)}
+	legacyOptions := legacy.normalizedOptions()
+	if legacyOptions["includeJunk"] != true || legacyOptions["includeDrafts"] != false {
+		t.Fatalf("legacy flags were not accepted: %#v", legacyOptions)
+	}
+	if got := mailImportMaxBytes(legacyOptions); got != 25<<20 {
+		t.Fatalf("legacy max bytes = %d", got)
+	}
+}
+
+func TestNormalizeMailImportItems(t *testing.T) {
+	items, err := normalizeMailImportItems([]mailImportItemInput{
+		{Email: "One@Example.com", Password: "secret", NotifyEmail: "Notify@Example.net"},
+		{Email: "two@example.com", Password: "secret"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items[0].Email != "one@example.com" || items[0].NotifyEmail != "notify@example.net" {
+		t.Fatalf("addresses were not normalized: %#v", items)
+	}
+	if _, err := normalizeMailImportItems([]mailImportItemInput{
+		{Email: "one@example.com", Password: "a"}, {Email: "ONE@example.com", Password: "b"},
+	}); err == nil {
+		t.Fatal("duplicate mailboxes must be rejected")
+	}
+	if _, err := normalizeMailImportItems([]mailImportItemInput{{Email: "not-an-email", Password: "a"}}); err == nil {
+		t.Fatal("invalid email must be rejected")
+	}
+	if _, err := normalizeMailImportItems([]mailImportItemInput{{Email: "one@example.com", Password: ""}}); err == nil {
+		t.Fatal("missing password must be rejected")
+	}
+}
+
+func TestValidMailImportHost(t *testing.T) {
+	for _, host := range []string{"mail.example.com", "130.94.64.32", "localhost", "2001:db8::10"} {
+		if !validMailImportHost(host) {
+			t.Fatalf("expected %q to be valid", host)
+		}
+	}
+	for _, host := range []string{"", "bad host", "https://mail.example.com", "-bad.example.com", "bad..example.com"} {
+		if validMailImportHost(host) {
+			t.Fatalf("expected %q to be rejected", host)
+		}
+	}
+}
+
+func boolPtr(value bool) *bool { return &value }
+func intPtr(value int) *int    { return &value }
 
 func TestParseDelegatedMessageID(t *testing.T) {
 	owner, message, ok := parseDelegatedMessageID("dlg:owner-uuid:msg_123")

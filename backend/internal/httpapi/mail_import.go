@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -18,12 +19,14 @@ import (
 )
 
 const (
-	maxMailImportItems   = 500
-	mailImportBatchSize  = 40
-	mailImportMaxMessage = int64(64 << 20)
+	maxMailImportItems  = 500
+	mailImportBatchSize = 40
+	mailImportDefaultMB = 50
+	mailImportHardMaxMB = 64
 )
 
 var errMailImportCancelled = fmt.Errorf("mail import cancelled")
+var errMailImportMessageTooLarge = fmt.Errorf("message exceeds the import size limit")
 
 type mailImportItemInput struct {
 	Email       string `json:"email"`
@@ -31,13 +34,28 @@ type mailImportItemInput struct {
 	NotifyEmail string `json:"notifyEmail"`
 }
 
+type mailImportRequestOptions struct {
+	IncludeJunk       *bool `json:"includeJunk"`
+	IncludeTrash      *bool `json:"includeTrash"`
+	IncludeDrafts     *bool `json:"includeDrafts"`
+	MaxMessageMB      *int  `json:"maxMessageMB"`
+	DeleteAfterImport *bool `json:"deleteAfterImport"`
+}
+
 type mailImportRequestBody struct {
-	Protocol string                `json:"protocol"`
-	Host     string                `json:"host"`
-	Port     int                   `json:"port"`
-	Security string                `json:"security"`
-	Items    []mailImportItemInput `json:"items"`
-	Options  map[string]any        `json:"options"`
+	Protocol string                    `json:"protocol"`
+	Host     string                    `json:"host"`
+	Port     int                       `json:"port"`
+	Security string                    `json:"security"`
+	Items    []mailImportItemInput     `json:"items"`
+	Options  *mailImportRequestOptions `json:"options"`
+
+	// Older admin bundles sent these three flags at the top level. Keep
+	// accepting them so a cached browser cannot break a migration request.
+	IncludeJunk   *bool `json:"includeJunk"`
+	IncludeTrash  *bool `json:"includeTrash"`
+	IncludeDrafts *bool `json:"includeDrafts"`
+	MaxMessageMB  *int  `json:"maxMessageMB"`
 }
 
 type mailImportJobRecord struct {
@@ -62,6 +80,125 @@ type mailImportJobRecord struct {
 	CompletedAt *time.Time
 }
 
+func pickImportBool(primary, legacy *bool, fallback bool) bool {
+	if primary != nil {
+		return *primary
+	}
+	if legacy != nil {
+		return *legacy
+	}
+	return fallback
+}
+
+// normalizedOptions is the single source of truth for migration options. It
+// accepts the current nested options object and the flat fields used by older
+// admin bundles.
+func (b mailImportRequestBody) normalizedOptions() map[string]any {
+	includeJunk := pickImportBool(nil, b.IncludeJunk, false)
+	includeTrash := pickImportBool(nil, b.IncludeTrash, false)
+	includeDrafts := pickImportBool(nil, b.IncludeDrafts, true)
+	maxMB := mailImportDefaultMB
+	if b.MaxMessageMB != nil {
+		maxMB = *b.MaxMessageMB
+	}
+	if b.Options != nil {
+		includeJunk = pickImportBool(b.Options.IncludeJunk, b.IncludeJunk, false)
+		includeTrash = pickImportBool(b.Options.IncludeTrash, b.IncludeTrash, false)
+		includeDrafts = pickImportBool(b.Options.IncludeDrafts, b.IncludeDrafts, true)
+		if b.Options.MaxMessageMB != nil {
+			maxMB = *b.Options.MaxMessageMB
+		}
+	}
+	if maxMB <= 0 {
+		maxMB = mailImportDefaultMB
+	}
+	if maxMB > mailImportHardMaxMB {
+		maxMB = mailImportHardMaxMB
+	}
+	return map[string]any{
+		"includeJunk": includeJunk, "includeTrash": includeTrash,
+		"includeDrafts": includeDrafts, "maxMessageMB": maxMB,
+	}
+}
+
+func mailImportMaxBytes(options map[string]any) int64 {
+	maxMB := stateInt(options, "maxMessageMB")
+	if maxMB <= 0 {
+		maxMB = mailImportDefaultMB
+	}
+	if maxMB > mailImportHardMaxMB {
+		maxMB = mailImportHardMaxMB
+	}
+	if maxMB < 1 {
+		maxMB = 1
+	}
+	return maxMB << 20
+}
+
+func normalizeMailImportEmail(value string) (string, error) {
+	email := strings.ToLower(strings.TrimSpace(value))
+	if email == "" {
+		return "", fmt.Errorf("email is required")
+	}
+	parsed, err := mail.ParseAddress(email)
+	if err != nil || !strings.EqualFold(parsed.Address, email) {
+		return "", fmt.Errorf("invalid email address")
+	}
+	return email, nil
+}
+
+func normalizeMailImportItems(input []mailImportItemInput) ([]mailImportItemInput, error) {
+	if len(input) == 0 {
+		return nil, fmt.Errorf("add at least one mailbox")
+	}
+	seen := map[string]bool{}
+	items := make([]mailImportItemInput, 0, len(input))
+	for index, item := range input {
+		email, err := normalizeMailImportEmail(item.Email)
+		if err != nil {
+			return nil, fmt.Errorf("row %d: %s", index+1, err)
+		}
+		if seen[email] {
+			return nil, fmt.Errorf("row %d duplicates mailbox %s", index+1, email)
+		}
+		if strings.TrimSpace(item.Password) == "" {
+			return nil, fmt.Errorf("row %d needs a mailbox password", index+1)
+		}
+		notify := ""
+		if strings.TrimSpace(item.NotifyEmail) != "" {
+			notify, err = normalizeMailImportEmail(item.NotifyEmail)
+			if err != nil {
+				return nil, fmt.Errorf("row %d has an invalid notification address", index+1)
+			}
+		}
+		seen[email] = true
+		items = append(items, mailImportItemInput{
+			Email: email, Password: item.Password, NotifyEmail: notify,
+		})
+	}
+	return items, nil
+}
+
+func validMailImportHost(host string) bool {
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	if len(host) == 0 || len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (s *Server) adminMailImportCreate(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	var body mailImportRequestBody
@@ -74,33 +211,25 @@ func (s *Server) adminMailImportCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "PROTOCOL", "Choose IMAP or POP3")
 		return
 	}
-	host := strings.TrimSpace(body.Host)
-	if host == "" || strings.ContainsAny(host, " \t\r\n/") {
-		writeError(w, http.StatusBadRequest, "HOST", "Enter the old mail server hostname")
+	host := strings.TrimSuffix(strings.TrimSpace(body.Host), ".")
+	if !validMailImportHost(host) {
+		writeError(w, http.StatusBadRequest, "HOST", "Enter a valid old mail server hostname or IP address")
 		return
 	}
 	security := strings.ToLower(strings.TrimSpace(body.Security))
 	if security != "ssl" && security != "starttls" && security != "none" {
 		security = "ssl"
 	}
-	if len(body.Items) == 0 {
-		writeError(w, http.StatusBadRequest, "IMPORT_EMPTY", "Add at least one mailbox from a CSV or the manual form")
-		return
-	}
 	if len(body.Items) > maxMailImportItems {
 		writeError(w, http.StatusBadRequest, "IMPORT_LIMIT", fmt.Sprintf("Import up to %d mailboxes at a time", maxMailImportItems))
 		return
 	}
-	options := map[string]any{
-		"includeJunk": false, "includeTrash": false, "includeDrafts": true,
-		"deleteAfterImport": false, "maxMessageMB": 50,
+	items, err := normalizeMailImportItems(body.Items)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "IMPORT_ROW", err.Error())
+		return
 	}
-	for key, value := range body.Options {
-		switch key {
-		case "includeJunk", "includeTrash", "includeDrafts", "deleteAfterImport", "maxMessageMB":
-			options[key] = value
-		}
-	}
+	options := body.normalizedOptions()
 	port := body.Port
 	if port <= 0 {
 		switch protocol {
@@ -122,6 +251,10 @@ func (s *Server) adminMailImportCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "PORT", "The port must be between 1 and 65535")
 		return
 	}
+	if security != "ssl" && ((protocol == "imap" && port == 993) || (protocol == "pop3" && port == 995)) {
+		writeError(w, http.StatusBadRequest, "PORT_SECURITY", "Port 993/995 normally requires SSL/TLS. Select SSL/TLS or use port 143 (IMAP) or 110 (POP3).")
+		return
+	}
 	optionsJSON, _ := json.Marshal(options)
 	jobID := newID("mimp")
 	ctx := r.Context()
@@ -134,19 +267,12 @@ func (s *Server) adminMailImportCreate(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO mail_import_jobs (id, tenant_id, created_by, created_by_user, protocol, host, port, security, status, options, total_items)
 		VALUES ($1,$2,$3,NULLIF($4,'')::uuid,$5,$6,$7,$8,'validating',$9::jsonb,$10)
-	`, jobID, sess.ActiveTenantID, sess.User.Name, sess.User.ID, protocol, host, port, security, string(optionsJSON), len(body.Items)); err != nil {
+	`, jobID, sess.ActiveTenantID, sess.User.Name, sess.User.ID, protocol, host, port, security, string(optionsJSON), len(items)); err != nil {
 		writeError(w, http.StatusInternalServerError, "IMPORT", "Could not create the migration job")
 		return
 	}
-	for index, item := range body.Items {
-		email := strings.ToLower(strings.TrimSpace(item.Email))
-		password := item.Password
-		notify := strings.ToLower(strings.TrimSpace(item.NotifyEmail))
-		if email == "" || !strings.Contains(email, "@") || password == "" {
-			writeError(w, http.StatusBadRequest, "IMPORT_ROW", fmt.Sprintf("Row %d needs an email and password", index+1))
-			return
-		}
-		sealed, err := s.sealSecuritySecret(password)
+	for index, item := range items {
+		sealed, err := s.sealSecuritySecret(item.Password)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "IMPORT", "Could not protect the imported credentials")
 			return
@@ -155,7 +281,7 @@ func (s *Server) adminMailImportCreate(w http.ResponseWriter, r *http.Request) {
 			INSERT INTO mail_import_items (id, job_id, tenant_id, source_email, source_password, notify_email, status)
 			VALUES ($1,$2,$3,$4,$5,$6,'pending')
 			ON CONFLICT (job_id, source_email) DO NOTHING
-		`, newID("mimpi"), jobID, sess.ActiveTenantID, email, sealed, notify); err != nil {
+		`, newID("mimpi"), jobID, sess.ActiveTenantID, item.Email, sealed, item.NotifyEmail); err != nil {
 			writeError(w, http.StatusInternalServerError, "IMPORT", fmt.Sprintf("Could not queue row %d: %v", index+1, err))
 			return
 		}
@@ -164,9 +290,9 @@ func (s *Server) adminMailImportCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "IMPORT", "Could not save the migration")
 		return
 	}
-	s.recordAdminAudit(ctx, sess, sess.User, "admin.mail_import_started", host, "Started a mailbox migration", map[string]any{"tenantId": sess.ActiveTenantID, "jobId": jobID, "mailboxes": len(body.Items)})
+	s.recordAdminAudit(ctx, sess, sess.User, "admin.mail_import_started", host, "Started a mailbox migration", map[string]any{"tenantId": sess.ActiveTenantID, "jobId": jobID, "mailboxes": len(items)})
 	s.startMailImportJob(jobID)
-	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "jobId": jobID, "status": "validating", "total": len(body.Items)})
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "jobId": jobID, "status": "validating", "total": len(items)})
 }
 
 func (s *Server) adminMailImportJobs(w http.ResponseWriter, r *http.Request) {
@@ -331,7 +457,7 @@ func (s *Server) adminMailImportMapping(w http.ResponseWriter, r *http.Request) 
 		merged := job.Options
 		for key, value := range body.Options {
 			switch key {
-			case "includeJunk", "includeTrash", "includeDrafts", "deleteAfterImport", "maxMessageMB":
+			case "includeJunk", "includeTrash", "includeDrafts", "maxMessageMB":
 				merged[key] = value
 			}
 		}
@@ -687,6 +813,7 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 			}
 		}
 	}
+	maxBytes := mailImportMaxBytes(job.Options)
 	var imported, total int64
 	for _, sourceFolder := range folders {
 		if s.mailImportStatus(ctx, job.ID) == "cancelled" {
@@ -751,8 +878,8 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 				if body == nil {
 					continue
 				}
-				raw, err := io.ReadAll(io.LimitReader(body, mailImportMaxMessage+1))
-				if err != nil || int64(len(raw)) > mailImportMaxMessage {
+				raw, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+				if err != nil || int64(len(raw)) > maxBytes {
 					continue
 				}
 				if err := target.Append(targetFolder, importFlags(message.Flags), message.InternalDate, bytes.NewReader(raw)); err != nil {
@@ -806,6 +933,7 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 		}
 	}
 	_, _ = target.Select("INBOX", false)
+	maxBytes := mailImportMaxBytes(job.Options)
 	var imported int64
 	for _, index := range indexes {
 		if int64(index) <= last {
@@ -814,9 +942,21 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 		if s.mailImportStatus(ctx, job.ID) == "cancelled" {
 			return imported, int64(len(indexes)), errMailImportCancelled
 		}
-		raw, err := source.retrieve(index)
+		raw, err := source.retrieve(index, maxBytes)
+		if err == errMailImportMessageTooLarge {
+			last = int64(index)
+			cursor["pop3Index"] = last
+			s.persistImportCursor(ctx, itemID, job.ID, sourceEmail, cursor, imported)
+			continue
+		}
 		if err != nil {
 			break
+		}
+		if int64(len(raw)) > maxBytes {
+			last = int64(index)
+			cursor["pop3Index"] = last
+			s.persistImportCursor(ctx, itemID, job.ID, sourceEmail, cursor, imported)
+			continue
 		}
 		messageID := rawMessageID(raw)
 		if messageID != "" && existing[messageID] {
