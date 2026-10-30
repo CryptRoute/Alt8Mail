@@ -633,8 +633,8 @@ func (s *Server) runMailImportItem(ctx context.Context, job mailImportJobRecord,
 			emailError = noticeErr.Error()
 		}
 	}
-	_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET notified_at=CASE WHEN $2 THEN now() ELSE NULL END, error=$3, updated_at=now() WHERE id=$1`, itemID, notified, truncate(emailError, 500))
-	update("completed", "")
+	_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET notified_at=CASE WHEN $2 THEN now() ELSE NULL END, updated_at=now() WHERE id=$1`, itemID, notified)
+	update("completed", emailError)
 }
 
 func (s *Server) sendMigrationNotice(ctx context.Context, tenantID, preferredUserID, to, name, mailbox, password string) error {

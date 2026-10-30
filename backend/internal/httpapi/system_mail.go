@@ -45,11 +45,12 @@ func (s *Server) sendAccountNotice(ctx context.Context, notice accountNotice) er
 	textBody, htmlBody := renderAccountNotice(notice, tenantName, productName, primaryColor, loginURL, supportEmail)
 	messageID := fmt.Sprintf("<%s@%s>", newID("notice"), s.cfg.MailDomain)
 	item := map[string]any{
-		"from":     map[string]any{"name": fromName, "email": fromEmail},
-		"to":       []any{map[string]any{"name": notice.ToName, "email": notice.To}},
-		"subject":  notice.Subject,
-		"bodyText": textBody,
-		"bodyHtml": htmlBody,
+		"from":        map[string]any{"name": fromName, "email": fromEmail},
+		"to":          []any{map[string]any{"name": notice.ToName, "email": notice.To}},
+		"subject":     notice.Subject,
+		"bodyText":    textBody,
+		"bodyHtml":    htmlBody,
+		"trustedHtml": true,
 	}
 	raw, err := buildMIMEMessage(item, messageID, nil)
 	if err != nil {

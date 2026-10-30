@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.3** release preserves the branded HTML of account and migration notification emails (server-generated, escaped) and surfaces notification failures in migration results.
+
 The **0.3.2** release finishes the admin detail-page polish: edits stay on the user page, vacation intervals match the Sieve limit, and validated mailboxes are auto-mapped to existing users with the same address.
 
 The **0.3.1** release hardens the onboarding workspace: delegated-mailbox permission and signature-default fixes, faster batched IMAP migration with resumable per-folder checkpoints, IPv6-safe source connections, and clearer migration credentials when a notification email could not be delivered.

@@ -291,7 +291,10 @@ func buildMIMEMessage(item map[string]any, messageID string, attachments []outbo
 	ccPeople := stateSlice(item, "cc")
 	subject := stateString(item, "subject")
 	bodyText := stateString(item, "bodyText")
-	bodyHTML := sanitizeComposeHTML(stateString(item, "bodyHtml"))
+	bodyHTML := stateString(item, "bodyHtml")
+	if item["trustedHtml"] != true {
+		bodyHTML = sanitizeComposeHTML(bodyHTML)
+	}
 	if bodyHTML == "" {
 		bodyHTML = textToHTML(bodyText)
 	}
