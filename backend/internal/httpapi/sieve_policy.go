@@ -175,7 +175,7 @@ func (s *Server) reapplyTenantSieveOnce(ctx context.Context, tenantID string) {
 		if len(sieve) == 0 {
 			continue
 		}
-		script := renderSieve(sieveWithForwardingPolicy(sieve, user.Email, domains, policy.Mail), user.Email)
+		script := renderSieveWithFolders(sieveWithForwardingPolicy(sieve, user.Email, domains, policy.Mail), user.Email, folderMapForSieve(state))
 		if err := s.pushSieveScript(ctx, user, script); err != nil {
 			s.logger.Warn("sieve policy update failed", "user", email, "err", err)
 			continue

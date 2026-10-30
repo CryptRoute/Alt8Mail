@@ -1477,3 +1477,13 @@ body.is-sidebar-collapsed .sidebar-collapse .icon { transform: rotate(180deg); }
   .rep-health-foot { align-items: flex-start; flex-direction: column; }
   .health-subhead { align-items: flex-start; }
 }
+
+/* ---------- security reports ---------- */
+a.security-report-alert { display: flex; align-items: center; gap: 11px; text-decoration: none; color: inherit; border: 1px solid var(--status-critical-line); background: var(--status-critical-bg); border-radius: var(--r-md); padding: 12px 14px; }
+a.security-report-alert > svg { flex: none; color: var(--status-critical-ink); }
+a.security-report-alert > div { flex: 1; min-width: 0; }
+a.security-report-alert .btn { flex: none; text-decoration: none; }
+a.security-report-alert:hover { filter: brightness(.985); }
+.field-label { display: block; margin-bottom: 5px; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); }
+.read-box { min-height: 34px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.message-snapshot { max-height: 280px; overflow: auto; white-space: pre-wrap; }

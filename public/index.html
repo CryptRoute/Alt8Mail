@@ -10,11 +10,12 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.10.0">
-<link rel="stylesheet" href="/features.css?v=0.10.0">
-<link rel="stylesheet" href="/workspace.css?v=0.10.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.10.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.10.0">
+<link rel="stylesheet" href="/styles.css?v=0.11.0">
+<link rel="stylesheet" href="/features.css?v=0.11.0">
+<link rel="stylesheet" href="/workspace.css?v=0.11.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.11.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.11.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.11.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -452,6 +453,7 @@
             </div>
           </div>
           <div class="folder-scroll" id="folderList"></div>
+          <div class="folder-add-row"><button class="folder-add-btn" id="folderAddBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New folder</button></div>
           <button class="quota" id="quotaButton" type="button" title="Storage usage from Alt8Mail">
             <div class="quota-line"><span id="quotaLabel">2.4 GB of 15 GB</span><span id="quotaPct">16%</span></div>
             <div class="quota-bar"><span id="quotaBarFill" style="width:16%"></span></div>
@@ -926,6 +928,13 @@
                           <span>Leave off if you prefer to mark messages read manually.</span>
                         </div>
                         <button class="switch" data-pref="markReadOnOpen" type="button" role="switch" aria-checked="true" aria-label="Mark messages as read when opened"><span></span></button>
+                      </div>
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Display images in email automatically</strong>
+                          <span>Loads embedded and remote images through the Alt8Mail privacy proxy. Junk always blocks images until the message is moved to Inbox.</span>
+                        </div>
+                        <button class="switch" data-server-pref="autoLoadImages" type="button" role="switch" aria-checked="true" aria-label="Display images in email automatically"><span></span></button>
                       </div>
                       <div class="pref-row">
                         <div class="pref-copy">
@@ -1772,12 +1781,8 @@
   <button data-new="event" type="button"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>New event</button>
 </div>
 
-<div class="cmd-newmenu" id="moveMenu" hidden>
-  <button data-move-folder="inbox" type="button"><svg class="icon" aria-hidden="true"><use href="#i-inbox"/></svg>Inbox</button>
-  <button data-move-folder="archive" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
-  <button data-move-folder="spam" type="button"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>Junk</button>
-  <button data-move-folder="trash" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Trash</button>
-</div>
+<div class="cmd-newmenu" id="moveMenu" hidden></div>
+<div class="folder-context-menu" id="folderMenu" hidden></div>
 
 <div class="overlay" id="detailsOverlay" hidden>
   <div class="dialog details-dialog" role="dialog" aria-modal="true" aria-labelledby="detailsTitle">
@@ -2388,6 +2393,18 @@
   </div>
 </div>
 
+<div class="overlay" id="folderEditorOverlay" hidden>
+  <div class="dialog folder-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="folderEditorTitle">
+    <div class="dialog-head"><div><h2 id="folderEditorTitle">New folder</h2><p class="dialog-note" id="folderEditorSubtitle">Create a folder for rules and moving mail.</p></div><button class="icon-btn" id="folderEditorClose" type="button" aria-label="Close folder editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-body">
+      <label class="form-field"><span>Folder name</span><input id="folderEditorName" maxlength="60" placeholder="e.g. Projects"></label>
+      <div class="field-row"><label class="form-field"><span>Place under <em>optional</em></span><select id="folderEditorParent"></select></label><label class="form-field"><span>Color</span><select id="folderEditorColor"><option value="">Default</option><option value="#2563eb">Blue</option><option value="#0f766e">Teal</option><option value="#6d28d9">Violet</option><option value="#be123c">Rose</option><option value="#b45309">Amber</option><option value="#475569">Slate</option></select></label></div>
+      <p class="onboarding-inline-error" id="folderEditorError" hidden></p>
+    </div>
+    <div class="dialog-foot"><button class="btn-secondary" id="folderEditorCancel" type="button">Cancel</button><button class="btn-primary" id="folderEditorSave" type="button">Create folder</button></div>
+  </div>
+</div>
+
 <div class="overlay" id="passwordChangeOverlay" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="passwordChangeTitle">
     <div class="dialog-head">
@@ -2408,6 +2425,6 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
-<script type="module" src="/app.js?v=0.10.0"></script>
+<script type="module" src="/app.js?v=0.11.0"></script>
 </body>
 </html>

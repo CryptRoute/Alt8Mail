@@ -58,7 +58,7 @@ func (s *Server) saveForwarding(w http.ResponseWriter, r *http.Request) {
 		next["forwarding"] = forwarding
 		next["revision"] = stateInt(existing, "revision") + 1
 		next["updatedAt"] = nowISO()
-		script := renderSieve(next, sess.User.Email)
+		script := renderSieveWithFolders(next, sess.User.Email, folderMapForSieve(state))
 		if err := s.pushSieveScript(r.Context(), sess.User, script); err != nil {
 			return failDetails(http.StatusBadGateway, "SIEVE_SERVICE", "Dovecot rejected the forwarding rule", map[string]any{"error": err.Error()})
 		}

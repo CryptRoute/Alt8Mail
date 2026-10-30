@@ -196,16 +196,18 @@ func mailAttachmentPublic(record map[string]any) map[string]any {
 		"id": id, "name": stateString(record, "name"), "type": stateString(record, "type"),
 		"mime": stateString(record, "mime"), "size": stateString(record, "size"),
 		"sizeBytes": stateInt(record, "sizeBytes"), "previewable": stateBool(record, "previewable"),
+		"contentId": stateString(record, "contentId"), "disposition": stateString(record, "disposition"),
 		"contentUrl":  "/api/attachments/" + id + "/content",
 		"downloadUrl": "/api/attachments/" + id + "/content",
 	}
 }
 
-func mailAttachmentStateRecord(attachmentID, name, mime, storedPath string, sizeBytes int64, previewable bool) map[string]any {
+func mailAttachmentStateRecord(attachmentID, name, mime, storedPath string, sizeBytes int64, previewable bool, contentID, disposition string) map[string]any {
 	return map[string]any{
 		"id": attachmentID, "name": name, "mime": mime,
 		"size": formatBytes(sizeBytes), "sizeBytes": sizeBytes,
 		"storedName": storedPath, "previewable": previewable,
+		"contentId": contentID, "disposition": disposition,
 		"type": attachmentBadgeType(mime, name),
 	}
 }
@@ -217,7 +219,8 @@ func (s *Server) loadAttachmentRows(ctx context.Context, userID string, messageI
 		return byMessage, stateRecords, nil
 	}
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT ma.message_id, a.id, a.name, a.mime, a.size_bytes, a.stored_path, a.previewable
+		SELECT ma.message_id, a.id, a.name, a.mime, a.size_bytes, a.stored_path, a.previewable,
+		       ma.content_id, ma.disposition
 		FROM mail_message_attachments ma
 		JOIN attachments a ON a.id = ma.attachment_id AND a.user_id = $1
 		WHERE ma.message_id = ANY($2)
@@ -228,13 +231,13 @@ func (s *Server) loadAttachmentRows(ctx context.Context, userID string, messageI
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var messageID, id, name, mime, storedPath string
+		var messageID, id, name, mime, storedPath, contentID, disposition string
 		var sizeBytes int64
 		var previewable bool
-		if err := rows.Scan(&messageID, &id, &name, &mime, &sizeBytes, &storedPath, &previewable); err != nil {
+		if err := rows.Scan(&messageID, &id, &name, &mime, &sizeBytes, &storedPath, &previewable, &contentID, &disposition); err != nil {
 			continue
 		}
-		record := mailAttachmentStateRecord(id, name, mime, storedPath, sizeBytes, previewable)
+		record := mailAttachmentStateRecord(id, name, mime, storedPath, sizeBytes, previewable, contentID, disposition)
 		byMessage[messageID] = append(byMessage[messageID], mailAttachmentPublic(record))
 		stateRecords[id] = record
 	}
@@ -379,7 +382,7 @@ func (s *Server) loadAttachmentsByIDs(ctx context.Context, userID string, ids []
 		var sizeBytes int64
 		var previewable bool
 		if rows.Scan(&id, &name, &mime, &sizeBytes, &storedPath, &previewable) == nil {
-			result[id] = mailAttachmentStateRecord(id, name, mime, storedPath, sizeBytes, previewable)
+			result[id] = mailAttachmentStateRecord(id, name, mime, storedPath, sizeBytes, previewable, "", "")
 		}
 	}
 	return result, rows.Err()

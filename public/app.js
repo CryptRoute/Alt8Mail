@@ -36,22 +36,111 @@ const recipientLabel = (message) => {
 
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
-function safeEmailHtml(html) {
+const SAFE_EMAIL_STYLE_PROPERTIES = new Set([
+  "color", "background-color", "font-family", "font-size", "font-weight", "font-style",
+  "text-decoration", "text-align", "line-height", "letter-spacing", "vertical-align",
+  "margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
+  "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+  "border", "border-top", "border-right", "border-bottom", "border-left",
+  "border-color", "border-width", "border-style", "border-radius", "border-collapse",
+  "width", "max-width", "height", "max-height", "display", "white-space", "word-break",
+  "overflow-wrap", "list-style-type", "text-transform",
+]);
+
+function safeEmailStyle(value) {
+  const declarations = [];
+  for (const part of String(value || "").split(";")) {
+    const index = part.indexOf(":");
+    if (index < 0) continue;
+    const property = part.slice(0, index).trim().toLowerCase();
+    const declaration = part.slice(index + 1).trim();
+    if (!SAFE_EMAIL_STYLE_PROPERTIES.has(property) || !declaration) continue;
+    if (/url\s*\(|expression\s*\(|@import|[<>]/i.test(declaration)) continue;
+    declarations.push(`${property}: ${declaration}`);
+  }
+  return declarations.join("; ");
+}
+
+function emailImageProxyURL(source) {
+  return `/api/mail/image?url=${encodeURIComponent(source)}`;
+}
+
+function emailImageSource(source) {
+  const value = String(source || "").trim();
+  if (!value) return "";
+  if (/^cid:/i.test(value)) return "";
+  if (/^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|x-icon)/i.test(value)) return value;
+  if (/^https?:\/\//i.test(value)) return emailImageProxyURL(value);
+  if (/^\/\//.test(value)) return emailImageProxyURL(`https:${value}`);
+  return "";
+}
+
+function cidImageMap(message) {
+  const map = new Map();
+  for (const attachment of (message?.attachments || [])) {
+    if (!attachment.contentId || !String(attachment.mime || "").startsWith("image/")) continue;
+    const key = String(attachment.contentId).replace(/^<|>$/g, "").toLowerCase();
+    if (key && attachment.contentUrl) map.set(key, attachment.contentUrl);
+  }
+  return map;
+}
+
+function safeEmailHtml(html, { message = null, allowImages = true } = {}) {
   const template = document.createElement("template");
   template.innerHTML = String(html || "");
-  template.content.querySelectorAll("script, style, iframe, object, embed, form, link, meta, base").forEach((node) => node.remove());
+  template.content.querySelectorAll("script, style, iframe, object, embed, form, link, meta, base, svg, math").forEach((node) => node.remove());
+  const cidImages = cidImageMap(message);
   template.content.querySelectorAll("*").forEach((node) => {
     for (const attribute of Array.from(node.attributes)) {
       const name = attribute.name.toLowerCase();
-      if (name.startsWith("on") || name === "style" || name === "srcdoc") node.removeAttribute(attribute.name);
+      if (name.startsWith("on") || name === "srcdoc" || name === "formaction" || name === "srcset") node.removeAttribute(attribute.name);
+      if (name === "style") {
+        const safe = safeEmailStyle(attribute.value);
+        if (safe) node.setAttribute("style", safe);
+        else node.removeAttribute(attribute.name);
+      }
       if ((name === "href" || name === "src") && /^\s*javascript:/i.test(attribute.value)) node.removeAttribute(attribute.name);
     }
     if (node.tagName === "A") {
       node.setAttribute("target", "_blank");
-      node.setAttribute("rel", "noopener noreferrer");
+      node.setAttribute("rel", "noopener noreferrer nofollow");
+    }
+    if (node.tagName === "IMG") {
+      const source = node.getAttribute("src") || "";
+      let cidKey = /^cid:/i.test(source) ? source.slice(4).replace(/^<|>$/g, "").toLowerCase() : "";
+      if (cidKey.includes("%")) {
+        try { cidKey = decodeURIComponent(cidKey); } catch {}
+      }
+      const cidURL = cidKey ? cidImages.get(cidKey) : "";
+      node.removeAttribute("width");
+      node.removeAttribute("height");
+      node.setAttribute("decoding", "async");
+      node.setAttribute("referrerpolicy", "no-referrer");
+      node.setAttribute("class", "email-image");
+      if (cidURL) {
+        node.setAttribute("src", cidURL);
+      } else if (allowImages) {
+        const proxied = emailImageSource(source);
+        if (proxied) node.setAttribute("src", proxied);
+        else {
+          node.setAttribute("data-blocked-src", source);
+          node.setAttribute("src", "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=");
+          node.classList.add("is-blocked-image");
+        }
+      } else {
+        node.setAttribute("data-blocked-src", source);
+        node.setAttribute("src", "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=");
+        node.classList.add("is-blocked-image");
+      }
     }
   });
   return template.innerHTML;
+}
+
+function emailHasImages(html) {
+  const template = document.createElement("template");
+  template.innerHTML = String(html || "");
+  return Boolean(template.content.querySelector("img"));
 }
 
 function formatBytes(bytes) {
@@ -369,6 +458,7 @@ const DEFAULT_PREFERENCES = {
   signature: "",
   saveCopyEnabled: true,
   spellCheckEnabled: true,
+  autoLoadImages: true,
   autoAdvance: false,
   theme: "system",
   accent: "blue",
@@ -508,7 +598,13 @@ const state = {
   notifyCalendar: true,
   saveCopyEnabled: true,
   spellCheckEnabled: true,
+  autoLoadImages: true,
+  imageOverrides: new Set(),
   onboarding: { step: 0, saving: false, passwordChanged: false },
+  folderMenuTarget: "",
+  folderEditor: null,
+  moveRuleMode: false,
+  moveSearch: "",
   signatureEditor: null,
   signaturePickerSessionId: null,
   identityEditor: null,
@@ -714,6 +810,8 @@ const signatureEditorOverlay = document.getElementById("signatureEditorOverlay")
 const signaturePickerOverlay = document.getElementById("signaturePickerOverlay");
 const spellcheckOverlay = document.getElementById("spellcheckOverlay");
 const identityEditorOverlay = document.getElementById("identityEditorOverlay");
+const folderMenu = document.getElementById("folderMenu");
+const folderEditorOverlay = document.getElementById("folderEditorOverlay");
 let confirmResolver = null;
 
 function appConfirm({ title = "Confirm action", message = "", confirmLabel = "Confirm", cancelLabel = "Cancel", tone = "default", icon = "i-alert" } = {}) {
@@ -1658,9 +1756,13 @@ function showLogin() {
   if (signaturePickerOverlay) signaturePickerOverlay.hidden = true;
   if (spellcheckOverlay) spellcheckOverlay.hidden = true;
   if (identityEditorOverlay) identityEditorOverlay.hidden = true;
+  if (folderEditorOverlay) folderEditorOverlay.hidden = true;
+  if (folderMenu) folderMenu.hidden = true;
+  state.folderEditor = null;
   state.signatureEditor = null;
   state.identityEditor = null;
   state.spellcheck = null;
+  state.imageOverrides = new Set();
   document.body.classList.remove("onboarding-active");
   if (app) app.inert = false;
   if (state.pendingSends.length && state.user) {
@@ -2713,19 +2815,35 @@ function unreadCount(folderId) {
 }
 
 function folderBadge(folder) {
-  if (folder.id === "starred") return null;
-  if (folder.id === "drafts") {
-    const count = state.messages.filter((message) => message.folder === "drafts").length;
-    return count ? { count, neutral: true } : null;
+  if (folder.id === "starred" || folder.virtual) return null;
+  const mode = folder.badgeMode || "unread";
+  if (mode === "none") return null;
+  const count = mode === "total"
+    ? state.messages.filter((message) => message.folder === folder.id).length
+    : unreadCount(folder.id);
+  return count ? { count, neutral: mode === "total" } : null;
+}
+
+function folderSortValue(folder) {
+  return Number.isFinite(Number(folder.order)) ? Number(folder.order) : 999;
+}
+
+function folderDepth(folder, folders = state.folders) {
+  let depth = 0;
+  let parentId = folder.parentId || "";
+  const seen = new Set();
+  while (parentId && depth < 5 && !seen.has(parentId)) {
+    seen.add(parentId);
+    const parent = folders.find((item) => item.id === parentId);
+    if (!parent) break;
+    depth += 1;
+    parentId = parent.parentId || "";
   }
-  if (folder.id === "inbox" || folder.id === "spam") {
-    const count = unreadCount(folder.id);
-    return count ? { count, neutral: false } : null;
-  }
-  return null;
+  return depth;
 }
 
 function renderFolders() {
+  const folders = (state.folders || []).slice().sort((a, b) => folderSortValue(a) - folderSortValue(b));
   const sections = [
     { key: "favorites", label: "Favorites" },
     { key: "folders", label: "Folders" }
@@ -2733,26 +2851,249 @@ function renderFolders() {
   let html = "";
   for (const section of sections) {
     html += `<div class="folder-section">${section.label}</div>`;
-    state.folders.filter((folder) => folder.section === section.key).forEach((folder) => {
+    folders.filter((folder) => folder.section === section.key).forEach((folder) => {
       const active = state.task === "mail" && state.folder === folder.id && !state.query;
       const badge = folderBadge(folder);
-      html += `<button class="folder-item${active ? " is-active" : ""}" data-folder="${esc(folder.id)}" type="button"${active ? ' aria-current="page"' : ""}>
-        <svg class="icon" aria-hidden="true"><use href="#${esc(folder.icon)}"/></svg>
-        <span class="folder-name">${esc(folder.label)}</span>
-        ${badge ? `<span class="folder-badge${badge.neutral ? " neutral" : ""}">${badge.count}</span>` : ""}
-      </button>`;
+      const depth = folderDepth(folder, folders);
+      const color = folder.color ? ` style="color:${esc(folder.color)}"` : "";
+      html += `<div class="folder-row${active ? " is-active" : ""}${depth ? " is-child" : ""}" data-folder-row="${esc(folder.id)}" style="--folder-depth:${depth}">
+        <button class="folder-item${active ? " is-active" : ""}" data-folder="${esc(folder.id)}" type="button"${active ? ' aria-current="page"' : ""} title="${esc(folder.label)}">
+          <svg class="icon" aria-hidden="true"${color}><use href="#${esc(folder.icon || "i-folder")}"/></svg>
+          <span class="folder-name">${esc(folder.label)}</span>
+          ${badge ? `<span class="folder-badge${badge.neutral ? " neutral" : ""}" data-folder-badge="${esc(folder.id)}">${badge.count > 999 ? "999+" : badge.count}</span>` : ""}
+        </button>
+        <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"><span aria-hidden="true">⋯</span></button>
+      </div>`;
     });
     if (section.key === "favorites") {
       const scheduledCount = state.pendingSends.filter((item) => item.scheduled).length;
       const active = state.task === "scheduled";
-      html += `<button class="folder-item${active ? " is-active" : ""}" data-open-scheduled type="button"${active ? ' aria-current="page"' : ""}>
+      html += `<div class="folder-row"><button class="folder-item${active ? " is-active" : ""}" data-open-scheduled type="button"${active ? ' aria-current="page"' : ""}>
         <svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg>
         <span class="folder-name">Scheduled</span>
         ${scheduledCount ? `<span class="folder-badge neutral">${scheduledCount}</span>` : ""}
-      </button>`;
+      </button></div>`;
     }
   }
   folderList.innerHTML = html;
+}
+
+function folderMenuSystem(folder) {
+  return Boolean(folder.system || ["inbox", "starred", "sent", "drafts", "archive", "spam", "trash"].includes(folder.id));
+}
+
+const folderMenuIcon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+
+function folderMenuHTML(folder) {
+  const system = folderMenuSystem(folder);
+  const emptyDisabled = system && folder.id !== "spam" && folder.id !== "trash";
+  const disabled = (condition) => condition ? " disabled" : "";
+  return `<div class="folder-menu-head"><svg class="icon" aria-hidden="true"><use href="#${esc(folder.icon || "i-folder")}"/></svg><div><strong>${esc(folder.label)}</strong><span>${system ? "Primary folder" : "Custom folder"}</span></div></div>
+    <button type="button" data-folder-action="create-subfolder"${disabled(Boolean(folder.virtual))}>${folderMenuIcon("plus")}Create new subfolder</button>
+    <button type="button" data-folder-action="rename"${disabled(system)}>${folderMenuIcon("file")}Rename</button>
+    <button type="button" data-folder-action="color">${folderMenuIcon("tag")}Change color<span class="menu-chevron">›</span></button>
+    <button type="button" data-folder-action="count">${folderMenuIcon("sliders")}Change folder count<span class="menu-chevron">›</span></button>
+    <div class="folder-menu-sep"></div>
+    <button type="button" data-folder-action="move"${disabled(system)}>${folderMenuIcon("folder")}Move</button>
+    <button type="button" data-folder-action="delete"${disabled(system)}>${folderMenuIcon("trash")}Delete</button>
+    <button type="button" data-folder-action="empty"${disabled(emptyDisabled)}>${folderMenuIcon("archive")}Empty</button>
+    <div class="folder-menu-sep"></div>
+    <button type="button" data-folder-action="mark-read">${folderMenuIcon("mail")}Mark all as read</button>
+    <div class="folder-menu-sep"></div>
+    <button type="button" data-folder-action="favorite">${folderMenuIcon("star")}${folder.section === "favorites" ? "Remove from Favorites" : "Add to Favorites"}</button>
+    <button type="button" data-folder-action="up">${folderMenuIcon("chevron-down")}Move up</button>
+    <button type="button" data-folder-action="down">${folderMenuIcon("chevron-down")}Move down</button>`;
+}
+
+function openFolderMenu(folderId, event) {
+  const folder = (state.folders || []).find((item) => item.id === folderId);
+  if (!folder || !folderMenu) return;
+  state.folderMenuTarget = folderId;
+  folderMenu.innerHTML = folderMenuHTML(folder);
+  folderMenu.hidden = false;
+  const rect = event?.currentTarget?.getBoundingClientRect?.() || { left: event?.clientX || 120, right: event?.clientX || 120, bottom: event?.clientY || 120, top: event?.clientY || 120 };
+  const width = 286;
+  const left = Math.min(window.innerWidth - width - 10, Math.max(10, event?.clientX ? event.clientX : rect.right + 6));
+  const top = Math.min(window.innerHeight - folderMenu.offsetHeight - 10, Math.max(10, event?.clientY ? event.clientY : rect.bottom + 4));
+  folderMenu.style.left = `${left}px`;
+  folderMenu.style.top = `${top}px`;
+  folderMenu.style.width = `${width}px`;
+}
+
+function closeFolderMenu() {
+  if (folderMenu) folderMenu.hidden = true;
+  state.folderMenuTarget = "";
+}
+
+function folderMenuFolder() {
+  return (state.folders || []).find((item) => item.id === state.folderMenuTarget) || null;
+}
+
+function openFolderSubmenu(kind) {
+  const folder = folderMenuFolder();
+  if (!folder) return;
+  if (kind === "color") {
+    folderMenu.innerHTML = `<div class="folder-subhead"><button type="button" data-folder-submenu-back>‹</button><strong>Change color</strong></div>
+      <div class="folder-color-grid">
+        ${["", "#2563eb", "#0f766e", "#6d28d9", "#be123c", "#b45309", "#475569", "#0369a1", "#4d7c0f"].map((color) => `<button type="button" data-folder-color="${color}" class="${(folder.color || "") === color ? "is-active" : ""}" title="${color || "Default"}"><span style="${color ? `--swatch:${color}` : ""}"></span>${color ? "" : "Default"}</button>`).join("")}
+      </div>`;
+    return;
+  }
+  folderMenu.innerHTML = `<div class="folder-subhead"><button type="button" data-folder-submenu-back>‹</button><strong>Show in folder</strong></div>
+    ${[["unread", "Unread messages"], ["total", "All messages"], ["none", "No count"]].map(([value, label]) => `<button type="button" data-folder-badge-mode="${value}" class="${(folder.badgeMode || "unread") === value ? "is-active" : ""}"><span class="folder-count-choice">${value === "none" ? "—" : value === "total" ? "All" : "Unread"}</span>${esc(label)}${(folder.badgeMode || "unread") === value ? `<span class="folder-check">✓</span>` : ""}</button>`).join("")}`;
+}
+
+function openFolderMoveMenu() {
+  const folder = folderMenuFolder();
+  if (!folder) return;
+  const descendants = new Set();
+  const collect = (id) => (state.folders || []).filter((item) => item.parentId === id).forEach((child) => { descendants.add(child.id); collect(child.id); });
+  collect(folder.id);
+  const candidates = (state.folders || []).filter((item) => item.id !== folder.id && !descendants.has(item.id) && !item.virtual);
+  folderMenu.innerHTML = `<div class="folder-subhead"><button type="button" data-folder-submenu-back>‹</button><strong>Move folder</strong></div>
+    <button type="button" data-folder-parent-id=""><span class="folder-count-choice">/</span>Top level</button>
+    ${candidates.map((item) => `<button type="button" data-folder-parent-id="${esc(item.id)}"><span class="folder-count-choice"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg></span>${esc(item.label)}</button>`).join("")}`;
+}
+
+async function loadFolders() {
+  try {
+    const data = await api("/api/folders");
+    state.folders = data.folders || [];
+    renderFolders();
+  } catch (error) { showError(error); }
+}
+
+function openFolderEditor(mode = "create", folder = null, parentId = "") {
+  state.folderEditor = { mode, id: folder?.id || "", parentId: folder?.parentId || parentId };
+  document.getElementById("folderEditorTitle").textContent = mode === "rename" ? "Rename folder" : "New folder";
+  document.getElementById("folderEditorSubtitle").textContent = mode === "rename" ? "Rename a custom folder. Primary folders stay fixed." : "Create a folder for rules and for moving messages.";
+  document.getElementById("folderEditorName").value = folder?.label || "";
+  document.getElementById("folderEditorColor").value = folder?.color || "";
+  const parent = document.getElementById("folderEditorParent");
+  const excluded = new Set();
+  if (folder) {
+    excluded.add(folder.id);
+    const collect = (id) => (state.folders || []).filter((item) => item.parentId === id).forEach((child) => { excluded.add(child.id); collect(child.id); });
+    collect(folder.id);
+  }
+  parent.innerHTML = `<option value="">Top level</option>` + (state.folders || [])
+    .filter((item) => !item.virtual && !excluded.has(item.id))
+    .map((item) => `<option value="${esc(item.id)}"${state.folderEditor.parentId === item.id ? " selected" : ""}>${esc(item.label)}</option>`).join("");
+  parent.disabled = mode === "rename";
+  document.getElementById("folderEditorError").hidden = true;
+  document.getElementById("folderEditorSave").textContent = mode === "rename" ? "Save changes" : "Create folder";
+  folderEditorOverlay.hidden = false;
+  setTimeout(() => document.getElementById("folderEditorName")?.focus(), 70);
+}
+
+function closeFolderEditor() {
+  folderEditorOverlay.hidden = true;
+  state.folderEditor = null;
+}
+
+async function saveFolderEditor() {
+  const editor = state.folderEditor;
+  if (!editor) return;
+  const name = document.getElementById("folderEditorName").value.trim();
+  const parentId = document.getElementById("folderEditorParent").value;
+  const color = document.getElementById("folderEditorColor").value;
+  const error = document.getElementById("folderEditorError");
+  const button = document.getElementById("folderEditorSave");
+  if (!name) { error.textContent = "Enter a folder name."; error.hidden = false; return; }
+  button.disabled = true;
+  try {
+    if (editor.mode === "rename") {
+      await api(`/api/folders/${encodeURIComponent(editor.id)}`, { method: "PATCH", body: { label: name, color } });
+    } else {
+      await api("/api/folders", { method: "POST", body: { label: name, parentId, color } });
+    }
+    closeFolderEditor();
+    closeFolderMenu();
+    await loadFolders();
+    await refreshMailbox({ quiet: true });
+    if (editor.mode === "rename") {
+      try { state.sieve = await api("/api/sieve"); renderRules(); } catch {}
+    }
+    showToast(editor.mode === "rename" ? "Folder renamed" : "Folder created");
+  } catch (saveError) {
+    error.textContent = saveError.message || "Could not save the folder.";
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function patchFolder(id, body, message = "Folder updated") {
+  try {
+    await api(`/api/folders/${encodeURIComponent(id)}`, { method: "PATCH", body });
+    await loadFolders();
+    closeFolderMenu();
+    showToast(message);
+  } catch (error) { showError(error); }
+}
+
+async function folderMenuAction(action) {
+  const folder = folderMenuFolder();
+  if (!folder) return;
+  if (action === "create-subfolder") { closeFolderMenu(); openFolderEditor("create", null, folder.id); return; }
+  if (action === "rename") { closeFolderMenu(); openFolderEditor("rename", folder); return; }
+  if (action === "color") { openFolderSubmenu("color"); return; }
+  if (action === "count") { openFolderSubmenu("count"); return; }
+  if (action === "move") { openFolderMoveMenu(); return; }
+  if (action === "favorite") {
+    await patchFolder(folder.id, { section: folder.section === "favorites" ? "folders" : "favorites" }, folder.section === "favorites" ? "Removed from Favorites" : "Added to Favorites");
+    return;
+  }
+  if (action === "mark-read") {
+    closeFolderMenu();
+    try {
+      const result = await api(`/api/folders/${encodeURIComponent(folder.id)}/mark-read`, { method: "POST", body: {} });
+      await refreshMailbox({ quiet: true });
+      showToast(`${result.affected || 0} message${result.affected === 1 ? "" : "s"} marked read`);
+    } catch (error) { showError(error); }
+    return;
+  }
+  if (action === "empty") {
+    closeFolderMenu();
+    if (!(await appConfirm({ title: `Empty ${folder.label}?`, message: "Every message in this folder will be permanently deleted. This cannot be undone.", confirmLabel: "Empty folder", tone: "danger" }))) return;
+    try {
+      const result = await api(`/api/folders/${encodeURIComponent(folder.id)}/empty`, { method: "POST", body: {} });
+      await refreshMailbox({ quiet: true });
+      showToast(`${result.removed || 0} message${result.removed === 1 ? "" : "s"} removed`);
+    } catch (error) { showError(error); }
+    return;
+  }
+  if (action === "delete") {
+    closeFolderMenu();
+    if (!(await appConfirm({ title: `Delete ${folder.label}?`, message: "Messages in this folder move to Trash. The folder and its rules are removed.", confirmLabel: "Delete folder", tone: "danger" }))) return;
+    try {
+      await api(`/api/folders/${encodeURIComponent(folder.id)}`, { method: "DELETE" });
+      state.sieve = await api("/api/sieve");
+      await loadFolders();
+      await refreshMailbox({ quiet: true });
+      renderRules();
+      showToast("Folder deleted");
+    } catch (error) { showError(error); }
+    return;
+  }
+  if (action === "up" || action === "down") {
+    closeFolderMenu();
+    const sorted = (state.folders || []).slice().sort((a, b) => folderSortValue(a) - folderSortValue(b));
+    const sectionFolders = sorted.filter((item) => item.section === folder.section && !item.virtual);
+    const sectionIndex = sectionFolders.findIndex((item) => item.id === folder.id);
+    const targetIndex = action === "up" ? sectionIndex - 1 : sectionIndex + 1;
+    if (sectionIndex < 0 || targetIndex < 0 || targetIndex >= sectionFolders.length) return;
+    const target = sectionFolders[targetIndex];
+    const index = sorted.findIndex((item) => item.id === folder.id);
+    const swap = sorted.findIndex((item) => item.id === target.id);
+    [sorted[index], sorted[swap]] = [sorted[swap], sorted[index]];
+    try {
+      await api("/api/folders/order", { method: "PUT", body: { ids: sorted.map((item) => item.id) } });
+      state.folders = sorted.map((item, order) => ({ ...item, order }));
+      renderFolders();
+      showToast("Folder order saved");
+    } catch (error) { showError(error); }
+  }
 }
 
 /* ============================================================
@@ -2960,7 +3301,29 @@ function externalBannerMarkup(thread) {
   </div>`;
 }
 
+function spamMessageBanner(message) {
+  if (message.folder !== "spam") return "";
+  return `<div class="spam-quarantine-banner" data-spam-banner="${esc(message.id)}">
+    <span class="spam-shield"><svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg></span>
+    <div class="spam-banner-copy">
+      <strong>Alt8Mail flagged this message as Junk</strong>
+      <p>Remote images, attachment previews/downloads and saving files are blocked for your safety. Report it as not spam to trust this sender, or move it to Inbox once.</p>
+    </div>
+    <div class="spam-banner-actions">
+      <button class="btn-primary small" data-report-not-spam="${esc(message.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Report Not Spam</button>
+      <button class="btn-secondary small" data-move-inbox="${esc(message.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-inbox"/></svg>Move to Inbox</button>
+    </div>
+  </div>`;
+}
+
+function blockedImagesBanner(message, imagesAllowed) {
+  if (message.folder === "spam" || imagesAllowed || !emailHasImages(message.bodyHtml)) return "";
+  return `<div class="email-image-blocked"><svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg><div><strong>Images are blocked</strong><span>Load remote images through the Alt8Mail privacy proxy for this message.</span></div><button class="btn-secondary small" data-show-images="${esc(message.id)}" type="button">Show images</button></div>`;
+}
+
 function threadMessageMarkup(message, expanded) {
+  const spamMessage = message.folder === "spam";
+  const imagesAllowed = !spamMessage && (state.preferences.autoLoadImages !== false || state.imageOverrides.has(message.id));
   const outgoing = isSentLike(message);
   const sender = message.from || { name: "Unknown", email: "", initials: "?", color: "#64748b" };
   const peerLabel = outgoing ? `to ${recipientLabel(message)}` : "to me";
@@ -2970,6 +3333,8 @@ function threadMessageMarkup(message, expanded) {
     ? `<span class="chip-cat" style="--cat:${CATEGORIES[key].color}"><span class="cat-dot"></span>${esc(CATEGORIES[key].label)}</span>`
     : "").join("");
   const body = expanded ? `<div class="thread-body">
+      ${spamMessageBanner(message)}
+      ${blockedImagesBanner(message, imagesAllowed)}
       <div class="trust-line${trust.tone === "danger" ? " is-external" : ""}">
         <svg class="icon" aria-hidden="true"><use href="#${trust.tone === "ok" ? "i-shield-check" : "i-alert"}"/></svg>
         <span class="trust-strong">${esc(trust.text)}</span>
@@ -2978,7 +3343,7 @@ function threadMessageMarkup(message, expanded) {
         ${message.external ? threadAuthChips(message) : ""}
         <button class="trust-details" data-details="${esc(message.id)}" type="button">Message details</button>
       </div>
-      <div class="email-body">${safeEmailHtml(message.bodyHtml || `<p>${esc(message.snippet || "")}</p>`)}</div>
+      <div class="email-body${imagesAllowed ? "" : " images-blocked"}">${safeEmailHtml(message.bodyHtml || `<p>${esc(message.snippet || "")}</p>`, { message, allowImages: imagesAllowed })}</div>
       ${meetingMarkup(message)}
       ${attachmentMarkup(message.attachments, message)}
       <div class="thread-message-actions">
@@ -3068,29 +3433,34 @@ function renderReader({ preserveScroll = false } = {}) {
   const dateRange = first && last && formatListWhen(first.date) !== formatListWhen(last.date)
     ? `${formatListWhen(first.date)} – ${formatListWhen(last.date)}`
     : formatListWhen(last.date);
+  const readerIndex = state.viewThreads.findIndex((item) => item.id === thread.id);
+  const canPrev = readerIndex > 0;
+  const canNext = readerIndex >= 0 && readerIndex < state.viewThreads.length - 1;
+  const canMoveInbox = thread.messages.some((message) => ["spam", "archive", "trash"].includes(message.folder));
   readerContent.innerHTML = `
-    <div class="subject-card">
-      <div class="reader-subject">
-        <h2>${esc(threadSubject(thread))}</h2>
-        <button class="star-btn${thread.starred ? " is-starred" : ""}" data-thread-star-reader="${esc(thread.id)}" type="button" aria-label="${thread.starred ? "Remove star" : "Star conversation"}" aria-pressed="${thread.starred ? "true" : "false"}">
-          <svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>
-        </button>
+    <div class="reader-subject-bar">
+      <button class="reader-subject-close" data-close-reader type="button" aria-label="Close this conversation" title="Close conversation"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+      <div class="reader-subject-main reader-subject">
+        <div class="reader-subject-line"><h2>${esc(threadSubject(thread))}</h2>
+          <button class="star-btn${thread.starred ? " is-starred" : ""}" data-thread-star-reader="${esc(thread.id)}" type="button" aria-label="${thread.starred ? "Remove star" : "Star conversation"}" aria-pressed="${thread.starred ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>
+        </div>
+        <div class="reader-subject-meta">
+          ${tagExternal ? '<span class="chip-class external">External</span>' : external ? "" : `<span class="chip-class ${esc(classification.toLowerCase())}">${esc(classification)}</span>`}
+          ${categories}
+          <span class="thread-meta-chip">${thread.count} message${thread.count === 1 ? "" : "s"}</span>
+          ${unread ? `<span class="thread-meta-chip is-unread">${unread} unread</span>` : ""}
+          ${thread.flagged ? '<span class="thread-meta-chip is-flagged"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>Follow-up</span>' : ""}
+          ${thread.pinned ? '<span class="thread-meta-chip is-pinned"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>Pinned</span>' : ""}
+          ${thread.messages.some((message) => message.spamReport) ? '<span class="thread-meta-chip is-reported">Reported to security</span>' : ""}
+          <span class="thread-meta-chip">${esc(dateRange)}</span>
+          <span class="reader-subject-participants">${esc(participants || "No participants")}</span>
+          ${individualView ? "" : `<button class="link-btn reader-subject-expand" id="readerExpandAll" type="button">Expand all</button><button class="link-btn reader-subject-expand" id="readerCollapseAll" type="button">Collapse all</button>`}
+        </div>
       </div>
-      <div class="reader-tags">
-        ${tagExternal ? '<span class="chip-class external">External</span>' : external ? "" : `<span class="chip-class ${esc(classification.toLowerCase())}">${esc(classification)}</span>`}
-        ${categories}
-        <span class="thread-meta-chip">${thread.count} message${thread.count === 1 ? "" : "s"}</span>
-        ${unread ? `<span class="thread-meta-chip is-unread">${unread} unread</span>` : ""}
-        ${thread.flagged ? '<span class="thread-meta-chip is-flagged"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>Follow-up</span>' : ""}
-        ${thread.pinned ? '<span class="thread-meta-chip is-pinned"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>Pinned</span>' : ""}
-        ${thread.messages.some((message) => message.spamReport) ? '<span class="thread-meta-chip is-reported">Reported to security</span>' : ""}
-        <span class="thread-meta-chip">${esc(dateRange)}</span>
-      </div>
-      <div class="thread-overview">
-        <span class="thread-participants">${esc(participants || "No participants")}</span>
-        <span class="thread-overview-spacer"></span>
-        ${individualView ? "" : `<button class="link-btn" id="readerExpandAll" type="button">Expand all</button>
-        <button class="link-btn" id="readerCollapseAll" type="button">Collapse all</button>`}
+      <div class="reader-subject-actions">
+        ${canMoveInbox ? `<button class="reader-subject-inbox" data-reader-inbox type="button" title="Move to Inbox"><svg class="icon" aria-hidden="true"><use href="#i-inbox"/></svg><span>Inbox</span></button>` : ""}
+        <button class="reader-subject-nav" data-reader-prev type="button" aria-label="Previous conversation" title="Previous conversation"${canPrev ? "" : " disabled"}><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
+        <button class="reader-subject-nav" data-reader-next type="button" aria-label="Next conversation" title="Next conversation"${canNext ? "" : " disabled"}><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
       </div>
     </div>
     ${readerAiCardMarkup(thread)}
@@ -3147,7 +3517,7 @@ function updateReaderAiCard() {
     if (markup) existing.outerHTML = markup;
     else existing.remove();
   } else if (markup) {
-    const subject = readerContent.querySelector(".subject-card");
+    const subject = readerContent.querySelector(".reader-subject-bar");
     if (subject) subject.insertAdjacentHTML("afterend", markup);
   }
 }
@@ -3314,21 +3684,23 @@ function meetingMarkup(message) {
 function attachmentMarkup(files, message = null) {
   if (!files || !files.length) return "";
   const messageId = message?.id || "";
-  return `<div class="attachments" data-attachment-message="${esc(messageId)}">
-    <div class="attach-title-row"><h3 class="attach-title"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>${files.length} attachment${files.length === 1 ? "" : "s"} · Scanned</h3>
-      ${messageId ? `<button class="link-btn attach-save-all" data-save-all-attachments="${esc(messageId)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg>Save all to Cabinet</button>` : ""}
+  const blocked = message?.folder === "spam";
+  return `<div class="attachments${blocked ? " is-blocked" : ""}" data-attachment-message="${esc(messageId)}">
+    <div class="attach-title-row"><h3 class="attach-title"><svg class="icon" aria-hidden="true"><use href="#${blocked ? "i-lock" : "i-shield-check"}"/></svg>${files.length} attachment${files.length === 1 ? "" : "s"} · ${blocked ? "Blocked in Junk" : "Scanned"}</h3>
+      ${messageId && !blocked ? `<button class="link-btn attach-save-all" data-save-all-attachments="${esc(messageId)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg>Save all to Cabinet</button>` : ""}
     </div>
     <div class="attach-grid">
       ${files.map((file) => `<div class="attach-item">
-        <button class="attach" data-attachment="${esc(file.name)}" data-file-id="${esc(file.id || "")}" data-file-type="${esc(file.type)}" data-file-size="${esc(file.size || formatBytes(file.sizeBytes))}" data-file-mime="${esc(file.mime || "")}" data-file-url="${esc(file.contentUrl || "")}" data-file-previewable="${file.previewable ? "true" : "false"}" type="button">
+        <button class="attach${blocked ? " is-blocked" : ""}" data-attachment="${esc(file.name)}" data-file-id="${esc(file.id || "")}" data-file-type="${esc(file.type)}" data-file-size="${esc(file.size || formatBytes(file.sizeBytes))}" data-file-mime="${esc(file.mime || "")}" data-file-url="${esc(file.contentUrl || "")}" data-file-previewable="${file.previewable ? "true" : "false"}" type="button"${blocked ? ` aria-label="Attachment blocked while this message is in Junk"` : ""}>
           <span class="attach-badge" data-type="${esc(file.type)}">${esc(file.type)}</span>
-          <span class="attach-info"><span class="attach-name">${esc(file.name)}</span><span class="attach-size">${esc(file.size || formatBytes(file.sizeBytes))}</span></span>
-          <svg class="icon attach-safe" role="img" aria-label="Scanned, no threats" title="Scanned, no threats"><use href="#i-shield-check"/></svg>
-          <span class="attach-preview-hint">${file.previewable ? "Preview" : "Info"}</span>
+          <span class="attach-info"><span class="attach-name">${esc(file.name)}</span><span class="attach-size">${blocked ? "Blocked in Junk" : esc(file.size || formatBytes(file.sizeBytes))}</span></span>
+          <svg class="icon attach-safe" role="img" aria-label="${blocked ? "Blocked in Junk" : "Scanned, no threats"}" title="${blocked ? "Blocked in Junk" : "Scanned, no threats"}"><use href="#${blocked ? "i-lock" : "i-shield-check"}"/></svg>
+          <span class="attach-preview-hint">${blocked ? "Locked" : file.previewable ? "Preview" : "Info"}</span>
         </button>
-        ${file.id ? `<button class="attach-save" data-save-attachment="${esc(file.id)}" data-save-attachment-name="${esc(file.name)}" type="button" title="Save to Cabinet" aria-label="Save ${esc(file.name)} to Cabinet"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg></button>` : ""}
+        ${file.id && !blocked ? `<button class="attach-save" data-save-attachment="${esc(file.id)}" data-save-attachment-name="${esc(file.name)}" type="button" title="Save to Cabinet" aria-label="Save ${esc(file.name)} to Cabinet"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg></button>` : ""}
       </div>`).join("")}
     </div>
+    ${blocked ? `<p class="attach-blocked-note"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Previews, downloads and saving to Cabinet are disabled while this message is in Junk. Move it to Inbox to continue.</p>` : ""}
   </div>`;
 }
 
@@ -3366,6 +3738,10 @@ async function saveAttachmentToCabinet(attachmentId, name, { quiet = false } = {
 
 async function saveAllAttachmentsToCabinet(messageId) {
   const message = messageById(messageId);
+  if (message?.folder === "spam") {
+    showToast("Attachments in Junk cannot be saved. Move this message to Inbox first.", "error");
+    return;
+  }
   const attachments = (message?.attachments || []).filter((file) => file.id);
   if (!attachments.length) {
     showToast("No saved attachments were found on this message", "error");
@@ -3697,11 +4073,126 @@ function replyTarget(thread) {
   return incoming.length ? incoming[incoming.length - 1] : thread.latest;
 }
 
-async function performBulkAction(action, folderValue) {
+function senderEmailsForThreads(threads) {
+  const senders = new Set();
+  for (const thread of threads || []) {
+    for (const message of thread.messages || []) {
+      const email = normalizeEmail(message.from?.email);
+      if (!email || message.draft || isSentLike(message)) continue;
+      if ((state.aliases || []).some((alias) => normalizeEmail(alias.email) === email)) continue;
+      senders.add(email);
+    }
+  }
+  return Array.from(senders);
+}
+
+function autoSenderRule(rule) {
+  return String(rule?.name || "").startsWith("Auto · ");
+}
+
+function ruleSenderAddresses(rule) {
+  return (rule?.conditions || [])
+    .filter((condition) => condition.field === "from" && ["is", "contains", "matches"].includes(condition.operator))
+    .map((condition) => String(condition.value || "").toLowerCase());
+}
+
+function ruleMovesSenderTo(rule, email, folder) {
+  if (String(rule?.action?.type) !== "move" || String(rule?.action?.value) !== folder) return false;
+  const candidate = String(email || "").toLowerCase();
+  return ruleSenderAddresses(rule).some((value) => value === candidate || value.includes(candidate));
+}
+
+async function updateSenderRules(emails, targetFolder, { keepRules = false, message = "" } = {}) {
+  if (!emails.length || !state.sieve) return false;
+  if (keepRules) return false;
+  const target = (state.folders || []).find((folder) => folder.id === targetFolder);
+  if (!target) return false;
+  const rules = (state.sieve.rules || []).slice();
+  const next = rules.filter((rule) => {
+    if (String(rule?.action?.type) !== "move" || autoSenderRule(rule) === false && !ruleSenderAddresses(rule).length) return true;
+    const addresses = ruleSenderAddresses(rule);
+    return !addresses.some((value) => emails.some((email) => value === email || value.includes(email)));
+  });
+  for (const email of emails) {
+    const rule = {
+      id: `rule_${uid("r").slice(2, 14)}`,
+      name: truncateText(`Auto · ${target.label}: ${email}`, 80),
+      match: "all",
+      conditions: [{ field: "from", operator: "is", value: email }],
+      action: { type: "move", value: target.id },
+      enabled: true,
+      priority: next.length + 1
+    };
+    if (!next.some((item) => item.name.toLowerCase() === rule.name.toLowerCase())) next.push(rule);
+  }
+  const changed = JSON.stringify(next) !== JSON.stringify(state.sieve.rules || []);
+  if (!changed) return false;
+  return saveSieve(next, state.sieve.vacation, message || `Sender rule saved to route this address to ${target.label}`);
+}
+
+function truncateText(value, limit) {
+  const text = String(value || "");
+  return text.length > limit ? text.slice(0, limit) : text;
+}
+
+async function removeSenderFolderRules(emails, folder) {
+  if (!emails.length || !state.sieve) return false;
+  const rules = (state.sieve.rules || []).filter((rule) =>
+    !emails.some((email) => ruleMovesSenderTo(rule, email, folder))
+  );
+  if (rules.length === (state.sieve.rules || []).length) return false;
+  return saveSieve(rules, state.sieve.vacation, "Junk sender rule removed");
+}
+
+async function sendSpamActionForMessage(messageId, action) {
+  try {
+    await api("/api/messages/actions", { method: "POST", body: { ids: [messageId], action } });
+    await refreshMailbox({ quiet: true });
+    renderList();
+    renderReader({ preserveScroll: true });
+    syncSelectionUi();
+    return true;
+  } catch (error) {
+    showError(error);
+    return false;
+  }
+}
+
+async function reportNotSpamMessage(messageId) {
+  const message = messageById(messageId);
+  if (!message) return;
+  const email = normalizeEmail(message.from?.email);
+  if (email) {
+    await updateSenderRules([email], "inbox", { message: "Sender trusted — future mail goes to Inbox" });
+  }
+  if (await sendSpamActionForMessage(messageId, "notSpam")) {
+    showToast("Reported not spam · sender will reach Inbox");
+  }
+  renderFolders();
+}
+
+async function moveSpamMessageToInbox(messageId) {
+  if (await sendSpamActionForMessage(messageId, "notSpam")) {
+    showToast("Moved to Inbox · no sender rule created");
+  }
+}
+
+async function performBulkAction(action, folderValue, options = {}) {
   const threads = state.selectedIds.size ? selectedThreads() : currentThread() ? [currentThread()] : [];
   if (!threads.length) {
     showToast("Select a conversation first");
     return;
+  }
+  if (action === "notSpam" && !options.confirmed) {
+    const ok = await appConfirm({
+      title: "Report not junk?",
+      message: "This moves the message to Inbox and removes any of your rules that sent this sender to Junk.",
+      confirmLabel: "Yes, not junk",
+      tone: "default",
+      icon: "i-shield-check"
+    });
+    if (!ok) return;
+    options = { ...options, confirmed: true };
   }
   const ids = actionMessageIds(threads);
   if (!ids.length) {
@@ -3734,6 +4225,15 @@ async function performBulkAction(action, folderValue) {
     if (closedReader && previousThreadId && state.preferences.autoAdvance && ["archive", "delete", "spam", "notSpam"].includes(action) && state.task === "mail") {
       const next = state.viewThreads[Math.min(previousIndex, Math.max(0, state.viewThreads.length - 1))];
       if (next) selectThread(next.id, { keepSelection: true });
+    }
+    const senders = senderEmailsForThreads(threads);
+    if (!options.keepRules && senders.length) {
+      if (action === "spam") await updateSenderRules(senders, "spam");
+      else if (action === "move" && options.alwaysRule) await updateSenderRules(senders, folderValue);
+      else if (action === "notSpam") {
+        if (options.inboxRule) await updateSenderRules(senders, "inbox");
+        else await removeSenderFolderRules(senders, "spam");
+      }
     }
     if (undoable && result.undoToken) {
       showToast(`${verb} · ${count} conversation${count === 1 ? "" : "s"}`, "Undo", async () => {
@@ -3916,7 +4416,9 @@ async function submitSpamReport() {
     renderList();
     renderReader();
     syncSelectionUi();
-    showToast("Reported to Alt8Mail Security · message moved to Junk");
+    const senders = senderEmailsForThreads([thread]);
+    if (senders.length) await updateSenderRules(senders, "spam", { message: "Reported sender set to go to Junk" });
+    showToast("Reported to Alt8Mail Security · sender blocked pending review");
   } catch (error) {
     reportSubmit.classList.remove("is-busy");
     reportSubmit.disabled = false;
@@ -3935,6 +4437,16 @@ function markThreadUnread(thread) {
   api("/api/messages/actions", { method: "POST", body: { ids, action: "markUnread" } })
     .then(() => showToast("Marked as unread"))
     .catch((error) => { showError(error); refreshMailbox({ quiet: true }).catch(() => {}); });
+}
+
+function closeReaderPane() {
+  state.selectedThreadId = null;
+  state.expandedThreadId = null;
+  state.expanded = new Set();
+  document.body.classList.remove("reader-open");
+  renderList();
+  renderReader();
+  writeAppHash({ replace: true });
 }
 
 function readerAction(action) {
@@ -7571,8 +8083,9 @@ function syncRuleActionInputs() {
   if (previousMode && previousMode !== type) value = type === "move" ? "archive" : "";
   wrap.dataset.mode = type;
   if (type === "move") {
-    if (!["inbox", "archive", "spam", "trash"].includes(value)) value = "archive";
-    input.outerHTML = `<select id="ruleActionValue" aria-label="Folder"><option value="inbox"${value === "inbox" ? " selected" : ""}>Inbox</option><option value="archive"${value === "archive" ? " selected" : ""}>Archive</option><option value="spam"${value === "spam" ? " selected" : ""}>Junk</option><option value="trash"${value === "trash" ? " selected" : ""}>Trash</option></select>`;
+    const folders = (state.folders || []).filter((folder) => !folder.virtual).sort((a, b) => folderSortValue(a) - folderSortValue(b));
+    if (!folders.some((folder) => folder.id === value)) value = folders.some((folder) => folder.id === "archive") ? "archive" : (folders[0]?.id || "inbox");
+    input.outerHTML = `<select id="ruleActionValue" aria-label="Folder">${folders.map((folder) => `<option value="${esc(folder.id)}"${value === folder.id ? " selected" : ""}>${esc(folder.label)}</option>`).join("")}</select>`;
   } else {
     input.outerHTML = `<input id="ruleActionValue" type="email" value="${esc(value)}" placeholder="name@example.com" autocomplete="off">`;
   }
@@ -9560,6 +10073,85 @@ function closeHelp() {
   }
 }
 
+function moveRecentKey() {
+  return `a8m_move_recent_${normalizeEmail(state.user?.email || "anonymous")}`;
+}
+
+function moveRecentFolders() {
+  try {
+    const ids = JSON.parse(localStorage.getItem(moveRecentKey()) || "[]");
+    return (Array.isArray(ids) ? ids : []).filter((id) => (state.folders || []).some((folder) => folder.id === id)).slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
+function rememberMoveFolder(id) {
+  const current = moveRecentFolders().filter((item) => item !== id);
+  current.unshift(id);
+  try { localStorage.setItem(moveRecentKey(), JSON.stringify(current.slice(0, 4))); } catch {}
+}
+
+function moveFolderRow(folder) {
+  const current = state.task === "mail" && state.query === "" && state.folder === folder.id;
+  return `<button class="move-folder-row${current ? " is-current" : ""}" type="button" data-move-target="${esc(folder.id)}"><span class="move-folder-icon"${folder.color ? ` style="color:${esc(folder.color)}"` : ""}><svg class="icon" aria-hidden="true"><use href="#${esc(folder.icon || "i-folder")}"/></svg></span><span>${esc(folder.label)}</span>${current ? `<small>current</small>` : ""}</button>`;
+}
+
+function moveMenuListMarkup() {
+  const query = state.moveSearch.trim().toLowerCase();
+  const folders = (state.folders || [])
+    .filter((folder) => !folder.virtual && folder.id !== "starred")
+    .filter((folder) => !query || folder.label.toLowerCase().includes(query))
+    .sort((a, b) => folderSortValue(a) - folderSortValue(b));
+  return folders.map(moveFolderRow).join("") || `<div class="move-empty">No folder matches “${esc(state.moveSearch)}”.</div>`;
+}
+
+function renderMoveMenu() {
+  const recent = moveRecentFolders();
+  const recentRows = (recent.length ? recent : ["trash", "archive"]).map((id) => (state.folders || []).find((folder) => folder.id === id)).filter(Boolean);
+  moveMenu.innerHTML = `<div class="move-panel-head"><span><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>${state.moveRuleMode ? "Always move to" : "Move to"}</span><button class="icon-btn" data-move-close type="button" aria-label="Close move menu"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="move-search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input data-move-search type="search" value="${esc(state.moveSearch)}" placeholder="Search for a folder" autocomplete="off"></div>
+    <div class="move-scroll">
+      <div class="move-section-label">Most Recent</div>
+      ${recentRows.map(moveFolderRow).join("")}
+      <div class="move-create-row"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><input data-move-new-folder type="text" maxlength="60" placeholder="Create new folder"><button type="button" data-move-create>Save</button></div>
+      <button class="move-rule-mode${state.moveRuleMode ? " is-active" : ""}" type="button" data-move-rule-toggle aria-pressed="${state.moveRuleMode ? "true" : "false"}"><span class="move-rule-check">${state.moveRuleMode ? "✓" : ""}</span><span><strong>Always move mail from this sender</strong><small>${state.moveRuleMode ? "Choosing a folder also creates a rule and a matching destination in Settings → Rules." : "Create a rule so future messages skip the wrong folder."}</small></span></button>
+      <div class="move-section-label">${state.moveRuleMode ? "Choose the permanent destination" : "All folders"}</div>
+      <div class="move-folder-list" data-move-list>${moveMenuListMarkup()}</div>
+    </div>`;
+}
+
+function openMoveMenu(anchor) {
+  if (!currentThread() && !state.selectedIds.size) return;
+  state.moveSearch = "";
+  state.moveRuleMode = false;
+  renderMoveMenu();
+  positionMenu(moveMenu, anchor);
+  setTimeout(() => moveMenu.querySelector("[data-move-search]")?.focus(), 50);
+}
+
+async function chooseMoveTarget(folderId) {
+  const folder = (state.folders || []).find((item) => item.id === folderId);
+  if (!folder) return;
+  const always = state.moveRuleMode;
+  closeMenus();
+  rememberMoveFolder(folderId);
+  await performBulkAction("move", folderId, { alwaysRule: always });
+  if (always) showToast(`Future mail from this sender will go to ${folder.label}`);
+}
+
+async function createFolderFromMoveMenu() {
+  const input = moveMenu.querySelector("[data-move-new-folder]");
+  const label = String(input?.value || "").trim();
+  if (!label) { input?.focus(); return; }
+  try {
+    const data = await api("/api/folders", { method: "POST", body: { label, parentId: "", color: "" } });
+    await loadFolders();
+    state.moveSearch = "";
+    if (data.folder?.id) await chooseMoveTarget(data.folder.id);
+  } catch (error) { showError(error); }
+}
+
 function positionMenu(menu, anchor) {
   menu.hidden = false;
   const rect = anchor.getBoundingClientRect();
@@ -9572,6 +10164,8 @@ function positionMenu(menu, anchor) {
 function closeMenus() {
   newMenu.hidden = true;
   moveMenu.hidden = true;
+  if (folderMenu) folderMenu.hidden = true;
+  state.folderMenuTarget = "";
   state.bulkMoveOpen = false;
   const bulkMenu = document.getElementById("bulkMoveMenu");
   if (bulkMenu) bulkMenu.hidden = true;
@@ -10320,6 +10914,10 @@ function bindEvents() {
     if (threadPin) { event.stopPropagation(); event.preventDefault(); toggleThreadPin(threadById(threadPin.getAttribute("data-thread-pin"))); return; }
     const threadStar = target.closest("[data-thread-star]");
     if (threadStar) { event.stopPropagation(); event.preventDefault(); toggleThreadStar(threadStar.getAttribute("data-thread-star")); return; }
+    if (target.closest("[data-close-reader]")) { event.preventDefault(); closeReaderPane(); return; }
+    if (target.closest("[data-reader-prev]")) { event.preventDefault(); navigateThread(-1); return; }
+    if (target.closest("[data-reader-next]")) { event.preventDefault(); navigateThread(1); return; }
+    if (target.closest("[data-reader-inbox]")) { event.preventDefault(); performBulkAction("notSpam", null, { confirmed: true, keepRules: true }); return; }
     const threadStarReader = target.closest("[data-thread-star-reader]");
     if (threadStarReader) { event.preventDefault(); toggleThreadStar(threadStarReader.getAttribute("data-thread-star-reader")); return; }
     const messageStar = target.closest("[data-message-star]");
@@ -10340,6 +10938,33 @@ function bindEvents() {
     if (trustToggle) {
       event.preventDefault();
       toggleTrust(trustToggle.getAttribute("data-trust-toggle"), trustToggle.getAttribute("data-trust-value") === "true");
+      return;
+    }
+    const showImagesButton = target.closest("[data-show-images]");
+    if (showImagesButton) {
+      event.preventDefault();
+      state.imageOverrides.add(showImagesButton.getAttribute("data-show-images"));
+      renderReader({ preserveScroll: true });
+      return;
+    }
+    const reportNotSpamButton = target.closest("[data-report-not-spam]");
+    if (reportNotSpamButton) {
+      event.preventDefault();
+      reportNotSpamButton.disabled = true;
+      reportNotSpamMessage(reportNotSpamButton.getAttribute("data-report-not-spam"));
+      return;
+    }
+    const moveInboxButton = target.closest("[data-move-inbox]");
+    if (moveInboxButton) {
+      event.preventDefault();
+      moveInboxButton.disabled = true;
+      moveSpamMessageToInbox(moveInboxButton.getAttribute("data-move-inbox"));
+      return;
+    }
+    const attachmentMessageId = target.closest("[data-attachment-message]")?.getAttribute("data-attachment-message");
+    if (attachmentMessageId && messageById(attachmentMessageId)?.folder === "spam") {
+      event.preventDefault();
+      showToast("Attachments in Junk are blocked. Move this message to Inbox first.", "error");
       return;
     }
     const saveAllAttachments = target.closest("[data-save-all-attachments]");
@@ -10383,7 +11008,13 @@ function bindEvents() {
     if (bulkMove) {
       event.preventDefault();
       state.bulkMoveOpen = !state.bulkMoveOpen;
-      document.getElementById("bulkMoveMenu").hidden = !state.bulkMoveOpen;
+      const menu = document.getElementById("bulkMoveMenu");
+      if (menu) {
+        menu.innerHTML = (state.folders || []).filter((folder) => !folder.virtual).map((folder) =>
+          `<button type="button" data-bulk-move-folder="${esc(folder.id)}"><svg class="icon" aria-hidden="true"><use href="#${esc(folder.icon || "i-folder")}"/></svg>${esc(folder.label)}</button>`
+        ).join("");
+        menu.hidden = !state.bulkMoveOpen;
+      }
       return;
     }
     const bulkMoveFolder = target.closest("[data-bulk-move-folder]");
@@ -10658,6 +11289,64 @@ function bindEvents() {
     }
   });
 
+  moveMenu?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (event.target.closest("[data-move-close]")) { closeMenus(); return; }
+    if (event.target.closest("[data-move-rule-toggle]")) {
+      state.moveRuleMode = !state.moveRuleMode;
+      renderMoveMenu();
+      moveMenu.querySelector("[data-move-search]")?.focus();
+      return;
+    }
+    if (event.target.closest("[data-move-create]")) { createFolderFromMoveMenu(); return; }
+    const target = event.target.closest("[data-move-target]");
+    if (target) chooseMoveTarget(target.getAttribute("data-move-target"));
+  });
+  moveMenu?.addEventListener("input", (event) => {
+    if (!event.target.matches("[data-move-search]")) return;
+    state.moveSearch = event.target.value;
+    const list = moveMenu.querySelector("[data-move-list]");
+    if (list) list.innerHTML = moveMenuListMarkup();
+  });
+  document.getElementById("folderAddBtn")?.addEventListener("click", () => openFolderEditor("create"));
+  folderMenu?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (event.target.closest("[data-folder-submenu-back]")) {
+      openFolderMenu(state.folderMenuTarget, { clientX: parseInt(folderMenu.style.left, 10) || 120, clientY: parseInt(folderMenu.style.top, 10) || 120 });
+      return;
+    }
+    const color = event.target.closest("[data-folder-color]");
+    if (color) { const folder = folderMenuFolder(); if (folder) patchFolder(folder.id, { color: color.getAttribute("data-folder-color") }, "Folder color saved"); return; }
+    const badgeMode = event.target.closest("[data-folder-badge-mode]");
+    if (badgeMode) { const folder = folderMenuFolder(); if (folder) patchFolder(folder.id, { badgeMode: badgeMode.getAttribute("data-folder-badge-mode") }, "Folder count setting saved"); return; }
+    const parent = event.target.closest("[data-folder-parent-id]");
+    if (parent) { const folder = folderMenuFolder(); if (folder) { patchFolder(folder.id, { parentId: parent.getAttribute("data-folder-parent-id") }, "Folder moved"); } return; }
+    const action = event.target.closest("[data-folder-action]");
+    if (action) { event.preventDefault(); folderMenuAction(action.getAttribute("data-folder-action")); }
+  });
+  document.addEventListener("click", (event) => {
+    const more = event.target.closest("[data-folder-menu]");
+    if (more) {
+      event.preventDefault();
+      event.stopPropagation();
+      openFolderMenu(more.getAttribute("data-folder-menu"), event);
+      return;
+    }
+    if (!event.target.closest("#folderMenu")) closeFolderMenu();
+  });
+  document.addEventListener("contextmenu", (event) => {
+    const row = event.target.closest("[data-folder-row]");
+    if (!row) return;
+    event.preventDefault();
+    openFolderMenu(row.getAttribute("data-folder-row"), { clientX: event.clientX, clientY: event.clientY });
+  });
+  folderEditorOverlay?.addEventListener("click", (event) => {
+    if (event.target === folderEditorOverlay || event.target.closest("#folderEditorClose") || event.target.closest("#folderEditorCancel")) {
+      closeFolderEditor();
+      return;
+    }
+    if (event.target.closest("#folderEditorSave")) saveFolderEditor();
+  });
   document.getElementById("folderToggle").addEventListener("click", openDrawer);
   document.getElementById("drawerClose").addEventListener("click", closeDrawer);
   document.getElementById("cmdCompose").addEventListener("click", () => openCompose());
@@ -10739,8 +11428,8 @@ function bindEvents() {
     if (!currentThread() && !state.selectedIds.size) return;
     event.stopPropagation();
     newMenu.hidden = true;
-    if (state.selectedIds.size) { state.bulkMoveOpen = true; const menu = document.getElementById("bulkMoveMenu"); if (menu) menu.hidden = false; return; }
-    if (moveMenu.hidden) positionMenu(moveMenu, event.currentTarget); else moveMenu.hidden = true;
+    if (!moveMenu.hidden) { moveMenu.hidden = true; return; }
+    openMoveMenu(event.currentTarget);
   });
   document.getElementById("cmdRefresh").addEventListener("click", () => {
     refreshMailbox({ quiet: false }).catch(showError);
@@ -11413,6 +12102,8 @@ function bindEvents() {
       if (!storageOverlay.hidden) { storageOverlay.hidden = true; return; }
       if (!shareOverlay.hidden) { shareOverlay.hidden = true; return; }
       if (!recoveryOverlay.hidden) { recoveryOverlay.hidden = true; return; }
+      if (folderEditorOverlay && !folderEditorOverlay.hidden) { closeFolderEditor(); return; }
+      if (folderMenu && !folderMenu.hidden) { closeFolderMenu(); return; }
       if (state.editingTaskId) { state.editingTaskId = null; renderTasks(); return; }
       if (!detailsOverlay.hidden) { closeDetails(); return; }
       if (!eventOverlay.hidden) { closeEventDialog(); return; }

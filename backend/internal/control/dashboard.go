@@ -137,7 +137,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, sess *s
 		"host": host, "hostHistory": s.probe.hostHistory(), "queueMessages": queue,
 		"services": services, "configSync": syncRun, "recentAudit": recentAudit,
 		"certificates": certificates, "deliverabilityHealth": s.deliverabilityHealth(ctx),
-		"version": s.version, "checkedAt": nowRFC3339(),
+		"securityReports": s.securityReportSummary(ctx),
+		"version":         s.version, "checkedAt": nowRFC3339(),
 		"serverTime": nowRFC3339(), "session": sessionView(sess),
 	})
 }

@@ -58,7 +58,7 @@ func (s *Server) getFolders(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"folders": stateSlice(state, "folders")})
+	writeJSON(w, http.StatusOK, map[string]any{"folders": toAnyFolders(stateFolderList(state))})
 }
 
 func (s *Server) getAliases(w http.ResponseWriter, r *http.Request) {
@@ -284,8 +284,7 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "BAD_ACTION", "Unknown bulk action")
 		return
 	}
-	validFolder := map[string]bool{"inbox": true, "sent": true, "drafts": true, "archive": true, "spam": true, "trash": true}
-	if body.Action == "move" && !validFolder[body.Folder] {
+	if body.Action == "move" && strings.TrimSpace(body.Folder) == "" {
 		writeError(w, http.StatusBadRequest, "BAD_FOLDER", "Choose a valid destination folder")
 		return
 	}
@@ -301,6 +300,14 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(targets) == 0 {
 			return fail(http.StatusNotFound, "NOT_FOUND", "No matching messages")
+		}
+		moveIMAPFolder := ""
+		if body.Action == "move" {
+			folder := findStateFolder(state, body.Folder)
+			if folder == nil || stateBool(folder, "virtual") {
+				return fail(http.StatusBadRequest, "BAD_FOLDER", "Choose a valid destination folder")
+			}
+			moveIMAPFolder = folderIMAPName(state, body.Folder)
 		}
 		if policy.Mail.Quarantine && !webmailAdminRole(sess.User.Role) {
 			for _, message := range targets {
@@ -402,6 +409,9 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 					"at": nowISO(), "reason": truncate(firstNonEmpty(body.Reason, "spam"), 40),
 					"note": truncate(body.Note, 500), "source": "reading-pane",
 				}
+				if err := s.recordSecurityReport(r.Context(), sess.User, message, body.Reason, body.Note); err != nil {
+					return err
+				}
 			}
 			if !permanent && targetFolder != originalFolder {
 				message["folder"] = targetFolder
@@ -410,6 +420,9 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 				entry["destinationFolder"] = targetFolder
 				entry["destinationIMAPFolder"] = targetFolder
 				mutation.TargetFolder = targetFolder
+				if body.Action == "move" {
+					mutation.TargetIMAPFolder = moveIMAPFolder
+				}
 			}
 			if mutation.MessageID != "" && mutation.SourceFolder != "" {
 				mutations = append(mutations, mutation)

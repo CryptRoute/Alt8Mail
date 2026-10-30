@@ -16,14 +16,16 @@ var appToIMAPFolder = map[string]string{
 }
 
 type imapAction struct {
-	MessageID    string
-	SourceUID    int64
-	SourceFolder string
-	TargetFolder string
-	SetSeen      *bool
-	SetFlagged   *bool
-	MarkDeleted  bool
-	ClearDeleted bool
+	MessageID        string
+	SourceUID        int64
+	SourceFolder     string
+	SourceIMAPFolder string
+	TargetFolder     string
+	TargetIMAPFolder string
+	SetSeen          *bool
+	SetFlagged       *bool
+	MarkDeleted      bool
+	ClearDeleted     bool
 }
 
 func imapFolderFor(appFolder string) string {
@@ -58,8 +60,15 @@ func (s *Server) applyIMAPActions(user userRecord, actions []imapAction) error {
 		return fmt.Errorf("IMAP login: %w", err)
 	}
 	ensureIMAPFolders(conn)
+	state, _ := s.loadState(context.Background(), user.ID)
 	for _, action := range actions {
-		source := imapFolderFor(action.SourceFolder)
+		source := action.SourceIMAPFolder
+		if source == "" {
+			source = imapFolderFor(action.SourceFolder)
+			if source == "" && state != nil {
+				source = folderIMAPName(state, action.SourceFolder)
+			}
+		}
 		if source == "" || (action.MessageID == "" && action.SourceUID == 0) {
 			continue
 		}
@@ -81,7 +90,13 @@ func (s *Server) applyIMAPActions(user userRecord, actions []imapAction) error {
 			}
 		}
 		if action.TargetFolder != "" && action.TargetFolder != action.SourceFolder {
-			target := imapFolderFor(action.TargetFolder)
+			target := action.TargetIMAPFolder
+			if target == "" {
+				target = imapFolderFor(action.TargetFolder)
+				if target == "" && state != nil {
+					target = folderIMAPName(state, action.TargetFolder)
+				}
+			}
 			if target == "" {
 				continue
 			}

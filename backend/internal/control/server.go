@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 //go:embed web/*
@@ -104,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAccessRoutes(mux)
 	s.registerAPIRoutes(mux)
 	s.registerNotificationRoutes(mux)
+	s.registerSecurityReportRoutes(mux)
 	s.registerUpdateRoutes(mux)
 	s.registerTerminalRoutes(mux)
 

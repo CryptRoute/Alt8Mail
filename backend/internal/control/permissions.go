@@ -7,8 +7,8 @@ var allPermissions = []string{
 	"domains.read", "mailboxes.read", "aliases.read", "tls.read", "delivery.read",
 	"services.read", "logs.read", "imports.read", "backups.read", "cron.read",
 	"server.read", "database.read", "api.read", "notifications.read", "access.read",
-	"audit.read",
-	"admin.manage", "group.manage", "sessions.manage", "settings.write",
+	"audit.read", "security.read",
+	"admin.manage", "group.manage", "sessions.manage", "settings.write", "security.manage",
 	"mail.manage", "cron.manage", "tls.manage", "delivery.manage", "services.manage",
 	"imports.manage", "backups.manage", "server.manage", "database.manage",
 	"api.manage", "notifications.manage",
@@ -19,7 +19,7 @@ var readPermissions = []string{
 	"domains.read", "mailboxes.read", "aliases.read", "tls.read", "delivery.read",
 	"services.read", "logs.read", "imports.read", "backups.read", "cron.read",
 	"server.read", "database.read", "api.read", "notifications.read", "access.read",
-	"audit.read",
+	"audit.read", "security.read",
 }
 
 func rolePermissions(role string) []string {
@@ -32,12 +32,12 @@ func rolePermissions(role string) []string {
 			"group.manage", "sessions.manage", "settings.write", "mail.manage",
 			"cron.manage", "tls.manage", "delivery.manage", "services.manage",
 			"imports.manage", "backups.manage", "server.manage", "database.manage",
-			"api.manage", "notifications.manage",
+			"api.manage", "notifications.manage", "security.manage",
 		)
 		return uniqueStrings(out)
 	case "operator":
 		out := append([]string{}, readPermissions...)
-		out = append(out, "mail.manage", "delivery.manage", "imports.manage", "services.manage")
+		out = append(out, "mail.manage", "delivery.manage", "imports.manage", "services.manage", "security.manage")
 		return uniqueStrings(out)
 	default:
 		return append([]string{}, readPermissions...)

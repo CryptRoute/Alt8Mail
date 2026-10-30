@@ -33,7 +33,7 @@ func (s *Server) getSieveScript(w http.ResponseWriter, r *http.Request) {
 	}
 	script := stateString(stateMap(state, "sieve"), "script")
 	if script == "" {
-		script = renderSieve(stateMap(state, "sieve"), sess.User.Email)
+		script = renderSieveWithFolders(stateMap(state, "sieve"), sess.User.Email, folderMapForSieve(state))
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -50,7 +50,17 @@ func (s *Server) saveSieve(w http.ResponseWriter, r *http.Request) {
 	var response map[string]any
 	err := s.withState(sess.User.ID, sess.User.TenantID, func(state map[string]any) error {
 		ensureStateCollections(state)
-		rules, vacation, errors := normalizeSieve(body, []string{"inbox", "archive", "spam", "trash"})
+		allowedFolders := []string{}
+		permittedFolders := map[string]bool{}
+		for _, folder := range stateFolderList(state) {
+			id := stateString(folder, "id")
+			if id == "" || stateBool(folder, "virtual") {
+				continue
+			}
+			allowedFolders = append(allowedFolders, id)
+			permittedFolders[id] = true
+		}
+		rules, vacation, errors := normalizeSieve(body, allowedFolders)
 		if len(errors) > 0 {
 			return failDetails(http.StatusBadRequest, "SIEVE_VALIDATION", "Sieve rules need attention", map[string]any{"errors": errors})
 		}
@@ -84,7 +94,6 @@ func (s *Server) saveSieve(w http.ResponseWriter, r *http.Request) {
 		if err := validateForwardingPolicy(forwarding, sess.User.Email, s.tenantMailDomains(r.Context(), sess.User.TenantID), policy.Mail); err != nil {
 			return err
 		}
-		permittedFolders := map[string]bool{"inbox": true, "archive": true, "spam": true, "trash": true}
 		for _, raw := range rules {
 			rule, _ := raw.(map[string]any)
 			action, _ := rule["action"].(map[string]any)
@@ -98,7 +107,7 @@ func (s *Server) saveSieve(w http.ResponseWriter, r *http.Request) {
 			"revision": revision, "updatedAt": now, "rules": rules, "vacation": vacation,
 			"forwarding": forwarding,
 		}
-		script := renderSieve(next, sess.User.Email)
+		script := renderSieveWithFolders(next, sess.User.Email, folderMapForSieve(state))
 		if err := s.pushSieveScript(r.Context(), sess.User, script); err != nil {
 			return failDetails(http.StatusBadGateway, "SIEVE_SERVICE", "Dovecot rejected the Sieve ruleset", map[string]any{"error": err.Error()})
 		}
@@ -290,7 +299,7 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 			}
 			assign("signature", text)
 		}
-		for _, key := range []string{"signatureEnabled", "saveCopyEnabled", "spellCheckEnabled", "autoAdvance", "markReadOnOpen", "defaultReceipt", "notifyDesktop", "notifySound", "notifyCalendar", "externalWarnings"} {
+		for _, key := range []string{"signatureEnabled", "saveCopyEnabled", "spellCheckEnabled", "autoLoadImages", "autoAdvance", "markReadOnOpen", "defaultReceipt", "notifyDesktop", "notifySound", "notifyCalendar", "externalWarnings"} {
 			if value, ok := patch[key]; ok {
 				flag, valid := value.(bool)
 				if !valid {

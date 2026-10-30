@@ -10,12 +10,13 @@ import {
 import {
   renderTLS, renderAccess, renderAPIKeys, renderWebhooks, renderNotifications,
 } from './views-security.js';
+import { renderSecurityReports } from './views-security-reports.js';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '0.10.0-control';
+const APP_VERSION = '0.11.0-control';
 
 const state = {
   csrf: '',
@@ -61,6 +62,7 @@ const NAV_GROUPS = [
     { key: 'suppressions', label: 'Suppressions', icon: 'shield-off', href: '#/suppressions', perm: 'delivery.read', desc: 'Inbound and outbound deny maps' },
   ] },
   { label: 'Security', items: [
+    { key: 'security-reports', label: 'Security reports', icon: 'alert', href: '#/security-reports', perm: 'security.read', desc: 'Reported phishing, spam and malware across tenants' },
     { key: 'tls', label: 'TLS certificates', icon: 'lock', href: '#/tls', perm: 'tls.read', desc: 'Issue, renew and inspect certificates' },
     { key: 'access', label: 'Access & security', icon: 'users', href: '#/access', perm: 'access.read', desc: 'Panel roles, groups, sessions and audit' },
     { key: 'api', label: 'API keys', icon: 'key', href: '#/api', perm: 'api.read', desc: 'Scoped keys for the public REST API' },
@@ -96,6 +98,7 @@ const ROUTE_DEFS = {
   queue: { title: 'Mail queue', crumb: 'Deliverability', nav: 'queue', perm: 'delivery.read', render: renderQueue },
   relay: { title: 'Relay & outbound', crumb: 'Deliverability', nav: 'relay', perm: 'delivery.read', render: renderRelay },
   suppressions: { title: 'Suppressions', crumb: 'Deliverability', nav: 'suppressions', perm: 'delivery.read', render: renderSuppressions },
+  'security-reports': { title: 'Security reports', crumb: 'Security', nav: 'security-reports', perm: 'security.read', render: renderSecurityReports },
   tls: { title: 'TLS certificates', crumb: 'Security', nav: 'tls', perm: 'tls.read', render: renderTLS },
   access: { title: 'Access & security', crumb: 'Security', nav: 'access', perm: 'access.read', render: renderAccess },
   api: { title: 'API keys', crumb: 'Security', nav: 'api', perm: 'api.read', render: renderAPIKeys },
@@ -703,6 +706,8 @@ function handleLiveEvent(payload) {
     'domain.created': ['A mail domain was created', 'info'],
     'domain.deleted': ['A mail domain was deleted', 'warning'],
     'user.created': ['A mailbox account was created', 'info'],
+    'security.report': ['A user reported a suspicious email', 'critical'],
+    'security.report_reviewed': ['A security report was reviewed', 'info'],
   }[event];
   if (significant) {
     const detail = payload?.data?.unit || payload?.data?.domain || payload?.data?.message || payload?.data?.certificate || '';
@@ -1045,6 +1050,9 @@ async function renderDashboard(ctx, params, query) {
   const recentAudit = Array.isArray(data.recentAudit) ? data.recentAudit : [];
   const deliverability = data.deliverabilityHealth || {};
   const deliverabilityIps = Array.isArray(deliverability.ips) ? deliverability.ips : [];
+  const securityReports = data.securityReports || {};
+  const pendingReports = Number(securityReports.counts?.pending || 0);
+  const latestReport = Array.isArray(securityReports.recent) ? securityReports.recent[0] : null;
   const queue = Number(data.queueMessages) || 0;
   const sync = data.configSync || {};
   const syncDrift = Array.isArray(sync.drift) ? sync.drift.filter((item) => item && item !== 'No drift detected') : [];
@@ -1067,6 +1075,7 @@ async function renderDashboard(ctx, params, query) {
       ${ui.statTile({ label: 'Deferrals · 30d', value: ui.num(data.deferrals || 0), detail: 'Temporary failures', iconName: 'clock', href: '#/delivery', tone: Number(data.deferrals) ? 'warning' : 'good' })}
       ${ui.statTile({ label: 'Services', value: `${activeServices}/${services.length}`, detail: activeServices === services.length ? 'All monitored units up' : 'Attention required', iconName: 'server', href: '#/services', tone: activeServices === services.length ? 'good' : 'critical' })}
     </div>
+    ${pendingReports ? `<a class="notice tone-critical security-report-alert mt-3" href="#/security-reports">${ui.icon('alert-circle', 17)}<div><strong>${ui.num(pendingReports)} security report${pendingReports === 1 ? '' : 's'} awaiting review</strong><p>${latestReport ? `${esc(latestReport.senderEmail || 'Unknown sender')} · ${esc(latestReport.reason || 'reported mail')}${latestReport.subject ? ` · ${esc(latestReport.subject)}` : ''}` : 'Reported senders are blocked at the Postfix policy layer while review is pending.'}</p></div><span class="btn btn-secondary btn-sm">Review reports ${ui.icon('arrow-up-right', 13)}</span></a>` : ''}
 
     <div class="grid grid-main mt-4">
       <section class="card">

@@ -113,6 +113,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/onboarding/complete", s.requireUser(s.completeOnboarding))
 	mux.HandleFunc("GET /api/bootstrap", s.requireUser(s.bootstrap))
 	mux.HandleFunc("GET /api/folders", s.requireUser(s.getFolders))
+	mux.HandleFunc("POST /api/folders", s.requireUser(s.createFolder))
+	mux.HandleFunc("PUT /api/folders/order", s.requireUser(s.reorderFolders))
+	mux.HandleFunc("PATCH /api/folders/{id}", s.requireUser(s.updateFolder))
+	mux.HandleFunc("DELETE /api/folders/{id}", s.requireUser(s.deleteFolder))
+	mux.HandleFunc("POST /api/folders/{id}/empty", s.requireUser(s.emptyFolder))
+	mux.HandleFunc("POST /api/folders/{id}/mark-read", s.requireUser(s.markFolderRead))
 	mux.HandleFunc("GET /api/aliases", s.requireUser(s.getAliases))
 	mux.HandleFunc("POST /api/password/change", s.requireUser(s.changePassword))
 	mux.HandleFunc("GET /api/preferences", s.requireUser(s.getPreferences))
@@ -179,6 +185,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/attachments", s.requireUser(s.uploadAttachment))
 	mux.HandleFunc("GET /api/attachments/{id}/content", s.requireUser(s.attachmentContent))
+	mux.HandleFunc("GET /api/mail/image", s.requireUser(s.mailRemoteImage))
 	mux.HandleFunc("GET /api/profile", s.requireUser(s.getProfile))
 	mux.HandleFunc("PATCH /api/profile", s.requireUser(s.updateProfile))
 	mux.HandleFunc("GET /api/security/app-passwords", s.requireUser(s.listAppPasswords))
@@ -973,7 +980,7 @@ func preferencesFor(user userRecord) map[string]any {
 		"timeZone": "UTC", "weekStart": "monday", "workStart": "09:00",
 		"workEnd": "17:00", "workDays": []int{1, 2, 3, 4, 5},
 		"signatureEnabled": true, "signature": "", "autoAdvance": false,
-		"saveCopyEnabled": true, "spellCheckEnabled": true,
+		"saveCopyEnabled": true, "spellCheckEnabled": true, "autoLoadImages": true,
 		"theme": "system", "accent": "blue", "density": "comfortable",
 		"markReadOnOpen": true, "inboxView": "grouped", "defaultPriority": "normal", "defaultReceipt": false,
 		"undoSendSeconds": 8, "notifyDesktop": true, "notifySound": false,
@@ -1006,13 +1013,13 @@ func percent(used, limit int64) float64 {
 
 func defaultFolders() []map[string]any {
 	return []map[string]any{
-		{"id": "inbox", "label": "Inbox", "icon": "i-inbox", "section": "favorites"},
-		{"id": "starred", "label": "Starred", "icon": "i-star", "section": "favorites", "virtual": true},
-		{"id": "sent", "label": "Sent", "icon": "i-send", "section": "folders"},
-		{"id": "drafts", "label": "Drafts", "icon": "i-file", "section": "folders"},
-		{"id": "archive", "label": "Archive", "icon": "i-archive", "section": "folders"},
-		{"id": "spam", "label": "Spam", "icon": "i-alert", "section": "folders"},
-		{"id": "trash", "label": "Trash", "icon": "i-trash", "section": "folders"},
+		{"id": "inbox", "label": "Inbox", "icon": "i-inbox", "section": "favorites", "system": true, "imapFolder": "INBOX", "order": 0, "badgeMode": "unread"},
+		{"id": "starred", "label": "Starred", "icon": "i-star", "section": "favorites", "virtual": true, "system": true, "order": 1, "badgeMode": "none"},
+		{"id": "sent", "label": "Sent", "icon": "i-send", "section": "folders", "system": true, "imapFolder": "Sent", "order": 2, "badgeMode": "unread"},
+		{"id": "drafts", "label": "Drafts", "icon": "i-file", "section": "folders", "system": true, "imapFolder": "Drafts", "order": 3, "badgeMode": "unread"},
+		{"id": "archive", "label": "Archive", "icon": "i-archive", "section": "folders", "system": true, "imapFolder": "Archive", "order": 4, "badgeMode": "unread"},
+		{"id": "spam", "label": "Spam", "icon": "i-alert", "section": "folders", "system": true, "imapFolder": "Junk", "order": 5, "badgeMode": "unread"},
+		{"id": "trash", "label": "Trash", "icon": "i-trash", "section": "folders", "system": true, "imapFolder": "Trash", "order": 6, "badgeMode": "unread"},
 	}
 }
 

@@ -367,6 +367,10 @@ func (s *Server) syncUserMailbox(ctx context.Context, user userRecord) (map[stri
 		s.recordSyncFailure(ctx, user, err)
 		return nil, err
 	}
+	customFolders := customFolderIMAPMap(state)
+	mapFolder := func(name string) (string, bool) {
+		return mapIMAPFolderWithCustom(name, customFolders)
+	}
 	fetched := []fetchedMail{}
 	flagUpdates := []imapFlagUpdate{}
 	folderCount := 0
@@ -377,12 +381,12 @@ func (s *Server) syncUserMailbox(ctx context.Context, user userRecord) (map[stri
 	deadline := time.Now().Add(syncBodyBudget)
 	remainingFolders := 0
 	for _, mailbox := range mailboxes {
-		if _, ok := mapIMAPFolder(mailbox); ok {
+		if _, ok := mapFolder(mailbox); ok {
 			remainingFolders++
 		}
 	}
 	for _, mailbox := range mailboxes {
-		appFolder, ok := mapIMAPFolder(mailbox)
+		appFolder, ok := mapFolder(mailbox)
 		if !ok {
 			continue
 		}
@@ -1212,8 +1216,16 @@ func storeImportedAttachment(uploadDir string, attachment parsedMailAttachment, 
 		"id": id, "name": safeFileName(attachment.Name), "type": attachmentBadgeType(mimeType, attachment.Name),
 		"mime": mimeType, "size": formatBytes(int64(len(attachment.Data))), "sizeBytes": len(attachment.Data),
 		"storedName": id, "previewable": previewable, "uploadedAt": nowISO(),
+		"contentId": strings.TrimSpace(attachment.ContentID), "disposition": attachment.Disposition,
 		"owner": map[string]any{"name": user.Name, "email": user.Email, "initials": user.Initials, "color": user.Color},
 	}, nil
+}
+
+func mapIMAPFolderWithCustom(name string, custom map[string]string) (string, bool) {
+	if id, ok := custom[strings.ToLower(strings.TrimSpace(name))]; ok {
+		return id, true
+	}
+	return mapIMAPFolder(name)
 }
 
 func mapIMAPFolder(name string) (string, bool) {

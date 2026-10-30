@@ -248,6 +248,10 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "FILE_CONTENT", "Upload a file attachment before adding it to storage")
 		return
 	}
+	if s.attachmentIsQuarantined(r.Context(), sess.User.ID, body.AttachmentID) {
+		writeError(w, http.StatusForbidden, "SPAM_ATTACHMENT_BLOCKED", "Attachments in Junk cannot be saved until the message is moved to Inbox.")
+		return
+	}
 	var attachmentName, attachmentMIME, storedName string
 	if err := s.store.DB.QueryRow(r.Context(), `
 		SELECT name, mime, stored_path FROM attachments WHERE id=$1 AND user_id=$2
@@ -669,9 +673,25 @@ func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"attachment": publicAttachment(record)})
 }
 
+func (s *Server) attachmentIsQuarantined(ctx context.Context, userID, attachmentID string) bool {
+	var blocked bool
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM mail_message_attachments ma
+			JOIN mail_messages m ON m.id = ma.message_id
+			WHERE ma.attachment_id = $1 AND m.user_id = $2 AND m.folder = 'spam'
+		)
+	`, attachmentID, userID).Scan(&blocked)
+	return blocked
+}
+
 func (s *Server) attachmentContent(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	id := r.PathValue("id")
+	if s.attachmentIsQuarantined(r.Context(), sess.User.ID, id) {
+		writeError(w, http.StatusForbidden, "SPAM_ATTACHMENT_BLOCKED", "Attachments in Junk are blocked. Move the message to Inbox first.")
+		return
+	}
 	var name, mime, storedName string
 	var sizeBytes int64
 	var previewable bool

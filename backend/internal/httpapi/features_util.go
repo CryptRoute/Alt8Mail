@@ -301,6 +301,7 @@ func publicAttachment(record map[string]any) map[string]any {
 		"id": id, "name": stateString(record, "name"), "type": stateString(record, "type"),
 		"mime": stateString(record, "mime"), "size": stateString(record, "size"),
 		"sizeBytes": stateInt(record, "sizeBytes"), "previewable": stateBool(record, "previewable"),
+		"contentId": stateString(record, "contentId"), "disposition": stateString(record, "disposition"),
 		"contentUrl":  "/api/attachments/" + id + "/content",
 		"downloadUrl": "/api/attachments/" + id + "/content",
 	}

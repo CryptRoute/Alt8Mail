@@ -270,6 +270,14 @@ func ensureStateCollections(state map[string]any) {
 			state[key] = value
 		}
 	}
+	if len(stateSlice(state, "folders")) == 0 {
+		folders := []any{}
+		for _, folder := range defaultFolders() {
+			folders = append(folders, folder)
+		}
+		state["folders"] = folders
+	}
+	state["folders"] = normalizeFolderRecords(stateSlice(state, "folders"))
 	user := stateMap(state, "user")
 	if _, exists := user["trustedSenders"]; !exists {
 		user["trustedSenders"] = []any{}

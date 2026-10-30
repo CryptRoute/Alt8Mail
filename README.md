@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.2.7** platform release adds privacy-proxied remote and inline email images with a default-on display preference (Junk always blocks images and attachments), a Junk quarantine banner with **Report Not Spam** and **Move to Inbox**, automatic sender rules when mail is marked Junk, a cross-tenant **Security reports** review queue in System Control with immediate Postfix-policy sender blocking, custom folders with rich hover/right-click actions, a searchable **Move to** panel with recent folders and rule mode, and a slim reader subject bar with close and previous/next navigation.
+
 The **0.2.4** platform release adds mandatory first-login onboarding (display
 name, time zone, 12/24-hour time, language, theme and accent, temporary-password
 rotation and optional two-factor guidance), an admin user flow that picks the

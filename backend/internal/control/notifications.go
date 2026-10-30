@@ -21,6 +21,7 @@ var notificationEvents = []string{
 	"service.up", "user.created", "user.deleted", "domain.created",
 	"domain.deleted", "outbound.ip_discovered", "config.sync",
 	"system.updated", "system.update_failed", "ssl.imported", "ssl.assigned",
+	"security.report", "security.report_reviewed",
 }
 
 func (s *Server) registerNotificationRoutes(mux *http.ServeMux) {

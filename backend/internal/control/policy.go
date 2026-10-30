@@ -81,6 +81,11 @@ func (s *Server) policyDecision(ctx context.Context, attrs map[string]string) st
 	if domain == "" || recipient == "" {
 		return "action=DUNNO"
 	}
+	if blocked, err := s.securityReportBlocked(ctx, sender); err == nil && blocked {
+		return "action=REJECT 5.7.1 Sender blocked by Alt8Mail Security review"
+	} else if err != nil {
+		s.logger.Warn("security report policy lookup failed", "err", err)
+	}
 	clientIP := net.ParseIP(attrs["client_address"])
 	authenticated := strings.TrimSpace(attrs["sasl_username"]) != ""
 	localClient := clientIP != nil && (clientIP.IsLoopback() || clientIP.IsPrivate())
@@ -101,6 +106,29 @@ func (s *Server) policyDecision(ctx context.Context, attrs map[string]string) st
 		return "action=DUNNO"
 	}
 	return "action=DEFER 4.7.1 " + reason
+}
+
+// securityReportBlocked enforces user-submitted security reports at the SMTP
+// policy layer. Pending reports block immediately; dismissing a report removes
+// the block, while confirming it with domain scope widens the block.
+func (s *Server) securityReportBlocked(ctx context.Context, sender string) (bool, error) {
+	sender = strings.ToLower(strings.TrimSpace(sender))
+	if sender == "" || !strings.Contains(sender, "@") {
+		return false, nil
+	}
+	domain := emailDomain(sender)
+	var blocked bool
+	err := s.db.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM public.security_reports
+			WHERE status IN ('pending', 'confirmed')
+			  AND (
+			    (block_scope = 'address' AND lower(sender_email::text) = $1)
+			    OR (block_scope = 'domain' AND $2 <> '' AND lower(sender_domain) = $2)
+			  )
+		)
+	`, sender, domain).Scan(&blocked)
+	return blocked, err
 }
 
 func (s *Server) checkDomainCaps(ctx context.Context, domain, queueID, recipient string, size int64, sender, saslUser, client string) (string, bool) {

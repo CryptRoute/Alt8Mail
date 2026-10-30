@@ -192,6 +192,10 @@ func normalizeSieve(input map[string]any, folders []string) ([]any, map[string]a
 }
 
 func renderSieve(sieve map[string]any, email string) string {
+	return renderSieveWithFolders(sieve, email, nil)
+}
+
+func renderSieveWithFolders(sieve map[string]any, email string, folderNames map[string]string) string {
 	rulesRaw, _ := sieve["rules"].([]any)
 	requires := map[string]bool{}
 	for _, raw := range rulesRaw {
@@ -290,7 +294,7 @@ func renderSieve(sieve map[string]any, email string) string {
 			test = operator + " (" + strings.Join(tests, ", ") + ")"
 		}
 		lines = append(lines, "if "+test+" {")
-		for _, statement := range sieveActionStatements(rule) {
+		for _, statement := range sieveActionStatements(rule, folderNames) {
 			lines = append(lines, "  "+statement)
 		}
 		lines = append(lines, "}", "")
@@ -378,9 +382,9 @@ func sieveConditionTest(condition map[string]any) string {
 	return test
 }
 
-func sieveActionStatements(rule map[string]any) []string {
+func sieveActionStatements(rule map[string]any, folderNames map[string]string) []string {
 	action, _ := rule["action"].(map[string]any)
-	value := sieveFolderName(stateString(action, "value"))
+	value := sieveFolderName(stateString(action, "value"), folderNames)
 	switch stateString(action, "type") {
 	case "move":
 		return []string{"fileinto " + sieveQuote(value) + ";", "stop;"}
@@ -397,7 +401,12 @@ func sieveActionStatements(rule map[string]any) []string {
 	}
 }
 
-func sieveFolderName(value string) string {
+func sieveFolderName(value string, folderNames map[string]string) string {
+	if folderNames != nil {
+		if mapped := strings.TrimSpace(folderNames[value]); mapped != "" {
+			return mapped
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "inbox":
 		return "INBOX"
@@ -433,7 +442,7 @@ func publicSieve(state map[string]any, email string) map[string]any {
 	}
 	script := stateString(sieve, "script")
 	if script == "" {
-		script = renderSieve(sieve, email)
+		script = renderSieveWithFolders(sieve, email, folderMapForSieve(state))
 	}
 	return map[string]any{
 		"revision": stateInt(sieve, "revision"), "updatedAt": sieve["updatedAt"],
