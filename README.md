@@ -64,6 +64,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.1** release hardens the onboarding workspace: delegated-mailbox permission and signature-default fixes, faster batched IMAP migration with resumable per-folder checkpoints, IPv6-safe source connections, and clearer migration credentials when a notification email could not be delivered.
+
 The **0.3.0** platform release turns the customer admin into an onboarding and migration workspace: CSV/XLSX user import with generated credentials and branded notification email, a resumable IMAP/POP3 mailbox migration engine with validation, mailbox mapping, live progress and dashboard visibility, a dedicated user page with alias editing, signature and per-address signature management, vacation responders and delegated mailbox access, a raw RFC 822 message source viewer in webmail, and an edge-to-edge webmail layout.
 
 The **0.2.8** platform release lets users manage their own Junk by default: **Report Not Spam** and **Move to Inbox** work unless an organization turns on **Restrict Junk release to administrators** in the admin Mail policy. When enabled, members see an "Administrator release required" state in the Junk banner and the reader action is locked, while tenant administrators release mail from the Quarantine queue. The policy is returned to the webmail bootstrap so the UI and API agree.

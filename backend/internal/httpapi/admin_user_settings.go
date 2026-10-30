@@ -140,17 +140,17 @@ func signatureDefaultFlags(body signatureBody) (newFlag, replyFlag, forwardFlag 
 }
 
 func (s *Server) applySignatureDefaults(ctx context.Context, userID, signatureID string, newFlag, replyFlag, forwardFlag bool) {
+	_, _ = s.store.DB.Exec(ctx, `UPDATE mail_signatures SET default_new=$3 WHERE user_id=$1 AND id=$2`, userID, signatureID, newFlag)
+	_, _ = s.store.DB.Exec(ctx, `UPDATE mail_signatures SET default_reply=$3 WHERE user_id=$1 AND id=$2`, userID, signatureID, replyFlag)
+	_, _ = s.store.DB.Exec(ctx, `UPDATE mail_signatures SET default_forward=$3 WHERE user_id=$1 AND id=$2`, userID, signatureID, forwardFlag)
 	if newFlag {
 		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_signatures SET default_new=false WHERE user_id=$1 AND id<>$2`, userID, signatureID)
-		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_signatures SET default_new=true WHERE user_id=$1 AND id=$2`, userID, signatureID)
 	}
 	if replyFlag {
 		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_signatures SET default_reply=false WHERE user_id=$1 AND id<>$2`, userID, signatureID)
-		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_signatures SET default_reply=true WHERE user_id=$1 AND id=$2`, userID, signatureID)
 	}
 	if forwardFlag {
 		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_signatures SET default_forward=false WHERE user_id=$1 AND id<>$2`, userID, signatureID)
-		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_signatures SET default_forward=true WHERE user_id=$1 AND id=$2`, userID, signatureID)
 	}
 }
 
@@ -334,6 +334,9 @@ func (s *Server) adminUserDelegates(w http.ResponseWriter, r *http.Request) {
 		if body.CanSend != nil {
 			canSend = *body.CanSend
 		}
+		if canSend {
+			canRead = true
+		}
 		_, err := s.store.DB.Exec(r.Context(), `
 			INSERT INTO mailbox_delegates (id, tenant_id, owner_user_id, delegate_user_id, can_read, can_send, created_by)
 			VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -373,6 +376,9 @@ func (s *Server) adminUserDelegate(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.CanSend != nil {
 			canSend = *body.CanSend
+		}
+		if canSend {
+			canRead = true
 		}
 		_, _ = s.store.DB.Exec(r.Context(), `UPDATE mailbox_delegates SET can_read=$3, can_send=$4, updated_at=now() WHERE owner_user_id=$1 AND delegate_user_id=$2`, user.ID, delegateID, canRead, canSend)
 		s.recordAdminAudit(r.Context(), sess, sess.User, "admin.delegate_updated", user.Email, "Updated delegated mailbox access", map[string]any{"userId": user.ID, "delegateId": delegateID})

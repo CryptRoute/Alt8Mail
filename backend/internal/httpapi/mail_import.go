@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -217,7 +219,7 @@ func (s *Server) adminMailImportJob(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		plainPassword := ""
-		if notify == "" && (status == "completed" || status == "failed") {
+		if (notify == "" || !notified) && (status == "completed" || status == "failed") {
 			plainPassword, _ = s.openSecuritySecret(initialPassword)
 		}
 		plainMailPassword := ""
@@ -710,6 +712,12 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 				existing[id] = true
 			}
 		}
+		if _, err := target.Select(targetFolder, false); err != nil {
+			_ = target.Create(targetFolder)
+			if _, err := target.Select(targetFolder, false); err != nil {
+				continue
+			}
+		}
 		section := &imap.BodySectionName{Peek: true}
 		for start := 0; start < len(uids); start += mailImportBatchSize {
 			if s.mailImportStatus(ctx, job.ID) == "cancelled" {
@@ -746,12 +754,6 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 				raw, err := io.ReadAll(io.LimitReader(body, mailImportMaxMessage+1))
 				if err != nil || int64(len(raw)) > mailImportMaxMessage {
 					continue
-				}
-				if _, err := target.Select(targetFolder, false); err != nil {
-					_ = target.Create(targetFolder)
-					if _, err := target.Select(targetFolder, false); err != nil {
-						continue
-					}
 				}
 				if err := target.Append(targetFolder, importFlags(message.Flags), message.InternalDate, bytes.NewReader(raw)); err != nil {
 					continue
@@ -803,6 +805,7 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 			existing[id] = true
 		}
 	}
+	_, _ = target.Select("INBOX", false)
 	var imported int64
 	for _, index := range indexes {
 		if int64(index) <= last {
@@ -820,12 +823,10 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 			last = int64(index)
 			continue
 		}
-		if _, err := target.Select("INBOX", false); err == nil {
-			if err := target.Append("INBOX", nil, time.Now(), bytes.NewReader(raw)); err == nil {
-				imported++
-				if messageID != "" {
-					existing[messageID] = true
-				}
+		if err := target.Append("INBOX", nil, time.Now(), bytes.NewReader(raw)); err == nil {
+			imported++
+			if messageID != "" {
+				existing[messageID] = true
 			}
 		}
 		last = int64(index)
@@ -878,7 +879,7 @@ func (s *Server) dialLocalTarget(targetEmail string) (*imapclient.Client, error)
 }
 
 func dialExternalIMAP(host string, port int, security string) (*imapclient.Client, error) {
-	address := fmt.Sprintf("%s:%d", host, port)
+	address := net.JoinHostPort(host, strconv.Itoa(port))
 	tlsConfig := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
 	if security == "ssl" {
 		return imapclient.DialTLS(address, tlsConfig)

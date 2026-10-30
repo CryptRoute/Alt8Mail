@@ -107,8 +107,9 @@ func (s *Server) applyDelegatedMailboxes(ctx context.Context, user userRecord, f
 			if seen[delegatedID] {
 				continue
 			}
+			public := publicStateMessage(ownerState, message)
 			clone := map[string]any{}
-			for key, value := range message {
+			for key, value := range public {
 				clone[key] = value
 			}
 			clone["id"] = delegatedID
