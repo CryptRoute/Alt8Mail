@@ -814,7 +814,7 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 		}
 	}
 	maxBytes := mailImportMaxBytes(job.Options)
-	var imported, total int64
+	var imported, total, quarantined int64
 	for _, sourceFolder := range folders {
 		if s.mailImportStatus(ctx, job.ID) == "cancelled" {
 			return imported, total, errMailImportCancelled
@@ -882,6 +882,19 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 				if err != nil || int64(len(raw)) > maxBytes {
 					continue
 				}
+				quarantine, err := s.scanImportedMessage(ctx, target, raw, message.Flags,
+					message.InternalDate, sourceEmail, messageID)
+				if err != nil {
+					return imported, total, err
+				}
+				if quarantine {
+					quarantined++
+					if messageID != "" {
+						existing[messageID] = true
+					}
+					lastUID = int64(message.Uid)
+					continue
+				}
 				if err := target.Append(targetFolder, importFlags(message.Flags), message.InternalDate, bytes.NewReader(raw)); err != nil {
 					continue
 				}
@@ -897,6 +910,9 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 			cursor[sourceFolder] = lastUID
 			s.persistImportCursor(ctx, itemID, job.ID, sourceEmail, cursor, imported)
 		}
+	}
+	if quarantined > 0 {
+		s.logger.Warn("mail import quarantined infected messages", "source", sanitizeMailText(sourceEmail), "count", quarantined)
 	}
 	return imported, total, nil
 }
@@ -934,7 +950,7 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 	}
 	_, _ = target.Select("INBOX", false)
 	maxBytes := mailImportMaxBytes(job.Options)
-	var imported int64
+	var imported, quarantined int64
 	for _, index := range indexes {
 		if int64(index) <= last {
 			continue
@@ -963,7 +979,16 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 			last = int64(index)
 			continue
 		}
-		if err := target.Append("INBOX", nil, time.Now(), bytes.NewReader(raw)); err == nil {
+		quarantine, scanErr := s.scanImportedMessage(ctx, target, raw, nil, time.Now(), sourceEmail, messageID)
+		if scanErr != nil {
+			return imported, int64(len(indexes)), scanErr
+		}
+		if quarantine {
+			quarantined++
+			if messageID != "" {
+				existing[messageID] = true
+			}
+		} else if err := target.Append("INBOX", nil, time.Now(), bytes.NewReader(raw)); err == nil {
 			imported++
 			if messageID != "" {
 				existing[messageID] = true
@@ -972,6 +997,9 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 		last = int64(index)
 		cursor["pop3Index"] = last
 		s.persistImportCursor(ctx, itemID, job.ID, sourceEmail, cursor, imported)
+	}
+	if quarantined > 0 {
+		s.logger.Warn("mail import quarantined infected messages", "source", sanitizeMailText(sourceEmail), "count", quarantined)
 	}
 	return imported, int64(len(indexes)), nil
 }

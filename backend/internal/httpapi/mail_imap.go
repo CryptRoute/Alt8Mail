@@ -690,8 +690,8 @@ func parseIMAPMessage(message *imap.Message, raw []byte, folder string) fetchedM
 	if message.Envelope != nil {
 		fetched.Date = message.Envelope.Date
 		fetched.Subject = decodeHeader(message.Envelope.Subject)
-		fetched.MessageID = strings.TrimSpace(message.Envelope.MessageId)
-		fetched.InReplyTo = strings.TrimSpace(message.Envelope.InReplyTo)
+		fetched.MessageID = sanitizeMailText(strings.TrimSpace(message.Envelope.MessageId))
+		fetched.InReplyTo = sanitizeMailText(strings.TrimSpace(message.Envelope.InReplyTo))
 		fetched.From = imapAddresses(message.Envelope.From)
 		fetched.To = imapAddresses(message.Envelope.To)
 		fetched.CC = imapAddresses(message.Envelope.Cc)
@@ -704,13 +704,16 @@ func parseIMAPMessage(message *imap.Message, raw []byte, folder string) fetchedM
 			fetched.Subject = decodeHeader(parsed.Header.Get("Subject"))
 		}
 		if fetched.MessageID == "" {
-			fetched.MessageID = strings.TrimSpace(parsed.Header.Get("Message-Id"))
+			fetched.MessageID = sanitizeMailText(strings.TrimSpace(parsed.Header.Get("Message-Id")))
 		}
 		if fetched.InReplyTo == "" {
-			fetched.InReplyTo = strings.TrimSpace(parsed.Header.Get("In-Reply-To"))
+			fetched.InReplyTo = sanitizeMailText(strings.TrimSpace(parsed.Header.Get("In-Reply-To")))
 		}
 		if references := strings.Fields(parsed.Header.Get("References")); len(references) > 0 {
-			fetched.References = references
+			fetched.References = make([]string, 0, len(references))
+			for _, reference := range references {
+				fetched.References = append(fetched.References, sanitizeMailText(reference))
+			}
 		}
 		if len(fetched.From) == 0 {
 			if list, err := parsed.Header.AddressList("From"); err == nil {
@@ -729,8 +732,8 @@ func parseIMAPMessage(message *imap.Message, raw []byte, folder string) fetchedM
 		}
 		parsedBody := &parsedBody{}
 		_ = walkMIMEPart(headers, parsed.Body, parsedBody, 0)
-		fetched.BodyText = strings.ToValidUTF8(parsedBody.text.String(), "")
-		fetched.BodyHTML = strings.ToValidUTF8(parsedBody.html.String(), "")
+		fetched.BodyText = sanitizeMailText(parsedBody.text.String())
+		fetched.BodyHTML = sanitizeMailText(parsedBody.html.String())
 		fetched.Attachments = parsedBody.attachments
 		applyAuthenticationResults(&fetched, parsed.Header.Get("Authentication-Results"))
 	}
@@ -763,12 +766,12 @@ func walkMIMEPart(headers textproto.MIMEHeader, body io.Reader, result *parsedBo
 	if depth > 10 {
 		return nil
 	}
-	contentType := headers.Get("Content-Type")
+	contentType := sanitizeMailText(headers.Get("Content-Type"))
 	mediaType := "text/plain"
 	params := map[string]string{}
 	if contentType != "" {
 		if parsedType, parsedParams, err := mime.ParseMediaType(contentType); err == nil {
-			mediaType = strings.ToLower(parsedType)
+			mediaType = strings.ToLower(sanitizeMailText(parsedType))
 			params = parsedParams
 		}
 	}
@@ -780,7 +783,8 @@ func walkMIMEPart(headers textproto.MIMEHeader, body io.Reader, result *parsedBo
 	case "quoted-printable":
 		reader = quotedprintable.NewReader(body)
 	}
-	disposition, dispositionParams, _ := mime.ParseMediaType(headers.Get("Content-Disposition"))
+	disposition, dispositionParams, _ := mime.ParseMediaType(sanitizeMailText(headers.Get("Content-Disposition")))
+	disposition = sanitizeMailText(disposition)
 	fileName := dispositionParams["filename"]
 	if fileName == "" {
 		fileName = params["name"]
@@ -822,7 +826,8 @@ func walkMIMEPart(headers textproto.MIMEHeader, body io.Reader, result *parsedBo
 			// Inline images remain attachments; the HTML references them by CID.
 		}
 		result.attachments = append(result.attachments, parsedMailAttachment{
-			Name: name, MIMEType: mediaType, ContentID: strings.Trim(headers.Get("Content-Id"), "<>"),
+			Name: name, MIMEType: sanitizeMailText(mediaType),
+			ContentID:   sanitizeMailText(strings.Trim(headers.Get("Content-Id"), "<>")),
 			Disposition: disposition, Data: data,
 		})
 		return nil
@@ -831,12 +836,12 @@ func walkMIMEPart(headers textproto.MIMEHeader, body io.Reader, result *parsedBo
 	case "text/plain":
 		data, _ := io.ReadAll(io.LimitReader(reader, maxBodyPartBytes))
 		if result.text.Len() == 0 {
-			result.text.WriteString(strings.ToValidUTF8(string(data), ""))
+			result.text.WriteString(sanitizeMailText(string(data)))
 		}
 	case "text/html":
 		data, _ := io.ReadAll(io.LimitReader(reader, maxBodyPartBytes))
 		if result.html.Len() == 0 {
-			result.html.WriteString(strings.ToValidUTF8(string(data), ""))
+			result.html.WriteString(sanitizeMailText(string(data)))
 		}
 	default:
 		_, _ = io.Copy(io.Discard, io.LimitReader(reader, maxAttachmentSize))
@@ -850,7 +855,7 @@ func imapAddresses(addresses []*imap.Address) []map[string]any {
 		if address == nil {
 			continue
 		}
-		email := strings.ToLower(address.MailboxName + "@" + address.HostName)
+		email := strings.ToLower(sanitizeMailText(address.MailboxName + "@" + address.HostName))
 		name := decodeHeader(address.PersonalName)
 		result = append(result, personFor(nil, email, name))
 	}
@@ -863,8 +868,8 @@ func addressListToPeople(addresses []*mail.Address) []map[string]any {
 		if address == nil {
 			continue
 		}
-		email := strings.ToLower(address.Address)
-		result = append(result, personFor(nil, email, address.Name))
+		email := strings.ToLower(sanitizeMailText(address.Address))
+		result = append(result, personFor(nil, email, sanitizeMailText(address.Name)))
 	}
 	return result
 }
@@ -1211,13 +1216,17 @@ func storeImportedAttachment(uploadDir string, attachment parsedMailAttachment, 
 	if mimeType == "" {
 		mimeType = mimeForExtension(attachment.Name)
 	}
+	mimeType = sanitizeMailText(strings.TrimSpace(mimeType))
+	name := safeFileName(attachment.Name)
+	contentID := sanitizeMailText(strings.TrimSpace(attachment.ContentID))
+	disposition := sanitizeMailText(strings.TrimSpace(attachment.Disposition))
 	previewable := mimeType == "application/pdf" || strings.HasPrefix(mimeType, "image/")
 	return map[string]any{
-		"id": id, "name": safeFileName(attachment.Name), "type": attachmentBadgeType(mimeType, attachment.Name),
+		"id": id, "name": name, "type": attachmentBadgeType(mimeType, name),
 		"mime": mimeType, "size": formatBytes(int64(len(attachment.Data))), "sizeBytes": len(attachment.Data),
 		"storedName": id, "previewable": previewable, "uploadedAt": nowISO(),
-		"contentId": strings.TrimSpace(attachment.ContentID), "disposition": attachment.Disposition,
-		"owner": map[string]any{"name": user.Name, "email": user.Email, "initials": user.Initials, "color": user.Color},
+		"contentId": contentID, "disposition": disposition,
+		"owner": map[string]any{"name": sanitizeMailText(user.Name), "email": sanitizeMailText(user.Email), "initials": sanitizeMailText(user.Initials), "color": user.Color},
 	}, nil
 }
 
@@ -1281,9 +1290,9 @@ func decodeHeader(value string) string {
 	}
 	decoded, err := mailHeaderDecoder.DecodeHeader(value)
 	if err != nil {
-		return value
+		return sanitizeMailText(value)
 	}
-	return decoded
+	return sanitizeMailText(decoded)
 }
 
 func domainOf(email string) string {

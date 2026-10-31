@@ -145,6 +145,23 @@ func (p *mailWorkerPool) runWorker(ctx context.Context, worker *mailWorker, user
 	initialFullDelay += time.Duration(rand.Int63n(int64(30 * time.Second)))
 	initialFull := time.NewTimer(initialFullDelay)
 	defer initialFull.Stop()
+	syncFailures := 0
+	var nextFullAt time.Time
+	runFull := func() {
+		if !nextFullAt.IsZero() && time.Now().Before(nextFullAt) {
+			return
+		}
+		if err := p.runFullSync(ctx, user); err != nil {
+			syncFailures++
+			delay := fullSyncRetryDelay(full, syncFailures)
+			nextFullAt = time.Now().Add(delay)
+			p.server.logger.Warn("mail worker full sync failed", "user", user.Email, "err", err,
+				"failures", syncFailures, "retryIn", delay.String())
+			return
+		}
+		syncFailures = 0
+		nextFullAt = time.Time{}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -152,9 +169,9 @@ func (p *mailWorkerPool) runWorker(ctx context.Context, worker *mailWorker, user
 		case <-pollTicker.C:
 			p.runCheck(ctx, user)
 		case <-initialFull.C:
-			p.runFullSync(ctx, user)
+			runFull()
 		case <-fullTicker.C:
-			p.runFullSync(ctx, user)
+			runFull()
 		}
 	}
 }
@@ -216,16 +233,35 @@ func (p *mailWorkerPool) runIdle(ctx context.Context, user userRecord) {
 	}
 }
 
-func (p *mailWorkerPool) runFullSync(ctx context.Context, user userRecord) {
+func (p *mailWorkerPool) runFullSync(ctx context.Context, user userRecord) error {
 	select {
 	case p.sem <- struct{}{}:
 		defer func() { <-p.sem }()
 	case <-ctx.Done():
-		return
+		return ctx.Err()
 	}
-	if _, err := p.server.syncUserMailbox(ctx, user); err != nil {
-		p.server.logger.Warn("mail worker full sync failed", "user", user.Email, "err", err)
+	_, err := p.server.syncUserMailbox(ctx, user)
+	return err
+}
+
+// fullSyncRetryDelay backs off repeated full-sync failures so an undiagnosed
+// poison message cannot hammer IMAP and the database every five minutes. It
+// caps at one hour and resets after a successful scan.
+func fullSyncRetryDelay(base time.Duration, failures int) time.Duration {
+	if base <= 0 {
+		base = 5 * time.Minute
 	}
+	if failures < 1 {
+		return base
+	}
+	delay := base
+	for i := 1; i < failures && delay < time.Hour; i++ {
+		delay *= 2
+		if delay > time.Hour {
+			delay = time.Hour
+		}
+	}
+	return delay
 }
 
 func minDuration(a, b time.Duration) time.Duration {

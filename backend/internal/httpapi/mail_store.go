@@ -557,10 +557,20 @@ func (s *Server) withMailState(ctx context.Context, user userRecord, ids []strin
 		beforeMessages := copyMailMapList(stateMessagesOut)
 		beforeAttachments := copyAttachmentMap(state)
 		beforeOutbox := copyMailMapList(outboxAny)
+		committed := false
+		defer func() {
+			if !committed {
+				s.removeUncommittedAttachments(state, beforeAttachments)
+			}
+		}()
 		if err := fn(state); err != nil {
 			return err
 		}
-		return s.persistMailStateDelta(ctx, user, state, beforeMessages, beforeAttachments, beforeOutbox)
+		if err := s.persistMailStateDelta(ctx, user, state, beforeMessages, beforeAttachments, beforeOutbox); err != nil {
+			return err
+		}
+		committed = true
+		return nil
 	})
 }
 
@@ -592,10 +602,11 @@ func (s *Server) persistMailStateDelta(ctx context.Context, user userRecord, sta
 			INSERT INTO attachments (id, tenant_id, user_id, name, mime, size_bytes, sha256, stored_path, previewable)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 			ON CONFLICT (id) DO NOTHING
-		`, id, user.TenantID, user.ID, truncate(firstNonEmpty(stateString(record, "name"), "attachment"), 240),
-			firstNonEmpty(stateString(record, "mime"), "application/octet-stream"),
-			stateInt(record, "sizeBytes"), stateString(record, "checksum"), storedName,
-			stateBool(record, "previewable"))
+		`, id, user.TenantID, user.ID,
+			truncate(sanitizeMailText(firstNonEmpty(stateString(record, "name"), "attachment")), 240),
+			sanitizeMailText(firstNonEmpty(stateString(record, "mime"), "application/octet-stream")),
+			stateInt(record, "sizeBytes"), sanitizeMailText(stateString(record, "checksum")),
+			sanitizeMailText(storedName), stateBool(record, "previewable"))
 		if err != nil {
 			return err
 		}
@@ -653,6 +664,11 @@ func (s *Server) persistMailStateDelta(ctx context.Context, user userRecord, sta
 			}
 		}
 	}
+	if err := tx.Commit(ctx); err != nil {
+		// Keep the maps in state until the commit succeeds: withMailState uses
+		// them to remove attachment files written by a failed transaction.
+		return err
+	}
 	// The per-user document must never retain mail, attachment or outbox data.
 	// These maps existed only to let the existing handlers mutate normalized
 	// rows in place; the tables are the sole source of truth once the
@@ -660,7 +676,7 @@ func (s *Server) persistMailStateDelta(ctx context.Context, user userRecord, sta
 	delete(state, "messages")
 	delete(state, "attachments")
 	delete(state, "outbox")
-	return tx.Commit(ctx)
+	return nil
 }
 
 func parseOptionalTime(value string) any {
@@ -726,18 +742,18 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 			attempts=EXCLUDED.attempts, last_error=EXCLUDED.last_error,
 			mime_message_id=EXCLUDED.mime_message_id, draft_snapshot=EXCLUDED.draft_snapshot,
 			ip=EXCLUDED.ip, user_agent=EXCLUDED.user_agent, updated_at=now()
-	`, id, user.TenantID, user.ID, stateString(item, "draftId"), fromJSON, toJSON, ccJSON, bccJSON,
-		truncate(stateString(item, "subject"), 500), stateString(item, "bodyText"),
-		stateString(item, "bodyHtml"), attachmentsJSON,
-		stateString(item, "threadId"), stateString(item, "inReplyTo"),
-		firstNonEmpty(stateString(item, "priority"), "normal"), stateBool(item, "receipt"),
+	`, id, user.TenantID, user.ID, sanitizeMailText(stateString(item, "draftId")), fromJSON, toJSON, ccJSON, bccJSON,
+		truncate(sanitizeMailText(stateString(item, "subject")), 500), sanitizeMailText(stateString(item, "bodyText")),
+		sanitizeMailText(stateString(item, "bodyHtml")), attachmentsJSON,
+		sanitizeMailText(stateString(item, "threadId")), sanitizeMailText(stateString(item, "inReplyTo")),
+		firstNonEmpty(sanitizeMailText(stateString(item, "priority")), "normal"), stateBool(item, "receipt"),
 		stateBool(item, "delivery"), item["saveCopy"] == nil || stateBool(item, "saveCopy"),
-		stateBool(item, "scheduled"), sendAt, queuedAt, stateInt(item, "holdMs"), status,
-		stateString(item, "deliveryState"), parseOptionalTime(stateString(item, "deliveryClaimedAt")),
+		stateBool(item, "scheduled"), sendAt, queuedAt, stateInt(item, "holdMs"), sanitizeMailText(status),
+		sanitizeMailText(stateString(item, "deliveryState")), parseOptionalTime(stateString(item, "deliveryClaimedAt")),
 		parseOptionalTime(stateString(item, "retryAt")), stateInt(item, "attempts"),
-		truncate(stateString(item, "lastError"), 500), stateString(item, "mimeMessageId"),
-		draftSnapshotJSON, truncate(stateString(item, "ip"), 64),
-		truncate(stateString(item, "userAgent"), 300), queuedAt)
+		truncate(sanitizeMailText(stateString(item, "lastError")), 500), sanitizeMailText(stateString(item, "mimeMessageId")),
+		draftSnapshotJSON, truncate(sanitizeMailText(stateString(item, "ip")), 64),
+		truncate(sanitizeMailText(stateString(item, "userAgent")), 300), queuedAt)
 	return err
 }
 
@@ -747,8 +763,8 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 		return fmt.Errorf("message has no id")
 	}
 	from, _ := message["from"].(map[string]any)
-	fromEmail := firstNonEmpty(stateString(message, "fromEmail"), stateString(from, "email"))
-	fromName := stateString(from, "name")
+	fromEmail := sanitizeMailText(firstNonEmpty(stateString(message, "fromEmail"), stateString(from, "email")))
+	fromName := sanitizeMailText(stateString(from, "name"))
 	to := stateSlice(message, "to")
 	cc := stateSlice(message, "cc")
 	bcc := stateSlice(message, "bcc")
@@ -773,7 +789,7 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 	categories := []string{}
 	for _, raw := range stateSlice(message, "categories") {
 		if value, ok := raw.(string); ok && value != "" {
-			categories = append(categories, value)
+			categories = append(categories, sanitizeMailText(value))
 		}
 	}
 	sentAt, err := time.Parse(time.RFC3339, stateString(message, "date"))
@@ -788,9 +804,18 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 	if err != nil {
 		updatedAt = time.Now().UTC()
 	}
-	threadID := firstNonEmpty(stateString(message, "threadId"), id)
-	windowMode := firstNonEmpty(stateString(message, "windowMode"), "floating")
-	priority := firstNonEmpty(stateString(message, "priority"), "normal")
+	threadID := firstNonEmpty(sanitizeMailText(stateString(message, "threadId")), id)
+	windowMode := firstNonEmpty(sanitizeMailText(stateString(message, "windowMode")), "floating")
+	priority := firstNonEmpty(sanitizeMailText(stateString(message, "priority")), "normal")
+	classification := firstNonEmpty(sanitizeMailText(stateString(message, "classification")), "Internal")
+	folder := firstNonEmpty(sanitizeMailText(stateString(message, "folder")), "inbox")
+	imapFolder := firstNonEmpty(sanitizeMailText(stateString(message, "imapFolder")), folder)
+	messageID := sanitizeMailText(stateString(message, "messageId"))
+	inReplyTo := sanitizeMailText(stateString(message, "inReplyTo"))
+	subject := truncate(sanitizeMailText(stateString(message, "subject")), 1000)
+	snippet := truncate(sanitizeMailText(stateString(message, "snippet")), 500)
+	bodyText := sanitizeMailText(stateString(message, "bodyText"))
+	bodyHTML := sanitizeMailText(stateString(message, "bodyHtml"))
 	_, err = tx.Exec(ctx, `
 		INSERT INTO mail_messages (
 			id, tenant_id, user_id, mailbox_id, folder, imap_folder, uid, uid_validity,
@@ -820,19 +845,18 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 			auth=EXCLUDED.auth, spam_report=EXCLUDED.spam_report, event=EXCLUDED.event,
 			priority=EXCLUDED.priority, receipt=EXCLUDED.receipt, delivery=EXCLUDED.delivery,
 			save_copy=EXCLUDED.save_copy, via_api=EXCLUDED.via_api, window_mode=EXCLUDED.window_mode
-	`, id, user.TenantID, user.ID, firstNonEmpty(stateString(message, "folder"), "inbox"),
-		firstNonEmpty(stateString(message, "imapFolder"), stateString(message, "folder"), "inbox"),
+	`, id, user.TenantID, user.ID, folder, imapFolder,
 		stateInt(message, "imapUid"), stateInt(message, "imapUidValidity"),
-		stateString(message, "messageId"), threadID, stateString(message, "inReplyTo"),
-		referencesJSON, truncate(stateString(message, "subject"), 1000), truncate(fromName, 240), fromEmail,
-		toJSON, ccJSON, bccJSON, truncate(firstNonEmpty(stateString(message, "toText"), peopleText(to)), 4000),
-		truncate(firstNonEmpty(stateString(message, "ccText"), peopleText(cc)), 4000),
-		truncate(firstNonEmpty(stateString(message, "bccText"), peopleText(bcc)), 4000),
-		truncate(stateString(message, "snippet"), 500), stateString(message, "bodyText"),
-		stateString(message, "bodyHtml"), sentAt, createdAt, updatedAt, stateInt(message, "sizeBytes"),
+		messageID, threadID, inReplyTo,
+		referencesJSON, subject, truncate(fromName, 240), fromEmail,
+		toJSON, ccJSON, bccJSON,
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "toText"), peopleText(to))), 4000),
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "ccText"), peopleText(cc))), 4000),
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "bccText"), peopleText(bcc))), 4000),
+		snippet, bodyText, bodyHTML, sentAt, createdAt, updatedAt, stateInt(message, "sizeBytes"),
 		stateBool(message, "unread"), stateBool(message, "starred"), stateBool(message, "flagged"),
 		stateBool(message, "pinned"), stateBool(message, "draft"), stateBool(message, "external"),
-		firstNonEmpty(stateString(message, "classification"), "Internal"), categories, authJSON,
+		classification, categories, authJSON,
 		spamJSON, eventJSON, priority, stateBool(message, "receipt"), stateBool(message, "delivery"),
 		message["saveCopy"] == nil || stateBool(message, "saveCopy"), stateBool(message, "viaApi"), windowMode)
 	if err != nil {
@@ -856,8 +880,8 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 			SELECT $1, $2, $3, $4, $5 FROM attachments
 			WHERE id=$2 AND user_id=$6
 			ON CONFLICT (message_id, attachment_id) DO NOTHING
-		`, id, attachmentID, position, stateString(attachment, "contentId"),
-			stateString(attachment, "disposition"), user.ID)
+		`, id, attachmentID, position, sanitizeMailText(stateString(attachment, "contentId")),
+			sanitizeMailText(stateString(attachment, "disposition")), user.ID)
 		if err != nil {
 			return err
 		}

@@ -49,6 +49,10 @@ type Config struct {
 	IMAPPollInterval      time.Duration
 	IMAPIdle              bool
 	MailWorkerConcurrency int
+	OrphanSweepInterval   time.Duration
+	OrphanGracePeriod     time.Duration
+	ImportScan            bool
+	ImportScanMaxMB       int
 	ClamAVAddr            string
 
 	DemoMode      bool
@@ -119,6 +123,10 @@ func Load() (Config, error) {
 		IMAPPollInterval:      15 * time.Second,
 		IMAPIdle:              envBool("ALT8MAIL_IMAP_IDLE", true),
 		MailWorkerConcurrency: 8,
+		OrphanSweepInterval:   time.Hour,
+		OrphanGracePeriod:     5 * time.Minute,
+		ImportScan:            envBool("ALT8MAIL_IMPORT_SCAN", true),
+		ImportScanMaxMB:       24,
 		ClamAVAddr:            os.Getenv("ALT8MAIL_CLAMAV_ADDR"),
 		S3Endpoint:            env("ALT8MAIL_S3_ENDPOINT", ""),
 		S3Region:              env("ALT8MAIL_S3_REGION", "us-east-1"),
@@ -168,6 +176,15 @@ func Load() (Config, error) {
 	}
 	if seconds, err := strconv.Atoi(env("ALT8MAIL_IMAP_SYNC_SECONDS", "300")); err == nil && seconds >= 30 {
 		cfg.IMAPSyncInterval = time.Duration(seconds) * time.Second
+	}
+	if seconds, err := strconv.Atoi(env("ALT8MAIL_ORPHAN_SWEEP_SECONDS", "3600")); err == nil && seconds >= 60 {
+		cfg.OrphanSweepInterval = time.Duration(seconds) * time.Second
+	}
+	if seconds, err := strconv.Atoi(env("ALT8MAIL_ORPHAN_GRACE_SECONDS", "300")); err == nil && seconds >= 60 {
+		cfg.OrphanGracePeriod = time.Duration(seconds) * time.Second
+	}
+	if megabytes, err := strconv.Atoi(env("ALT8MAIL_IMPORT_SCAN_MAX_MB", "24")); err == nil && megabytes >= 1 && megabytes <= 64 {
+		cfg.ImportScanMaxMB = megabytes
 	}
 	if seconds, err := strconv.Atoi(env("ALT8MAIL_IMAP_POLL_SECONDS", "15")); err == nil && seconds >= 5 {
 		cfg.IMAPPollInterval = time.Duration(seconds) * time.Second

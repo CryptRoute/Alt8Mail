@@ -676,6 +676,8 @@ ALT8MAIL_IMAP_TLS_NAME=mail.a8m.test
 ALT8MAIL_IMAP_SYNC_SECONDS=300
 ALT8MAIL_IMAP_POLL_SECONDS=15
 ALT8MAIL_IMAP_IDLE=true
+ALT8MAIL_ORPHAN_SWEEP_SECONDS=3600
+ALT8MAIL_ORPHAN_GRACE_SECONDS=300
 ALT8MAIL_SMTP_ADDR=127.0.0.1:587
 ALT8MAIL_SMTP_TLS_NAME=mail.a8m.test
 ALT8MAIL_MAIL_CA_FILE=/etc/ssl/a8m/mail.crt
@@ -688,6 +690,8 @@ ALT8MAIL_ADMIN_DIR=/opt/a8m/admin
 ALT8MAIL_ADMIN_URL=https://130-94-46-22.sslip.io/admin/
 ALT8MAIL_ADMIN_SESSION_HOURS=8
 ALT8MAIL_CLAMAV_ADDR=/var/run/clamav/clamd.ctl
+ALT8MAIL_IMPORT_SCAN=true
+ALT8MAIL_IMPORT_SCAN_MAX_MB=24
 
 # Optional storage connectors; leave OAuth IDs empty until the provider app is ready.
 ALT8MAIL_S3_ENDPOINT=127.0.0.1:9000
@@ -733,6 +737,39 @@ connection per active mailbox; size Dovecot's `mail_max_userip_connections`,
 process limits and file descriptors before enabling it for a very large user
 base. That isolates users while keeping a restart from opening every mailbox at
 once.
+
+The full scan is transactional for the normalized message and attachment rows.
+Attachment bytes are written before those rows, so a failed scan can leave
+unreferenced files behind. The worker deletes files created by a failed
+transaction immediately, and a background sweep removes any local `att_*` files
+that are not referenced by `attachments.stored_path` or an `a8m` workspace
+`files.storage_key`. The sweep starts 90 seconds after boot and then runs every
+`ALT8MAIL_ORPHAN_SWEEP_SECONDS` (default 3600). Files newer than
+`ALT8MAIL_ORPHAN_GRACE_SECONDS` (default 300) are never removed, which protects
+in-flight uploads and imports. Set the grace period longer than the longest
+expected database write on a heavily loaded host.
+
+Mailbox migrations scan each IMAP/POP3 message with clamd before appending it to
+the destination when `ALT8MAIL_IMPORT_SCAN=true` and
+`ALT8MAIL_CLAMAV_ADDR` is set. A detected message is appended to the
+`Quarantine` mailbox instead of its original folder and is logged; the
+application does not map that folder, so it is not shown in webmail. A scanner
+transport error fails the import item closed with the error in the job record,
+and the cursor remains retryable. Set `ALT8MAIL_IMPORT_SCAN=false` only for an
+environment that intentionally imports unscanned mail. Scanning applies to
+messages copied by the import worker; messages already present in a mailbox are
+not re-scanned by the sync loop. `ALT8MAIL_IMPORT_SCAN_MAX_MB` defaults to 24
+and must stay below clamd's `StreamMaxLength` (25M on a stock Debian install).
+Messages larger than that cap are imported without a scan and logged with the
+source and size rather than failing the migration.
+
+Message subjects, sender/recipient names, message identifiers, attachment
+filenames and dispositions are normalized before they enter the normalized
+tables. Raw Windows-1252/Latin-1 header bytes and NULs supplied by a remote
+mailbox are replaced with U+FFFD instead of aborting an entire folder sync.
+Regression cases in `backend/internal/httpapi/mail_encoding_test.go` cover the
+exact malformed filename and subject shapes that triggered the 0.3.16 disk
+leak.
 
 Set the web password:
 

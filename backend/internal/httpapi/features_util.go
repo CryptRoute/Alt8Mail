@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 type apiError struct {
@@ -79,7 +80,8 @@ func aliasPerson(alias map[string]any) map[string]any {
 }
 
 func personFor(state map[string]any, email, name string) map[string]any {
-	email = strings.ToLower(strings.TrimSpace(email))
+	email = strings.ToLower(sanitizeMailText(strings.TrimSpace(email)))
+	name = sanitizeMailText(name)
 	if email == "" {
 		return nil
 	}
@@ -217,8 +219,26 @@ func normalizeAttachments(state map[string]any, value any) []any {
 	return result
 }
 
+// sanitizeMailText makes untrusted mail metadata safe for PostgreSQL text and
+// JSONB columns. Mail servers legitimately carry raw Windows-1252/Latin-1
+// header bytes, and PostgreSQL rejects both invalid UTF-8 and NUL in text.
+// Every value that came from a message must pass through this before it is
+// persisted or placed in application state.
+func sanitizeMailText(value string) string {
+	if value == "" {
+		return value
+	}
+	if !utf8.ValidString(value) {
+		value = strings.ToValidUTF8(value, "�")
+	}
+	if strings.IndexByte(value, 0) >= 0 {
+		value = strings.ReplaceAll(value, "\x00", "�")
+	}
+	return value
+}
+
 func safeFileName(name string) string {
-	name = strings.TrimSpace(name)
+	name = sanitizeMailText(strings.TrimSpace(name))
 	if name == "" {
 		return "attachment"
 	}
