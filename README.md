@@ -7,7 +7,8 @@
 
 Alt8Mail is an enterprise email platform with a real HTTP backend, persistent
 mailbox state, threaded conversations, indexed search, server-backed drafts,
-undo send and scheduled send, Sieve rules and automatic replies, sender trust,
+Outlook-style message actions with reply/forward activity, optimistic queued
+deletes, undo send and scheduled send, Sieve rules and automatic replies, sender trust,
 two-factor sign-in with passkeys, enterprise Tasks and Files workspaces,
 PDF/image attachment preview, outbound caps, live quota, an audit log, PWA
 support and a responsive mobile layout. The Go build adds a separate
@@ -67,6 +68,8 @@ Dutch, Italian and Arabic catalogs ship in this release; additional languages
 can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
+
+The **0.4.0** release brings the webmail closer to Outlook. Message rows show reply (←) and forward (→) activity, and the reader shows the weekday, date and time of each action. Right-clicking a conversation opens a full message menu with Reply, Reply all, Forward, Delete, Archive, Move, Copy, Mark as unread, Pin, Categorize, Flag, Snooze, Rules, quick-action setup, junk/phishing/concern reports, Block, Ignore, Download, Find related, View and Advanced actions; every entry has server support, including Snoozed and Ignored conversation state. Deletes are optimistic: the row disappears at once, the reader advances to the next conversation (and closes after the last), and actions are queued with retries, idempotent request receipts and offline recovery. Compose now proxies remote images, preserves pasted base64 images, keeps Outlook table layout without forced grid lines, applies font family and size correctly before typing, and offers an HTML-source dialog for both compose and the signature editor. Signature editing matches the compose editor with the full formatting toolbar, image handling, advanced styling and the same safe HTML conversion.
 
 The **0.3.19** release makes the webmail open large mailboxes in pages. Bootstrap, folder changes and inbox polling fetch the newest 50 conversations first; scrolling the list requests older pages, and folder badges use server-side counts rather than the loaded page. Conversation siblings are loaded with each page, so threads stay complete, while drafts and delegated mailboxes remain available on first paint.
 

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"html"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -17,11 +18,19 @@ var composeHTMLPolicy = func() *bluemonday.Policy {
 	elements := []string{
 		"p", "br", "div", "span", "strong", "b", "em", "i", "u", "s", "strike",
 		"ul", "ol", "li", "blockquote", "h1", "h2", "h3", "h4", "pre", "code",
-		"a", "hr", "table", "thead", "tbody", "tr", "td", "th", "img",
+		"a", "hr", "table", "thead", "tbody", "tfoot", "tr", "td", "th", "img",
+		"center", "font", "small", "big", "sub", "sup",
 	}
 	policy.AllowElements(elements...)
-	policy.AllowAttrs("href", "title").OnElements("a")
-	policy.AllowAttrs("src", "alt", "title", "width", "height", "data-email-src").OnElements("img")
+	policy.AllowAttrs("href", "title", "target", "rel").OnElements("a")
+	policy.AllowAttrs("src", "alt", "title", "width", "height", "data-email-src", "border").OnElements("img")
+	// Outlook and other desktop clients position logos and banners with table
+	// attributes (cellpadding/cellspacing/valign) rather than CSS. Keep the
+	// conservative layout attributes so a pasted signature keeps its shape.
+	policy.AllowAttrs("width", "height", "cellpadding", "cellspacing", "border", "align", "valign", "bgcolor", "role", "dir", "lang").OnElements("table", "thead", "tbody", "tfoot", "tr", "td", "th")
+	policy.AllowAttrs("colspan", "rowspan", "nowrap").OnElements("td", "th")
+	policy.AllowAttrs("face", "size", "color").OnElements("font")
+	policy.AllowAttrs("align", "valign", "dir", "lang").OnElements("p", "div", "span", "center")
 	policy.AllowAttrs("class").Matching(regexp.MustCompile(`^(compose-quote|compose-quote-inner|compose-quote-lead|compose-quote-meta|email-quote)$`)).OnElements("div", "p", "blockquote", "span")
 	policy.AllowAttrs("style").OnElements(elements...)
 	policy.AllowStyles("text-align").MatchingEnum("left", "center", "right", "justify").OnElements(elements...)
@@ -50,6 +59,23 @@ var composeHTMLPolicy = func() *bluemonday.Policy {
 		policy.AllowStyles(property).Matching(composeLayoutValuePattern).OnElements(elements...)
 	}
 	policy.AllowURLSchemes("http", "https", "mailto")
+	// Base64 images are common in pasted signatures. Allow raster image data
+	// URIs only; SVG and other data types can execute script when navigated.
+	policy.AllowURLSchemeWithCustomPolicy("data", func(u *url.URL) bool {
+		lower := strings.ToLower(u.Opaque)
+		for _, prefix := range []string{
+			"image/png;base64,", "image/jpeg;base64,", "image/jpg;base64,",
+			"image/gif;base64,", "image/webp;base64,", "image/avif;base64,",
+			"image/bmp;base64,", "image/x-icon;base64,",
+			"image/png,", "image/jpeg,", "image/jpg,", "image/gif,",
+			"image/webp,", "image/avif,", "image/bmp,", "image/x-icon,",
+		} {
+			if strings.HasPrefix(lower, prefix) {
+				return true
+			}
+		}
+		return false
+	})
 	// Draft bodies may reference Alt8Mail's same-origin image proxy. Outbound
 	// sends restore the original remote URL in the browser before submission.
 	policy.AllowRelativeURLs(true)

@@ -80,6 +80,63 @@ func stateTrusted(state map[string]any) []string {
 	return result
 }
 
+func ignoredThreadIn(state map[string]any, threadID string) bool {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return false
+	}
+	for _, raw := range stateSlice(stateMap(state, "user"), "ignoredThreads") {
+		if strings.TrimSpace(fmt.Sprint(raw)) == threadID {
+			return true
+		}
+	}
+	return false
+}
+
+func rememberIgnoredThread(state map[string]any, threadID string) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return
+	}
+	user := stateMap(state, "user")
+	threads := stateSlice(user, "ignoredThreads")
+	for _, raw := range threads {
+		if strings.TrimSpace(fmt.Sprint(raw)) == threadID {
+			return
+		}
+	}
+	user["ignoredThreads"] = append(threads, threadID)
+}
+
+func forgetIgnoredThread(state map[string]any, threadID string) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return
+	}
+	user := stateMap(state, "user")
+	threads := stateSlice(user, "ignoredThreads")
+	kept := make([]any, 0, len(threads))
+	for _, raw := range threads {
+		if strings.TrimSpace(fmt.Sprint(raw)) != threadID {
+			kept = append(kept, raw)
+		}
+	}
+	user["ignoredThreads"] = kept
+}
+
+func blockedSenderIn(state map[string]any, email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return false
+	}
+	for _, raw := range stateSlice(stateMap(state, "user"), "blockedSenders") {
+		if strings.EqualFold(strings.TrimSpace(fmt.Sprint(raw)), email) {
+			return true
+		}
+	}
+	return false
+}
+
 func trustedIn(state map[string]any, email string) bool {
 	email = strings.ToLower(strings.TrimSpace(email))
 	for _, value := range stateTrusted(state) {
@@ -277,7 +334,22 @@ func ensureStateCollections(state map[string]any) {
 		}
 		state["folders"] = folders
 	}
-	state["folders"] = normalizeFolderRecords(stateSlice(state, "folders"))
+	folders := normalizeFolderRecords(stateSlice(state, "folders"))
+	hasSnoozed := false
+	for _, raw := range folders {
+		if folder, _ := raw.(map[string]any); stateString(folder, "id") == "snoozed" {
+			hasSnoozed = true
+			break
+		}
+	}
+	if !hasSnoozed {
+		folders = append(folders, map[string]any{
+			"id": "snoozed", "label": "Snoozed", "icon": "i-clock",
+			"section": "favorites", "virtual": true, "system": true,
+			"order": 1, "badgeMode": "none",
+		})
+	}
+	state["folders"] = folders
 	user := stateMap(state, "user")
 	if _, exists := user["trustedSenders"]; !exists {
 		user["trustedSenders"] = []any{}

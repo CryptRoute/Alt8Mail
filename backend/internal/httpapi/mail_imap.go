@@ -1096,6 +1096,17 @@ func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []f
 			"viaApi": true, "windowMode": "floating",
 			"imapUid": item.UID, "imapFolder": item.Folder, "imapUidValidity": item.UIDValidity,
 		}
+		if ignoredThreadIn(state, threadID) {
+			message["ignored"] = true
+			message["ignoredAt"] = nowISO()
+		}
+		if item.Folder == "inbox" && blockedSenderIn(state, stateString(from, "email")) {
+			message["folder"] = "spam"
+			message["unread"] = false
+			message["spamReport"] = map[string]any{
+				"at": nowISO(), "reason": "blocked-sender", "note": "Delivered to Junk by the blocked sender list", "source": "blocklist",
+			}
+		}
 		state["messages"] = append(stateMessages(state), message)
 		existingByUID[uidKey] = message
 		existingByFolderMessageID[folderMessageKey] = message

@@ -116,17 +116,45 @@ func (s *Server) processOutboxItem(ctx context.Context, userID, tenantID, itemID
 
 func (s *Server) finalizeOutboxItem(userID, tenantID, itemID, messageID string, raw []byte) (string, error) {
 	sentID := ""
+	composeKind := ""
+	sourceMessageID := ""
 	err := s.withMailState(context.Background(), userRecord{ID: userID, TenantID: tenantID}, nil, false, func(state map[string]any) error {
 		item := stateObjectByID(stateSlice(state, "outbox"), itemID)
 		if item == nil {
 			return fail(http.StatusConflict, "SEND_ALREADY_COMMITTED", "This message has already been sent")
 		}
+		composeKind = stateString(item, "composeKind")
+		sourceMessageID = stateString(item, "sourceMessageId")
 		if messageID != "" {
 			item["mimeMessageId"] = messageID
 		}
 		sentID = commitQueued(state, item)
 		return nil
 	})
+	if err != nil {
+		return sentID, err
+	}
+	if sourceMessageID != "" && (composeKind == "reply" || composeKind == "replyAll" || composeKind == "forward") {
+		if composeKind == "forward" {
+			_, markErr := s.store.DB.Exec(context.Background(), `
+				UPDATE mail_messages
+				SET forwarded_at = now(), forward_count = forward_count + 1, updated_at = now()
+				WHERE id = $1 AND user_id = $2 AND NOT ignored
+			`, sourceMessageID, userID)
+			if markErr != nil {
+				s.logger.Warn("forward activity update failed", "message", sourceMessageID, "err", markErr)
+			}
+		} else {
+			_, markErr := s.store.DB.Exec(context.Background(), `
+				UPDATE mail_messages
+				SET replied_at = now(), reply_count = reply_count + 1, updated_at = now()
+				WHERE id = $1 AND user_id = $2 AND NOT ignored
+			`, sourceMessageID, userID)
+			if markErr != nil {
+				s.logger.Warn("reply activity update failed", "message", sourceMessageID, "err", markErr)
+			}
+		}
+	}
 	return sentID, err
 }
 

@@ -69,7 +69,7 @@ function emailImageSource(source) {
   const value = String(source || "").trim();
   if (!value) return "";
   if (/^cid:/i.test(value)) return "";
-  if (/^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|x-icon)/i.test(value)) return value;
+  if (/^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|x-icon)(?:;base64)?,/i.test(value)) return value;
   if (/^https?:\/\//i.test(value)) return emailImageProxyURL(value);
   if (/^\/\//.test(value)) return emailImageProxyURL(`https:${value}`);
   return "";
@@ -388,6 +388,215 @@ function editorPlainText(html) {
   return (div.innerText || div.textContent || "").replace(/ /g, " ").trim();
 }
 
+function originalImageSource(image) {
+  return String(image?.getAttribute?.("data-email-src") || image?.getAttribute?.("src") || "").trim();
+}
+
+function normalizeEditorImageSources(root) {
+  if (!root) return;
+  root.querySelectorAll("img").forEach((image) => {
+    const source = String(image.getAttribute("src") || "").trim();
+    if (!source) return;
+    const original = originalImageSource(image);
+    if (/^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|x-icon)(?:;base64)?,/i.test(original)) {
+      if (!image.getAttribute("src")) image.setAttribute("src", original);
+      image.removeAttribute("data-email-src");
+      return;
+    }
+    if (/^\/api\/mail\/image\?/i.test(original)) {
+      try {
+        const proxied = new URL(original, window.location.origin);
+        const target = proxied.searchParams.get("url") || "";
+        if (/^https?:\/\//i.test(target)) image.setAttribute("data-email-src", target);
+      } catch {}
+      return;
+    }
+    if (/^https?:\/\//i.test(original) || /^\/\//.test(original)) {
+      const remote = original.startsWith("//") ? `https:${original}` : original;
+      image.setAttribute("data-email-src", remote);
+      image.setAttribute("src", emailImageProxyURL(remote));
+      image.removeAttribute("srcset");
+      return;
+    }
+    if (/^cid:/i.test(original)) {
+      image.setAttribute("data-email-cid", original);
+      image.classList.add("is-unresolved-cid");
+    }
+  });
+}
+
+function stripEditorArtifacts(html) {
+  return String(html || "").replace(/\u200b/g, "");
+}
+
+function restoreEditorImageSources(html) {
+  return restoreComposeImageSources(stripEditorArtifacts(html));
+}
+
+function activeEditorRange(editor) {
+  const selection = window.getSelection();
+  if (!selection || !editor) return null;
+  if (selection.rangeCount && editor.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+    return selection.getRangeAt(0).cloneRange();
+  }
+  const remembered = richEditorSelections.get(editor);
+  return remembered && editor.contains(remembered.commonAncestorContainer) ? remembered.cloneRange() : null;
+}
+
+function rememberEditorRange(editor) {
+  if (!editor) return null;
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.commonAncestorContainer)) return null;
+  const copy = range.cloneRange();
+  richEditorSelections.set(editor, copy);
+  return copy;
+}
+
+function restoreEditorRange(editor) {
+  if (!editor) return null;
+  const range = activeEditorRange(editor);
+  editor.focus();
+  if (!range) return null;
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return range;
+}
+
+function styleTypingSpanAtCaret(editor, range, styles) {
+  let node = range.startContainer;
+  if (node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+  let span = node && node.closest ? node.closest("span[data-a8m-typing]") : null;
+  if (!span || !editor.contains(span)) {
+    span = document.createElement("span");
+    span.setAttribute("data-a8m-typing", "1");
+    span.appendChild(document.createTextNode("\u200b"));
+    const target = range.cloneRange();
+    target.collapse(false);
+    target.insertNode(span);
+  }
+  for (const [property, value] of Object.entries(styles)) {
+    if (value) span.style[property] = value;
+  }
+  const selection = window.getSelection();
+  const caret = document.createRange();
+  const text = span.firstChild || span.appendChild(document.createTextNode("\u200b"));
+  caret.setStart(text, Math.min(1, text.nodeValue.length));
+  caret.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(caret);
+  richEditorSelections.set(editor, caret.cloneRange());
+  return span;
+}
+
+function applyRichInlineStyle(editor, styles) {
+  if (!editor) return;
+  let range = restoreEditorRange(editor);
+  if (!range) {
+    editor.focus();
+    range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  try {
+    if (range.collapsed) {
+      styleTypingSpanAtCaret(editor, range, styles);
+      return;
+    }
+    try { document.execCommand("styleWithCSS", false, true); } catch {}
+    if (styles.fontFamily) document.execCommand("fontName", false, styles.fontFamily);
+    if (styles.color) document.execCommand("foreColor", false, styles.color);
+    if (styles.backgroundColor) document.execCommand("hiliteColor", false, styles.backgroundColor);
+    // Font sizes use the legacy marker (7) and are normalised below, which is
+    // reliable across Chrome, Edge and Safari even with a partial selection.
+    if (styles.fontSize) {
+      try { document.execCommand("styleWithCSS", false, false); } catch {}
+      document.execCommand("fontSize", false, "7");
+      for (const node of Array.from(editor.querySelectorAll('font[size="7"], [style*="font-size"]'))) {
+        if (node.tagName === "FONT") {
+          const span = document.createElement("span");
+          span.style.fontSize = styles.fontSize;
+          while (node.firstChild) span.appendChild(node.firstChild);
+          node.replaceWith(span);
+        } else if (node.style && ["xxx-large", "48px"].includes(String(node.style.fontSize || "").toLowerCase())) {
+          node.style.fontSize = styles.fontSize;
+        }
+      }
+      try { document.execCommand("styleWithCSS", false, true); } catch {}
+    }
+    rememberEditorRange(editor);
+  } catch {}
+}
+
+function applyRichFontFamily(editor, family) {
+  if (!family) return;
+  applyRichInlineStyle(editor, { fontFamily: family });
+  normalizeEditorFontTags(editor);
+}
+
+function applyRichFontSize(editor, pixels) {
+  if (!pixels) return;
+  applyRichInlineStyle(editor, { fontSize: `${pixels}px` });
+}
+
+function insertEditorHTML(editor, html) {
+  if (!editor) return;
+  const clean = sanitizeEditorHTML(html);
+  const range = restoreEditorRange(editor);
+  if (!range) {
+    editor.innerHTML = clean;
+  } else {
+    range.deleteContents();
+    const fragment = range.createContextualFragment(clean);
+    range.insertNode(fragment);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  normalizeEditorImageSources(editor);
+  rememberEditorRange(editor);
+}
+
+function editorClipboardHTML(event) {
+  const data = event.clipboardData;
+  if (!data) return "";
+  const html = data.getData("text/html");
+  if (html) return html;
+  const text = data.getData("text/plain");
+  return text ? textToEditorHTML(text) : "";
+}
+
+function insertClipboardImages(event, editor) {
+  const files = Array.from(event.clipboardData?.files || []).filter((file) => String(file.type || "").startsWith("image/"));
+  if (!files.length) return false;
+  event.preventDefault();
+  files.forEach((file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const alt = String(file.name || "pasted image").replace(/"/g, "");
+      insertEditorHTML(editor, `<img src="${reader.result}" alt="${esc(alt)}">`);
+    };
+    reader.readAsDataURL(file);
+  });
+  return true;
+}
+
+function handleRichEditorPaste(event, editor) {
+  if (!editor || !event.clipboardData) return false;
+  if (insertClipboardImages(event, editor)) return true;
+  const html = event.clipboardData.getData("text/html");
+  if (!html) return false;
+  event.preventDefault();
+  insertEditorHTML(editor, html);
+  return true;
+}
+
 const CATEGORIES = {
   decision: { label: "Decision", color: "var(--cat-decision)" },
   product: { label: "Product", color: "var(--cat-product)" },
@@ -405,7 +614,7 @@ const ACCENTS = {
   rose: { label: "Rose", value: "#b8336a" }
 };
 
-const FOLDER_LABELS = { inbox: "Inbox", starred: "Starred", sent: "Sent", drafts: "Drafts", archive: "Archive", spam: "Spam", trash: "Trash" };
+const FOLDER_LABELS = { inbox: "Inbox", starred: "Starred", snoozed: "Snoozed", sent: "Sent", drafts: "Drafts", archive: "Archive", spam: "Spam", trash: "Trash" };
 
 const AUDIT_LABELS = {
   "auth.login": "Sign-in",
@@ -426,6 +635,13 @@ const AUDIT_LABELS = {
   "message.spam": "Marked spam",
   "message.notSpam": "Moved to Inbox",
   "message.report": "Reported to security",
+  "message.copy": "Copied",
+  "message.categorize": "Categorized",
+  "message.snooze": "Snoozed",
+  "message.unsnooze": "Returned from snooze",
+  "message.ignore": "Ignored",
+  "message.unignore": "Unignored",
+  "message.block": "Sender blocked",
   "message.undo": "Undo",
   "message.received": "Received",
   "draft.created": "Draft started",
@@ -486,7 +702,8 @@ const DEFAULT_PREFERENCES = {
   externalWarnings: true,
   composeMode: "html",
   composeWidth: "wide",
-  composePosition: "center"
+  composePosition: "center",
+  quickActions: ["archive", "markRead", "delete"]
 };
 
 /* ============================================================
@@ -642,7 +859,11 @@ const state = {
   offline: false,
   statusPop: null,
   bulkMoveOpen: false,
-  knownPendingIds: new Set()
+  knownPendingIds: new Set(),
+  messageMenuThreadId: "",
+  messageMenuMessageId: "",
+  messageMenuView: "",
+  messageMenuPoint: null
 };
 
 state.calendarSelected = `${state.calendarYear}-${String(state.calendarMonth + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`;
@@ -682,6 +903,10 @@ let scheduleSession = null;
 let taskEditorMode = false;
 let fileShareTarget = null;
 let uploadBusy = false;
+let mailActionQueue = [];
+let mailActionQueueRunning = false;
+const richEditorSelections = new WeakMap();
+let htmlSourceTarget = null;
 
 /* ============================================================
    DOM
@@ -828,6 +1053,9 @@ const signaturePickerOverlay = document.getElementById("signaturePickerOverlay")
 const spellcheckOverlay = document.getElementById("spellcheckOverlay");
 const identityEditorOverlay = document.getElementById("identityEditorOverlay");
 const folderMenu = document.getElementById("folderMenu");
+const messageMenu = document.getElementById("messageMenu");
+const htmlSourceOverlay = document.getElementById("htmlSourceOverlay");
+const quickActionsOverlay = document.getElementById("quickActionsOverlay");
 const folderEditorOverlay = document.getElementById("folderEditorOverlay");
 let confirmResolver = null;
 
@@ -2755,10 +2983,13 @@ function scopeMessages() {
     state.searchResults = [];
     state.searchErrors = [];
     state.searchLoading = false;
+    const snoozeActive = (message) => Boolean(message.snoozedUntil) && Date.parse(message.snoozedUntil) > Date.now();
     if (state.folder === "starred") {
-      messages = state.messages.filter((message) => message.starred && message.folder !== "spam" && message.folder !== "trash");
+      messages = state.messages.filter((message) => message.starred && message.folder !== "spam" && message.folder !== "trash" && !message.ignored && !snoozeActive(message));
+    } else if (state.folder === "snoozed") {
+      messages = state.messages.filter((message) => !message.ignored && snoozeActive(message));
     } else {
-      messages = state.messages.filter((message) => message.folder === state.folder);
+      messages = state.messages.filter((message) => message.folder === state.folder && !message.ignored && !snoozeActive(message));
     }
   }
   if (state.filter === "unread") messages = messages.filter((message) => message.unread);
@@ -2789,7 +3020,11 @@ function individualThreadFor(message) {
     folderSet: [message.folder],
     date: message.date,
     count: 1,
-    individual: true
+    individual: true,
+    repliedAt: message.repliedAt || "",
+    forwardedAt: message.forwardedAt || "",
+    replyCount: Number(message.replyCount) || 0,
+    forwardCount: Number(message.forwardCount) || 0
   };
 }
 
@@ -2873,6 +3108,8 @@ function actionMessageIds(threads) {
     for (const message of thread.messages) {
       if (includeAllFolders) {
         if (message.folder !== "drafts" || state.folder === "drafts" || state.query) ids.add(message.id);
+      } else if (state.folder === "snoozed") {
+        if (message.snoozedUntil && Date.parse(message.snoozedUntil) > Date.now()) ids.add(message.id);
       } else if (message.folder === state.folder) {
         ids.add(message.id);
       }
@@ -3344,6 +3581,38 @@ function mailLoadMoreMarkup(page) {
     : "";
 }
 
+function threadActivityMarkup(thread) {
+  const bits = [];
+  if (thread.repliedAt) {
+    bits.push(`<span title="Replied ${esc(formatDateTimeFull(thread.repliedAt))}" aria-label="Replied"><svg class="icon" aria-hidden="true"><use href="#i-reply"/></svg></span>`);
+  }
+  if (thread.forwardedAt) {
+    bits.push(`<span class="is-forward" title="Forwarded ${esc(formatDateTimeFull(thread.forwardedAt))}" aria-label="Forwarded"><svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg></span>`);
+  }
+  return bits.length ? `<span class="msg-activity">${bits.join("")}</span>` : "";
+}
+
+function quickActionIcon(action) {
+  if (action === "delete") return "i-trash";
+  if (action === "archive") return "i-archive";
+  if (action === "markRead") return "i-envelope-open";
+  if (action === "flag") return "i-flag";
+  if (action === "pin") return "i-pin";
+  if (action === "spam") return "i-alert";
+  if (action === "snooze") return "i-clock";
+  return "i-check";
+}
+
+function quickActionLabel(action) {
+  return ({ delete: "Delete", archive: "Archive", markRead: "Mark read", flag: "Flag", pin: "Pin", spam: "Junk", snooze: "Snooze" })[action] || action;
+}
+
+function threadQuickActionsMarkup(thread, unread) {
+  const actions = (state.preferences.quickActions || []).filter((action) => action && (action !== "markRead" || unread));
+  const safeId = esc(thread.id);
+  return `<span class="msg-quick" role="group" aria-label="Quick actions">${actions.slice(0, 3).map((action) => `<button type="button" class="${action === "delete" || action === "spam" ? "is-danger" : ""}" data-thread-quick="${esc(action)}" data-thread-quick-id="${safeId}" title="${esc(quickActionLabel(action))}" aria-label="${esc(quickActionLabel(action))}"><svg class="icon" aria-hidden="true"><use href="#${quickActionIcon(action)}"/></svg></button>`).join("")}</span>`;
+}
+
 function threadRowMarkup(thread) {
   const { rep, person, label } = threadRowDisplay(thread);
   const selected = thread.id === state.selectedThreadId;
@@ -3364,7 +3633,9 @@ function threadRowMarkup(thread) {
             ${threadCount}
             ${hasFiles ? `<span class="msg-tag" title="Has attachments"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></span>` : ""}
             ${thread.flagged ? '<span class="msg-flag" title="Flagged for follow-up" aria-label="Flagged for follow-up"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg></span>' : ""}
+            ${threadActivityMarkup(thread)}
             ${threadSearchToken(thread)}
+            ${threadQuickActionsMarkup(thread, unread)}
             <button class="star-btn pin-btn${thread.pinned ? " is-pinned" : ""}" data-thread-pin="${safeId}" type="button" aria-label="${thread.pinned ? "Unpin conversation" : "Pin conversation"}" aria-pressed="${thread.pinned ? "true" : "false"}" title="${thread.pinned ? "Unpin conversation" : "Pin conversation"}">
               <svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>
             </button>
@@ -3619,6 +3890,13 @@ function threadMessageMarkup(message, expanded) {
   const cats = (message.categories || []).map((key) => CATEGORIES[key]
     ? `<span class="chip-cat" style="--cat:${CATEGORIES[key].color}"><span class="cat-dot"></span>${esc(CATEGORIES[key].label)}</span>`
     : "").join("");
+  const activityBits = [];
+  if (message.repliedAt) {
+    activityBits.push(`<span><svg class="icon" aria-hidden="true"><use href="#i-reply"/></svg><strong>Replied</strong> ${esc(formatDateTimeFull(message.repliedAt))}${Number(message.replyCount) > 1 ? ` · ${Number(message.replyCount)} replies` : ""}</span>`);
+  }
+  if (message.forwardedAt) {
+    activityBits.push(`<span><svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg><strong>Forwarded</strong> ${esc(formatDateTimeFull(message.forwardedAt))}${Number(message.forwardCount) > 1 ? ` · ${Number(message.forwardCount)} forwards` : ""}</span>`);
+  }
   const body = expanded ? `<div class="thread-body">
       ${delegationBanner(message)}
       ${spamMessageBanner(message)}
@@ -3631,6 +3909,7 @@ function threadMessageMarkup(message, expanded) {
         ${message.external ? threadAuthChips(message) : ""}
         <button class="trust-details" data-details="${esc(message.id)}" type="button">Message details</button>
       </div>
+      ${activityBits.length ? `<div class="thread-activity-line">${activityBits.join("")}</div>` : ""}
       <div class="email-body${imagesAllowed ? "" : " images-blocked"}">${safeEmailHtml(message.bodyHtml || `<p>${esc(message.snippet || "")}</p>`, { message, allowImages: imagesAllowed })}</div>
       ${meetingMarkup(message)}
       ${attachmentMarkup(message.attachments, message)}
@@ -4311,12 +4590,21 @@ function composeQuoteFor(message, kind = "reply") {
 function restoreComposeImageSources(html) {
   const template = document.createElement("template");
   template.innerHTML = String(html || "");
-  template.content.querySelectorAll("img[data-email-src]").forEach((image) => {
+  template.content.querySelectorAll("img").forEach((image) => {
     const original = String(image.getAttribute("data-email-src") || "").trim();
     if (/^https?:\/\//i.test(original) || /^\/\//.test(original)) {
       image.setAttribute("src", original.startsWith("//") ? `https:${original}` : original);
+    } else {
+      const src = String(image.getAttribute("src") || "").trim();
+      if (/^\/api\/mail\/image\?/i.test(src)) {
+        try {
+          const target = new URL(src, window.location.origin).searchParams.get("url") || "";
+          if (/^https?:\/\//i.test(target)) image.setAttribute("src", target);
+        } catch {}
+      }
     }
     image.removeAttribute("data-email-src");
+    image.removeAttribute("data-email-cid");
     image.removeAttribute("data-blocked-src");
   });
   return template.innerHTML;
@@ -4341,7 +4629,8 @@ function replyToMessage(message, all = false) {
     fromEmail: receivedAlias ? receivedAlias.email : (state.aliases.find((alias) => alias.id === "primary") || state.aliases[0] || {}).email,
     threadId: message.threadId,
     inReplyTo: message.messageId,
-    kind: "reply"
+    sourceMessageId: message.id,
+    kind: all ? "replyAll" : "reply"
   });
 }
 
@@ -4362,6 +4651,7 @@ async function replyWithAi(thread = currentThread()) {
     fromEmail: receivedAlias ? receivedAlias.email : (state.aliases.find((alias) => alias.id === "primary") || state.aliases[0] || {}).email,
     threadId: target.threadId,
     inReplyTo: target.messageId,
+    sourceMessageId: target.id,
     kind: "reply"
   });
   if (!session) return;
@@ -4401,6 +4691,7 @@ function forwardMessage(message) {
     fromEmail: (state.aliases.find((alias) => alias.id === "primary") || state.aliases[0] || {}).email,
     threadId: null,
     inReplyTo: null,
+    sourceMessageId: message.id,
     kind: "forward"
   });
 }
@@ -4522,8 +4813,319 @@ async function moveSpamMessageToInbox(messageId) {
   }
 }
 
+function adjustFolderCount(folder, totalDelta = 0, unreadDelta = 0) {
+  if (!folder) return;
+  if (totalDelta) state.folderCounts[folder] = Math.max(0, Number(state.folderCounts[folder] || 0) + totalDelta);
+  if (unreadDelta) state.folderUnread[folder] = Math.max(0, Number(state.folderUnread[folder] || 0) + unreadDelta);
+}
+
+function localFolderMove(message, targetFolder) {
+  if (!message || !targetFolder || message.folder === targetFolder) return;
+  const wasUnread = Boolean(message.unread);
+  const snoozeActive = Boolean(message.snoozedUntil) && Date.parse(message.snoozedUntil) > Date.now();
+  const sourceCountFolder = snoozeActive ? "snoozed" : message.folder;
+  adjustFolderCount(sourceCountFolder, -1, wasUnread && !snoozeActive ? -1 : 0);
+  if (snoozeActive) delete message.snoozedUntil;
+  message.folder = targetFolder;
+  message.imapFolder = targetFolder;
+  message.imapUid = 0;
+  adjustFolderCount(targetFolder, 1, wasUnread ? 1 : 0);
+}
+
+function localMessageUnread(message, unread) {
+  if (!message) return;
+  unread = Boolean(unread);
+  if (Boolean(message.unread) === unread) return;
+  message.unread = unread;
+  adjustFolderCount(message.folder, 0, unread ? 1 : -1);
+}
+
+function cloneMessageRecord(message) {
+  try { return JSON.parse(JSON.stringify(message)); } catch { return { ...message }; }
+}
+
+function optimisticMailAction(action, folderValue, ids, options = {}) {
+  const affected = new Set(ids || []);
+  if (!affected.size) return;
+  const removed = new Set();
+  const categoryList = Array.isArray(options.categories) ? options.categories.slice() : [];
+  for (const message of state.messages) {
+    if (!affected.has(message.id)) continue;
+    const sourceFolder = message.folder;
+    switch (action) {
+      case "archive":
+        localFolderMove(message, "archive");
+        break;
+      case "move":
+        localFolderMove(message, folderValue);
+        break;
+      case "delete":
+        if (sourceFolder === "trash" || sourceFolder === "drafts") {
+          adjustFolderCount(sourceFolder, -1, message.unread ? -1 : 0);
+          removed.add(message.id);
+        } else {
+          localFolderMove(message, "trash");
+        }
+        break;
+      case "markRead":
+        localMessageUnread(message, false);
+        break;
+      case "markUnread":
+        localMessageUnread(message, true);
+        break;
+      case "star":
+        message.starred = true;
+        break;
+      case "unstar":
+        message.starred = false;
+        break;
+      case "flag":
+        message.flagged = true;
+        break;
+      case "unflag":
+        message.flagged = false;
+        break;
+      case "pin":
+        message.pinned = true;
+        break;
+      case "unpin":
+        message.pinned = false;
+        break;
+      case "spam":
+        localFolderMove(message, "spam");
+        localMessageUnread(message, false);
+        break;
+      case "notSpam":
+        localFolderMove(message, "inbox");
+        delete message.spamReport;
+        break;
+      case "report":
+        localFolderMove(message, "spam");
+        localMessageUnread(message, false);
+        message.flagged = true;
+        message.spamReport = { at: new Date().toISOString(), reason: options.reason || "spam", note: options.note || "", source: "message-menu" };
+        break;
+      case "categorize":
+        message.categories = categoryList.slice();
+        break;
+      case "snooze": {
+        const alreadySnoozed = Boolean(message.snoozedUntil) && Date.parse(message.snoozedUntil) > Date.now();
+        adjustFolderCount(alreadySnoozed ? "snoozed" : message.folder, -1, message.unread && !alreadySnoozed ? -1 : 0);
+        message.snoozedUntil = options.until;
+        message.unread = false;
+        adjustFolderCount("snoozed", 1, 0);
+        break;
+      }
+      case "unsnooze":
+        if (message.snoozedUntil) {
+          delete message.snoozedUntil;
+          adjustFolderCount("snoozed", -1, 0);
+          if (message.folder === "inbox") adjustFolderCount("inbox", 1, message.unread ? 1 : 0);
+        }
+        break;
+      case "ignore": {
+        const snoozeActive = Boolean(message.snoozedUntil) && Date.parse(message.snoozedUntil) > Date.now();
+        message.ignored = true;
+        message.ignoredAt = new Date().toISOString();
+        adjustFolderCount(snoozeActive ? "snoozed" : message.folder, -1, message.unread && !snoozeActive ? -1 : 0);
+        break;
+      }
+      case "unignore": {
+        const snoozeActive = Boolean(message.snoozedUntil) && Date.parse(message.snoozedUntil) > Date.now();
+        message.ignored = false;
+        delete message.ignoredAt;
+        adjustFolderCount(snoozeActive ? "snoozed" : message.folder, 1, message.unread && !snoozeActive ? 1 : 0);
+        break;
+      }
+      case "block": {
+        localFolderMove(message, "spam");
+        localMessageUnread(message, false);
+        message.flagged = false;
+        message.spamReport = { at: new Date().toISOString(), reason: "blocked-sender", note: options.note || "", source: "message-menu" };
+        const sender = normalizeEmail(message.from?.email);
+        if (sender) {
+          const blocked = new Set((state.user?.blockedSenders || []).map((value) => normalizeEmail(value)).filter(Boolean));
+          blocked.add(sender);
+          if (state.user) state.user.blockedSenders = Array.from(blocked);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  if (removed.size) state.messages = state.messages.filter((message) => !removed.has(message.id));
+}
+
+function mailActionIsUndoable(action) {
+  return ["archive", "move", "delete", "spam", "notSpam", "report", "categorize", "snooze", "ignore"].includes(action);
+}
+
+function mailActionVerb(action, folderValue) {
+  return ({
+    archive: "Archived", move: `Moved to ${folderDef(folderValue).label}`, copy: "Copied",
+    delete: "Deleted", markRead: "Marked read", markUnread: "Marked unread",
+    star: "Starred", unstar: "Unstarred", spam: "Marked as spam",
+    notSpam: "Moved back to Inbox", report: "Reported", flag: "Flagged for follow-up",
+    unflag: "Follow-up flag cleared", pin: "Pinned", unpin: "Unpinned",
+    categorize: "Categorized", snooze: "Snoozed", unsnooze: "Returned to Inbox",
+    ignore: "Ignored", unignore: "No longer ignored", block: "Blocked"
+  })[action] || "Updated";
+}
+
+function retryableMailActionError(error) {
+  return !error || error.code === "NETWORK" || Number(error.status) === 0 || Number(error.status) === 429 || Number(error.status) >= 500;
+}
+
+function waitForOnlineOrRetry(attempt) {
+  if (navigator.onLine) {
+    return new Promise((resolve) => setTimeout(resolve, Math.min(6000, 500 * (2 ** attempt))));
+  }
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("online", finish);
+      resolve();
+    };
+    window.addEventListener("online", finish, { once: true });
+    setTimeout(finish, 30000);
+  });
+}
+
+async function runMailActionQueue() {
+  if (mailActionQueueRunning) return;
+  mailActionQueueRunning = true;
+  while (mailActionQueue.length) {
+    const job = mailActionQueue[0];
+    try {
+      const result = await api("/api/messages/actions", {
+        method: "POST",
+        body: {
+          ids: job.ids,
+          action: job.action,
+          folder: job.folder || "",
+          reason: job.reason || "",
+          note: job.note || "",
+          categories: job.categories || [],
+          until: job.until || "",
+          requestId: job.requestId
+        }
+      });
+      mailActionQueue.shift();
+      if (result?.quota) updateQuotaUi(result.quota);
+      if (typeof job.after === "function") {
+        try { await job.after(result); } catch (error) { showError(error); }
+      }
+      const verb = mailActionVerb(job.action, job.folder);
+      const count = job.threadCount || 1;
+      if (result?.undoToken && mailActionIsUndoable(job.action)) {
+        showToast(`${verb} · ${count} conversation${count === 1 ? "" : "s"}`, "Undo", async () => {
+          try {
+            await api(`/api/undo/${encodeURIComponent(result.undoToken)}`, { method: "POST", body: {} });
+            await loadBootstrap({ quiet: true });
+            if (job.previousThreadId) await ensureThreadLoaded(job.previousThreadId);
+            renderList();
+            renderReader();
+            syncSelectionUi();
+            showToast("Restored");
+          } catch (error) {
+            showError(error);
+          }
+        }, { duration: 12000 });
+      } else {
+        showToast(`${verb} · ${count} conversation${count === 1 ? "" : "s"}`);
+      }
+    } catch (error) {
+      if (retryableMailActionError(error) && job.attempts < 2) {
+        job.attempts = (job.attempts || 0) + 1;
+        await waitForOnlineOrRetry(job.attempts);
+        continue;
+      }
+      mailActionQueue.shift();
+      await revertMailActionJob(job, error);
+    }
+  }
+  mailActionQueueRunning = false;
+}
+
+async function revertMailActionJob(job, error) {
+  let refreshed = false;
+  if (navigator.onLine) {
+    try {
+      await loadBootstrap({ quiet: true });
+      refreshed = true;
+    } catch {}
+  }
+  if (!refreshed) {
+    const byId = new Map(state.messages.map((message) => [message.id, message]));
+    for (const saved of job.snapshot || []) {
+      if (!saved || !saved.id) continue;
+      if (byId.has(saved.id)) Object.assign(byId.get(saved.id), saved);
+      else state.messages.push(saved);
+    }
+    rebuildIndex();
+    renderList();
+    renderReader({ preserveScroll: true });
+    syncSelectionUi();
+  }
+  if (job.previousThreadId) {
+    ensureThreadLoaded(job.previousThreadId).then((found) => {
+      if (found && !state.selectedThreadId) {
+        state.selectedThreadId = job.previousThreadId;
+        renderList();
+        renderReader();
+        syncSelectionUi();
+      }
+    }).catch(() => {});
+  }
+  showToast((error?.message || "That change could not be saved") + " — your mailbox has been restored", "error");
+}
+
+function enqueueMailAction(job) {
+  if (!job || !job.ids?.length) return;
+  job.requestId = job.requestId || uid("act");
+  job.attempts = 0;
+  job.snapshot = job.snapshot || captureMailActionSnapshot(job.ids);
+  mailActionQueue.push(job);
+  runMailActionQueue().catch((error) => {
+    mailActionQueueRunning = false;
+    showError(error);
+  });
+}
+
+function captureMailActionSnapshot(ids) {
+  const wanted = new Set(ids || []);
+  return state.messages.filter((message) => wanted.has(message.id)).map(cloneMessageRecord);
+}
+
+function nextThreadAfterMailAction(previousThreadId, previousIndex) {
+  const threads = computeView();
+  if (threads.some((thread) => thread.id === previousThreadId)) {
+    return previousThreadId;
+  }
+  const candidate = threads[Math.max(0, previousIndex)] || null;
+  return candidate ? candidate.id : null;
+}
+
+function focusThreadAfterMailAction(threadId) {
+  if (!threadId) {
+    state.selectedThreadId = null;
+    state.expandedThreadId = null;
+    state.expanded = new Set();
+    document.body.classList.remove("reader-open");
+    return;
+  }
+  state.selectedThreadId = threadId;
+  state.expandedThreadId = threadId;
+  const thread = threadById(threadId);
+  const focus = thread ? (replyTarget(thread) || thread.latest) : null;
+  state.expanded = new Set(focus ? [focus.id] : []);
+}
+
 async function performBulkAction(action, folderValue, options = {}) {
-  const threads = state.selectedIds.size ? selectedThreads() : currentThread() ? [currentThread()] : [];
+  let threads = options.threads?.length ? options.threads.slice() : (state.selectedIds.size ? selectedThreads() : currentThread() ? [currentThread()] : []);
   if (!threads.length) {
     showToast("Select a conversation first");
     return;
@@ -4550,61 +5152,451 @@ async function performBulkAction(action, folderValue, options = {}) {
     return;
   }
   closeMenus();
-  const previousThreadId = state.selectedThreadId;
-  const previousIndex = Math.max(0, state.viewThreads.findIndex((thread) => thread.id === previousThreadId));
-  setBulkBusy(true);
-  try {
-    const result = await api("/api/messages/actions", {
-      method: "POST",
-      body: { ids, action, folder: folderValue }
-    });
-    const verb = action === "archive" ? "Archived" : action === "move" ? `Moved to ${folderDef(folderValue).label}` : action === "delete" ? "Deleted" : action === "markRead" ? "Marked read" : action === "markUnread" ? "Marked unread" : action === "star" ? "Starred" : action === "spam" ? "Marked as spam" : action === "notSpam" ? "Moved back to Inbox" : action === "flag" ? "Flagged for follow-up" : action === "unflag" ? "Follow-up flag cleared" : "Unstarred";
-    const count = threads.length;
-    const undoable = ["archive", "move", "delete", "spam", "notSpam"].includes(action);
-    state.selectedIds.clear();
-    await refreshMailbox({ quiet: true });
-    const stillVisible = state.selectedThreadId ? threadById(state.selectedThreadId) : null;
-    let closedReader = false;
-    if (!stillVisible || !threadScopeMessages(stillVisible).length) {
-      state.selectedThreadId = null;
-      state.expandedThreadId = null;
-      document.body.classList.remove("reader-open");
-      renderReader();
-      closedReader = true;
-    }
-    if (closedReader && previousThreadId && state.preferences.autoAdvance && ["archive", "delete", "spam", "notSpam"].includes(action) && state.task === "mail") {
-      const next = state.viewThreads[Math.min(previousIndex, Math.max(0, state.viewThreads.length - 1))];
-      if (next) selectThread(next.id, { keepSelection: true });
-    }
-    const senders = senderEmailsForThreads(threads);
-    if (!options.keepRules && senders.length) {
-      if (action === "spam") await updateSenderRules(senders, "spam");
-      else if (action === "move" && options.alwaysRule) await updateSenderRules(senders, folderValue);
-      else if (action === "notSpam") {
-        if (options.inboxRule) await updateSenderRules(senders, "inbox");
-        else await removeSenderFolderRules(senders, "spam");
+  const anchorThreadId = options.anchorThreadId || state.selectedThreadId || threads[0]?.id || "";
+  const anchorIndex = Math.max(0, state.viewThreads.findIndex((thread) => thread.id === anchorThreadId));
+  const snapshot = captureMailActionSnapshot(ids);
+  const count = threads.length;
+  const previousThreadId = anchorThreadId;
+  const senders = senderEmailsForThreads(threads);
+
+  if (action === "copy") {
+    try {
+      const result = await api("/api/messages/actions", {
+        method: "POST",
+        body: { ids, action, folder: folderValue, requestId: uid("act") }
+      });
+      if (result?.quota) updateQuotaUi(result.quota);
+      showToast(`Copied ${count} conversation${count === 1 ? "" : "s"} to ${folderDef(folderValue).label}`);
+      if (state.folder === folderValue) {
+        await loadMailPage(state.folder, state.filter).catch(() => {});
+        renderList({ preserveScroll: true });
       }
+    } catch (error) {
+      showError(error);
     }
-    if (undoable && result.undoToken) {
-      showToast(`${verb} · ${count} conversation${count === 1 ? "" : "s"}`, "Undo", async () => {
-        try {
-          await api(`/api/undo/${encodeURIComponent(result.undoToken)}`, { method: "POST", body: {} });
-          await refreshMailbox({ quiet: true });
-          showToast("Restored");
-        } catch (error) {
-          showError(error);
-        }
-      }, { duration: 12000 });
-    } else {
-      showToast(`${verb} · ${count} conversation${count === 1 ? "" : "s"}`);
+    return;
+  }
+
+  const beforeThreadIds = new Set(state.viewThreads.map((thread) => thread.id));
+  state.selectedIds.clear();
+  optimisticMailAction(action, folderValue, ids, options);
+  rebuildIndex();
+  const nextId = nextThreadAfterMailAction(previousThreadId, anchorIndex);
+  const afterThreadIds = new Set(state.viewThreads.map((thread) => thread.id));
+  const page = currentMailPage();
+  if (page) {
+    let removedThreads = 0;
+    for (const id of beforeThreadIds) if (!afterThreadIds.has(id)) removedThreads += 1;
+    if (removedThreads) page.total = Math.max(0, Number(page.total || 0) - removedThreads);
+  }
+  focusThreadAfterMailAction(nextId);
+  renderList({ preserveScroll: true });
+  renderReader({ preserveScroll: previousThreadId === nextId });
+  syncSelectionUi();
+  syncCommandBar();
+  if (!state.selectedThreadId) writeAppHash({ replace: true });
+
+  const job = {
+    ids,
+    action,
+    folder: folderValue || "",
+    reason: options.reason || "",
+    note: options.note || "",
+    categories: options.categories || [],
+    until: options.until || "",
+    threadCount: count,
+    previousThreadId,
+    snapshot,
+    after: null
+  };
+  if (!options.keepRules && senders.length) {
+    if (action === "spam" || action === "block") {
+      job.after = () => updateSenderRules(senders, "spam");
+    } else if (action === "move" && options.alwaysRule) {
+      job.after = () => updateSenderRules(senders, folderValue);
+    } else if (action === "notSpam") {
+      job.after = () => options.inboxRule ? updateSenderRules(senders, "inbox") : removeSenderFolderRules(senders, "spam");
     }
-    updateQuotaUi(result.quota || null);
-    if (!state.selectedThreadId) writeAppHash({ replace: true });
+  }
+  enqueueMailAction(job);
+}
+function messageMenuThread() {
+  return state.messageMenuThreadId ? threadById(state.messageMenuThreadId) : null;
+}
+
+function messageMenuActionThreads(thread) {
+  if (thread && state.selectedIds.has(thread.id) && state.selectedIds.size > 1) return selectedThreads();
+  return thread ? [thread] : [];
+}
+
+function messageMenuFolders() {
+  return (state.folders || [])
+    .filter((folder) => !folder.virtual && !folder.delegated)
+    .slice()
+    .sort((a, b) => folderSortValue(a) - folderSortValue(b));
+}
+
+function menuButton(command, icon, label, attrs = "", classes = "") {
+  return `<button type="button" data-message-command="${esc(command)}" ${attrs} class="${classes}"><svg class="icon" aria-hidden="true"><use href="#${icon}"/></svg><span>${esc(label)}</span></button>`;
+}
+
+function messageMenuDivider() {
+  return '<div class="message-menu-sep" role="separator"></div>';
+}
+
+function messageMenuFolderList(kind) {
+  const current = messageMenuThread()?.latest?.folder || "";
+  const folders = messageMenuFolders().filter((folder) => folder.id !== current);
+  return `<div class="message-menu-head"><button class="icon-btn" type="button" data-message-back aria-label="Back to message actions"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><div><strong>${kind === "copy" ? "Copy to folder" : "Move to folder"}</strong><span>Choose a destination</span></div></div>
+    ${folders.map((folder) => `<button type="button" data-message-command="${kind}" data-folder-id="${esc(folder.id)}"><svg class="icon" aria-hidden="true"><use href="#${esc(folder.icon || "i-folder")}"/></svg><span>${esc(folder.label)}</span></button>`).join("") || '<div class="message-menu-empty">No other folders available</div>'}`;
+}
+
+function messageMenuCategoryList(thread) {
+  const active = new Set(thread?.latest?.categories || []);
+  return `<div class="message-menu-head"><button class="icon-btn" type="button" data-message-back aria-label="Back to message actions"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><div><strong>Categorize</strong><span>Apply labels to this conversation</span></div></div>
+    ${Object.entries(CATEGORIES).map(([key, category]) => `<button type="button" data-message-category="${esc(key)}" class="${active.has(key) ? "is-active" : ""}"><span class="msg-cat-dot" style="--cat:${category.color}"></span><span>${esc(category.label)}</span>${active.has(key) ? '<span class="check">✓</span>' : ""}</button>`).join("")}
+    <div class="message-menu-note">Choose any number of categories. Clicking applies the change immediately.</div>`;
+}
+
+function nextSnoozeDate(kind) {
+  const now = new Date();
+  if (kind === "later") {
+    const at = new Date(now);
+    at.setHours(18, 0, 0, 0);
+    if (at.getTime() - now.getTime() < 2 * 60 * 1000) at.setTime(now.getTime() + 3 * 60 * 60 * 1000);
+    return at;
+  }
+  if (kind === "tomorrow") {
+    const at = new Date(now);
+    at.setDate(at.getDate() + 1);
+    at.setHours(8, 0, 0, 0);
+    return at;
+  }
+  if (kind === "weekend") {
+    const at = new Date(now);
+    const day = at.getDay();
+    const untilSaturday = (6 - day + 7) % 7 || 7;
+    at.setDate(at.getDate() + untilSaturday);
+    at.setHours(9, 0, 0, 0);
+    return at;
+  }
+  const at = new Date(now);
+  const untilMonday = (1 - at.getDay() + 7) % 7 || 7;
+  at.setDate(at.getDate() + untilMonday);
+  at.setHours(8, 0, 0, 0);
+  return at;
+}
+
+function messageMenuSnoozeList() {
+  const presets = [
+    ["later", "Later today", nextSnoozeDate("later")],
+    ["tomorrow", "Tomorrow morning", nextSnoozeDate("tomorrow")],
+    ["weekend", "This weekend", nextSnoozeDate("weekend")],
+    ["nextweek", "Next week", nextSnoozeDate("nextweek")]
+  ];
+  return `<div class="message-menu-head"><button class="icon-btn" type="button" data-message-back aria-label="Back to message actions"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><div><strong>Snooze</strong><span>It returns to Inbox automatically</span></div></div>
+    ${presets.map(([kind, label, date]) => `<button type="button" data-message-snooze="${kind}"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>${esc(label)}</span><small style="margin-left:auto;color:var(--text-3);font-size:10px">${esc(formatListWhen(date))}</small></button>`).join("")}
+    <div class="message-menu-sep"></div>
+    <input class="message-menu-input" type="datetime-local" data-message-snooze-custom aria-label="Custom snooze time">
+    <button type="button" data-message-command="snooze-custom"><svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg><span>Pick a date and time</span></button>`;
+}
+
+function messageMenuAdvancedList() {
+  return `<div class="message-menu-head"><button class="icon-btn" type="button" data-message-back aria-label="Back to message actions"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><div><strong>Advanced actions</strong><span>More ways to handle this conversation</span></div></div>
+    ${menuButton("markRead", "i-envelope-open", "Mark as read")}
+    ${menuButton("replyAll", "i-reply-all", "Reply all")}
+    ${menuButton("forward", "i-forward", "Forward")}
+    ${menuButton("rules", "i-sliders", "Create a rule")}
+    ${menuButton("print", "i-file", "Print")}
+    ${menuButton("download", "i-download", "Download message")}
+    ${menuButton("findRelated", "i-search", "Find related messages")}
+    ${messageMenuDivider()}
+    ${menuButton("block", "i-shield-alert", "Block sender", "", "is-danger")}
+    ${menuButton("ignore", "i-lock", "Ignore conversation")}`;
+}
+
+function messageMenuMarkup() {
+  const thread = messageMenuThread();
+  if (!thread) return '<div class="message-menu-empty">That conversation is no longer available</div>';
+  const message = state.messageMenuMessageId ? (thread.messages.find((item) => item.id === state.messageMenuMessageId) || thread.latest) : thread.latest;
+  const view = state.messageMenuView;
+  if (view === "move" || view === "copy") return messageMenuFolderList(view);
+  if (view === "category") return messageMenuCategoryList(thread);
+  if (view === "snooze") return messageMenuSnoozeList();
+  if (view === "advanced") return messageMenuAdvancedList();
+  const unread = thread.unreadCount > 0;
+  const pinned = Boolean(thread.pinned);
+  const flagged = Boolean(thread.flagged);
+  const isSpam = thread.messages.some((item) => item.folder === "spam");
+  const sender = message?.from?.name && message.from.name !== message.from.email ? message.from.name : (message?.from?.email || "Unknown sender");
+  const activity = thread.repliedAt || thread.forwardedAt
+    ? `${thread.repliedAt ? "Replied" : ""}${thread.repliedAt && thread.forwardedAt ? " · " : ""}${thread.forwardedAt ? "Forwarded" : ""}`
+    : "No reply or forward yet";
+  return `<div class="message-menu-head"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><div><strong>${esc(threadSubject(thread))}</strong><span>${esc(sender)} · ${esc(activity)}</span></div></div>
+    ${menuButton("reply", "i-reply", "Reply")}
+    ${menuButton("replyAll", "i-reply-all", "Reply all", replyAllAvailable(thread) ? "" : "disabled")}
+    ${menuButton("forward", "i-forward", "Forward")}
+    ${messageMenuDivider()}
+    ${menuButton("delete", "i-trash", "Delete", "", "is-danger")}
+    ${menuButton("archive", "i-archive", "Archive")}
+    <div class="message-menu-sub"><button type="button" data-message-submenu="move"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span>Move</span><span class="menu-chevron">›</span></button></div>
+    <div class="message-menu-sub"><button type="button" data-message-submenu="copy"><svg class="icon" aria-hidden="true"><use href="#i-files"/></svg><span>Copy</span><span class="menu-chevron">›</span></button></div>
+    ${messageMenuDivider()}
+    ${menuButton("markUnread", "i-envelope-open", "Mark as unread", unread ? "disabled" : "")}
+    ${menuButton(pinned ? "unpin" : "pin", "i-pin", pinned ? "Unpin" : "Pin")}
+    <div class="message-menu-sub"><button type="button" data-message-submenu="category"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg><span>Categorize</span><span class="menu-chevron">›</span></button></div>
+    ${menuButton(flagged ? "unflag" : "flag", "i-flag", flagged ? "Clear follow-up flag" : "Flag")}
+    <div class="message-menu-sub"><button type="button" data-message-submenu="snooze"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Snooze</span><span class="menu-chevron">›</span></button></div>
+    ${menuButton("rules", "i-sliders", "Rules")}
+    ${menuButton("quickActions", "i-grid", "Set quick actions")}
+    ${messageMenuDivider()}
+    ${isSpam ? menuButton("notSpam", "i-inbox", "Report not junk") : menuButton("reportJunk", "i-alert", "Report junk")}
+    ${menuButton("reportPhishing", "i-shield-alert", "Report phishing")}
+    ${menuButton("reportConcern", "i-info", "Report a concern")}
+    ${menuButton("block", "i-shield-alert", "Block", "", "is-danger")}
+    ${message?.ignored || thread.messages.some((item) => item.ignored) ? menuButton("unignore", "i-lock", "Unignore conversation") : menuButton("ignore", "i-lock", "Ignore")}
+    ${messageMenuDivider()}
+    ${menuButton("download", "i-download", "Download")}
+    ${menuButton("findRelated", "i-search", "Find related")}
+    ${menuButton("view", "i-envelope-open", "View")}
+    <div class="message-menu-sub"><button type="button" data-message-submenu="advanced"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg><span>Advanced actions</span><span class="menu-chevron">›</span></button></div>`;
+}
+
+function positionMessageMenu(point) {
+  if (!messageMenu) return;
+  const width = 286;
+  const left = Math.min(window.innerWidth - width - 10, Math.max(10, point?.clientX || 120));
+  messageMenu.style.left = `${left}px`;
+  messageMenu.style.top = "10px";
+  messageMenu.hidden = false;
+  const height = messageMenu.offsetHeight;
+  const top = Math.min(window.innerHeight - height - 10, Math.max(10, point?.clientY || 120));
+  messageMenu.style.top = `${top}px`;
+}
+
+function openMessageMenu(threadId, messageId, point) {
+  const thread = threadById(threadId);
+  if (!thread) return;
+  closeMenus();
+  state.messageMenuThreadId = thread.id;
+  state.messageMenuMessageId = messageId || thread.latest?.id || "";
+  state.messageMenuView = "";
+  state.messageMenuPoint = point || { clientX: 120, clientY: 120 };
+  messageMenu.innerHTML = messageMenuMarkup();
+  positionMessageMenu(state.messageMenuPoint);
+  messageMenu.querySelector("button")?.focus();
+}
+
+function closeMessageMenu() {
+  if (messageMenu) messageMenu.hidden = true;
+  state.messageMenuThreadId = "";
+  state.messageMenuMessageId = "";
+  state.messageMenuView = "";
+}
+
+function rerenderMessageMenu() {
+  if (!state.messageMenuThreadId) return;
+  messageMenu.innerHTML = messageMenuMarkup();
+  positionMessageMenu(state.messageMenuPoint);
+}
+
+function messageMenuTargetMessage(thread) {
+  if (!thread) return null;
+  return thread.messages.find((message) => message.id === state.messageMenuMessageId) || thread.latest;
+}
+
+async function downloadMessageSource(message) {
+  if (!message) return;
+  try {
+    const data = await api(`/api/messages/${encodeURIComponent(message.id)}/source`);
+    const subject = String(message.subject || "message").replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80);
+    const blob = new Blob([data.source || data.headers || ""], { type: "message/rfc822" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${subject || "message"}.eml`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast("Message downloaded as .eml");
   } catch (error) {
     showError(error);
-  } finally {
-    setBulkBusy(false);
   }
+}
+
+function printThread(thread, target = null) {
+  if (!thread) return;
+  const message = target || thread.latest;
+  const sender = message.from?.name && message.from.name !== message.from.email ? `${message.from.name} <${message.from.email}>` : (message.from?.email || "Unknown");
+  const recipients = (message.to || []).map((person) => person.name ? `${person.name} <${person.email}>` : person.email).join(", ");
+  const body = message.bodyText || htmlToText(message.bodyHtml || "");
+  const win = window.open("", "_blank", "width=860,height=900");
+  if (!win) { showToast("Allow pop-ups to print this message"); return; }
+  try { win.opener = null; } catch {}
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(threadSubject(thread))}</title><style>body{font-family:"Segoe UI",Arial,sans-serif;color:#172230;margin:40px;line-height:1.55}h1{font-size:20px;margin:0 0 18px}dl{display:grid;grid-template-columns:80px 1fr;gap:4px 10px;margin:0 0 24px}dt{color:#64748b}dd{margin:0}pre{white-space:pre-wrap;font:inherit;border-top:1px solid #dfe6ee;padding-top:20px}</style></head><body><h1>${esc(threadSubject(thread))}</h1><dl><dt>From</dt><dd>${esc(sender)}</dd><dt>To</dt><dd>${esc(recipients || "undisclosed recipients")}</dd><dt>Date</dt><dd>${esc(formatDateTimeFull(message.date))}</dd></dl><pre>${esc(body)}</pre></body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 250);
+}
+
+function openRuleForThread(thread) {
+  const message = thread?.latest;
+  const email = normalizeEmail(message?.from?.email);
+  if (!email) return;
+  const senderName = message.from?.name || email;
+  openSettings("rules");
+  setTimeout(() => {
+    openRuleEditor({
+      id: "",
+      name: `Messages from ${senderName}`,
+      match: "all",
+      conditions: [{ field: "from", operator: "is", value: email }],
+      action: { type: "move", value: "archive" },
+      enabled: true
+    });
+    const name = document.getElementById("ruleName");
+    if (name) name.value = `Messages from ${senderName}`;
+  }, 120);
+}
+
+function openQuickActionsDialog() {
+  const selected = new Set((state.preferences.quickActions || []).slice(0, 3));
+  const options = [
+    ["archive", "i-archive", "Archive"],
+    ["markRead", "i-envelope-open", "Mark read"],
+    ["delete", "i-trash", "Delete"],
+    ["flag", "i-flag", "Flag"],
+    ["pin", "i-pin", "Pin"],
+    ["spam", "i-alert", "Junk"],
+    ["snooze", "i-clock", "Snooze"]
+  ];
+  const holder = document.getElementById("quickActionsChoices");
+  if (!holder) return;
+  holder.innerHTML = `<div class="quick-actions-grid">${options.map(([value, icon, label]) => `<button type="button" class="quick-actions-choice${selected.has(value) ? " is-selected" : ""}" data-quick-choice="${value}"><svg class="icon" aria-hidden="true"><use href="#${icon}"/></svg><span>${esc(label)}</span>${selected.has(value) ? '<span class="check">✓</span>' : ""}</button>`).join("")}</div>
+    <p class="settings-note">Choose up to three. The shortcuts appear as soon as you hover a message in the list.</p>`;
+  quickActionsOverlay.hidden = false;
+}
+
+function toggleQuickActionChoice(button) {
+  if (!button) return;
+  const selected = $$("#quickActionsChoices .quick-actions-choice.is-selected");
+  const isSelected = button.classList.contains("is-selected");
+  if (!isSelected && selected.length >= 3) {
+    showToast("Choose up to three quick actions");
+    return;
+  }
+  button.classList.toggle("is-selected", !isSelected);
+  const check = button.querySelector(".check");
+  if (isSelected) check?.remove();
+  else button.insertAdjacentHTML("beforeend", '<span class="check">✓</span>');
+}
+
+async function saveQuickActions() {
+  const choices = $$("#quickActionsChoices .quick-actions-choice.is-selected").map((button) => button.getAttribute("data-quick-choice"));
+  if (!choices.length) { showToast("Choose at least one quick action"); return; }
+  try {
+    const data = await api("/api/preferences", { method: "PATCH", body: { quickActions: choices } });
+    state.preferences = { ...state.preferences, ...(data.preferences || {}) };
+    quickActionsOverlay.hidden = true;
+    renderList();
+    showToast("Quick actions saved");
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function messageMenuCommand(command, button) {
+  const thread = messageMenuThread();
+  if (!thread) { closeMessageMenu(); return; }
+  const threads = messageMenuActionThreads(thread);
+  const target = messageMenuTargetMessage(thread);
+  closeMessageMenu();
+  if (command === "reply") { replyToMessage(target || replyTarget(thread)); return; }
+  if (command === "replyAll") { replyToMessage(target || replyTarget(thread), true); return; }
+  if (command === "forward") { forwardMessage(target || replyTarget(thread)); return; }
+  if (command === "view") {
+    state.selectedThreadId = thread.id;
+    state.expandedThreadId = thread.id;
+    if (target) state.expanded = new Set([target.id]);
+    document.body.classList.add("reader-open");
+    renderList();
+    renderReader();
+    syncSelectionUi();
+    return;
+  }
+  if (command === "download") { await downloadMessageSource(target); return; }
+  if (command === "print") { printThread(thread, target); return; }
+  if (command === "findRelated") {
+    const email = target?.from?.email;
+    if (!email) return;
+    if (state.task !== "mail") setTask("mail");
+    searchInput.value = `from:${email}`;
+    setQuery(searchInput.value);
+    focusSearch();
+    return;
+  }
+  if (command === "rules") { openRuleForThread(thread); return; }
+  if (command === "quickActions") { openQuickActionsDialog(); return; }
+  if (command === "reportJunk") { performBulkAction("spam", "", { threads, anchorThreadId: thread.id }); return; }
+  if (command === "reportPhishing") {
+    performBulkAction("report", "", { threads, anchorThreadId: thread.id, reason: "phishing", note: "" });
+    return;
+  }
+  if (command === "reportConcern") { openReportDialog(thread); return; }
+  if (command === "notSpam") { performBulkAction("notSpam", "", { threads, anchorThreadId: thread.id }); return; }
+  if (command === "block") { performBulkAction("block", "", { threads, anchorThreadId: thread.id }); return; }
+  if (command === "ignore") { performBulkAction("ignore", "", { threads, anchorThreadId: thread.id }); return; }
+  if (command === "unignore") { performBulkAction("unignore", "", { threads, anchorThreadId: thread.id }); return; }
+  if (command === "delete" || command === "archive" || command === "markRead" || command === "markUnread" || command === "pin" || command === "unpin" || command === "flag" || command === "unflag") {
+    performBulkAction(command, "", { threads, anchorThreadId: thread.id });
+    return;
+  }
+  if (command === "move" || command === "copy") {
+    const folder = button?.getAttribute("data-folder-id") || "";
+    if (folder) performBulkAction(command, folder, { threads, anchorThreadId: thread.id });
+    return;
+  }
+  if (command === "snooze-custom") {
+    const input = messageMenu.querySelector("[data-message-snooze-custom]");
+    const value = input?.value ? new Date(input.value) : null;
+    if (!value || Number.isNaN(value.getTime()) || value <= new Date()) { showToast("Choose a future snooze time"); return; }
+    performBulkAction("snooze", "", { threads, anchorThreadId: thread.id, until: value.toISOString() });
+    return;
+  }
+}
+
+function snoozeFromMenu(kind) {
+  const thread = messageMenuThread();
+  if (!thread) return;
+  const until = nextSnoozeDate(kind);
+  closeMessageMenu();
+  performBulkAction("snooze", "", { threads: messageMenuActionThreads(thread), anchorThreadId: thread.id, until: until.toISOString() });
+}
+
+async function toggleCategoryForMenu(key) {
+  const thread = messageMenuThread();
+  if (!thread) return;
+  const threads = messageMenuActionThreads(thread);
+  const current = new Set(thread.latest?.categories || []);
+  if (current.has(key)) current.delete(key);
+  else current.add(key);
+  const categories = Array.from(current);
+  const ids = actionMessageIds(threads);
+  const snapshot = captureMailActionSnapshot(ids);
+  optimisticMailAction("categorize", "", ids, { categories });
+  rebuildIndex();
+  renderList({ preserveScroll: true });
+  renderReader({ preserveScroll: true });
+  rerenderMessageMenu();
+  enqueueMailAction({
+    ids,
+    action: "categorize",
+    categories,
+    threadCount: threads.length,
+    previousThreadId: thread.id,
+    snapshot
+  });
 }
 
 function setBulkBusy(busy) {
@@ -5401,7 +6393,7 @@ function composeEditorToolbar(session) {
     <button type="button" data-editor-block="h1" title="Heading 1">H1</button>
     <button type="button" data-editor-block="h2" title="Heading 2">H2</button>
     <button type="button" data-editor-block="blockquote" title="Quote">❝</button>
-    <button type="button" data-editor-block="pre" title="Code block">&lt;/&gt;</button>
+    <button type="button" data-editor-block="pre" title="Code block">{ }</button>
     <span class="editor-sep"></span>
     ${button("insertUnorderedList", "•", "Bulleted list", "•")}${button("insertOrderedList", "1.", "Numbered list", "1.")}
     <span class="editor-sep"></span>
@@ -5411,6 +6403,7 @@ function composeEditorToolbar(session) {
     <label class="editor-color-wrap" title="Text color"><span class="editor-color-glyph">A</span><input type="color" data-editor-color value="#172230" title="Text color" aria-label="Text color"></label>
     <label class="editor-color-wrap" title="Highlight color"><span class="editor-color-glyph editor-highlight-glyph"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><input type="color" data-editor-highlight value="#fff2a8" title="Highlight color" aria-label="Highlight color"></label>
     ${button("removeFormat", "Tx", "Clear formatting", "Tx")}
+    <button type="button" data-compose-action="source" title="Edit HTML source" aria-label="Edit HTML source">&lt;&gt;</button>
     ${session.hasQuote ? `<span class="editor-sep"></span><button type="button" data-compose-action="toggle-quote" class="compose-quote-toggle${session.quoteCollapsed ? " is-active" : ""}" title="${session.quoteCollapsed ? "Show quoted message" : "Hide quoted message"}" aria-pressed="${session.quoteCollapsed ? "true" : "false"}">❝ Quote</button>` : ""}
     ${composeAiToolbarButton()}
     <span class="compose-toolbar-mode">
@@ -5526,7 +6519,7 @@ function openCompose(prefill = {}, options = {}) {
   const requestedAlias = aliasForEmail(requestedFrom);
   const fromEmail = requestedAlias && requestedAlias.canSend ? requestedFrom : defaultAlias.email;
   const htmlMode = data.htmlMode != null ? !!data.htmlMode : state.preferences.composeMode !== "plain";
-  const context = data.kind === "reply" ? "reply" : data.kind === "forward" ? "forward" : "new";
+  const context = (data.kind === "reply" || data.kind === "replyAll") ? "reply" : data.kind === "forward" ? "forward" : "new";
   const signatureItem = options.restoring ? null : defaultSignatureForCompose(context, fromEmail);
   const signatureText = signatureItem ? signaturePlainValue(signatureItem) : "";
   const signatureHTML = signatureItem ? signatureRichValue(signatureItem) : "";
@@ -5570,6 +6563,8 @@ function openCompose(prefill = {}, options = {}) {
     files: Array.isArray(data.attachments) ? data.attachments.map((file) => ({ ...file })) : [],
     threadId: data.threadId || null,
     inReplyTo: data.inReplyTo || null,
+    sourceMessageId: data.sourceMessageId || "",
+    kind: data.kind || "",
     ccOpen: Boolean(data.ccText || data.cc || data.bccText || data.bcc),
     optionsOpen: false,
     mode: data.windowMode === "minimized" ? "minimized" : (options.mode || "floating"),
@@ -5593,6 +6588,7 @@ function openCompose(prefill = {}, options = {}) {
   composeSessions.push(session);
   composeLayer.insertAdjacentHTML("beforeend", composeTemplate(session));
   session.el = composeLayer.querySelector(`[data-compose-id="${CSS.escape(id)}"]`);
+  normalizeEditorImageSources(session.el.querySelector("[data-compose-editor]"));
   updateComposeWindow(session);
   updateComposeFiles(session);
   updateComposeStatus(session);
@@ -5637,6 +6633,8 @@ function openComposeFromDraft(draft, options = {}) {
     attachments: draft.attachments,
     threadId: draft.threadId,
     inReplyTo: draft.inReplyTo,
+    sourceMessageId: draft.sourceMessageId || "",
+    kind: draft.composeKind || "",
     windowMode: draft.windowMode || "floating",
     updatedAt: draft.updatedAt
   }, { restoring: true, draftId: draft.id, id: `c_draft_${draft.id}`, mode: options.forceOpen ? "floating" : (draft.windowMode === "minimized" ? "minimized" : "floating") });
@@ -5744,6 +6742,7 @@ function reRenderCompose(session) {
   if (!next) return;
   session.el.replaceWith(next);
   session.el = next;
+  normalizeEditorImageSources(next.querySelector("[data-compose-editor]"));
   if (session.quoteCollapsed) next.querySelector("[data-compose-editor]")?.classList.add("is-quote-collapsed");
   updateComposeWindow(session);
   updateComposeFiles(session);
@@ -5802,8 +6801,9 @@ function normalizeEditorFontTags(editor, explicitSize = "") {
     const face = font.getAttribute("face");
     const size = font.getAttribute("size");
     if (face) span.style.fontFamily = face;
-    if (explicitSize) span.style.fontSize = `${explicitSize}px`;
-    else if (size) {
+    if (explicitSize) {
+      if (size === "7" || !size) span.style.fontSize = `${explicitSize}px`;
+    } else if (size) {
       const legacy = { 1: "10px", 2: "13px", 3: "16px", 4: "18px", 5: "24px", 6: "32px", 7: "48px" };
       if (legacy[size]) span.style.fontSize = legacy[size];
     }
@@ -5816,9 +6816,7 @@ function applyComposeFontFamily(session, family) {
   if (!session?.el || !family) return;
   const editor = session.el.querySelector("[data-compose-editor]");
   if (!editor) return;
-  restoreComposeEditorSelection(session, editor);
-  try { document.execCommand("styleWithCSS", false, true); } catch {}
-  document.execCommand("fontName", false, family);
+  applyRichFontFamily(editor, family);
   normalizeEditorFontTags(editor);
   updateComposeEditor(session, editor);
   rememberComposeEditorSelection(session, editor);
@@ -5828,11 +6826,8 @@ function applyComposeFontSize(session, pixels) {
   if (!session?.el || !pixels) return;
   const editor = session.el.querySelector("[data-compose-editor]");
   if (!editor) return;
-  restoreComposeEditorSelection(session, editor);
-  try { document.execCommand("styleWithCSS", false, false); } catch {}
-  document.execCommand("fontSize", false, "7");
-  normalizeEditorFontTags(editor, pixels);
-  try { document.execCommand("styleWithCSS", false, true); } catch {}
+  applyRichFontSize(editor, pixels);
+  normalizeEditorFontTags(editor);
   updateComposeEditor(session, editor);
   rememberComposeEditorSelection(session, editor);
 }
@@ -6404,11 +7399,13 @@ function composePayload(session) {
     bccText: recipientTextWithPending(session, "bcc"),
     subject: session.subject,
     bodyText: session.body,
-    bodyHtml: session.htmlMode ? session.bodyHtml : "",
+    bodyHtml: session.htmlMode ? restoreEditorImageSources(session.bodyHtml) : "",
     fromEmail: session.fromEmail,
     attachments: session.files,
     threadId: session.threadId,
     inReplyTo: session.inReplyTo,
+    composeKind: session.kind || "",
+    sourceMessageId: session.sourceMessageId || "",
     windowMode: session.mode,
     priority: session.priority,
     receipt: session.receipt,
@@ -6785,10 +7782,12 @@ function composeSendPayload(session, extra = {}) {
     bcc: session.bcc,
     subject: session.subject,
     bodyText: session.body,
-    bodyHtml: session.htmlMode ? restoreComposeImageSources(session.bodyHtml) : "",
+    bodyHtml: session.htmlMode ? restoreEditorImageSources(session.bodyHtml) : "",
     attachments: session.files,
     threadId: session.threadId,
     inReplyTo: session.inReplyTo,
+    composeKind: session.kind || "",
+    sourceMessageId: session.sourceMessageId || "",
     priority: session.priority,
     receipt: session.receipt,
     delivery: session.delivery,
@@ -7008,7 +8007,7 @@ function swapComposeIdentitySignature(session, fromEmail) {
     if (oldHTML && session.bodyHtml.includes(oldHTML)) {
       session.bodyHtml = sanitizeEditorHTML(session.bodyHtml.replace(oldHTML, replacement));
       const editor = session.el?.querySelector("[data-compose-editor]");
-      if (editor) editor.innerHTML = session.bodyHtml;
+      if (editor) { editor.innerHTML = session.bodyHtml; normalizeEditorImageSources(editor); }
       session.body = editorPlainText(session.bodyHtml);
       changed = true;
     }
@@ -7066,8 +8065,8 @@ function updateComposeField(session, target) {
 
 function updateComposeEditor(session, editor) {
   if (!session || !editor) return;
-  session.bodyHtml = sanitizeEditorHTML(editor.innerHTML);
-  session.body = editorPlainText(editor.innerHTML);
+  session.bodyHtml = sanitizeEditorHTML(stripEditorArtifacts(editor.innerHTML));
+  session.body = editorPlainText(stripEditorArtifacts(editor.innerHTML));
   session.dirty = true;
   session.error = null;
   updateComposeStatus(session);
@@ -7092,7 +8091,7 @@ function setComposeBodyText(session, text) {
 function refreshComposeEditorContent(session) {
   if (!session?.el) return;
   const editor = session.el.querySelector("[data-compose-editor]");
-  if (editor) editor.innerHTML = sanitizeEditorHTML(session.bodyHtml || textToEditorHTML(session.body || ""));
+  if (editor) { editor.innerHTML = sanitizeEditorHTML(session.bodyHtml || textToEditorHTML(session.body || "")); normalizeEditorImageSources(editor); }
   const textarea = session.el.querySelector('[data-compose-field="body"]');
   if (textarea) textarea.value = session.body || "";
 }
@@ -7969,7 +8968,7 @@ function identityEditorFormatPayload() {
     const bodyText = String(plain?.value || "").trim();
     return { signature: bodyText, signatureHtml: "" };
   }
-  const bodyHtml = sanitizeEditorHTML(editor?.innerHTML || "");
+  const bodyHtml = sanitizeEditorHTML(restoreEditorImageSources(editor?.innerHTML || ""));
   const bodyText = editorPlainText(bodyHtml) || htmlToText(bodyHtml);
   return { signature: bodyText, signatureHtml: bodyHtml };
 }
@@ -8023,6 +9022,7 @@ function openIdentityEditor(identity = null) {
   const signatureHtml = existing?.signatureHtml || "";
   const signatureText = existing?.signature || "";
   editor.innerHTML = sanitizeEditorHTML(signatureHtml || (signatureText ? textToEditorHTML(signatureText) : ""));
+  normalizeEditorImageSources(editor);
   plain.value = signatureText || (signatureHtml ? htmlToText(signatureHtml) : "");
   error.hidden = true;
   setIdentitySignatureMode(state.identityEditor.format);
@@ -8160,7 +9160,7 @@ function signatureEditorFormatPayload() {
   if (format === "plain") {
     return { bodyText: String(plain?.value || "").trim(), bodyHtml: "" };
   }
-  const bodyHtml = sanitizeEditorHTML(editor?.innerHTML || "");
+  const bodyHtml = sanitizeEditorHTML(restoreEditorImageSources(editor?.innerHTML || ""));
   return { bodyText: editorPlainText(bodyHtml) || htmlToText(bodyHtml), bodyHtml };
 }
 
@@ -8194,6 +9194,7 @@ function openSignatureEditor(signature = null, { onSaved = null } = {}) {
     : "Name the signature and write it once. Use it in any message or make it the automatic default.";
   document.getElementById("signatureEditorName").value = signature?.name || "";
   document.getElementById("signatureEditorBody").innerHTML = sanitizeEditorHTML(signature?.bodyHtml || (signature?.bodyText ? textToEditorHTML(signature.bodyText) : ""));
+  normalizeEditorImageSources(document.getElementById("signatureEditorBody"));
   document.getElementById("signatureEditorPlain").value = signature?.bodyText || (signature?.bodyHtml ? htmlToText(signature.bodyHtml) : "");
   document.getElementById("signatureDefaultNewFlag").checked = signature ? Boolean(signature.defaultNew) : !(state.signatures || []).length;
   document.getElementById("signatureDefaultReplyFlag").checked = Boolean(signature?.defaultReply);
@@ -8296,6 +9297,7 @@ function insertSignatureIntoCompose(sessionId, signature) {
     if (editor) {
       const existing = editor.innerHTML.trim();
       editor.innerHTML = sanitizeEditorHTML(`${existing}${existing ? "<p><br></p>" : ""}<div class="a8m-signature">${html}</div>`);
+      normalizeEditorImageSources(editor);
       updateComposeEditor(session, editor);
       editor.focus();
     }
@@ -10674,7 +11676,11 @@ function closeMenus() {
   newMenu.hidden = true;
   moveMenu.hidden = true;
   if (folderMenu) folderMenu.hidden = true;
+  if (messageMenu) messageMenu.hidden = true;
   state.folderMenuTarget = "";
+  state.messageMenuThreadId = "";
+  state.messageMenuMessageId = "";
+  state.messageMenuView = "";
   state.bulkMoveOpen = false;
   const bulkMenu = document.getElementById("bulkMoveMenu");
   if (bulkMenu) bulkMenu.hidden = true;
@@ -11364,19 +12370,88 @@ function handleFeatureClick(event) {
 
 function applySignatureRichCommand(editor, command, value = null) {
   if (!editor) return;
-  editor.focus();
+  restoreEditorRange(editor);
   try { document.execCommand("styleWithCSS", false, true); } catch {}
   if (command === "createLink") {
     const href = window.prompt("Link URL", "https://");
     if (!href || !/^(https?:\/\/|mailto:)/i.test(href.trim())) return;
     document.execCommand("createLink", false, href.trim());
-    return;
-  }
-  if (command === "formatBlock") {
+  } else if (command === "formatBlock") {
     document.execCommand("formatBlock", false, value || "p");
-    return;
+  } else {
+    document.execCommand(command, false, value);
   }
-  document.execCommand(command, false, value);
+  normalizeEditorFontTags(editor);
+  rememberEditorRange(editor);
+}
+
+function htmlSourceEditor(target) {
+  if (!target) return null;
+  if (target.kind === "compose") {
+    return sessionById(target.sessionId)?.el?.querySelector("[data-compose-editor]") || null;
+  }
+  if (target.kind === "identity") return document.getElementById("identityEditorSignature");
+  return document.getElementById("signatureEditorBody");
+}
+
+function openHtmlSource(target) {
+  const editor = htmlSourceEditor(target);
+  if (!editor) return;
+  htmlSourceTarget = target;
+  const textarea = document.getElementById("htmlSourceText");
+  if (!textarea) return;
+  textarea.value = restoreEditorImageSources(editor.innerHTML);
+  const subtitle = document.getElementById("htmlSourceSubtitle");
+  if (subtitle) {
+    subtitle.textContent = target.kind === "compose"
+      ? "Edit the message HTML, then apply it to the compose editor."
+      : "Edit the signature HTML, then apply it to the signature editor.";
+  }
+  htmlSourceOverlay.hidden = false;
+  setTimeout(() => { textarea.focus(); textarea.setSelectionRange(0, 0); }, 40);
+}
+
+function closeHtmlSource() {
+  htmlSourceOverlay.hidden = true;
+  htmlSourceTarget = null;
+}
+
+function applyHtmlSource() {
+  const target = htmlSourceTarget;
+  const editor = htmlSourceEditor(target);
+  const textarea = document.getElementById("htmlSourceText");
+  if (!target || !editor || !textarea) { closeHtmlSource(); return; }
+  const clean = sanitizeEditorHTML(textarea.value);
+  editor.innerHTML = clean;
+  normalizeEditorImageSources(editor);
+  richEditorSelections.delete(editor);
+  if (target.kind === "compose") {
+    const session = sessionById(target.sessionId);
+    if (session) {
+      updateComposeEditor(session, editor);
+      session.dirty = true;
+      scheduleComposeSave(session);
+    }
+  } else {
+    editor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    richEditorSelections.set(editor, range.cloneRange());
+  }
+  closeHtmlSource();
+}
+
+function wireHtmlSourceDialog() {
+  document.getElementById("htmlSourceClose")?.addEventListener("click", closeHtmlSource);
+  document.getElementById("htmlSourceCancel")?.addEventListener("click", closeHtmlSource);
+  document.getElementById("htmlSourceApply")?.addEventListener("click", applyHtmlSource);
+  htmlSourceOverlay?.addEventListener("click", (event) => {
+    if (event.target === htmlSourceOverlay) closeHtmlSource();
+  });
 }
 
 function bindEvents() {
@@ -11540,6 +12615,7 @@ function bindEvents() {
 
     const row = target.closest(".msg[data-thread-id]");
     if (row) {
+      if (target.closest(".msg-quick")) return;
       if (event.metaKey || event.ctrlKey) { toggleThreadSelection(row.getAttribute("data-thread-id")); return; }
       if (event.shiftKey) { extendSelectionTo(row.getAttribute("data-thread-id")); return; }
       selectThread(row.getAttribute("data-thread-id"));
@@ -11856,11 +12932,64 @@ function bindEvents() {
     }
     if (!event.target.closest("#folderMenu")) closeFolderMenu();
   });
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest("#messageMenu");
+    if (target) {
+      event.preventDefault();
+      const back = event.target.closest("[data-message-back]");
+      if (back) { state.messageMenuView = ""; rerenderMessageMenu(); return; }
+      const submenu = event.target.closest("[data-message-submenu]");
+      if (submenu) { state.messageMenuView = submenu.getAttribute("data-message-submenu") || ""; rerenderMessageMenu(); return; }
+      const category = event.target.closest("[data-message-category]");
+      if (category) { toggleCategoryForMenu(category.getAttribute("data-message-category")); return; }
+      const snooze = event.target.closest("[data-message-snooze]");
+      if (snooze) { snoozeFromMenu(snooze.getAttribute("data-message-snooze")); return; }
+      const command = event.target.closest("[data-message-command]");
+      if (command) { messageMenuCommand(command.getAttribute("data-message-command"), command); return; }
+      return;
+    }
+    closeMessageMenu();
+    const quick = event.target.closest("[data-thread-quick]");
+    if (quick) {
+      event.preventDefault();
+      event.stopPropagation();
+      const thread = threadById(quick.getAttribute("data-thread-quick-id"));
+      if (!thread) return;
+      const action = quick.getAttribute("data-thread-quick");
+      if (action === "snooze") {
+        performBulkAction("snooze", "", { threads: [thread], anchorThreadId: thread.id, until: nextSnoozeDate("later").toISOString() });
+      } else {
+        performBulkAction(action === "markRead" ? "markRead" : action, "", { threads: [thread], anchorThreadId: thread.id });
+      }
+      return;
+    }
+    const quickChoice = event.target.closest("[data-quick-choice]");
+    if (quickChoice) { toggleQuickActionChoice(quickChoice); return; }
+    if (event.target.closest("#quickActionsSave")) { saveQuickActions(); return; }
+    if (event.target === quickActionsOverlay || event.target.closest("#quickActionsClose") || event.target.closest("#quickActionsCancel")) {
+      quickActionsOverlay.hidden = true;
+    }
+  });
   document.addEventListener("contextmenu", (event) => {
-    const row = event.target.closest("[data-folder-row]");
-    if (!row) return;
+    const messageRow = event.target.closest(".thread-msg[data-message-id]");
+    if (messageRow) {
+      const thread = currentThread();
+      if (thread) {
+        event.preventDefault();
+        openMessageMenu(thread.id, messageRow.getAttribute("data-message-id"), { clientX: event.clientX, clientY: event.clientY });
+      }
+      return;
+    }
+    const row = event.target.closest(".msg[data-thread-id]");
+    if (row) {
+      event.preventDefault();
+      openMessageMenu(row.getAttribute("data-thread-id"), "", { clientX: event.clientX, clientY: event.clientY });
+      return;
+    }
+    const folderRow = event.target.closest("[data-folder-row]");
+    if (!folderRow) return;
     event.preventDefault();
-    openFolderMenu(row.getAttribute("data-folder-row"), { clientX: event.clientX, clientY: event.clientY });
+    openFolderMenu(folderRow.getAttribute("data-folder-row"), { clientX: event.clientX, clientY: event.clientY });
   });
   folderEditorOverlay?.addEventListener("click", (event) => {
     if (event.target === folderEditorOverlay || event.target.closest("#folderEditorClose") || event.target.closest("#folderEditorCancel")) {
@@ -12264,6 +13393,7 @@ function bindEvents() {
       } else if (kind === "attach") { openComposeAttach(session.id); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
       else if (kind === "toggle-quote") { toggleComposeQuote(session); }
+      else if (kind === "source") { openHtmlSource({ kind: "compose", sessionId: session.id }); }
       else if (kind === "insert-signature") { openSignaturePicker(session); }
       else if (kind === "ai") { toggleComposeAi(session); }
       else if (kind === "cc") {
@@ -12304,6 +13434,16 @@ function bindEvents() {
     if (session) recipientKeydown(event, session, input);
   });
   composeLayer.addEventListener("paste", (event) => {
+    const editor = event.target.closest("[data-compose-editor]");
+    if (editor) {
+      const section = editor.closest(".compose[data-compose-id]");
+      const session = sessionById(section?.getAttribute("data-compose-id"));
+      if (handleRichEditorPaste(event, editor) && session) {
+        updateComposeEditor(session, editor);
+        rememberComposeEditorSelection(session, editor);
+      }
+      return;
+    }
     const input = event.target.closest("[data-recipient-input]");
     if (!input) return;
     const section = input.closest(".compose[data-compose-id]");
@@ -12367,11 +13507,17 @@ function bindEvents() {
     if (!selection || !selection.rangeCount) return;
     const node = selection.anchorNode;
     const element = node ? (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement) : null;
-    const editor = element?.closest?.("[data-compose-editor]");
-    if (!editor) return;
-    const section = editor.closest(".compose[data-compose-id]");
-    const session = sessionById(section?.getAttribute("data-compose-id"));
-    if (session) rememberComposeEditorSelection(session, editor);
+    const composeEditor = element?.closest?.("[data-compose-editor]");
+    if (composeEditor) {
+      const section = composeEditor.closest(".compose[data-compose-id]");
+      const session = sessionById(section?.getAttribute("data-compose-id"));
+      if (session) rememberComposeEditorSelection(session, composeEditor);
+      return;
+    }
+    const richEditor = element?.closest?.('[contenteditable="true"]');
+    if (richEditor && (richEditor.id === "signatureEditorBody" || richEditor.id === "identityEditorSignature")) {
+      rememberEditorRange(richEditor);
+    }
   });
   composeLayer.addEventListener("pointerdown", (event) => {
     const section = event.target.closest(".compose[data-compose-id]");
@@ -12445,8 +13591,13 @@ function bindEvents() {
   }
 
   /* Signature library editor, identity editor and spell-check review */
+  wireHtmlSourceDialog();
   signatureEditorOverlay?.addEventListener("mousedown", (event) => {
     if (event.target.closest(".signature-editor-toolbar button")) event.preventDefault();
+  });
+  signatureEditorOverlay?.addEventListener("paste", (event) => {
+    const editor = event.target.closest("#signatureEditorBody");
+    if (editor) handleRichEditorPaste(event, editor);
   });
   signatureEditorOverlay?.addEventListener("click", (event) => {
     if (event.target === signatureEditorOverlay || event.target.closest("#signatureEditorClose") || event.target.closest("#signatureEditorCancel")) {
@@ -12459,7 +13610,18 @@ function bindEvents() {
     if (command) { applySignatureRichCommand(document.getElementById("signatureEditorBody"), command.getAttribute("data-signature-cmd")); return; }
     const block = event.target.closest("[data-signature-block]");
     if (block) { applySignatureRichCommand(document.getElementById("signatureEditorBody"), "formatBlock", block.getAttribute("data-signature-block")); return; }
+    if (event.target.closest("[data-signature-source]")) { openHtmlSource({ kind: "signature" }); return; }
     if (event.target.closest("#signatureEditorSave")) { saveSignatureEditor(); return; }
+  });
+  signatureEditorOverlay?.addEventListener("change", (event) => {
+    const editor = document.getElementById("signatureEditorBody");
+    if (event.target.matches("[data-signature-font]")) { applyRichFontFamily(editor, event.target.value); return; }
+    if (event.target.matches("[data-signature-size]")) { applyRichFontSize(editor, event.target.value); return; }
+  });
+  signatureEditorOverlay?.addEventListener("input", (event) => {
+    const editor = document.getElementById("signatureEditorBody");
+    if (event.target.matches("[data-signature-color]")) { applyRichInlineStyle(editor, { color: event.target.value }); return; }
+    if (event.target.matches("[data-signature-highlight]")) { applyRichInlineStyle(editor, { backgroundColor: event.target.value }); }
   });
   signaturePickerOverlay?.addEventListener("click", (event) => {
     if (event.target === signaturePickerOverlay || event.target.closest("#signaturePickerClose") || event.target.closest("#signaturePickerCancel")) {
@@ -12476,6 +13638,10 @@ function bindEvents() {
   identityEditorOverlay?.addEventListener("mousedown", (event) => {
     if (event.target.closest(".signature-editor-toolbar button")) event.preventDefault();
   });
+  identityEditorOverlay?.addEventListener("paste", (event) => {
+    const editor = event.target.closest("#identityEditorSignature");
+    if (editor) handleRichEditorPaste(event, editor);
+  });
   identityEditorOverlay?.addEventListener("click", (event) => {
     if (event.target === identityEditorOverlay || event.target.closest("#identityEditorClose") || event.target.closest("#identityEditorCancel")) {
       closeIdentityEditor();
@@ -12485,7 +13651,20 @@ function bindEvents() {
     if (mode) { setIdentitySignatureMode(mode.getAttribute("data-identity-signature-mode")); return; }
     const command = event.target.closest("[data-identity-signature-cmd]");
     if (command) { applySignatureRichCommand(document.getElementById("identityEditorSignature"), command.getAttribute("data-identity-signature-cmd")); return; }
+    const block = event.target.closest("[data-identity-signature-block]");
+    if (block) { applySignatureRichCommand(document.getElementById("identityEditorSignature"), "formatBlock", block.getAttribute("data-identity-signature-block")); return; }
+    if (event.target.closest("[data-identity-signature-source]")) { openHtmlSource({ kind: "identity" }); return; }
     if (event.target.closest("#identityEditorSave")) { saveIdentityEditor(); return; }
+  });
+  identityEditorOverlay?.addEventListener("change", (event) => {
+    const editor = document.getElementById("identityEditorSignature");
+    if (event.target.matches("[data-identity-signature-font]")) { applyRichFontFamily(editor, event.target.value); return; }
+    if (event.target.matches("[data-identity-signature-size]")) { applyRichFontSize(editor, event.target.value); return; }
+  });
+  identityEditorOverlay?.addEventListener("input", (event) => {
+    const editor = document.getElementById("identityEditorSignature");
+    if (event.target.matches("[data-identity-signature-color]")) { applyRichInlineStyle(editor, { color: event.target.value }); return; }
+    if (event.target.matches("[data-identity-signature-highlight]")) { applyRichInlineStyle(editor, { backgroundColor: event.target.value }); }
   });
   for (const [id, kind] of [["signatureDefaultNew", "new"], ["signatureDefaultReply", "reply"], ["signatureDefaultForward", "forward"]]) {
     document.getElementById(id)?.addEventListener("change", (event) => { setSignatureDefault(kind, event.target.value); });

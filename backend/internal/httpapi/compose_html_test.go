@@ -88,3 +88,18 @@ func TestRenderForwarding(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeComposeHTMLPastableSignature(t *testing.T) {
+	dataImage := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	raw := `<table cellpadding="0" cellspacing="0" border="0" width="600"><tr><td valign="top" style="padding:0"><img src="` + dataImage + `" width="180" alt="Logo"></td><td><img src="https://cdn.example.test/banner.png" width="420" alt="Banner"></td></tr></table>`
+	clean := sanitizeComposeHTML(raw)
+	for _, expected := range []string{"data:image/png;base64,", "https://cdn.example.test/banner.png", `cellpadding="0"`, `valign="top"`} {
+		if !strings.Contains(clean, expected) {
+			t.Fatalf("pasted signature lost %q: %s", expected, clean)
+		}
+	}
+	unsafe := sanitizeComposeHTML(`<img src="data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+">`)
+	if strings.Contains(strings.ToLower(unsafe), "image/svg") {
+		t.Fatalf("SVG data URI was allowed: %s", unsafe)
+	}
+}

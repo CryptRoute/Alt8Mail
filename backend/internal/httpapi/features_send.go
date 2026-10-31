@@ -10,25 +10,27 @@ import (
 )
 
 type sendBody struct {
-	DraftID      string   `json:"draftId"`
-	FromEmail    string   `json:"fromEmail"`
-	To           any      `json:"to"`
-	CC           any      `json:"cc"`
-	BCC          any      `json:"bcc"`
-	Subject      string   `json:"subject"`
-	BodyText     *string  `json:"bodyText"`
-	BodyHTML     *string  `json:"bodyHtml"`
-	Body         *string  `json:"body"`
-	Attachments  []any    `json:"attachments"`
-	ThreadID     string   `json:"threadId"`
-	InReplyTo    *string  `json:"inReplyTo"`
-	Priority     string   `json:"priority"`
-	Receipt      *bool    `json:"receipt"`
-	Delivery     *bool    `json:"delivery"`
-	SaveCopy     *bool    `json:"saveCopy"`
-	ScheduledFor string   `json:"scheduledFor"`
-	SendAt       string   `json:"sendAt"`
-	HoldSeconds  *float64 `json:"holdSeconds"`
+	DraftID         string   `json:"draftId"`
+	FromEmail       string   `json:"fromEmail"`
+	To              any      `json:"to"`
+	CC              any      `json:"cc"`
+	BCC             any      `json:"bcc"`
+	Subject         string   `json:"subject"`
+	BodyText        *string  `json:"bodyText"`
+	BodyHTML        *string  `json:"bodyHtml"`
+	Body            *string  `json:"body"`
+	Attachments     []any    `json:"attachments"`
+	ThreadID        string   `json:"threadId"`
+	InReplyTo       *string  `json:"inReplyTo"`
+	Priority        string   `json:"priority"`
+	Receipt         *bool    `json:"receipt"`
+	Delivery        *bool    `json:"delivery"`
+	SaveCopy        *bool    `json:"saveCopy"`
+	ScheduledFor    string   `json:"scheduledFor"`
+	SendAt          string   `json:"sendAt"`
+	HoldSeconds     *float64 `json:"holdSeconds"`
+	ComposeKind     string   `json:"composeKind"`
+	SourceMessageID string   `json:"sourceMessageId"`
 }
 
 type outboxPatch struct {
@@ -93,7 +95,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			bodyText = truncate(*body.Body, 200_000)
 		}
 		if body.BodyHTML != nil {
-			bodyHTML = truncate(*body.BodyHTML, 500_000)
+			bodyHTML = truncate(*body.BodyHTML, 4_000_000)
 		}
 		bodyHTML, bodyText = normalizeComposeBody(bodyHTML, bodyText)
 		var draft map[string]any
@@ -191,6 +193,17 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			sendAt = scheduledAt
 			holdMs = 0
 		}
+		composeKind := body.ComposeKind
+		if composeKind != "reply" && composeKind != "replyAll" && composeKind != "forward" {
+			composeKind = ""
+		}
+		if composeKind == "" && draft != nil {
+			composeKind = stateString(draft, "composeKind")
+		}
+		sourceMessageID := body.SourceMessageID
+		if sourceMessageID == "" && draft != nil {
+			sourceMessageID = stateString(draft, "sourceMessageId")
+		}
 		item := map[string]any{
 			"id": newID("send"), "draftId": body.DraftID, "from": aliasPerson(alias),
 			"to": to, "cc": cc, "bcc": bcc, "subject": subject,
@@ -200,6 +213,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			"queuedAt": now.Format(time.RFC3339), "sendAt": sendAt.Format(time.RFC3339),
 			"holdMs": holdMs, "scheduled": !scheduledAt.IsZero(),
 			"ip": clientIP(r), "userAgent": sanitizeUserAgent(r.UserAgent()),
+			"composeKind": composeKind, "sourceMessageId": truncate(sourceMessageID, 120),
 		}
 		if draft != nil {
 			item["draftSnapshot"] = map[string]any{
@@ -527,7 +541,8 @@ func restoreDraft(state map[string]any, item map[string]any) map[string]any {
 		"receipt":  stateBool(item, "receipt"), "delivery": stateBool(item, "delivery"),
 		"saveCopy": item["saveCopy"] != false, "categories": []any{}, "classification": "Internal",
 		"messageId": fmt.Sprintf("<%s@a8m.test>", draftID),
-		"viaApi":    true,
+		"viaApi":    true, "composeKind": stateString(item, "composeKind"),
+		"sourceMessageId": stateString(item, "sourceMessageId"),
 	}
 	auth, _ := snapshot["auth"].(map[string]any)
 	if auth == nil {

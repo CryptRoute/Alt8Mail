@@ -350,6 +350,26 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 			}
 			assign("undoSendSeconds", seconds)
 		}
+		if value, ok := patch["quickActions"]; ok {
+			rawActions, ok := value.([]any)
+			if !ok || len(rawActions) == 0 || len(rawActions) > 3 {
+				return fail(http.StatusBadRequest, "PREFERENCES", "Choose between one and three quick actions")
+			}
+			allowed := map[string]bool{"archive": true, "markRead": true, "delete": true, "flag": true, "pin": true, "spam": true, "snooze": true}
+			actions := []any{}
+			seen := map[string]bool{}
+			for _, rawAction := range rawActions {
+				action := fmt.Sprint(rawAction)
+				if !allowed[action] {
+					return fail(http.StatusBadRequest, "PREFERENCES", "Unsupported quick action")
+				}
+				if !seen[action] {
+					seen[action] = true
+					actions = append(actions, action)
+				}
+			}
+			assign("quickActions", actions)
+		}
 		if value, ok := patch["composeMode"]; ok {
 			mode := fmt.Sprint(value)
 			if mode != "html" && mode != "plain" {

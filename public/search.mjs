@@ -340,6 +340,8 @@ export function buildThreads(scope, allMessages) {
       }
     }
     const folders = Array.from(new Set(members.map((message) => message.folder)));
+    const replied = members.map((message) => message.repliedAt).filter(Boolean).sort().pop() || "";
+    const forwarded = members.map((message) => message.forwardedAt).filter(Boolean).sort().pop() || "";
     threads.push({
       id: threadId,
       messages: members,
@@ -353,7 +355,11 @@ export function buildThreads(scope, allMessages) {
       hasAttachments: members.some((message) => (message.attachments || []).length),
       folderSet: folders,
       date: latest.date,
-      count: members.length
+      count: members.length,
+      repliedAt: replied,
+      forwardedAt: forwarded,
+      replyCount: members.reduce((total, message) => total + (Number(message.replyCount) || 0), 0),
+      forwardCount: members.reduce((total, message) => total + (Number(message.forwardCount) || 0), 0)
     });
   }
   threads.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));

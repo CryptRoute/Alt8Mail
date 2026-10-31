@@ -15,7 +15,7 @@ import (
 const maxRemoteImageBytes = 8 * 1024 * 1024
 
 var remoteImageTypes = map[string]bool{
-	"image/png": true, "image/jpeg": true, "image/gif": true,
+	"image/png": true, "image/jpeg": true, "image/jpg": true, "image/pjpeg": true, "image/gif": true,
 	"image/webp": true, "image/avif": true, "image/bmp": true,
 	"image/x-icon": true,
 }

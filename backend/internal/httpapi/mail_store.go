@@ -17,52 +17,63 @@ const mailMessageColumns = `id, folder, imap_folder, uid, uid_validity,
 	from_name, from_email::text, to_json, cc_json, bcc_json, to_text, cc_text, bcc_text,
 	snippet, body_text, body_html, sent_at, received_at, created_at, updated_at,
 	size_bytes, unread, starred, flagged, pinned, draft, external, classification, categories,
-	auth, spam_report, event, priority, receipt, delivery, save_copy, via_api, window_mode`
+	auth, spam_report, event, priority, receipt, delivery, save_copy, via_api, window_mode,
+	replied_at, forwarded_at, reply_count, forward_count, snoozed_until, ignored, ignored_at,
+	compose_kind, source_message_id`
 
 type mailRow struct {
-	ID             string
-	Folder         string
-	IMAPFolder     string
-	UID            int64
-	UIDValidity    int64
-	MessageID      string
-	ThreadID       string
-	InReplyTo      string
-	ReferencesJSON []byte
-	Subject        string
-	FromName       string
-	FromEmail      string
-	ToJSON         []byte
-	CCJSON         []byte
-	BCCJSON        []byte
-	ToText         string
-	CCText         string
-	BCCText        string
-	Snippet        string
-	BodyText       string
-	BodyHTML       string
-	SentAt         time.Time
-	ReceivedAt     time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	SizeBytes      int64
-	Unread         bool
-	Starred        bool
-	Flagged        bool
-	Pinned         bool
-	Draft          bool
-	External       bool
-	Classification string
-	Categories     []string
-	AuthJSON       []byte
-	SpamReportJSON []byte
-	EventJSON      []byte
-	Priority       string
-	Receipt        bool
-	Delivery       bool
-	SaveCopy       bool
-	ViaAPI         bool
-	WindowMode     string
+	ID              string
+	Folder          string
+	IMAPFolder      string
+	UID             int64
+	UIDValidity     int64
+	MessageID       string
+	ThreadID        string
+	InReplyTo       string
+	ReferencesJSON  []byte
+	Subject         string
+	FromName        string
+	FromEmail       string
+	ToJSON          []byte
+	CCJSON          []byte
+	BCCJSON         []byte
+	ToText          string
+	CCText          string
+	BCCText         string
+	Snippet         string
+	BodyText        string
+	BodyHTML        string
+	SentAt          time.Time
+	ReceivedAt      time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	SizeBytes       int64
+	Unread          bool
+	Starred         bool
+	Flagged         bool
+	Pinned          bool
+	Draft           bool
+	External        bool
+	Classification  string
+	Categories      []string
+	AuthJSON        []byte
+	SpamReportJSON  []byte
+	EventJSON       []byte
+	Priority        string
+	Receipt         bool
+	Delivery        bool
+	SaveCopy        bool
+	ViaAPI          bool
+	WindowMode      string
+	RepliedAt       *time.Time
+	ForwardedAt     *time.Time
+	ReplyCount      int
+	ForwardCount    int
+	SnoozedUntil    *time.Time
+	Ignored         bool
+	IgnoredAt       *time.Time
+	ComposeKind     string
+	SourceMessageID string
 }
 
 type rowScanner interface {
@@ -79,7 +90,9 @@ func scanMailRow(scanner rowScanner) (mailRow, error) {
 		&row.Unread, &row.Starred, &row.Flagged, &row.Pinned, &row.Draft, &row.External,
 		&row.Classification, &row.Categories, &row.AuthJSON, &row.SpamReportJSON,
 		&row.EventJSON, &row.Priority, &row.Receipt, &row.Delivery, &row.SaveCopy,
-		&row.ViaAPI, &row.WindowMode)
+		&row.ViaAPI, &row.WindowMode, &row.RepliedAt, &row.ForwardedAt, &row.ReplyCount,
+		&row.ForwardCount, &row.SnoozedUntil, &row.Ignored, &row.IgnoredAt,
+		&row.ComposeKind, &row.SourceMessageID)
 	return row, err
 }
 
@@ -166,8 +179,23 @@ func (row mailRow) stateMap(state map[string]any, attachments []map[string]any) 
 		"priority": row.Priority, "receipt": row.Receipt, "delivery": row.Delivery,
 		"saveCopy": row.SaveCopy, "viaApi": row.ViaAPI, "windowMode": row.WindowMode,
 		"imapUid": row.UID, "imapFolder": row.IMAPFolder, "imapUidValidity": row.UIDValidity,
+		"replyCount": row.ReplyCount, "forwardCount": row.ForwardCount,
+		"ignored":     row.Ignored,
+		"composeKind": row.ComposeKind, "sourceMessageId": row.SourceMessageID,
 		"createdAt": row.CreatedAt.UTC().Format(time.RFC3339),
 		"updatedAt": row.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+	if row.RepliedAt != nil {
+		out["repliedAt"] = row.RepliedAt.UTC().Format(time.RFC3339)
+	}
+	if row.ForwardedAt != nil {
+		out["forwardedAt"] = row.ForwardedAt.UTC().Format(time.RFC3339)
+	}
+	if row.SnoozedUntil != nil {
+		out["snoozedUntil"] = row.SnoozedUntil.UTC().Format(time.RFC3339)
+	}
+	if row.IgnoredAt != nil {
+		out["ignoredAt"] = row.IgnoredAt.UTC().Format(time.RFC3339)
 	}
 	if row.InReplyTo != "" {
 		out["inReplyTo"] = row.InReplyTo
@@ -309,13 +337,18 @@ func (s *Server) loadMailMessagesByIDs(ctx context.Context, userID string, ids [
 }
 
 func mailFolderCondition(userID, folder, filter string) (string, []any) {
-	conditions := []string{"user_id=$1"}
+	conditions := []string{"user_id=$1", "NOT ignored"}
 	args := []any{userID}
-	if folder == "starred" {
-		conditions = append(conditions, `(starred OR flagged) AND folder NOT IN ('spam', 'trash')`)
-	} else if folder != "" && folder != "all" {
+	switch folder {
+	case "starred":
+		conditions = append(conditions, `(starred OR flagged) AND folder NOT IN ('spam', 'trash')`, `(snoozed_until IS NULL OR snoozed_until <= now())`)
+	case "snoozed":
+		conditions = append(conditions, `snoozed_until IS NOT NULL AND snoozed_until > now()`)
+	case "", "all":
+		conditions = append(conditions, `(snoozed_until IS NULL OR snoozed_until <= now())`)
+	default:
 		args = append(args, folder)
-		conditions = append(conditions, fmt.Sprintf(`folder = $%d`, len(args)))
+		conditions = append(conditions, fmt.Sprintf(`folder = $%d`, len(args)), `(snoozed_until IS NULL OR snoozed_until <= now())`)
 	}
 	switch filter {
 	case "unread":
@@ -403,7 +436,9 @@ func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[s
 	counts := map[string]int{}
 	unread := map[string]int{}
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT folder, count(*), count(*) FILTER (WHERE unread)
+		SELECT folder,
+		       count(*) FILTER (WHERE NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())),
+		       count(*) FILTER (WHERE unread AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now()))
 		FROM mail_messages WHERE user_id=$1 GROUP BY folder
 	`, userID)
 	if err != nil {
@@ -418,7 +453,18 @@ func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[s
 			unread[folder] = unreadCount
 		}
 	}
-	return counts, unread, rows.Err()
+	if err := rows.Err(); err != nil {
+		return counts, unread, err
+	}
+	var snoozed, snoozedUnread int
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE unread)
+		FROM mail_messages
+		WHERE user_id=$1 AND NOT ignored AND snoozed_until > now()
+	`, userID).Scan(&snoozed, &snoozedUnread)
+	counts["snoozed"] = snoozed
+	unread["snoozed"] = snoozedUnread
+	return counts, unread, nil
 }
 
 func (s *Server) loadMailMessagesByThreads(ctx context.Context, userID string, threadIDs []string) ([]map[string]any, map[string]any, error) {
@@ -516,7 +562,8 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 		SELECT id, draft_id, from_json, to_json, cc_json, bcc_json, subject, body_text, body_html, attachments,
 		       thread_id, COALESCE(in_reply_to,''), priority, receipt, delivery, save_copy, scheduled,
 		       send_at, queued_at, hold_ms, status, delivery_state, delivery_claimed_at, retry_at,
-		       attempts, last_error, mime_message_id, draft_snapshot, ip, user_agent
+		       attempts, last_error, mime_message_id, draft_snapshot, ip, user_agent,
+		       compose_kind, source_message_id
 		FROM outbox WHERE user_id=$1 ORDER BY send_at ASC
 	`, userID)
 	if err != nil {
@@ -525,7 +572,7 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, draftID, threadID, inReplyTo, priority, status, deliveryState, lastError, mimeMessageID, ip, userAgent string
+		var id, draftID, threadID, inReplyTo, priority, status, deliveryState, lastError, mimeMessageID, ip, userAgent, composeKind, sourceMessageID string
 		var subject, bodyText, bodyHTML string
 		var fromJSON, toJSON, ccJSON, bccJSON, attachmentsJSON, draftSnapshotJSON []byte
 		var receipt, delivery, saveCopy, scheduled bool
@@ -535,7 +582,8 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 		if err := rows.Scan(&id, &draftID, &fromJSON, &toJSON, &ccJSON, &bccJSON, &subject, &bodyText, &bodyHTML,
 			&attachmentsJSON, &threadID, &inReplyTo, &priority, &receipt, &delivery, &saveCopy,
 			&scheduled, &sendAt, &queuedAt, &holdMs, &status, &deliveryState, &claimedAt, &retryAt,
-			&attempts, &lastError, &mimeMessageID, &draftSnapshotJSON, &ip, &userAgent); err != nil {
+			&attempts, &lastError, &mimeMessageID, &draftSnapshotJSON, &ip, &userAgent,
+			&composeKind, &sourceMessageID); err != nil {
 			continue
 		}
 		item := map[string]any{
@@ -549,6 +597,7 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 			"queuedAt": queuedAt.UTC().Format(time.RFC3339), "holdMs": holdMs,
 			"status": status, "deliveryState": deliveryState, "attempts": attempts,
 			"lastError": lastError, "mimeMessageId": mimeMessageID, "ip": ip, "userAgent": userAgent,
+			"composeKind": composeKind, "sourceMessageId": sourceMessageID,
 		}
 		if inReplyTo != "" {
 			item["inReplyTo"] = inReplyTo
@@ -817,10 +866,10 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 			body_text, body_html, attachments, thread_id, in_reply_to, priority, receipt, delivery,
 			save_copy, scheduled, send_at, queued_at, hold_ms, status, delivery_state, delivery_claimed_at,
 			retry_at, attempts, last_error, mime_message_id, draft_snapshot, ip, user_agent,
-			created_at, updated_at
+			compose_kind, source_message_id, created_at, updated_at
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),$15,$16,$17,$18,$19,$20,
-			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,now()
+			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,now()
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			draft_id=EXCLUDED.draft_id, from_json=EXCLUDED.from_json, to_json=EXCLUDED.to_json,
@@ -834,7 +883,9 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 			delivery_claimed_at=EXCLUDED.delivery_claimed_at, retry_at=EXCLUDED.retry_at,
 			attempts=EXCLUDED.attempts, last_error=EXCLUDED.last_error,
 			mime_message_id=EXCLUDED.mime_message_id, draft_snapshot=EXCLUDED.draft_snapshot,
-			ip=EXCLUDED.ip, user_agent=EXCLUDED.user_agent, updated_at=now()
+			ip=EXCLUDED.ip, user_agent=EXCLUDED.user_agent,
+			compose_kind=EXCLUDED.compose_kind, source_message_id=EXCLUDED.source_message_id,
+			updated_at=now()
 	`, id, user.TenantID, user.ID, sanitizeMailText(stateString(item, "draftId")), fromJSON, toJSON, ccJSON, bccJSON,
 		truncate(sanitizeMailText(stateString(item, "subject")), 500), sanitizeMailText(stateString(item, "bodyText")),
 		sanitizeMailText(stateString(item, "bodyHtml")), attachmentsJSON,
@@ -846,7 +897,9 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 		parseOptionalTime(stateString(item, "retryAt")), stateInt(item, "attempts"),
 		truncate(sanitizeMailText(stateString(item, "lastError")), 500), sanitizeMailText(stateString(item, "mimeMessageId")),
 		draftSnapshotJSON, truncate(sanitizeMailText(stateString(item, "ip")), 64),
-		truncate(sanitizeMailText(stateString(item, "userAgent")), 300), queuedAt)
+		truncate(sanitizeMailText(stateString(item, "userAgent")), 300),
+		truncate(sanitizeMailText(stateString(item, "composeKind")), 24),
+		truncate(sanitizeMailText(stateString(item, "sourceMessageId")), 120), queuedAt)
 	return err
 }
 
@@ -909,6 +962,10 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 	snippet := truncate(sanitizeMailText(stateString(message, "snippet")), 500)
 	bodyText := sanitizeMailText(stateString(message, "bodyText"))
 	bodyHTML := sanitizeMailText(stateString(message, "bodyHtml"))
+	repliedAt := parseOptionalTime(stateString(message, "repliedAt"))
+	forwardedAt := parseOptionalTime(stateString(message, "forwardedAt"))
+	snoozedUntil := parseOptionalTime(stateString(message, "snoozedUntil"))
+	ignoredAt := parseOptionalTime(stateString(message, "ignoredAt"))
 	_, err = tx.Exec(ctx, `
 		INSERT INTO mail_messages (
 			id, tenant_id, user_id, mailbox_id, folder, imap_folder, uid, uid_validity,
@@ -916,11 +973,14 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 			to_json, cc_json, bcc_json, to_text, cc_text, bcc_text, snippet, body_text, body_html,
 			sent_at, received_at, created_at, updated_at, size_bytes, unread, starred, flagged,
 			pinned, draft, external, classification, categories, auth, spam_report, event, priority,
-			receipt, delivery, save_copy, via_api, window_mode
+			receipt, delivery, save_copy, via_api, window_mode, replied_at, forwarded_at,
+			reply_count, forward_count, snoozed_until, ignored, ignored_at, compose_kind,
+			source_message_id
 		) VALUES (
 			$1,$2,$3,(SELECT id FROM mailboxes WHERE user_id=$3 LIMIT 1),$4,$5,$6,$7,
 			$8,$9,NULLIF($10,''),$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
-			$24,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44
+			$24,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
+			$45,$46,$47,$48,$49,$50,$51,$52,$53
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			folder=EXCLUDED.folder, imap_folder=EXCLUDED.imap_folder, uid=EXCLUDED.uid,
@@ -937,7 +997,12 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 			classification=EXCLUDED.classification, categories=EXCLUDED.categories,
 			auth=EXCLUDED.auth, spam_report=EXCLUDED.spam_report, event=EXCLUDED.event,
 			priority=EXCLUDED.priority, receipt=EXCLUDED.receipt, delivery=EXCLUDED.delivery,
-			save_copy=EXCLUDED.save_copy, via_api=EXCLUDED.via_api, window_mode=EXCLUDED.window_mode
+			save_copy=EXCLUDED.save_copy, via_api=EXCLUDED.via_api, window_mode=EXCLUDED.window_mode,
+			replied_at=EXCLUDED.replied_at, forwarded_at=EXCLUDED.forwarded_at,
+			reply_count=EXCLUDED.reply_count, forward_count=EXCLUDED.forward_count,
+			snoozed_until=EXCLUDED.snoozed_until, ignored=EXCLUDED.ignored,
+			ignored_at=EXCLUDED.ignored_at, compose_kind=EXCLUDED.compose_kind,
+			source_message_id=EXCLUDED.source_message_id
 	`, id, user.TenantID, user.ID, folder, imapFolder,
 		stateInt(message, "imapUid"), stateInt(message, "imapUidValidity"),
 		messageID, threadID, inReplyTo,
@@ -951,7 +1016,11 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 		stateBool(message, "pinned"), stateBool(message, "draft"), stateBool(message, "external"),
 		classification, categories, authJSON,
 		spamJSON, eventJSON, priority, stateBool(message, "receipt"), stateBool(message, "delivery"),
-		message["saveCopy"] == nil || stateBool(message, "saveCopy"), stateBool(message, "viaApi"), windowMode)
+		message["saveCopy"] == nil || stateBool(message, "saveCopy"), stateBool(message, "viaApi"), windowMode,
+		repliedAt, forwardedAt, max(int(stateInt(message, "replyCount")), 0), max(int(stateInt(message, "forwardCount")), 0),
+		snoozedUntil, stateBool(message, "ignored"), ignoredAt,
+		truncate(sanitizeMailText(stateString(message, "composeKind")), 24),
+		truncate(sanitizeMailText(stateString(message, "sourceMessageId")), 120))
 	if err != nil {
 		return err
 	}

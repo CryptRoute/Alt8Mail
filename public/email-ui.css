@@ -240,3 +240,72 @@
 @media (max-width: 719px) {
   .reader-subject-bar .reader-subject-main { margin-bottom: 0; }
 }
+
+/* ---------- reply / forward activity ---------- */
+.msg-activity { display: inline-flex; align-items: center; gap: 2px; flex: none; color: var(--accent-ink); }
+.msg-activity span { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 5px; background: var(--accent-soft); }
+.msg-activity svg { width: 12px; height: 12px; stroke-width: 2.25; }
+.msg-activity .is-forward { color: #7c3aed; background: color-mix(in srgb, #7c3aed 12%, var(--surface)); }
+.thread-activity-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0 2px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text-2); font-size: 11px; }
+.thread-activity-line svg { width: 14px; height: 14px; color: var(--accent-ink); flex: none; }
+.thread-activity-line strong { color: var(--text); font-weight: 650; }
+.thread-activity-line span + span::before { content: "·"; margin: 0 6px 0 2px; color: var(--text-3); }
+
+/* ---------- message context menu ---------- */
+.message-context-menu { width: 286px; padding: 5px; overflow: visible; }
+.message-menu-head { display: flex; align-items: center; gap: 9px; padding: 8px 9px 9px; margin-bottom: 3px; border-bottom: 1px solid var(--border); }
+.message-menu-head > svg { width: 18px; height: 18px; color: var(--accent-ink); flex: none; }
+.message-menu-head strong { display: block; max-width: 228px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.message-menu-head span { display: block; margin-top: 1px; color: var(--text-3); font-size: 10px; }
+.message-menu-sep { height: 1px; margin: 4px 7px; background: var(--border); }
+.message-context-menu > button, .message-context-menu > .message-menu-sub > button {
+  width: 100%; display: flex; align-items: center; gap: 9px; padding: 7px 9px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--text-2);
+  font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+}
+.message-context-menu > button:hover:not(:disabled), .message-context-menu > .message-menu-sub > button:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.message-context-menu > button:disabled { opacity: .38; cursor: not-allowed; }
+.message-context-menu > button svg, .message-menu-sub > button svg { width: 16px; height: 16px; color: var(--text-3); flex: none; }
+.message-context-menu > button.is-danger { color: var(--danger); }
+.message-context-menu > button.is-danger svg { color: var(--danger); }
+.message-context-menu .menu-chevron { margin-left: auto; }
+.message-menu-sub { position: relative; }
+.message-menu-submenu {
+  position: absolute; z-index: 1; left: calc(100% - 4px); top: -5px; width: 262px;
+  max-height: min(400px, calc(100vh - 30px)); overflow: auto; padding: 5px;
+  border: 1px solid var(--border-strong); border-radius: 11px; background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+.message-menu-submenu.is-left { left: auto; right: calc(100% - 4px); }
+.message-menu-submenu button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
+.message-menu-submenu button:hover { background: var(--surface-3); color: var(--text); }
+.message-menu-submenu button.is-active { background: var(--accent-soft); color: var(--accent-ink); }
+.message-menu-submenu .check { margin-left: auto; color: var(--accent-ink); font-weight: 800; }
+.message-menu-empty { padding: 8px; color: var(--text-3); font-size: 11px; text-align: center; }
+.message-menu-input { width: calc(100% - 12px); margin: 4px 6px 7px; height: 31px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit; font-size: 11.5px; }
+.message-menu-note { padding: 4px 9px 8px; color: var(--text-3); font-size: 10px; line-height: 1.45; }
+
+/* ---------- quick actions ---------- */
+.msg-quick { display: none; align-items: center; gap: 1px; margin: 0 2px; flex: none; }
+.msg:hover .msg-quick, .msg.is-selected .msg-quick, .msg:focus-within .msg-quick { display: inline-flex; }
+.msg-quick button { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); cursor: pointer; }
+.msg-quick button:hover { background: var(--surface-4); color: var(--text); }
+.msg-quick button.is-danger:hover { color: var(--danger); background: var(--danger-soft); }
+.msg-quick svg { width: 14px; height: 14px; }
+.quick-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.quick-actions-choice { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
+.quick-actions-choice:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.quick-actions-choice.is-selected { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+.quick-actions-choice svg { width: 16px; height: 16px; flex: none; }
+.quick-actions-choice .check { margin-left: auto; font-weight: 800; }
+
+/* ---------- HTML source modal ---------- */
+.html-source-dialog { width: min(860px, calc(100vw - 28px)); }
+.html-source-text { width: 100%; min-height: min(55vh, 480px); resize: vertical; padding: 12px 13px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-2); color: var(--text); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; tab-size: 2; outline: none; }
+.html-source-text:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* Outlook-style pasted tables: no forced grid lines. Explicit inline borders still win. */
+.compose-editor table, .signature-rich-editor table { border-collapse: collapse; width: auto; max-width: 100%; }
+.compose-editor td, .compose-editor th, .signature-rich-editor td, .signature-rich-editor th { border: 0; }
+.compose-editor img, .signature-rich-editor img { max-width: 100%; height: auto; }
+.compose-editor table img, .signature-rich-editor table img { max-width: none; }

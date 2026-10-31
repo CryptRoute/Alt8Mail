@@ -3,6 +3,7 @@ package httpapi
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMailFolderCondition(t *testing.T) {
@@ -39,5 +40,24 @@ func TestMailMessageMatchesScope(t *testing.T) {
 	withAttachment := map[string]any{"folder": "inbox", "attachments": []any{map[string]any{"id": "att_x"}}}
 	if !mailMessageMatchesScope(withAttachment, "inbox", "attachments") {
 		t.Fatal("attachment message should match attachment filter")
+	}
+}
+
+func TestMailScopeHidesIgnoredAndSnoozed(t *testing.T) {
+	ignored := map[string]any{"folder": "inbox", "ignored": true}
+	if mailMessageMatchesScope(ignored, "inbox", "all") {
+		t.Fatal("ignored message must not appear in Inbox")
+	}
+	future := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+	snoozed := map[string]any{"folder": "inbox", "snoozedUntil": future}
+	if mailMessageMatchesScope(snoozed, "inbox", "all") {
+		t.Fatal("future-snoozed message must not appear in Inbox")
+	}
+	if !mailMessageMatchesScope(snoozed, "snoozed", "all") {
+		t.Fatal("future-snoozed message should appear in Snoozed")
+	}
+	where, _ := mailFolderCondition("user-1", "snoozed", "all")
+	if !strings.Contains(where, "snoozed_until > now()") || !strings.Contains(where, "NOT ignored") {
+		t.Fatalf("unexpected snoozed condition: %q", where)
 	}
 }

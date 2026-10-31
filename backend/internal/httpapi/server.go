@@ -1041,6 +1041,7 @@ func preferencesFor(user userRecord) map[string]any {
 		"undoSendSeconds": 8, "notifyDesktop": true, "notifySound": false,
 		"notifyCalendar": true, "externalWarnings": true,
 		"composeMode": "html", "composeWidth": "wide", "composePosition": "center",
+		"quickActions": []string{"archive", "markRead", "delete"},
 	}
 	for key, value := range defaults {
 		if _, exists := prefs[key]; !exists {
@@ -1070,6 +1071,7 @@ func defaultFolders() []map[string]any {
 	return []map[string]any{
 		{"id": "inbox", "label": "Inbox", "icon": "i-inbox", "section": "favorites", "system": true, "imapFolder": "INBOX", "order": 0, "badgeMode": "unread"},
 		{"id": "starred", "label": "Starred", "icon": "i-star", "section": "favorites", "virtual": true, "system": true, "order": 1, "badgeMode": "none"},
+		{"id": "snoozed", "label": "Snoozed", "icon": "i-clock", "section": "favorites", "virtual": true, "system": true, "order": 1, "badgeMode": "none"},
 		{"id": "sent", "label": "Sent", "icon": "i-send", "section": "folders", "system": true, "imapFolder": "Sent", "order": 2, "badgeMode": "unread"},
 		{"id": "drafts", "label": "Drafts", "icon": "i-file", "section": "folders", "system": true, "imapFolder": "Drafts", "order": 3, "badgeMode": "unread"},
 		{"id": "archive", "label": "Archive", "icon": "i-archive", "section": "folders", "system": true, "imapFolder": "Archive", "order": 4, "badgeMode": "unread"},

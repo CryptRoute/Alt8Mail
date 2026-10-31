@@ -80,6 +80,19 @@ in the request path and its JSON demo data is not read by the live frontend.
 | Sign-in factors | `POST /api/session/2fa` (TOTP/recovery), `POST /api/session/2fa/webauthn/begin\|finish`, `POST /api/enrollment/totp/begin\|finish`, `POST /api/enrollment/webauthn/begin\|finish` |
 | Usage | `GET /api/quota`, `GET /api/outbound` |
 
+`POST /api/messages/actions` accepts `archive`, `move`, `copy`, `delete`,
+`markRead`, `markUnread`, `star`, `unstar`, `flag`, `unflag`, `pin`, `unpin`,
+`spam`, `notSpam`, `report`, `categorize`, `snooze`, `unsnooze`, `ignore`,
+`unignore` and `block`. `move`/`copy` require `folder`; `snooze` requires an
+RFC 3339 `until`; `categorize` takes `categories`; and reports take `reason`
+and `note`. A client may send a `requestId`; successful responses are stored in
+`mail_action_requests` for seven days so an optimistic UI can retry after a lost
+response without deleting a message twice. Reply and forward activity is written
+to the source message (`replied_at`, `forwarded_at`, `reply_count`,
+`forward_count`) when the queued outbound item actually commits. `snoozed_until`
+and `ignored` are server-side message state: Snoozed is a virtual folder, and
+future mail in an ignored thread is hidden as it arrives.
+
 ## Settings persistence
 
 All user-facing settings are stored in PostgreSQL, not in browser storage or a

@@ -10,12 +10,12 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.13.0">
-<link rel="stylesheet" href="/features.css?v=0.13.0">
-<link rel="stylesheet" href="/workspace.css?v=0.13.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.13.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.13.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.13.0">
+<link rel="stylesheet" href="/styles.css?v=0.14.0">
+<link rel="stylesheet" href="/features.css?v=0.14.0">
+<link rel="stylesheet" href="/workspace.css?v=0.14.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.14.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.14.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.14.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -1784,6 +1784,7 @@
 
 <div class="cmd-newmenu" id="moveMenu" hidden></div>
 <div class="folder-context-menu" id="folderMenu" hidden></div>
+<div class="folder-context-menu message-context-menu" id="messageMenu" hidden></div>
 
 <div class="overlay" id="detailsOverlay" hidden>
   <div class="dialog details-dialog" role="dialog" aria-modal="true" aria-labelledby="detailsTitle">
@@ -2341,9 +2342,22 @@
       <div class="signature-mode-row"><span>Format</span><div class="onboarding-segments compact" role="group" aria-label="Signature format"><button type="button" data-signature-mode="rich">Rich HTML</button><button type="button" data-signature-mode="plain">Plain text</button></div></div>
       <div class="signature-rich-wrap" id="signatureRichWrap">
         <div class="signature-editor-toolbar" role="toolbar" aria-label="Signature formatting">
-          <button type="button" data-signature-cmd="bold" title="Bold"><strong>B</strong></button><button type="button" data-signature-cmd="italic" title="Italic"><em>I</em></button><button type="button" data-signature-cmd="underline" title="Underline"><u>U</u></button>
-          <button type="button" data-signature-block="p" title="Normal text">¶</button><button type="button" data-signature-block="h2" title="Heading">H2</button>
-          <button type="button" data-signature-cmd="insertUnorderedList" title="Bulleted list">•</button><button type="button" data-signature-cmd="createLink" title="Insert link">↗</button><button type="button" data-signature-cmd="removeFormat" title="Clear formatting">Tx</button>
+          <button type="button" data-signature-cmd="undo" title="Undo">↶</button><button type="button" data-signature-cmd="redo" title="Redo">↷</button>
+          <span class="editor-sep"></span>
+          <select data-signature-font aria-label="Font family" title="Font family"><option value="">Font</option><option value="Arial, Helvetica, sans-serif">Arial</option><option value="'Segoe UI', Tahoma, sans-serif">Segoe UI</option><option value="Calibri, Candara, sans-serif">Calibri</option><option value="'Helvetica Neue', Helvetica, Arial, sans-serif">Helvetica</option><option value="Verdana, Geneva, sans-serif">Verdana</option><option value="Tahoma, Verdana, sans-serif">Tahoma</option><option value="'Trebuchet MS', Helvetica, sans-serif">Trebuchet MS</option><option value="Georgia, 'Times New Roman', serif">Georgia</option><option value="'Times New Roman', Times, serif">Times New Roman</option><option value="Garamond, Georgia, serif">Garamond</option><option value="'Courier New', Courier, monospace">Courier New</option></select>
+          <select data-signature-size aria-label="Font size" title="Font size"><option value="">Size</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="15">15</option><option value="17">17</option><option value="20">20</option><option value="24">24</option><option value="32">32</option></select>
+          <span class="editor-sep"></span>
+          <button type="button" data-signature-cmd="bold" title="Bold"><strong>B</strong></button><button type="button" data-signature-cmd="italic" title="Italic"><em>I</em></button><button type="button" data-signature-cmd="underline" title="Underline"><u>U</u></button><button type="button" data-signature-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
+          <span class="editor-sep"></span>
+          <button type="button" data-signature-block="p" title="Normal text">¶</button><button type="button" data-signature-block="h1" title="Heading 1">H1</button><button type="button" data-signature-block="h2" title="Heading 2">H2</button><button type="button" data-signature-block="blockquote" title="Quote">❝</button>
+          <span class="editor-sep"></span>
+          <button type="button" data-signature-cmd="insertUnorderedList" title="Bulleted list">•</button><button type="button" data-signature-cmd="insertOrderedList" title="Numbered list">1.</button><button type="button" data-signature-cmd="createLink" title="Insert link">🔗</button><button type="button" data-signature-cmd="unlink" title="Remove link">⛓</button>
+          <button type="button" data-signature-cmd="justifyLeft" title="Align left">⇤</button><button type="button" data-signature-cmd="justifyCenter" title="Align center">↔</button><button type="button" data-signature-cmd="justifyRight" title="Align right">⇥</button>
+          <span class="editor-sep"></span>
+          <label class="editor-color-wrap" title="Text color"><span class="editor-color-glyph">A</span><input type="color" data-signature-color value="#172230" title="Text color" aria-label="Text color"></label>
+          <label class="editor-color-wrap" title="Highlight color"><span class="editor-color-glyph editor-highlight-glyph">▮</span><input type="color" data-signature-highlight value="#fff2a8" title="Highlight color" aria-label="Highlight color"></label>
+          <button type="button" data-signature-cmd="removeFormat" title="Clear formatting">Tx</button>
+          <button type="button" data-signature-source title="Edit HTML source" aria-label="Edit HTML source">&lt;&gt;</button>
         </div>
         <div class="signature-rich-editor" id="signatureEditorBody" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="Your name, role, phone and links"></div>
       </div>
@@ -2382,7 +2396,21 @@
       <div class="signature-mode-row"><span>Signature</span><div class="onboarding-segments compact" role="group" aria-label="Identity signature format"><button type="button" data-identity-signature-mode="rich">Rich HTML</button><button type="button" data-identity-signature-mode="plain">Plain text</button></div></div>
       <div class="signature-rich-wrap" id="identitySignatureRichWrap">
         <div class="signature-editor-toolbar" role="toolbar" aria-label="Identity signature formatting">
-          <button type="button" data-identity-signature-cmd="bold" title="Bold"><strong>B</strong></button><button type="button" data-identity-signature-cmd="italic" title="Italic"><em>I</em></button><button type="button" data-identity-signature-cmd="underline" title="Underline"><u>U</u></button><button type="button" data-identity-signature-cmd="insertUnorderedList" title="Bulleted list">•</button><button type="button" data-identity-signature-cmd="createLink" title="Insert link">↗</button><button type="button" data-identity-signature-cmd="removeFormat" title="Clear formatting">Tx</button>
+          <button type="button" data-identity-signature-cmd="undo" title="Undo">↶</button><button type="button" data-identity-signature-cmd="redo" title="Redo">↷</button>
+          <select data-identity-signature-font aria-label="Font family" title="Font family"><option value="">Font</option><option value="Arial, Helvetica, sans-serif">Arial</option><option value="'Segoe UI', Tahoma, sans-serif">Segoe UI</option><option value="Calibri, Candara, sans-serif">Calibri</option><option value="'Helvetica Neue', Helvetica, Arial, sans-serif">Helvetica</option><option value="Verdana, Geneva, sans-serif">Verdana</option><option value="Tahoma, Verdana, sans-serif">Tahoma</option><option value="'Trebuchet MS', Helvetica, sans-serif">Trebuchet MS</option><option value="Georgia, 'Times New Roman', serif">Georgia</option><option value="'Times New Roman', Times, serif">Times New Roman</option><option value="Garamond, Georgia, serif">Garamond</option><option value="'Courier New', Courier, monospace">Courier New</option></select>
+          <select data-identity-signature-size aria-label="Font size" title="Font size"><option value="">Size</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="15">15</option><option value="17">17</option><option value="20">20</option><option value="24">24</option><option value="32">32</option></select>
+          <span class="editor-sep"></span>
+          <button type="button" data-identity-signature-cmd="bold" title="Bold"><strong>B</strong></button><button type="button" data-identity-signature-cmd="italic" title="Italic"><em>I</em></button><button type="button" data-identity-signature-cmd="underline" title="Underline"><u>U</u></button><button type="button" data-identity-signature-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
+          <span class="editor-sep"></span>
+          <button type="button" data-identity-signature-block="p" title="Normal text">¶</button><button type="button" data-identity-signature-block="h1" title="Heading 1">H1</button><button type="button" data-identity-signature-block="h2" title="Heading 2">H2</button><button type="button" data-identity-signature-block="blockquote" title="Quote">❝</button>
+          <span class="editor-sep"></span>
+          <button type="button" data-identity-signature-cmd="insertUnorderedList" title="Bulleted list">•</button><button type="button" data-identity-signature-cmd="insertOrderedList" title="Numbered list">1.</button><button type="button" data-identity-signature-cmd="createLink" title="Insert link">🔗</button><button type="button" data-identity-signature-cmd="unlink" title="Remove link">⛓</button>
+          <button type="button" data-identity-signature-cmd="justifyLeft" title="Align left">⇤</button><button type="button" data-identity-signature-cmd="justifyCenter" title="Align center">↔</button><button type="button" data-identity-signature-cmd="justifyRight" title="Align right">⇥</button>
+          <span class="editor-sep"></span>
+          <label class="editor-color-wrap" title="Text color"><span class="editor-color-glyph">A</span><input type="color" data-identity-signature-color value="#172230" title="Text color" aria-label="Text color"></label>
+          <label class="editor-color-wrap" title="Highlight color"><span class="editor-color-glyph editor-highlight-glyph">▮</span><input type="color" data-identity-signature-highlight value="#fff2a8" title="Highlight color" aria-label="Highlight color"></label>
+          <button type="button" data-identity-signature-cmd="removeFormat" title="Clear formatting">Tx</button>
+          <button type="button" data-identity-signature-source title="Edit HTML source" aria-label="Edit HTML source">&lt;&gt;</button>
         </div>
         <div class="signature-rich-editor" id="identityEditorSignature" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="Signature used when this identity is the From address"></div>
       </div>
@@ -2423,9 +2451,28 @@
     </div>
   </div>
 </div>
+<div class="overlay" id="htmlSourceOverlay" hidden>
+  <div class="dialog html-source-dialog" role="dialog" aria-modal="true" aria-labelledby="htmlSourceTitle">
+    <div class="dialog-head"><div><h2 id="htmlSourceTitle">HTML source</h2><p class="dialog-note" id="htmlSourceSubtitle">Edit the HTML, then apply it to the visual editor.</p></div><button class="icon-btn" id="htmlSourceClose" type="button" aria-label="Close HTML source"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-body">
+      <textarea id="htmlSourceText" class="html-source-text" spellcheck="false" aria-label="HTML source"></textarea>
+      <p class="settings-note">Scripts, event handlers and unsafe links are removed. Images, tables and inline styles are kept so the message can render like Outlook.</p>
+    </div>
+    <div class="dialog-foot"><button class="btn-secondary" id="htmlSourceCancel" type="button">Cancel</button><button class="btn-primary" id="htmlSourceApply" type="button">OK</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="quickActionsOverlay" hidden>
+  <div class="dialog quick-actions-dialog" role="dialog" aria-modal="true" aria-labelledby="quickActionsTitle">
+    <div class="dialog-head"><div><h2 id="quickActionsTitle">Set quick actions</h2><p class="dialog-note">Choose the shortcuts that appear when you hover a message in the list.</p></div><button class="icon-btn" id="quickActionsClose" type="button" aria-label="Close quick actions"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-body" id="quickActionsChoices"></div>
+    <div class="dialog-foot"><button class="btn-secondary" id="quickActionsCancel" type="button">Cancel</button><button class="btn-primary" id="quickActionsSave" type="button">Save quick actions</button></div>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
-<script type="module" src="/app.js?v=0.13.0"></script>
+<script type="module" src="/app.js?v=0.14.0"></script>
 </body>
 </html>

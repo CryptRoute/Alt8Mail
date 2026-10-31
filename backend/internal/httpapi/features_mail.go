@@ -14,11 +14,14 @@ import (
 )
 
 type actionsBody struct {
-	IDs    []string `json:"ids"`
-	Action string   `json:"action"`
-	Folder string   `json:"folder"`
-	Reason string   `json:"reason"`
-	Note   string   `json:"note"`
+	IDs        []string `json:"ids"`
+	Action     string   `json:"action"`
+	Folder     string   `json:"folder"`
+	Reason     string   `json:"reason"`
+	Note       string   `json:"note"`
+	Categories []string `json:"categories"`
+	Until      string   `json:"until"`
+	RequestID  string   `json:"requestId"`
 }
 
 type readBody struct {
@@ -33,25 +36,27 @@ type messagePatch struct {
 }
 
 type draftBody struct {
-	ToText      *string `json:"toText"`
-	To          any     `json:"to"`
-	CC          any     `json:"cc"`
-	BCC         any     `json:"bcc"`
-	CCText      *string `json:"ccText"`
-	BCCText     *string `json:"bccText"`
-	Subject     *string `json:"subject"`
-	BodyText    *string `json:"bodyText"`
-	BodyHTML    *string `json:"bodyHtml"`
-	Body        *string `json:"body"`
-	FromEmail   string  `json:"fromEmail"`
-	Attachments []any   `json:"attachments"`
-	ThreadID    string  `json:"threadId"`
-	InReplyTo   *string `json:"inReplyTo"`
-	WindowMode  string  `json:"windowMode"`
-	Priority    string  `json:"priority"`
-	Receipt     bool    `json:"receipt"`
-	Delivery    bool    `json:"delivery"`
-	SaveCopy    *bool   `json:"saveCopy"`
+	ToText          *string `json:"toText"`
+	To              any     `json:"to"`
+	CC              any     `json:"cc"`
+	BCC             any     `json:"bcc"`
+	CCText          *string `json:"ccText"`
+	BCCText         *string `json:"bccText"`
+	Subject         *string `json:"subject"`
+	BodyText        *string `json:"bodyText"`
+	BodyHTML        *string `json:"bodyHtml"`
+	Body            *string `json:"body"`
+	FromEmail       string  `json:"fromEmail"`
+	Attachments     []any   `json:"attachments"`
+	ThreadID        string  `json:"threadId"`
+	InReplyTo       *string `json:"inReplyTo"`
+	WindowMode      string  `json:"windowMode"`
+	Priority        string  `json:"priority"`
+	Receipt         bool    `json:"receipt"`
+	Delivery        bool    `json:"delivery"`
+	SaveCopy        *bool   `json:"saveCopy"`
+	ComposeKind     string  `json:"composeKind"`
+	SourceMessageID string  `json:"sourceMessageId"`
 }
 
 func (s *Server) getFolders(w http.ResponseWriter, r *http.Request) {
@@ -209,15 +214,29 @@ func (s *Server) loadMailMessageThread(ctx context.Context, userID, target strin
 }
 
 func mailMessageMatchesScope(message map[string]any, folder, filter string) bool {
-	if folder == "starred" {
-		if !stateBool(message, "starred") && !stateBool(message, "flagged") {
-			return false
-		}
-		if stateString(message, "folder") == "spam" || stateString(message, "folder") == "trash" {
-			return false
-		}
-	} else if folder != "" && folder != "all" && stateString(message, "folder") != folder {
+	if stateBool(message, "ignored") {
 		return false
+	}
+	snoozedUntil, _ := parseStateTime(stateString(message, "snoozedUntil"))
+	snoozed := snoozedUntil.After(time.Now())
+	if folder == "snoozed" {
+		if !snoozed {
+			return false
+		}
+	} else {
+		if snoozed {
+			return false
+		}
+		if folder == "starred" {
+			if !stateBool(message, "starred") && !stateBool(message, "flagged") {
+				return false
+			}
+			if stateString(message, "folder") == "spam" || stateString(message, "folder") == "trash" {
+				return false
+			}
+		} else if folder != "" && folder != "all" && stateString(message, "folder") != folder {
+			return false
+		}
 	}
 	switch filter {
 	case "unread":
@@ -387,18 +406,53 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "NO_MESSAGES", "Select at least one message")
 		return
 	}
+	requestID := truncate(strings.TrimSpace(body.RequestID), 80)
+	if requestID != "" {
+		var cached []byte
+		if err := s.store.DB.QueryRow(r.Context(), `
+			SELECT response FROM mail_action_requests
+			WHERE user_id=$1 AND request_id=$2 AND created_at > now() - interval '7 days'
+		`, sess.User.ID, requestID).Scan(&cached); err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(cached)
+			return
+		}
+		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM mail_action_requests WHERE user_id=$1 AND created_at <= now() - interval '7 days'`, sess.User.ID)
+	}
 	allowed := map[string]bool{
-		"archive": true, "move": true, "delete": true, "markRead": true, "markUnread": true,
+		"archive": true, "move": true, "copy": true, "delete": true, "markRead": true, "markUnread": true,
 		"star": true, "unstar": true, "spam": true, "notSpam": true, "report": true,
-		"flag": true, "unflag": true, "pin": true, "unpin": true,
+		"flag": true, "unflag": true, "pin": true, "unpin": true, "categorize": true,
+		"snooze": true, "unsnooze": true, "ignore": true, "unignore": true, "block": true,
 	}
 	if !allowed[body.Action] {
 		writeError(w, http.StatusBadRequest, "BAD_ACTION", "Unknown bulk action")
 		return
 	}
-	if body.Action == "move" && strings.TrimSpace(body.Folder) == "" {
+	if (body.Action == "move" || body.Action == "copy") && strings.TrimSpace(body.Folder) == "" {
 		writeError(w, http.StatusBadRequest, "BAD_FOLDER", "Choose a valid destination folder")
 		return
+	}
+	if body.Action == "snooze" {
+		until, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(body.Until))
+		if parseErr != nil || !until.After(time.Now().Add(time.Minute)) || until.After(time.Now().Add(366*24*time.Hour)) {
+			writeError(w, http.StatusBadRequest, "BAD_SNOOZE", "Choose a snooze time between one minute and one year from now")
+			return
+		}
+	}
+	if body.Action == "categorize" {
+		if len(body.Categories) > 12 {
+			writeError(w, http.StatusBadRequest, "BAD_CATEGORIES", "Choose at most 12 categories")
+			return
+		}
+		for _, category := range body.Categories {
+			if strings.TrimSpace(category) == "" || len([]rune(category)) > 40 {
+				writeError(w, http.StatusBadRequest, "BAD_CATEGORIES", "Category names must be 1–40 characters")
+				return
+			}
+		}
 	}
 	delegatedIDs := []string{}
 	localIDs := make([]string, 0, len(ids))
@@ -437,12 +491,42 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 			return fail(http.StatusNotFound, "NOT_FOUND", "No matching messages")
 		}
 		moveIMAPFolder := ""
-		if body.Action == "move" {
+		if body.Action == "move" || body.Action == "copy" {
 			folder := findStateFolder(state, body.Folder)
 			if folder == nil || stateBool(folder, "virtual") {
 				return fail(http.StatusBadRequest, "BAD_FOLDER", "Choose a valid destination folder")
 			}
-			moveIMAPFolder = folderIMAPName(state, body.Folder)
+			if body.Action == "move" {
+				moveIMAPFolder = folderIMAPName(state, body.Folder)
+			}
+			if body.Action == "copy" {
+				copied := 0
+				for _, message := range targets {
+					copyMessage := deepCopyMap(message)
+					copyMessage["id"] = newID("msg")
+					copyMessage["folder"] = body.Folder
+					copyMessage["imapFolder"] = body.Folder
+					copyMessage["imapUid"] = 0
+					copyMessage["imapUidValidity"] = 0
+					copyMessage["copiedFrom"] = stateString(message, "id")
+					state["messages"] = append(stateMessages(state), copyMessage)
+					copied++
+				}
+				appendStateAudit(state, "message.copy", fmt.Sprintf("%d message", copied),
+					stateString(stateMap(state, "user"), "name"),
+					fmt.Sprintf("Copied %d message to %s", copied, body.Folder), clientIP(r), sanitizeUserAgent(r.UserAgent()))
+				response = map[string]any{"ok": true, "affected": copied, "copied": copied, "quota": s.mailQuotaForUser(r.Context(), sess.User.ID)}
+				if requestID != "" {
+					if encoded, marshalErr := json.Marshal(response); marshalErr == nil {
+						_, _ = s.store.DB.Exec(r.Context(), `
+							INSERT INTO mail_action_requests (user_id, request_id, response)
+							VALUES ($1, $2, $3)
+							ON CONFLICT (user_id, request_id) DO UPDATE SET response=EXCLUDED.response
+						`, sess.User.ID, requestID, encoded)
+					}
+				}
+				return nil
+			}
 		}
 		if policy.Mail.Quarantine && !webmailAdminRole(sess.User.Role) {
 			for _, message := range targets {
@@ -471,7 +555,9 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 				"messageId": stateString(message, "messageId"),
 				"unread":    stateBool(message, "unread"), "starred": stateBool(message, "starred"),
 				"flagged": stateBool(message, "flagged"), "pinned": stateBool(message, "pinned"),
-				"spamReport": report,
+				"spamReport": report, "categories": message["categories"],
+				"snoozedUntil": stateString(message, "snoozedUntil"),
+				"ignored":      stateBool(message, "ignored"), "ignoredAt": stateString(message, "ignoredAt"),
 			}
 			mutation := imapAction{
 				MessageID:    stateString(message, "messageId"),
@@ -524,6 +610,58 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 				message["pinned"] = true
 			case "unpin":
 				message["pinned"] = false
+			case "categorize":
+				categories := make([]any, 0, len(body.Categories))
+				seen := map[string]bool{}
+				for _, category := range body.Categories {
+					category = truncate(strings.TrimSpace(category), 40)
+					if category != "" && !seen[strings.ToLower(category)] {
+						seen[strings.ToLower(category)] = true
+						categories = append(categories, category)
+					}
+				}
+				message["categories"] = categories
+			case "snooze":
+				message["snoozedUntil"] = strings.TrimSpace(body.Until)
+				message["unread"] = false
+				seen := true
+				mutation.SetSeen = &seen
+			case "unsnooze":
+				delete(message, "snoozedUntil")
+			case "ignore":
+				message["ignored"] = true
+				message["ignoredAt"] = nowISO()
+				rememberIgnoredThread(state, stateString(message, "threadId"))
+			case "unignore":
+				message["ignored"] = false
+				delete(message, "ignoredAt")
+				forgetIgnoredThread(state, stateString(message, "threadId"))
+			case "block":
+				targetFolder = "spam"
+				message["unread"] = false
+				message["ignored"] = false
+				delete(message, "ignoredAt")
+				message["spamReport"] = map[string]any{
+					"at": nowISO(), "reason": "blocked-sender", "note": truncate(body.Note, 500), "source": "message-menu",
+				}
+				seen, flagged := true, stateBool(message, "starred")
+				mutation.SetSeen = &seen
+				mutation.SetFlagged = &flagged
+				from, _ := message["from"].(map[string]any)
+				user := stateMap(state, "user")
+				blocked := stateSlice(user, "blockedSenders")
+				sender := strings.ToLower(stateString(from, "email"))
+				found := false
+				for _, raw := range blocked {
+					if strings.EqualFold(fmt.Sprint(raw), sender) {
+						found = true
+						break
+					}
+				}
+				if sender != "" && !found {
+					blocked = append(blocked, sender)
+					user["blockedSenders"] = blocked
+				}
 			case "spam":
 				targetFolder = "spam"
 				message["unread"] = false
@@ -549,6 +687,7 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if !permanent && targetFolder != originalFolder {
+				delete(message, "snoozedUntil")
 				message["folder"] = targetFolder
 				message["imapFolder"] = targetFolder
 				message["imapUid"] = 0
@@ -582,13 +721,17 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 			"markRead": "message.markRead", "markUnread": "message.markUnread", "star": "message.star",
 			"unstar": "message.unstar", "flag": "message.flag", "unflag": "message.unflag",
 			"spam": "message.spam", "notSpam": "message.notSpam", "report": "message.report",
-			"pin": "message.pin", "unpin": "message.unpin",
+			"pin": "message.pin", "unpin": "message.unpin", "categorize": "message.categorize",
+			"snooze": "message.snooze", "unsnooze": "message.unsnooze", "ignore": "message.ignore",
+			"unignore": "message.unignore", "block": "message.block", "copy": "message.copy",
 		}[body.Action]
 		pastTense := map[string]string{
 			"archive": "archived", "delete": "deleted", "markRead": "marked read", "markUnread": "marked unread",
 			"star": "starred", "unstar": "unstarred", "flag": "flagged for follow-up", "unflag": "flag cleared",
 			"spam": "marked as spam", "notSpam": "moved back to Inbox", "report": "reported to security",
-			"pin": "pinned", "unpin": "unpinned",
+			"pin": "pinned", "unpin": "unpinned", "categorize": "categorized", "snooze": "snoozed",
+			"unsnooze": "returned to Inbox", "ignore": "ignored", "unignore": "no longer ignored",
+			"block": "blocked", "copy": "copied",
 		}[body.Action]
 		if pastTense == "" {
 			pastTense = body.Action
@@ -613,6 +756,12 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 			if body.Note != "" {
 				detail += " · analyst note recorded"
 			}
+		case "snooze":
+			detail = fmt.Sprintf("%s snoozed until %s", countLabel, body.Until)
+		case "block":
+			detail = countLabel + " blocked · sender added to the blocked list"
+		case "categorize":
+			detail = fmt.Sprintf("%s categorized as %s", countLabel, strings.Join(body.Categories, ", "))
 		}
 		appendStateAudit(state, auditAction, countLabel, stateString(stateMap(state, "user"), "name"), detail, clientIP(r), sanitizeUserAgent(r.UserAgent()))
 		response = map[string]any{
@@ -628,6 +777,17 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 	}
 	if response != nil {
 		response["quota"] = s.mailQuotaForUser(r.Context(), sess.User.ID)
+	}
+	if requestID != "" && response != nil {
+		if encoded, marshalErr := json.Marshal(response); marshalErr == nil {
+			if _, insertErr := s.store.DB.Exec(r.Context(), `
+				INSERT INTO mail_action_requests (user_id, request_id, response)
+				VALUES ($1, $2, $3)
+				ON CONFLICT (user_id, request_id) DO UPDATE SET response=EXCLUDED.response
+			`, sess.User.ID, requestID, encoded); insertErr != nil {
+				s.logger.Warn("message action receipt store failed", "err", insertErr)
+			}
+		}
 	}
 	if len(mutations) > 0 {
 		if err := s.applyIMAPActions(sess.User, mutations); err != nil {
@@ -720,6 +880,26 @@ func (s *Server) undoAction(w http.ResponseWriter, r *http.Request) {
 			} else {
 				delete(message, "spamReport")
 			}
+			if categories, ok := item["categories"].([]any); ok {
+				message["categories"] = categories
+			}
+			if snoozed := stateString(item, "snoozedUntil"); snoozed != "" {
+				message["snoozedUntil"] = snoozed
+			} else {
+				delete(message, "snoozedUntil")
+			}
+			ignored, hasIgnored := item["ignored"].(bool)
+			if hasIgnored {
+				message["ignored"] = ignored
+			}
+			if ignoredAt := stateString(item, "ignoredAt"); ignoredAt != "" {
+				message["ignoredAt"] = ignoredAt
+			} else {
+				delete(message, "ignoredAt")
+			}
+			if action == "ignore" {
+				forgetIgnoredThread(state, stateString(message, "threadId"))
+			}
 			restored++
 		}
 		appendStateAudit(state, "message.undo", fmt.Sprintf("%d message", restored), stateString(stateMap(state, "user"), "name"),
@@ -767,7 +947,7 @@ func (s *Server) saveDraft(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	id := r.PathValue("id")
 	var body draftBody
-	if !s.decodeBody(w, r, &body, 2*1024*1024) {
+	if !s.decodeBody(w, r, &body, 8*1024*1024) {
 		return
 	}
 	var response map[string]any
@@ -868,7 +1048,7 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 		}
 	}
 	if body.BodyHTML != nil {
-		bodyHTML = truncate(*body.BodyHTML, 500_000)
+		bodyHTML = truncate(*body.BodyHTML, 4_000_000)
 	}
 	bodyHTML, bodyText = normalizeComposeBody(bodyHTML, bodyText)
 	if body.ToText != nil {
@@ -918,6 +1098,8 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 	priority := "normal"
 	windowMode := "floating"
 	saveCopy := true
+	composeKind := ""
+	sourceMessageID := ""
 	auth := map[string]any{"spf": "pass", "dkim": "pass", "dmarc": "pass", "tls": "TLS 1.3", "ip": "127.0.0.1", "signer": "a8m.test", "firstContact": false, "warnings": []any{}}
 	if existing != nil {
 		createdAt = stateString(existing, "createdAt")
@@ -926,6 +1108,8 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 		inReplyTo = existing["inReplyTo"]
 		priority = stateString(existing, "priority")
 		windowMode = stateString(existing, "windowMode")
+		composeKind = stateString(existing, "composeKind")
+		sourceMessageID = stateString(existing, "sourceMessageId")
 		if existing["saveCopy"] == false {
 			saveCopy = false
 		}
@@ -948,6 +1132,12 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 	if body.SaveCopy != nil {
 		saveCopy = *body.SaveCopy
 	}
+	if body.ComposeKind == "reply" || body.ComposeKind == "replyAll" || body.ComposeKind == "forward" {
+		composeKind = body.ComposeKind
+	}
+	if body.SourceMessageID != "" {
+		sourceMessageID = truncate(body.SourceMessageID, 120)
+	}
 	sizeBytes := int64(4*1024 + len(bodyText))
 	for _, raw := range attachments {
 		file, _ := raw.(map[string]any)
@@ -966,6 +1156,7 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 		"event": nil, "sizeBytes": sizeBytes, "messageId": messageID, "inReplyTo": inReplyTo,
 		"threadId": threadID, "priority": priority, "receipt": body.Receipt, "delivery": body.Delivery,
 		"saveCopy": saveCopy, "windowMode": windowMode, "viaApi": true,
+		"composeKind": composeKind, "sourceMessageId": sourceMessageID,
 	}, nil
 }
 

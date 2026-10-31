@@ -390,15 +390,28 @@ func threadSummaries(scope, all []any) []any {
 		})
 		latest := members[len(members)-1]
 		unread := 0
+		repliedAt := ""
+		forwardedAt := ""
+		replyCount := 0
+		forwardCount := 0
 		for _, member := range members {
 			if stateBool(member, "unread") {
 				unread++
 			}
+			if stamp := stateString(member, "repliedAt"); stamp > repliedAt {
+				repliedAt = stamp
+			}
+			if stamp := stateString(member, "forwardedAt"); stamp > forwardedAt {
+				forwardedAt = stamp
+			}
+			replyCount += int(stateInt(member, "replyCount"))
+			forwardCount += int(stateInt(member, "forwardCount"))
 		}
 		result = append(result, map[string]any{
 			"id": id, "subject": firstNonEmpty(stateString(latest, "subject"), "(no subject)"),
 			"count": len(members), "unreadCount": unread, "date": stateString(latest, "date"),
-			"latestId": stateString(latest, "id"),
+			"latestId": stateString(latest, "id"), "repliedAt": repliedAt,
+			"forwardedAt": forwardedAt, "replyCount": replyCount, "forwardCount": forwardCount,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {

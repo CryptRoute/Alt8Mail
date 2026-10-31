@@ -196,7 +196,7 @@ func (s *Server) getIdentities(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	var body identityBody
-	if !s.decodeBody(w, r, &body, 64*1024) {
+	if !s.decodeBody(w, r, &body, 4*1024*1024) {
 		return
 	}
 	email := strings.ToLower(strings.TrimSpace(body.Email))
@@ -311,7 +311,7 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 
 func normalizeIdentitySignature(bodyText, bodyHTML string) (string, string) {
 	bodyText = strings.TrimSpace(truncate(bodyText, 12_000))
-	bodyHTML = sanitizeComposeHTML(truncate(bodyHTML, 24_000))
+	bodyHTML = sanitizeComposeHTML(truncate(bodyHTML, 2_000_000))
 	if bodyHTML != "" && strings.TrimSpace(htmlToPlainText(bodyHTML)) == "" {
 		bodyHTML = ""
 	}
@@ -346,7 +346,7 @@ func (s *Server) putIdentitySignature(w http.ResponseWriter, r *http.Request) {
 		Signature     string `json:"signature"`
 		SignatureHTML string `json:"signatureHtml"`
 	}
-	if !s.decodeBody(w, r, &body, 64*1024) {
+	if !s.decodeBody(w, r, &body, 4*1024*1024) {
 		return
 	}
 	email := strings.ToLower(strings.TrimSpace(body.Email))
@@ -377,7 +377,7 @@ func (s *Server) putIdentitySignature(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateIdentity(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	var body identityBody
-	if !s.decodeBody(w, r, &body, 128*1024) {
+	if !s.decodeBody(w, r, &body, 4*1024*1024) {
 		return
 	}
 	replyTo := strings.ToLower(strings.TrimSpace(body.ReplyTo))

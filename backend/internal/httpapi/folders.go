@@ -12,7 +12,7 @@ import (
 )
 
 var primaryFolderIDs = map[string]bool{
-	"inbox": true, "starred": true, "sent": true, "drafts": true,
+	"inbox": true, "starred": true, "snoozed": true, "sent": true, "drafts": true,
 	"archive": true, "spam": true, "trash": true,
 }
 
@@ -135,7 +135,7 @@ func customFolderIMAPMap(state map[string]any) map[string]string {
 
 func reservedFolderLabel(label string) bool {
 	switch strings.ToLower(strings.TrimSpace(label)) {
-	case "inbox", "starred", "sent", "sent items", "sent messages", "drafts", "archive",
+	case "inbox", "starred", "snoozed", "sent", "sent items", "sent messages", "drafts", "archive",
 		"archives", "all mail", "spam", "junk", "junk e-mail", "trash", "deleted items", "deleted messages":
 		return true
 	}

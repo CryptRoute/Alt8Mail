@@ -74,7 +74,7 @@ func signatureDefaults(signatures []map[string]any) map[string]any {
 
 func normalizeSignatureBodies(bodyText, bodyHTML string) (string, string, error) {
 	bodyText = strings.TrimSpace(truncate(bodyText, 12_000))
-	bodyHTML = sanitizeComposeHTML(truncate(bodyHTML, 24_000))
+	bodyHTML = sanitizeComposeHTML(truncate(bodyHTML, 2_000_000))
 	if bodyHTML != "" && strings.TrimSpace(htmlToPlainText(bodyHTML)) == "" {
 		bodyHTML = ""
 	}
@@ -106,7 +106,7 @@ func (s *Server) getSignatures(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createSignature(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	var body signatureBody
-	if !s.decodeBody(w, r, &body, 128*1024) {
+	if !s.decodeBody(w, r, &body, 4*1024*1024) {
 		return
 	}
 	name := ""
@@ -180,7 +180,7 @@ func (s *Server) createSignature(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateSignature(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	var body signatureBody
-	if !s.decodeBody(w, r, &body, 128*1024) {
+	if !s.decodeBody(w, r, &body, 4*1024*1024) {
 		return
 	}
 	ctx := r.Context()
