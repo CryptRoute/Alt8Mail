@@ -52,8 +52,13 @@ func (s *Server) publicUserWithState(ctx context.Context, user userRecord) (map[
 	if !ok {
 		return publicUser(user), fallback
 	}
-	prefs := statePreferences(state, fallback)
-	return publicStateUser(state, user, prefs, security), prefs
+	return publicUserFromState(state, user, fallback, security), statePreferences(state, fallback)
+}
+
+// publicUserFromState reuses an already-loaded workspace document. Bootstrap
+// used to parse the same app_states row twice per request.
+func publicUserFromState(state map[string]any, user userRecord, fallback, security map[string]any) map[string]any {
+	return publicStateUser(state, user, statePreferences(state, fallback), security)
 }
 
 func statePreferences(state map[string]any, fallback map[string]any) map[string]any {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -24,6 +25,13 @@ func main() {
 		logger.Error("configuration error", "err", err)
 		os.Exit(1)
 	}
+	if cfg.MemoryLimitMB > 0 && os.Getenv("GOMEMLIMIT") == "" {
+		limit := int64(cfg.MemoryLimitMB) << 20
+		debug.SetMemoryLimit(limit)
+		logger.Info("runtime heap target configured", "limitMB", cfg.MemoryLimitMB)
+	}
+	logger.Info("mail resource profile",
+		"workerConcurrency", cfg.MailWorkerConcurrency, "dbMaxConns", cfg.DBMaxConns)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	st, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBMaxConns, cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)

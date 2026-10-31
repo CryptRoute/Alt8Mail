@@ -23,6 +23,7 @@ type Config struct {
 	UploadDir         string
 	DatabaseURL       string
 	DBMaxConns        int32
+	MemoryLimitMB     int
 	RedisAddr         string
 	RedisPassword     string
 	RedisDB           int
@@ -225,6 +226,12 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("ALT8MAIL_DB_MAX_CONNS must be a positive integer")
 	}
 	cfg.DBMaxConns = int32(maxConns)
+	if value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("ALT8MAIL_MEMORY_LIMIT_MB"))); err == nil && value > 0 {
+		cfg.MemoryLimitMB = value
+	} else {
+		cfg.MemoryLimitMB = defaultMemoryLimitMB(hostMemoryMB())
+	}
+	applyHostDefaults(&cfg)
 	cfg.RedisDB, _ = strconv.Atoi(env("ALT8MAIL_REDIS_DB", "0"))
 
 	if cfg.SessionSecret == "" || cfg.CSRFSecret == "" {

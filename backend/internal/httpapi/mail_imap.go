@@ -275,7 +275,7 @@ func (s *Server) checkNewInboxForUser(ctx context.Context, user userRecord) (int
 		pending = 0
 	}
 	imported := 0
-	err = s.withMailState(ctx, user, nil, true, func(current map[string]any) error {
+	err = s.withMailMetadataState(ctx, user, func(current map[string]any) error {
 		resetFolders := map[string]bool{}
 		if validityChanged {
 			resetFolders["inbox"] = true
@@ -511,7 +511,7 @@ func (s *Server) syncUserMailbox(ctx context.Context, user userRecord) (map[stri
 	state["mailSync"] = syncMeta
 
 	imported, updated, removed := 0, 0, 0
-	err = s.withMailState(ctx, user, nil, true, func(current map[string]any) error {
+	err = s.withMailMetadataState(ctx, user, func(current map[string]any) error {
 		imported, updated, removed = mergeFetchedMailAdvanced(current, user, fetched, s.cfg.UploadDir,
 			coveredFolders, liveKeys, flagUpdates, resetFolders)
 		meta := stateMap(current, "mailSync")

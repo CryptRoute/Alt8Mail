@@ -519,7 +519,9 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	ensureStateCollections(state)
 	repairEncodedSubjects(state)
 	s.attachOutbox(ctx, sess.User.ID, state)
-	user, preferences := s.publicUserWithState(ctx, sess.User)
+	security, _, _, _ := s.securityState(ctx, sess.User)
+	user := publicUserFromState(state, sess.User, preferencesFor(sess.User), security)
+	preferences := statePreferences(state, preferencesFor(sess.User))
 	identities, err := s.mailIdentities(ctx, sess.User)
 	if err != nil {
 		s.logger.Warn("identity load failed", "user", sess.User.ID, "err", err)

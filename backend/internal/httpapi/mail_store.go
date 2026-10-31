@@ -274,6 +274,23 @@ func (s *Server) loadAttachmentRows(ctx context.Context, userID string, messageI
 }
 
 func (s *Server) loadMailMessagesQuery(ctx context.Context, userID, query string, args ...any) ([]map[string]any, map[string]any, error) {
+	return s.loadMailMessagesQueryMode(ctx, userID, query, false, args...)
+}
+
+// loadMailMessagesMetadata is the bucket-brigade path for mailbox-wide syncs.
+// It keeps IDs, threading, IMAP coordinates and flags but does not transfer or
+// retain message bodies. A full sync over a 7k-message mailbox then costs a
+// few megabytes instead of the full HTML/text corpus.
+func (s *Server) loadMailMessagesMetadata(ctx context.Context, userID, query string, args ...any) ([]map[string]any, map[string]any, error) {
+	return s.loadMailMessagesQueryMode(ctx, userID, query, true, args...)
+}
+
+func (s *Server) loadMailMessagesQueryMode(ctx context.Context, userID, query string, metadataOnly bool, args ...any) ([]map[string]any, map[string]any, error) {
+	if metadataOnly {
+		query = strings.Replace(query,
+			"snippet, body_text, body_html",
+			"''::text AS snippet, ''::text AS body_text, ''::text AS body_html", 1)
+	}
 	rows, err := s.store.DB.Query(ctx, query, args...)
 	if err != nil {
 		return nil, nil, err
@@ -292,9 +309,13 @@ func (s *Server) loadMailMessagesQuery(ctx context.Context, userID, query string
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
-	byMessage, attachmentRecords, err := s.loadAttachmentRows(ctx, userID, ids)
-	if err != nil {
-		return nil, nil, err
+	byMessage := map[string][]map[string]any{}
+	attachmentRecords := map[string]any{}
+	if !metadataOnly {
+		byMessage, attachmentRecords, err = s.loadAttachmentRows(ctx, userID, ids)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	// Persist decoded legacy-charset subjects the first time these rows are
 	// read, so search and future API calls use the readable subject too.
@@ -318,13 +339,22 @@ func (s *Server) loadMailMessagesQuery(ctx context.Context, userID, query string
 	}
 	messages := make([]map[string]any, 0, len(records))
 	for _, row := range records {
-		messages = append(messages, row.stateMap(nil, byMessage[row.ID]))
+		message := row.stateMap(nil, byMessage[row.ID])
+		if metadataOnly {
+			message["_light"] = true
+		}
+		messages = append(messages, message)
 	}
 	return messages, attachmentRecords, nil
 }
 
 func (s *Server) loadAllMailMessages(ctx context.Context, userID string) ([]map[string]any, map[string]any, error) {
 	return s.loadMailMessagesQuery(ctx, userID,
+		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE user_id=$1 ORDER BY sent_at ASC`, userID)
+}
+
+func (s *Server) loadAllMailMetadata(ctx context.Context, userID string) ([]map[string]any, map[string]any, error) {
+	return s.loadMailMessagesMetadata(ctx, userID,
 		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE user_id=$1 ORDER BY sent_at ASC`, userID)
 }
 
@@ -665,6 +695,18 @@ func copyAttachmentMap(state map[string]any) map[string]map[string]any {
 }
 
 func (s *Server) withMailState(ctx context.Context, user userRecord, ids []string, loadAll bool, fn func(map[string]any) error) error {
+	return s.withMailStateMode(ctx, user, ids, loadAll, false, fn)
+}
+
+// withMailMetadataState is for mailbox-wide operations that only need message
+// identity, threading, folder and flag data: IMAP syncs, folder actions and
+// undo. It never transfers the stored HTML or plain-text bodies, avoiding
+// several copies of the entire mailbox on each pass.
+func (s *Server) withMailMetadataState(ctx context.Context, user userRecord, fn func(map[string]any) error) error {
+	return s.withMailStateMode(ctx, user, nil, true, true, fn)
+}
+
+func (s *Server) withMailStateMode(ctx context.Context, user userRecord, ids []string, loadAll, metadataOnly bool, fn func(map[string]any) error) error {
 	return s.withStateTimeout(user.ID, user.TenantID, 120*time.Second, func(state map[string]any) error {
 		ensureStateCollections(state)
 		if err := s.syncStateAliases(ctx, user, state); err != nil {
@@ -674,7 +716,11 @@ func (s *Server) withMailState(ctx context.Context, user userRecord, ids []strin
 		var attachmentRecords map[string]any
 		var err error
 		if loadAll {
-			messages, attachmentRecords, err = s.loadAllMailMessages(ctx, user.ID)
+			if metadataOnly {
+				messages, attachmentRecords, err = s.loadAllMailMetadata(ctx, user.ID)
+			} else {
+				messages, attachmentRecords, err = s.loadAllMailMessages(ctx, user.ID)
+			}
 		} else {
 			messages, attachmentRecords, err = s.loadMailMessagesByIDs(ctx, user.ID, ids)
 		}
@@ -712,6 +758,12 @@ func (s *Server) withMailState(ctx context.Context, user userRecord, ids []strin
 			return err
 		}
 		committed = true
+		// Messages and attachment metadata belong in the normalized tables.
+		// Never write them back into app_states: the next bootstrap would parse
+		// the whole mailbox just to read folders and preferences.
+		delete(state, "messages")
+		delete(state, "attachments")
+		delete(state, "outbox")
 		return nil
 	})
 }
@@ -769,7 +821,11 @@ func (s *Server) persistMailStateDelta(ctx context.Context, user userRecord, sta
 		if existed && reflect.DeepEqual(previous, message) {
 			continue
 		}
-		if err := s.persistMailMessageTx(ctx, tx, user, message); err != nil {
+		if light, _ := message["_light"].(bool); light {
+			if err := s.persistMailMessageMetadataTx(ctx, tx, user, message); err != nil {
+				return err
+			}
+		} else if err := s.persistMailMessageTx(ctx, tx, user, message); err != nil {
 			return err
 		}
 	}
@@ -900,6 +956,88 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 		truncate(sanitizeMailText(stateString(item, "userAgent")), 300),
 		truncate(sanitizeMailText(stateString(item, "composeKind")), 24),
 		truncate(sanitizeMailText(stateString(item, "sourceMessageId")), 120), queuedAt)
+	return err
+}
+
+// persistMailMessageMetadataTx updates only the fields an IMAP reconciler can
+// change on an existing message. The body columns are intentionally absent so
+// a metadata-only sync can never overwrite the stored HTML or text with blanks.
+func (s *Server) persistMailMessageMetadataTx(ctx context.Context, tx pgx.Tx, user userRecord, message map[string]any) error {
+	id := stateString(message, "id")
+	if id == "" {
+		return fmt.Errorf("message has no id")
+	}
+	from, _ := message["from"].(map[string]any)
+	fromEmail := sanitizeMailText(firstNonEmpty(stateString(message, "fromEmail"), stateString(from, "email")))
+	fromName := sanitizeMailText(stateString(from, "name"))
+	to := stateSlice(message, "to")
+	cc := stateSlice(message, "cc")
+	bcc := stateSlice(message, "bcc")
+	toJSON, _ := json.Marshal(to)
+	ccJSON, _ := json.Marshal(cc)
+	bccJSON, _ := json.Marshal(bcc)
+	auth, _ := message["auth"].(map[string]any)
+	authJSON, _ := json.Marshal(auth)
+	spamJSON := []byte(nil)
+	if report, ok := message["spamReport"].(map[string]any); ok && report != nil {
+		spamJSON, _ = json.Marshal(report)
+	}
+	eventJSON := []byte(nil)
+	if event, ok := message["event"].(map[string]any); ok && event != nil {
+		eventJSON, _ = json.Marshal(event)
+	}
+	references := []any{}
+	if raw, ok := message["references"].([]any); ok {
+		references = raw
+	}
+	referencesJSON, _ := json.Marshal(references)
+	categories := []string{}
+	for _, raw := range stateSlice(message, "categories") {
+		if value, ok := raw.(string); ok && value != "" {
+			categories = append(categories, sanitizeMailText(value))
+		}
+	}
+	sentAt := parseOptionalTime(stateString(message, "date"))
+	repliedAt := parseOptionalTime(stateString(message, "repliedAt"))
+	forwardedAt := parseOptionalTime(stateString(message, "forwardedAt"))
+	snoozedUntil := parseOptionalTime(stateString(message, "snoozedUntil"))
+	ignoredAt := parseOptionalTime(stateString(message, "ignoredAt"))
+	folder := firstNonEmpty(sanitizeMailText(stateString(message, "folder")), "inbox")
+	imapFolder := firstNonEmpty(sanitizeMailText(stateString(message, "imapFolder")), folder)
+	threadID := firstNonEmpty(sanitizeMailText(stateString(message, "threadId")), id)
+	_, err := tx.Exec(ctx, `
+		UPDATE mail_messages SET
+			folder=$3, imap_folder=$4, uid=$5, uid_validity=$6,
+			message_id=$7, thread_id=$8, in_reply_to=NULLIF($9,''),
+			references_json=$10, subject=$11, from_name=$12, from_email=$13,
+			to_json=$14, cc_json=$15, bcc_json=$16, to_text=$17, cc_text=$18, bcc_text=$19,
+			sent_at=COALESCE($20, sent_at), size_bytes=$21, unread=$22, starred=$23,
+			flagged=$24, pinned=$25, draft=$26, external=$27, classification=$28,
+			categories=$29, auth=$30, spam_report=$31, event=$32, priority=$33,
+			receipt=$34, delivery=$35, save_copy=$36, via_api=$37, window_mode=$38,
+			replied_at=$39, forwarded_at=$40, reply_count=$41, forward_count=$42,
+			snoozed_until=$43, ignored=$44, ignored_at=$45, compose_kind=$46,
+			source_message_id=$47, updated_at=now()
+		WHERE id=$1 AND user_id=$2
+	`, id, user.ID, folder, imapFolder, stateInt(message, "imapUid"),
+		stateInt(message, "imapUidValidity"), sanitizeMailText(stateString(message, "messageId")),
+		threadID, sanitizeMailText(stateString(message, "inReplyTo")), referencesJSON,
+		truncate(sanitizeMailText(stateString(message, "subject")), 1000), truncate(fromName, 240), fromEmail,
+		toJSON, ccJSON, bccJSON,
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "toText"), peopleText(to))), 4000),
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "ccText"), peopleText(cc))), 4000),
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "bccText"), peopleText(bcc))), 4000),
+		sentAt, stateInt(message, "sizeBytes"), stateBool(message, "unread"), stateBool(message, "starred"),
+		stateBool(message, "flagged"), stateBool(message, "pinned"), stateBool(message, "draft"),
+		stateBool(message, "external"), firstNonEmpty(sanitizeMailText(stateString(message, "classification")), "Internal"),
+		categories, authJSON, spamJSON, eventJSON, firstNonEmpty(sanitizeMailText(stateString(message, "priority")), "normal"),
+		stateBool(message, "receipt"), stateBool(message, "delivery"),
+		message["saveCopy"] == nil || stateBool(message, "saveCopy"), stateBool(message, "viaApi"),
+		firstNonEmpty(sanitizeMailText(stateString(message, "windowMode")), "floating"),
+		repliedAt, forwardedAt, max(int(stateInt(message, "replyCount")), 0), max(int(stateInt(message, "forwardCount")), 0),
+		snoozedUntil, stateBool(message, "ignored"), ignoredAt,
+		truncate(sanitizeMailText(stateString(message, "composeKind")), 24),
+		truncate(sanitizeMailText(stateString(message, "sourceMessageId")), 120))
 	return err
 }
 

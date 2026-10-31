@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -23,6 +24,10 @@ func main() {
 	if err != nil {
 		logger.Error("configuration error", "err", err)
 		os.Exit(1)
+	}
+	if cfg.MemoryLimitMB > 0 && os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(int64(cfg.MemoryLimitMB) << 20)
+		logger.Info("runtime heap target configured", "limitMB", cfg.MemoryLimitMB)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

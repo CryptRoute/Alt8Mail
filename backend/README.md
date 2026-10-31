@@ -194,7 +194,8 @@ Mail workers add:
 ```text
 ALT8MAIL_IMAP_ADDR, ALT8MAIL_IMAP_MASTER_USER,
 ALT8MAIL_IMAP_MASTER_PASSWORD_FILE, ALT8MAIL_MAILDIR_BASE,
-ALT8MAIL_MAIL_WORKER_CONCURRENCY (default 8),
+ALT8MAIL_MAIL_WORKER_CONCURRENCY (default 8; capped to 2 on hosts under 3 GB and 4 under 6 GB),
+ALT8MAIL_MEMORY_LIMIT_MB (optional soft Go heap target; host/cgroup derived when empty),
 ALT8MAIL_IMAP_TLS_NAME, ALT8MAIL_IMAP_SYNC_SECONDS,
 ALT8MAIL_IMAP_POLL_SECONDS (new-mail fallback, default 15, min 5),
 ALT8MAIL_IMAP_IDLE (default true),

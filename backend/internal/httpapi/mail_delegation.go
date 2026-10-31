@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"sort"
 	"strings"
 )
 
@@ -80,27 +79,17 @@ func (s *Server) applyDelegatedMailboxes(ctx context.Context, user userRecord, f
 			continue
 		}
 		folderID := "delegate_" + delegation.OwnerID
-		inbox := []map[string]any{}
-		for _, raw := range stateMessages(ownerState) {
-			message, _ := raw.(map[string]any)
-			if message == nil || stateString(message, "folder") != "inbox" {
-				continue
-			}
-			inbox = append(inbox, message)
+		shown, _, err := s.loadMailMessagesQuery(ctx, delegation.OwnerID,
+			`SELECT `+mailMessageColumns+` FROM mail_messages
+			 WHERE user_id=$1 AND folder='inbox' AND NOT ignored
+			   AND (snoozed_until IS NULL OR snoozed_until <= now())
+			 ORDER BY sent_at DESC LIMIT $2`, delegation.OwnerID, delegatedMessageLimit)
+		if err != nil {
+			continue
 		}
-		sort.SliceStable(inbox, func(i, j int) bool {
-			return stateString(inbox[i], "date") > stateString(inbox[j], "date")
-		})
-		unread := 0
-		for _, message := range inbox {
-			if stateBool(message, "unread") {
-				unread++
-			}
-		}
-		shown := inbox
-		if len(shown) > delegatedMessageLimit {
-			shown = shown[:delegatedMessageLimit]
-		}
+		counts, unreadByFolder, _ := s.loadMailFolderCounts(ctx, delegation.OwnerID)
+		unread := unreadByFolder["inbox"]
+		total := counts["inbox"]
 		for _, message := range shown {
 			originalID := stateString(message, "id")
 			delegatedID := delegatedIDPrefix + delegation.OwnerID + ":" + originalID
@@ -127,7 +116,7 @@ func (s *Server) applyDelegatedMailboxes(ctx context.Context, user userRecord, f
 			"id": folderID, "label": delegation.OwnerName + " · Inbox",
 			"icon": "i-people", "section": "folders", "system": false, "delegated": true,
 			"delegateOwnerId": delegation.OwnerID, "delegateOwnerEmail": delegation.OwnerEmail,
-			"delegateCanSend": delegation.CanSend, "unread": unread, "total": len(inbox),
+			"delegateCanSend": delegation.CanSend, "unread": unread, "total": total,
 			"badgeMode": "count", "order": nextOrder,
 		})
 		nextOrder++

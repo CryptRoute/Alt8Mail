@@ -816,7 +816,7 @@ func (s *Server) undoAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusGone, "UNDO_EXPIRED", "The undo window has closed")
 		return
 	}
-	err := s.withMailState(r.Context(), sess.User, nil, true, func(state map[string]any) error {
+	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		restored := 0
 		for _, raw := range snapshot {
 			item, _ := raw.(map[string]any)

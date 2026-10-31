@@ -648,7 +648,8 @@ normalizes the scheduled/undo-send queue; `0013_undo_table.sql` moves undo
 snapshots into `undo_actions`; `0014_compose_identity_ai.sql` adds verified
 sending identities, tenant AI settings/cache, soft app-password revocation and
 HTML bodies in the outbox. After `0014`, `app_states` contains no mail, draft,
-attachment, outbox or undo content.
+attachment, outbox or undo content. Migration `0027` enforces that invariant
+again for workspaces that older 0.4 builds had copied back into the document.
 Apply migrations **before** restarting a backend that selects the new columns;
 without them, authentication and admin routes fail closed. Migrations are
 idempotent (`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`). See [ADMIN.md](ADMIN.md)
@@ -692,6 +693,8 @@ ALT8MAIL_ADMIN_SESSION_HOURS=8
 ALT8MAIL_CLAMAV_ADDR=/var/run/clamav/clamd.ctl
 ALT8MAIL_IMPORT_SCAN=true
 ALT8MAIL_IMPORT_SCAN_MAX_MB=24
+# Optional; unset means derive a soft heap target from host/cgroup memory.
+ALT8MAIL_MEMORY_LIMIT_MB=
 
 # Optional storage connectors; leave OAuth IDs empty until the provider app is ready.
 ALT8MAIL_S3_ENDPOINT=127.0.0.1:9000
@@ -724,6 +727,8 @@ for IMAP, SMTP and ManageSieve.
 keeps an INBOX `IDLE` connection when `ALT8MAIL_IMAP_IDLE=true` (the default):
 new mail, flag changes and expunges wake the worker immediately, and
 `refreshInboxFlagsForUser` applies flags/deletions without re-downloading bodies.
+A full sync reconciles the complete UID set but reads only message metadata;
+the HTML/text body columns are not loaded unless a message is being imported.
 If a server does not advertise IDLE, the worker logs that fact and falls back to
 the new-mail check (`ALT8MAIL_IMAP_POLL_SECONDS`, default 15, minimum 5), which
 performs a cheap `UID SEARCH` on INBOX and fetches only new bodies. The browser
@@ -737,6 +742,32 @@ connection per active mailbox; size Dovecot's `mail_max_userip_connections`,
 process limits and file descriptors before enabling it for a very large user
 base. That isolates users while keeping a restart from opening every mailbox at
 once.
+
+### Mail-server memory controls
+
+`a8m-server` derives a soft Go heap target from the effective cgroup limit (or
+`/proc/meminfo`) when `GOMEMLIMIT` is unset. `ALT8MAIL_MEMORY_LIMIT_MB` overrides
+that calculation, and setting `GOMEMLIMIT` in `/etc/a8m/app.env` bypasses it
+entirely. On hosts below 3 GB the startup profile also caps IMAP worker
+concurrency at 2 and `ALT8MAIL_DB_MAX_CONNS` at 8; below 6 GB the caps are 4
+and 12. Operators can lower the values further. The process logs the selected
+heap target and resource profile at startup:
+
+```bash
+journalctl -u a8m-server -b | grep -E "heap target|resource profile"
+```
+
+Mailbox bodies are deliberately excluded from the periodic reconciler and from
+`app_states`. If RSS remains high after upgrading to 0.4.1, check for a stale
+workspace document and let autovacuum reclaim the freed pages:
+
+```bash
+sudo -u postgres psql -d a8m -c   "SELECT user_id, pg_size_pretty(pg_column_size(state)::bigint) AS state_bytes FROM app_states ORDER BY pg_column_size(state) DESC LIMIT 10;"
+```
+
+A state document should be kibibytes, not megabytes. Migration `0027` removes
+legacy `messages`, `attachments` and `outbox` keys; run `VACUUM (ANALYZE)
+app_states` during a maintenance window if table bloat remains.
 
 The full scan is transactional for the normalized message and attachment rows.
 Attachment bytes are written before those rows, so a failed scan can leave

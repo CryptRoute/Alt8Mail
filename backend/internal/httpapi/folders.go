@@ -321,7 +321,7 @@ func (s *Server) updateFolder(w http.ResponseWriter, r *http.Request) {
 	var updated map[string]any
 	var oldIMAPName, newIMAPName string
 	var scriptToPush string
-	err := s.withMailState(r.Context(), sess.User, nil, true, func(state map[string]any) error {
+	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
 		if folder == nil {
 			return fail(http.StatusNotFound, "FOLDER_NOT_FOUND", "Folder not found")
@@ -474,7 +474,7 @@ func (s *Server) markFolderRead(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	mutations := []imapAction{}
 	affected := 0
-	err := s.withMailState(r.Context(), sess.User, nil, true, func(state map[string]any) error {
+	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
 		if folder == nil {
 			return fail(http.StatusNotFound, "FOLDER_NOT_FOUND", "Folder not found")
@@ -519,7 +519,7 @@ func (s *Server) emptyFolder(w http.ResponseWriter, r *http.Request) {
 	mutations := []imapAction{}
 	removed := 0
 	imapName := ""
-	err := s.withMailState(r.Context(), sess.User, nil, true, func(state map[string]any) error {
+	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
 		if folder == nil {
 			return fail(http.StatusNotFound, "FOLDER_NOT_FOUND", "Folder not found")
@@ -569,7 +569,7 @@ func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request) {
 	imapName := ""
 	scriptToPush := ""
 	label := ""
-	err := s.withMailState(r.Context(), sess.User, nil, true, func(state map[string]any) error {
+	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
 		if folder == nil {
 			return fail(http.StatusNotFound, "FOLDER_NOT_FOUND", "Folder not found")

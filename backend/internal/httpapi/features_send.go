@@ -287,7 +287,7 @@ func (s *Server) cancelSend(w http.ResponseWriter, r *http.Request) {
 	var response map[string]any
 	var restoredDraft map[string]any
 	var attachmentRecords map[string]any
-	err := s.withMailState(r.Context(), sess.User, nil, true, func(state map[string]any) error {
+	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		item := stateObjectByID(stateSlice(state, "outbox"), id)
 		if item == nil {
 			return fail(http.StatusConflict, "SEND_ALREADY_COMMITTED", "This message has already been sent and cannot be undone")
@@ -553,6 +553,9 @@ func restoreDraft(state map[string]any, item map[string]any) map[string]any {
 		for key, value := range draft {
 			existing[key] = value
 		}
+		// The restored draft now carries body and attachment fields, so it
+		// must take the full persistence path instead of the metadata update.
+		delete(existing, "_light")
 		return existing
 	}
 	state["messages"] = append(stateMessages(state), draft)
