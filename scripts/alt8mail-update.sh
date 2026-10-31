@@ -26,6 +26,9 @@ A8M_REPO_HTTPS="${A8M_REPO_HTTPS:-}"
 A8M_GIT_KEY="${A8M_GIT_KEY:-/etc/a8m/github_readonly}"
 A8M_CHANNEL="${A8M_CHANNEL:-stable}"
 A8M_SERVICES="${A8M_SERVICES:-a8m-server a8m-admin alt8mail-control}"
+A8M_RELEASE_BASE_URL="${A8M_RELEASE_BASE_URL:-https://github.com/CryptRoute/Alt8Mail/releases/download}"
+A8M_PREFER_RELEASE_ASSET="${A8M_PREFER_RELEASE_ASSET:-1}"
+A8M_MIN_FREE_MB="${A8M_MIN_FREE_MB:-1024}"
 
 # The control plane launches this script from a transient systemd unit with no
 # login environment. Set stable HOME/Go paths before SSH or the release build.
@@ -156,6 +159,76 @@ cleanup() {
 }
 trap cleanup EXIT
 
+free_kb="$(df -Pk "$INSTALL_ROOT" 2>/dev/null | awk 'NR==2 {print $4}')"
+mem_available_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+log "preflight: free_disk=${free_kb:-unknown}KB available_memory=${mem_available_kb:-unknown}KB"
+if [[ -n "$free_kb" ]] && (( free_kb < A8M_MIN_FREE_MB * 1024 )); then
+  die "not enough free disk for a safe update: ${free_kb} KB available, ${A8M_MIN_FREE_MB} MB required; stop the mail worker and remove orphan uploads first"
+fi
+
+# Prefer the prebuilt, checksummed GitHub release asset. This avoids running a
+# full Go build on a small production host, where a long compile can exhaust
+# RAM or disk. Any download/verification failure falls back to the source build.
+fetch_release_asset() {
+  local base="${A8M_RELEASE_BASE_URL%/}"
+  local name="alt8mail-$LATEST_VERSION.tar.gz"
+  local dir="$WORK/release"
+  local url="$base/$LATEST_TAG/$name"
+  local downloader=""
+  if command -v curl >/dev/null 2>&1; then
+    downloader="curl"
+  elif command -v wget >/dev/null 2>&1; then
+    downloader="wget"
+  fi
+  if [[ -z "$downloader" ]]; then
+    log "neither curl nor wget is available for release asset download"
+    return 1
+  fi
+  rm -rf "$dir"
+  install -d -m 0755 "$dir"
+  log "downloading published release asset $LATEST_TAG"
+  if [[ "$downloader" == "curl" ]]; then
+    if ! curl -fsSL --retry 3 --connect-timeout 15 --max-time 600 -o "$dir/$name" "$url"; then
+      log "release asset download failed; falling back to source build"
+      return 1
+    fi
+    if ! curl -fsSL --retry 3 --connect-timeout 15 --max-time 60 -o "$dir/$name.sha256" "$url.sha256"; then
+      log "release checksum download failed; falling back to source build"
+      return 1
+    fi
+  else
+    if ! wget -q --timeout=60 --tries=3 -O "$dir/$name" "$url"; then
+      log "release asset download failed; falling back to source build"
+      return 1
+    fi
+    if ! wget -q --timeout=30 --tries=3 -O "$dir/$name.sha256" "$url.sha256"; then
+      log "release checksum download failed; falling back to source build"
+      return 1
+    fi
+  fi
+  if ! (cd "$dir" && sha256sum -c "$name.sha256" >/dev/null 2>&1); then
+    log "release asset checksum verification failed; falling back to source build"
+    return 1
+  fi
+  if ! tar -xzf "$dir/$name" -C "$dir"; then
+    log "release asset extraction failed; falling back to source build"
+    return 1
+  fi
+  NEW_RELEASE="$dir/alt8mail-$LATEST_VERSION"
+  if [[ ! -x "$NEW_RELEASE/bin/a8m-server" ]] ||
+     [[ "$(tr -d '[:space:]' < "$NEW_RELEASE/VERSION" 2>/dev/null)" != "$LATEST_VERSION" ]]; then
+    log "release asset is incomplete or has the wrong version; falling back to source build"
+    rm -rf "$NEW_RELEASE"
+    return 1
+  fi
+  log "using published release asset $LATEST_TAG"
+  return 0
+}
+
+NEW_RELEASE=""
+if [[ "$A8M_PREFER_RELEASE_ASSET" == "1" ]] && fetch_release_asset; then
+  :
+else
 log "fetching $LATEST_TAG"
 CLONE_ORDER=("$ACTIVE_REPO")
 for repo in "${REPO_CANDIDATES[@]}"; do
@@ -183,7 +256,8 @@ done
 log "building $LATEST_VERSION"
 "$WORK/src/scripts/build-release.sh" "$LATEST_VERSION" "$WORK/dist" >/dev/null
 NEW_RELEASE="$WORK/dist/alt8mail-$LATEST_VERSION"
-[[ -x "$NEW_RELEASE/bin/a8m-server" ]] || die "release build did not produce a server binary"
+fi
+[[ -n "$NEW_RELEASE" && -x "$NEW_RELEASE/bin/a8m-server" ]] || die "release did not produce a server binary"
 
 log "backing up the database and configuration"
 runuser -u postgres -- pg_dump -Fc -d a8m > "$BACKUP_DIR/database.dump"
@@ -252,14 +326,14 @@ rollback() {
 
 UPDATE_ACTIVE=0
 on_error() {
-  local line="$1"
+  local line="$1" command="${2:-}"
   trap - ERR
   if [[ "$UPDATE_ACTIVE" -eq 1 ]]; then
-    rollback "unexpected error at line $line"
+    rollback "unexpected error at line $line: $command"
   fi
-  die "update failed at line $line"
+  die "update failed at line $line: $command"
 }
-trap 'on_error $LINENO' ERR
+trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 
 # Install updated unit files before restarting. Custom site configuration is
 # intentionally not overwritten by an application update.

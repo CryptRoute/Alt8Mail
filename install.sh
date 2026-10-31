@@ -452,6 +452,9 @@ A8M_REPO_HTTPS=https://github.com/CryptRoute/Alt8Mail.git
 A8M_GIT_KEY=$UPDATE_KEY
 A8M_CHANNEL=stable
 A8M_SERVICES="a8m-server a8m-admin alt8mail-control"
+A8M_RELEASE_BASE_URL=https://github.com/CryptRoute/Alt8Mail/releases/download
+A8M_PREFER_RELEASE_ASSET=1
+A8M_MIN_FREE_MB=1024
 EOF
 chmod 0640 "$CONFIG_ROOT/update.conf"
 chown root:$SERVICE_USER "$CONFIG_ROOT/update.conf"

@@ -298,6 +298,8 @@ func (s *Server) runUserImportJob(jobID string) {
 	`, jobID, status, totalCreated, totalFailed, lastError)
 }
 
+// provisionImportedUser returns the one-time web password, the mailbox
+// password and the new user id, in that order.
 func (s *Server) provisionImportedUser(ctx context.Context, job userImportJobRecord, itemID, email, name, role string, quota int64) (string, string, string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	name = strings.TrimSpace(name)
@@ -365,6 +367,45 @@ func (s *Server) provisionImportedUser(ctx context.Context, job userImportJobRec
 		s.logger.Warn("imported user state provisioning failed", "email", email, "err", stateErr)
 	}
 	return temporaryPassword, mailPassword, userID, nil
+}
+
+// reissueImportedUserCredentials is used when an interrupted mailbox import
+// created the destination account but failed before its one-time plaintext
+// credentials were stored. Only never-signed-in accounts are reset by the
+// caller; active accounts keep their current password.
+func (s *Server) reissueImportedUserCredentials(ctx context.Context, userID, email string) (string, string, error) {
+	webPassword, err := generateTemporaryPassword()
+	if err != nil {
+		return "", "", fmt.Errorf("could not generate a web password")
+	}
+	webHash, err := auth.HashPassword(webPassword)
+	if err != nil {
+		return "", "", fmt.Errorf("could not hash the web password")
+	}
+	mailPassword, err := generateTemporaryPassword()
+	if err != nil {
+		return "", "", fmt.Errorf("could not generate a mailbox password")
+	}
+	mailHash, err := hashMailPassword(mailPassword)
+	if err != nil {
+		return "", "", fmt.Errorf("could not hash the mailbox password")
+	}
+	tag, err := s.store.DB.Exec(ctx, `
+		UPDATE users SET password_hash=$2, mail_password_hash=$3, password_changed_at=now(),
+		       force_password_change=true, updated_at=now()
+		WHERE id=$1 AND last_login_at IS NULL
+	`, userID, webHash, mailHash)
+	if err != nil {
+		return "", "", fmt.Errorf("could not update the existing user: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return "", "", fmt.Errorf("the existing account signed in before credentials could be reissued")
+	}
+	_, _ = s.store.DB.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, userID)
+	_, _ = s.store.DB.Exec(ctx, `DELETE FROM auth_challenges WHERE user_id=$1`, userID)
+	_, _ = s.store.DB.Exec(ctx, `DELETE FROM trusted_devices WHERE user_id=$1`, userID)
+	s.clearDAVAuthCache(email)
+	return webPassword, mailPassword, nil
 }
 
 func (s *Server) sendUserImportNotice(ctx context.Context, tenantID, preferredUserID, to, name, mailbox, password string) error {

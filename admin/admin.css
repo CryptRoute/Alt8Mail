@@ -543,6 +543,20 @@ input[type="checkbox"] { accent-color: var(--brand); width: 14px; height: 14px; 
 .manual-mailbox-row input { height: 32px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); font-size: 11.5px; }
 .import-options { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 11px; }
 .import-options .muted { font-size: 10.5px; margin-left: auto; }
+.import-log { margin-top: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+.import-log summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--text); }
+.import-log summary .icon { width: 13px; height: 13px; }
+.import-log-list { border-top: 1px solid var(--line); max-height: 320px; overflow: auto; }
+.import-log-row { display: grid; grid-template-columns: 132px 82px minmax(0, 1fr) 160px; gap: 9px; align-items: baseline; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 10.5px; }
+.import-log-row:last-child { border-bottom: 0; }
+.import-log-time { color: var(--muted); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 9.5px; }
+.import-log-row b { color: var(--muted); font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; }
+.import-log-message { min-width: 0; overflow-wrap: anywhere; }
+.import-log-message small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.import-log-row.level-warn .import-log-message { color: var(--warning, #9a6700); }
+.import-log-row.level-error .import-log-message { color: var(--danger, #b42318); }
+.import-log-row > .cell-sub { margin: 0; text-align: right; }
+@media (max-width: 720px) { .import-log-row { grid-template-columns: 1fr; gap: 3px; } .import-log-row > .cell-sub { text-align: left; } }
 .credential-inline { display: inline-flex; align-items: center; gap: 4px; }
 .credential-inline code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px; background: var(--surface-3); padding: 2px 5px; border-radius: 4px; }
 .import-alert { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--line)); border-radius: var(--radius); background: var(--brand-soft); color: var(--ink); }

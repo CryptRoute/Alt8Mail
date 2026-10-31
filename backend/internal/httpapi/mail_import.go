@@ -291,6 +291,7 @@ func (s *Server) adminMailImportCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordAdminAudit(ctx, sess, sess.User, "admin.mail_import_started", host, "Started a mailbox migration", map[string]any{"tenantId": sess.ActiveTenantID, "jobId": jobID, "mailboxes": len(items)})
+	s.mailImportEvent(ctx, jobID, "", "info", "job", "Migration queued", fmt.Sprintf("%d mailbox(es) · %s", len(items), host))
 	s.startMailImportJob(jobID)
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "jobId": jobID, "status": "validating", "total": len(items)})
 }
@@ -365,6 +366,31 @@ func (s *Server) adminMailImportJob(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := mailImportJobPayload(job, true)
 	payload["items"] = items
+	events := []map[string]any{}
+	eventRows, eventErr := s.store.DB.Query(r.Context(), `
+		SELECT e.id, COALESCE(e.item_id,''), COALESCE(i.source_email::text,''), e.level, e.stage,
+		       e.message, e.detail, e.created_at
+		FROM mail_import_events e
+		LEFT JOIN mail_import_items i ON i.id=e.item_id
+		WHERE e.job_id=$1
+		ORDER BY e.created_at, e.id
+		LIMIT 500
+	`, job.ID)
+	if eventErr == nil {
+		defer eventRows.Close()
+		for eventRows.Next() {
+			var id, itemID, source, level, stage, message, detail string
+			var createdAt time.Time
+			if eventRows.Scan(&id, &itemID, &source, &level, &stage, &message, &detail, &createdAt) == nil {
+				events = append(events, map[string]any{
+					"id": id, "itemId": itemID, "sourceEmail": source, "level": level,
+					"stage": stage, "message": message, "detail": detail,
+					"createdAt": formatAdminTime(createdAt),
+				})
+			}
+		}
+	}
+	payload["events"] = events
 	writeJSON(w, http.StatusOK, payload)
 }
 
@@ -379,6 +405,7 @@ func (s *Server) adminMailImportMapping(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "IMPORT_STATE", "This migration is not waiting for mailbox mapping yet")
 		return
 	}
+	s.mailImportEvent(r.Context(), job.ID, "", "info", "mapping", "Saving destination mailbox mappings", "")
 	var body struct {
 		Items []struct {
 			ID          string  `json:"id"`
@@ -466,6 +493,7 @@ func (s *Server) adminMailImportMapping(w http.ResponseWriter, r *http.Request) 
 	}
 	_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_jobs SET status='queued', last_error='', updated_at=now() WHERE id=$1`, job.ID)
 	s.recordAdminAudit(ctx, sess, sess.User, "admin.mail_import_mapped", job.Host, "Confirmed mailbox mapping", map[string]any{"tenantId": job.TenantID, "jobId": job.ID})
+	s.mailImportEvent(ctx, job.ID, "", "info", "mapping", "Destination mappings saved; import queued", fmt.Sprintf("%d mailbox(es)", len(body.Items)))
 	s.startMailImportJob(job.ID)
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "status": "queued"})
 }
@@ -568,12 +596,14 @@ func (s *Server) runMailImportJob(jobID string) {
 }
 
 func (s *Server) validateMailImportJob(ctx context.Context, job mailImportJobRecord) {
+	s.mailImportEvent(ctx, job.ID, "", "info", "validation", "Starting source credential validation", job.Host)
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT id, source_email::text, source_password FROM mail_import_items
 		WHERE job_id=$1 AND status='pending' ORDER BY created_at, id
 	`, job.ID)
 	if err != nil {
 		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_jobs SET status='failed', last_error=$2, completed_at=now(), updated_at=now() WHERE id=$1`, job.ID, err.Error())
+		s.mailImportEvent(ctx, job.ID, "", "error", "validation", "Could not load validation rows", err.Error())
 		return
 	}
 	type validationRow struct{ id, email, password string }
@@ -592,14 +622,17 @@ func (s *Server) validateMailImportJob(ctx context.Context, job mailImportJobRec
 		password, err := s.openSecuritySecret(item.password)
 		if err != nil {
 			_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET status='auth_failed', auth_error=$2, updated_at=now() WHERE id=$1`, item.id, "Stored credential could not be read")
+			s.mailImportEvent(ctx, job.ID, item.id, "error", "validation", "Stored source credential could not be read", item.email)
 			continue
 		}
 		_ = s.store.DB.QueryRow(ctx, `UPDATE mail_import_items SET status='validating', updated_at=now() WHERE id=$1`, item.id)
 		err = s.validateSourceLogin(job, item.email, password)
 		if err != nil {
 			_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET status='auth_failed', auth_error=$2, updated_at=now() WHERE id=$1`, item.id, truncate(err.Error(), 500))
+			s.mailImportEvent(ctx, job.ID, item.id, "error", "validation", "Source login failed", err.Error())
 		} else {
 			_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET status='ready', auth_error='', updated_at=now() WHERE id=$1`, item.id)
+			s.mailImportEvent(ctx, job.ID, item.id, "info", "validation", "Source login validated", item.email)
 		}
 	}
 	var validated, failed int
@@ -617,6 +650,12 @@ func (s *Server) validateMailImportJob(ctx context.Context, job mailImportJobRec
 		       updated_at=now(), completed_at=CASE WHEN $2='failed' THEN now() ELSE NULL END
 		WHERE id=$1
 	`, job.ID, status, validated, failed)
+	level := "info"
+	if status == "failed" {
+		level = "error"
+	}
+	s.mailImportEvent(ctx, job.ID, "", level, "validation",
+		fmt.Sprintf("Validation finished: %d ready, %d failed", validated, failed), "")
 }
 
 func (s *Server) validateSourceLogin(job mailImportJobRecord, email, password string) error {
@@ -633,6 +672,7 @@ func (s *Server) validateSourceLogin(job mailImportJobRecord, email, password st
 }
 
 func (s *Server) importMailImportJob(ctx context.Context, job mailImportJobRecord) {
+	s.mailImportEvent(ctx, job.ID, "", "info", "import", "Starting mailbox import", job.Host)
 	_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_jobs SET status='running', started_at=COALESCE(started_at,now()), updated_at=now() WHERE id=$1`, job.ID)
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT id, source_email::text, source_password, notify_email::text, target_mode,
@@ -642,6 +682,7 @@ func (s *Server) importMailImportJob(ctx context.Context, job mailImportJobRecor
 	`, job.ID)
 	if err != nil {
 		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_jobs SET status='failed', last_error=$2, completed_at=now(), updated_at=now() WHERE id=$1`, job.ID, err.Error())
+		s.mailImportEvent(ctx, job.ID, "", "error", "import", "Could not load import rows", err.Error())
 		return
 	}
 	type importItem struct {
@@ -682,6 +723,12 @@ func (s *Server) importMailImportJob(ctx context.Context, job mailImportJobRecor
 		       current_item='', last_error=CASE WHEN $2='failed' THEN 'No mailbox could be imported' ELSE '' END,
 		       completed_at=now(), updated_at=now() WHERE id=$1
 	`, job.ID, status, completed, failed, messages)
+	level := "info"
+	if failed > 0 {
+		level = "warn"
+	}
+	s.mailImportEvent(ctx, job.ID, "", level, "import",
+		fmt.Sprintf("Import finished: %d completed, %d failed, %d messages", completed, failed, messages), "")
 }
 
 func (s *Server) mailImportStatus(ctx context.Context, jobID string) string {
@@ -690,33 +737,115 @@ func (s *Server) mailImportStatus(ctx context.Context, jobID string) string {
 	return status
 }
 
+func (s *Server) findImportDestinationUser(ctx context.Context, tenantID, email string) (id, name string, hasLoggedIn, found bool) {
+	err := s.store.DB.QueryRow(ctx, `
+		SELECT id::text, name, last_login_at IS NOT NULL
+		FROM users
+		WHERE tenant_id=$1 AND lower(email::text)=lower($2) AND deleted_at IS NULL
+		LIMIT 1
+	`, tenantID, email).Scan(&id, &name, &hasLoggedIn)
+	return id, name, hasLoggedIn, err == nil && id != ""
+}
+
+func (s *Server) saveImportItemDestination(ctx context.Context, itemID, userID, email, webPassword, mailPassword string) error {
+	sealedWeb, err := s.sealSecuritySecret(webPassword)
+	if err != nil && webPassword != "" {
+		return fmt.Errorf("protect the web password: %w", err)
+	}
+	sealedMail, err := s.sealSecuritySecret(mailPassword)
+	if err != nil && mailPassword != "" {
+		return fmt.Errorf("protect the mailbox password: %w", err)
+	}
+	if webPassword == "" {
+		sealedWeb = ""
+	}
+	if mailPassword == "" {
+		sealedMail = ""
+	}
+	_, err = s.store.DB.Exec(ctx, `
+		UPDATE mail_import_items
+		SET target_user_id=NULLIF($2,'')::uuid, target_email=$3,
+		    initial_password=CASE WHEN $4='' THEN initial_password ELSE $4 END,
+		    mail_password=CASE WHEN $5='' THEN mail_password ELSE $5 END,
+		    updated_at=now()
+		WHERE id=$1
+	`, itemID, userID, email, sealedWeb, sealedMail)
+	return err
+}
+
 func (s *Server) runMailImportItem(ctx context.Context, job mailImportJobRecord, itemID, sourceEmail, sealedPassword, notify, mode, targetUserID, targetEmail, targetName, role string, quota int64, cursorJSON string) {
 	update := func(status, errText string) {
 		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET status=$2, error=$3, updated_at=now(), completed_at=CASE WHEN $2 IN ('completed','failed','skipped') THEN now() ELSE completed_at END WHERE id=$1`, itemID, status, truncate(errText, 500))
 	}
 	_ = s.store.DB.QueryRow(ctx, `UPDATE mail_import_items SET status='running', started_at=COALESCE(started_at,now()), updated_at=now() WHERE id=$1`, itemID)
 	_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_jobs SET current_item=$2, updated_at=now() WHERE id=$1`, job.ID, sourceEmail)
+	s.mailImportEvent(ctx, job.ID, itemID, "info", "item", "Starting mailbox import",
+		fmt.Sprintf("%s -> %s (%s)", sourceEmail, targetEmail, mode))
 
 	password, err := s.openSecuritySecret(sealedPassword)
 	if err != nil {
 		update("failed", "The stored source password could not be read")
+		s.mailImportEvent(ctx, job.ID, itemID, "error", "source-auth", "Stored source password could not be read", err.Error())
 		return
 	}
 	// Create the destination account before importing so a crash leaves a
-	// visible, resumable user rather than a half-mapped job.
+	// visible, resumable user rather than a half-mapped job. If an earlier
+	// attempt already created the account but failed before recording its id,
+	// attach to that account instead of attempting a duplicate creation.
 	if mode == "new" && targetUserID == "" {
-		createdID, tempPassword, mailPassword, err := s.provisionImportedUser(ctx, userImportJobRecord{TenantID: job.TenantID}, itemID, targetEmail, targetName, role, quota)
-		if err != nil {
-			update("failed", "Could not create the destination user: "+err.Error())
-			return
+		if targetEmail == "" {
+			targetEmail = sourceEmail
 		}
-		targetUserID = createdID
-		sealedTemp, _ := s.sealSecuritySecret(tempPassword)
-		sealedMail, _ := s.sealSecuritySecret(mailPassword)
-		_, _ = s.store.DB.Exec(ctx, `
-			UPDATE mail_import_items SET target_user_id=$2::uuid, target_email=$3, initial_password=$4, mail_password=$5, updated_at=now()
-			WHERE id=$1
-		`, itemID, targetUserID, targetEmail, sealedTemp, sealedMail)
+		existingID, existingName, hasLoggedIn, found := s.findImportDestinationUser(ctx, job.TenantID, targetEmail)
+		if found {
+			targetUserID = existingID
+			if targetName == "" {
+				targetName = existingName
+			}
+			var sealedTemp, sealedMail string
+			_ = s.store.DB.QueryRow(ctx, `
+				SELECT initial_password, mail_password FROM mail_import_items WHERE id=$1
+			`, itemID).Scan(&sealedTemp, &sealedMail)
+			tempPassword, _ := s.openSecuritySecret(sealedTemp)
+			mailPassword, _ := s.openSecuritySecret(sealedMail)
+			if tempPassword == "" || mailPassword == "" {
+				if !hasLoggedIn {
+					// The account was created by the earlier interrupted
+					// attempt; its plaintext credentials were never recorded.
+					// Issue a fresh pair so the administrator can hand them over.
+					tempPassword, mailPassword, err = s.reissueImportedUserCredentials(ctx, targetUserID, targetEmail)
+					if err != nil {
+						update("failed", "Could not reissue credentials for the existing destination user: "+err.Error())
+						s.mailImportEvent(ctx, job.ID, itemID, "error", "destination", "Could not reissue credentials", err.Error())
+						return
+					}
+					s.mailImportEvent(ctx, job.ID, itemID, "warn", "destination",
+						"Reissued one-time credentials for the existing, never-signed-in account", targetEmail)
+				}
+			}
+			if err := s.saveImportItemDestination(ctx, itemID, targetUserID, targetEmail, tempPassword, mailPassword); err != nil {
+				update("failed", "Could not record the existing destination user: "+err.Error())
+				s.mailImportEvent(ctx, job.ID, itemID, "error", "destination", "Could not record the existing destination user", err.Error())
+				return
+			}
+			s.mailImportEvent(ctx, job.ID, itemID, "warn", "destination",
+				"Attached to the existing destination account", targetUserID+" · "+targetEmail)
+		} else {
+			tempPassword, mailPassword, createdID, err := s.provisionImportedUser(ctx, userImportJobRecord{TenantID: job.TenantID}, itemID, targetEmail, targetName, role, quota)
+			if err != nil {
+				update("failed", "Could not create the destination user: "+err.Error())
+				s.mailImportEvent(ctx, job.ID, itemID, "error", "destination", "Could not create the destination user", err.Error())
+				return
+			}
+			targetUserID = createdID
+			if err := s.saveImportItemDestination(ctx, itemID, targetUserID, targetEmail, tempPassword, mailPassword); err != nil {
+				update("failed", "Could not record the new destination user: "+err.Error())
+				s.mailImportEvent(ctx, job.ID, itemID, "error", "destination", "Could not record the new destination user", err.Error())
+				return
+			}
+			s.mailImportEvent(ctx, job.ID, itemID, "info", "destination",
+				"Created destination account", targetUserID+" · "+targetEmail)
+		}
 	}
 	if targetEmail == "" && targetUserID != "" {
 		_ = s.store.DB.QueryRow(ctx, `SELECT email::text FROM users WHERE id=$1`, targetUserID).Scan(&targetEmail)
@@ -727,25 +856,31 @@ func (s *Server) runMailImportItem(ctx context.Context, job mailImportJobRecord,
 		if err != nil {
 			if err == errMailImportCancelled {
 				update("skipped", "Cancelled")
+				s.mailImportEvent(ctx, job.ID, itemID, "warn", "import", "Import cancelled", "")
 				return
 			}
 			update("failed", err.Error())
+			s.mailImportEvent(ctx, job.ID, itemID, "error", "pop3", "POP3 mailbox import failed", err.Error())
 			return
 		}
-		_ = imported
 		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET imported_messages=$2, total_messages=$3, updated_at=now() WHERE id=$1`, itemID, imported, total)
+		s.mailImportEvent(ctx, job.ID, itemID, "info", "pop3", "POP3 mailbox import finished",
+			fmt.Sprintf("%d / %d messages", imported, total))
 	} else {
 		imported, total, err := s.importIMAPMailbox(ctx, job, sourceEmail, password, targetEmail, cursorJSON, itemID)
 		if err != nil {
 			if err == errMailImportCancelled {
 				update("skipped", "Cancelled")
+				s.mailImportEvent(ctx, job.ID, itemID, "warn", "import", "Import cancelled", "")
 				return
 			}
 			update("failed", err.Error())
+			s.mailImportEvent(ctx, job.ID, itemID, "error", "imap", "IMAP mailbox import failed", err.Error())
 			return
 		}
-		_ = imported
 		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET imported_messages=$2, total_messages=$3, updated_at=now() WHERE id=$1`, itemID, imported, total)
+		s.mailImportEvent(ctx, job.ID, itemID, "info", "imap", "IMAP mailbox import finished",
+			fmt.Sprintf("%d / %d messages", imported, total))
 	}
 	var notified bool
 	var emailError string
@@ -757,10 +892,18 @@ func (s *Server) runMailImportItem(ctx context.Context, job mailImportJobRecord,
 		notified = noticeErr == nil
 		if noticeErr != nil {
 			emailError = noticeErr.Error()
+			s.mailImportEvent(ctx, job.ID, itemID, "error", "notification", "Migration notice email failed", emailError)
+		} else {
+			s.mailImportEvent(ctx, job.ID, itemID, "info", "notification", "Migration notice emailed", notify)
 		}
 	}
 	_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET notified_at=CASE WHEN $2 THEN now() ELSE NULL END, updated_at=now() WHERE id=$1`, itemID, notified)
 	update("completed", emailError)
+	level := "info"
+	if emailError != "" {
+		level = "warn"
+	}
+	s.mailImportEvent(ctx, job.ID, itemID, level, "item", "Mailbox import completed", emailError)
 }
 
 func (s *Server) sendMigrationNotice(ctx context.Context, tenantID, preferredUserID, to, name, mailbox, password string) error {
@@ -787,20 +930,24 @@ func (s *Server) sendMigrationNotice(ctx context.Context, tenantID, preferredUse
 func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord, sourceEmail, password, targetEmail, cursorJSON, itemID string) (int64, int64, error) {
 	source, err := dialExternalIMAP(job.Host, job.Port, job.Security)
 	if err != nil {
+		s.mailImportEvent(ctx, job.ID, itemID, "error", "source", "Could not connect to the source IMAP server", err.Error())
 		return 0, 0, err
 	}
 	defer source.Logout()
 	source.Timeout = 60 * time.Second
 	if err := source.Login(sourceEmail, password); err != nil {
+		s.mailImportEvent(ctx, job.ID, itemID, "error", "source", "Source IMAP login failed", err.Error())
 		return 0, 0, fmt.Errorf("source login failed: %w", err)
 	}
 	target, err := s.dialLocalTarget(targetEmail)
 	if err != nil {
+		s.mailImportEvent(ctx, job.ID, itemID, "error", "target", "Could not open the destination mailbox", err.Error())
 		return 0, 0, err
 	}
 	defer target.Logout()
 	folders, err := listIMAPMailboxes(source)
 	if err != nil {
+		s.mailImportEvent(ctx, job.ID, itemID, "error", "source", "Could not list source IMAP folders", err.Error())
 		return 0, 0, err
 	}
 	cursor := map[string]int64{}
@@ -824,12 +971,17 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 			continue
 		}
 		if _, err := source.Select(sourceFolder, true); err != nil {
+			s.mailImportEvent(ctx, job.ID, itemID, "warn", "source", "Could not select source folder "+sourceFolder, err.Error())
 			continue
 		}
 		total += int64(source.Mailbox().Messages)
 		criteria := imap.NewSearchCriteria()
 		uids, err := source.UidSearch(criteria)
-		if err != nil || len(uids) == 0 {
+		if err != nil {
+			s.mailImportEvent(ctx, job.ID, itemID, "warn", "source", "Could not list messages in source folder "+sourceFolder, err.Error())
+			continue
+		}
+		if len(uids) == 0 {
 			continue
 		}
 		lastUID := cursor[sourceFolder]
@@ -841,7 +993,8 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 		}
 		if _, err := target.Select(targetFolder, false); err != nil {
 			_ = target.Create(targetFolder)
-			if _, err := target.Select(targetFolder, false); err != nil {
+			if _, retryErr := target.Select(targetFolder, false); retryErr != nil {
+				s.mailImportEvent(ctx, job.ID, itemID, "warn", "target", "Could not open destination folder "+targetFolder, retryErr.Error())
 				continue
 			}
 		}
@@ -896,6 +1049,7 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 					continue
 				}
 				if err := target.Append(targetFolder, importFlags(message.Flags), message.InternalDate, bytes.NewReader(raw)); err != nil {
+					s.mailImportEvent(ctx, job.ID, itemID, "warn", "imap", "Could not append a message to "+targetFolder, err.Error())
 					continue
 				}
 				if messageID != "" {
@@ -905,6 +1059,7 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 				lastUID = int64(message.Uid)
 			}
 			if err := <-done; err != nil {
+				s.mailImportEvent(ctx, job.ID, itemID, "warn", "source", "Fetching a batch from "+sourceFolder+" failed", err.Error())
 				break
 			}
 			cursor[sourceFolder] = lastUID
@@ -913,6 +1068,8 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 	}
 	if quarantined > 0 {
 		s.logger.Warn("mail import quarantined infected messages", "source", sanitizeMailText(sourceEmail), "count", quarantined)
+		s.mailImportEvent(ctx, job.ID, itemID, "warn", "antivirus",
+			fmt.Sprintf("Quarantined %d infected message(s)", quarantined), "Destination: "+importQuarantineMailbox)
 	}
 	return imported, total, nil
 }
@@ -920,19 +1077,23 @@ func (s *Server) importIMAPMailbox(ctx context.Context, job mailImportJobRecord,
 func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord, sourceEmail, password, targetEmail, cursorJSON, itemID string) (int64, int64, error) {
 	source, err := dialPOP3(job.Host, job.Port, job.Security)
 	if err != nil {
+		s.mailImportEvent(ctx, job.ID, itemID, "error", "source", "Could not connect to the source POP3 server", err.Error())
 		return 0, 0, err
 	}
 	defer source.close()
 	if err := source.login(sourceEmail, password); err != nil {
+		s.mailImportEvent(ctx, job.ID, itemID, "error", "source", "Source POP3 login failed", err.Error())
 		return 0, 0, fmt.Errorf("source login failed: %w", err)
 	}
 	target, err := s.dialLocalTarget(targetEmail)
 	if err != nil {
+		s.mailImportEvent(ctx, job.ID, itemID, "error", "target", "Could not open the destination mailbox", err.Error())
 		return 0, 0, err
 	}
 	defer target.Logout()
 	indexes, err := source.list()
 	if err != nil {
+		s.mailImportEvent(ctx, job.ID, itemID, "error", "source", "Could not list POP3 messages", err.Error())
 		return 0, 0, fmt.Errorf("list POP3 messages: %w", err)
 	}
 	cursor := map[string]int64{}
@@ -966,6 +1127,7 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 			continue
 		}
 		if err != nil {
+			s.mailImportEvent(ctx, job.ID, itemID, "warn", "source", "Could not retrieve a POP3 message", err.Error())
 			break
 		}
 		if int64(len(raw)) > maxBytes {
@@ -988,7 +1150,9 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 			if messageID != "" {
 				existing[messageID] = true
 			}
-		} else if err := target.Append("INBOX", nil, time.Now(), bytes.NewReader(raw)); err == nil {
+		} else if err := target.Append("INBOX", nil, time.Now(), bytes.NewReader(raw)); err != nil {
+			s.mailImportEvent(ctx, job.ID, itemID, "warn", "target", "Could not append a POP3 message to INBOX", err.Error())
+		} else {
 			imported++
 			if messageID != "" {
 				existing[messageID] = true
@@ -1000,6 +1164,8 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 	}
 	if quarantined > 0 {
 		s.logger.Warn("mail import quarantined infected messages", "source", sanitizeMailText(sourceEmail), "count", quarantined)
+		s.mailImportEvent(ctx, job.ID, itemID, "warn", "antivirus",
+			fmt.Sprintf("Quarantined %d infected message(s)", quarantined), "Destination: "+importQuarantineMailbox)
 	}
 	return imported, int64(len(indexes)), nil
 }

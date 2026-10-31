@@ -763,6 +763,17 @@ and must stay below clamd's `StreamMaxLength` (25M on a stock Debian install).
 Messages larger than that cap are imported without a scan and logged with the
 source and size rather than failing the migration.
 
+Mailbox migration is idempotent across restarts and retries. The worker records
+the destination user id before copying mail, so a second pass resumes into the
+same account instead of attempting to create the address again. If an earlier
+version created the user but failed before storing its one-time credentials,
+the worker attaches to that account and, only when the account has never signed
+in, issues a fresh web/mailbox password pair. Each job also writes durable
+events to `mail_import_events`; the admin migration view exposes the source,
+stage, message, detail and timestamp for validation, destination, source-folder,
+append, scanner, notification and completion failures. Event rows follow the
+job's cascade when a job is removed.
+
 Message subjects, sender/recipient names, message identifiers, attachment
 filenames and dispositions are normalized before they enter the normalized
 tables. Raw Windows-1252/Latin-1 header bytes and NULs supplied by a remote

@@ -234,6 +234,13 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
   blocked SSH transport does not prevent a public or otherwise reachable HTTPS
   checkout. Existing GitHub SSH configurations derive the HTTPS fallback
   automatically.
+- Before cloning or compiling, the updater tries the checksummed GitHub release
+  asset at `A8M_RELEASE_BASE_URL/<tag>/alt8mail-<version>.tar.gz`
+  (`A8M_PREFER_RELEASE_ASSET=1`). This avoids a Go build on the mail host. It
+  falls back to the source checkout and build if the asset is unavailable,
+  fails verification, or has the wrong version. `A8M_MIN_FREE_MB=1024`
+  prevents an update from starting when the root filesystem is too full to
+  take a backup and release copy.
 - The same page schedules a host reboot through a transient systemd timer. The
   control plane records the boot ID, writes an audit request before the host
   goes down and a completion event when it returns; the browser polls the

@@ -68,6 +68,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.3.18** release makes mailbox migration idempotent when a destination account was already created by an interrupted attempt, fixes the destination account/password handoff that could show blank credentials, adds a durable activity log to the admin migration view, and makes self-update prefer the checksummed GitHub release asset instead of compiling on the mail host. Imports now record why a source, destination, folder, notification or scanner step failed; never-signed-in destinations recovered from an earlier interrupted job get a fresh one-time password pair. The updater also refuses to start without enough free disk and caps Go build parallelism on small hosts.
+
 The **0.3.17** release fixes a disk-exhaustion bug in mailbox import and IMAP sync. Raw Windows-1252/Latin-1 and NUL bytes in subjects, sender names, message identifiers and attachment filenames are normalized to valid UTF-8 before PostgreSQL writes; attachment files written by a sync that fails to commit are removed immediately; a background sweep reclaims unreferenced local attachment files with a configurable grace period; repeated full-sync failures back off up to one hour instead of retrying every five minutes; and imported IMAP/POP3 messages up to the configured scan cap are scanned through ClamAV, with detections moved to the unmapped `Quarantine` mailbox.
 
 The **0.3.16** release reconciles Alt8Mail update jobs in the background after the updater restarts the control plane, and refreshes the latest-version state when an update completes so the System page does not wait for a manual refresh.

@@ -19,12 +19,23 @@ export PATH="/usr/local/go/bin:/usr/local/bin:${PATH:-/usr/sbin:/usr/bin:/sbin:/
 if [[ -z "${GOPATH:-}" ]]; then export GOPATH="$HOME/go"; fi
 if [[ -z "${GOMODCACHE:-}" ]]; then export GOMODCACHE="$GOPATH/pkg/mod"; fi
 if [[ -z "${GOCACHE:-}" ]]; then export GOCACHE="$HOME/.cache/go-build"; fi
+# A release build runs on the mail host itself. Keep compiler parallelism at one
+# package at a time so a 2 GB host does not get OOM-killed by seven binaries.
+if [[ -z "${GOMAXPROCS:-}" ]]; then export GOMAXPROCS=1; fi
+if [[ " ${GOFLAGS:-} " != *" -p=1 "* ]]; then export GOFLAGS="${GOFLAGS:-} -p=1"; fi
+if [[ " ${GOFLAGS:-} " != *" -buildvcs=false "* ]]; then export GOFLAGS="${GOFLAGS} -buildvcs=false"; fi
+trap 'status=$?; printf "build failed at line %s: %s (exit %s)\n" "$LINENO" "$BASH_COMMAND" "$status" >&2; exit "$status"' ERR
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${1:-$(tr -d '[:space:]' < "$ROOT/VERSION")}"
 OUT_DIR="${2:-$ROOT/dist}"
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
+free_kb="$(df -Pk "$OUT_DIR" 2>/dev/null | awk 'NR==2 {print $4}')"
+if [[ -n "$free_kb" ]] && (( free_kb < ${A8M_BUILD_MIN_FREE_MB:-1024} * 1024 )); then
+  echo "not enough free disk for a release build: ${free_kb} KB available" >&2
+  exit 1
+fi
 GOOS_TARGET="${GOOS_TARGET:-linux}"
 GOARCH_TARGET="${GOARCH_TARGET:-amd64}"
 NAME="alt8mail-$VERSION"
