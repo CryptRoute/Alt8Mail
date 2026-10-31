@@ -551,6 +551,9 @@ const state = {
   noticeFilter: "all",
   folders: [],
   messages: [],
+  mailPages: {},
+  folderCounts: {},
+  folderUnread: {},
   people: [],
   calendarEvents: [],
   sieve: null,
@@ -2369,6 +2372,10 @@ async function logout() {
     state.user = null;
     state.csrf = null;
     state.messages = [];
+    state.mailPages = {};
+    state.folderCounts = {};
+    state.folderUnread = {};
+    state.knownInboxIds = null;
     state.people = [];
     state.aliases = [];
     state.sieve = null;
@@ -2388,7 +2395,12 @@ async function logout() {
 }
 
 async function loadBootstrap({ restoreDrafts = false, quiet = false } = {}) {
-  const data = await api("/api/bootstrap");
+  const params = new URLSearchParams({
+    folder: state.folder || "inbox",
+    filter: state.filter || "all",
+    limit: "50"
+  });
+  const data = await api(`/api/bootstrap?${params.toString()}`);
   applyBootstrap(data, { restoreDrafts, quiet });
   if (!quiet) statusMid.textContent = "Synced just now";
 }
@@ -2409,6 +2421,31 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.folders = data.folders || [];
   state.people = data.people || [];
   state.messages = data.messages || [];
+  state.mailPages = {};
+  state.folderCounts = data.folderCounts || {};
+  state.folderUnread = data.folderUnread || {};
+  if (data.mailPage && data.mailPage.folder) {
+    const key = mailPageKey(data.mailPage.folder, data.mailPage.filter || "all");
+    const limit = Number(data.mailPage.limit) || 50;
+    state.mailPages[key] = {
+      ...data.mailPage,
+      limit,
+      loaded: true,
+      loading: false,
+      nextOffset: (Number(data.mailPage.offset) || 0) + limit
+    };
+  } else {
+    // The standalone Node reference template predates server-side paging and
+    // returns the complete mailbox document. Treat that response as one page.
+    const key = mailPageKey(state.folder, "all");
+    const total = state.messages.filter((message) => state.folder === "starred"
+      ? message.starred && message.folder !== "spam" && message.folder !== "trash"
+      : message.folder === state.folder).length;
+    state.mailPages[key] = {
+      folder: state.folder, filter: "all", offset: 0, limit: Math.max(total, 50),
+      total, totalMessages: total, hasMore: false, loaded: true, loading: false, nextOffset: Math.max(total, 50)
+    };
+  }
   state.calendarEvents = data.calendarEvents || [];
   state.sieve = data.sieve || null;
   state.quota = data.quota || null;
@@ -2449,8 +2486,13 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   if (state.task === "people") renderPeople();
   if (state.task === "files") renderFiles();
   const inboxIds = state.messages.filter((message) => message.folder === "inbox").map((message) => message.id);
-  if (!state.knownInboxIds) state.knownInboxIds = new Set(inboxIds);
-  else inboxIds.forEach((id) => state.knownInboxIds.add(id));
+  if (!state.knownInboxIds) {
+    // If the initial page was not INBOX, leave this unknown so the first
+    // background poll can seed it without firing a burst of false notifications.
+    state.knownInboxIds = state.mailPages[mailPageKey("inbox", "all")] ? new Set(inboxIds) : null;
+  } else {
+    inboxIds.forEach((id) => state.knownInboxIds.add(id));
+  }
   startMailMonitor();
   const dataAction = document.getElementById("resetData");
   const dataNote = document.querySelector(".about-actions .about-note");
@@ -2490,11 +2532,21 @@ function startMailMonitor() {
 async function pollNewMail() {
   if (!state.user || document.visibilityState !== "visible") return;
   const data = await api("/api/messages?folder=inbox");
-  const known = state.knownInboxIds || new Set();
-  const fresh = (data.messages || []).filter((message) => !known.has(message.id));
-  if (!fresh.length) return;
-  fresh.forEach((message) => known.add(message.id));
+  if (!state.knownInboxIds) {
+    state.knownInboxIds = new Set((data.messages || []).map((message) => message.id));
+    return;
+  }
+  const known = state.knownInboxIds;
+  const incoming = data.messages || [];
+  const recentCutoff = Date.now() - 10 * 60 * 1000;
+  const fresh = incoming.filter((message) =>
+    !known.has(message.id) && (Date.parse(message.date) || 0) > recentCutoff
+  );
+  // A paged response can include older siblings of a newly loaded thread. Mark
+  // every returned id as seen; only recent unseen messages trigger a toast.
+  incoming.forEach((message) => known.add(message.id));
   state.knownInboxIds = known;
+  if (!fresh.length) return;
   showNewMailNotification(fresh[0], fresh.length);
   await refreshMailbox({ quiet: true });
   renderNotifications();
@@ -2570,6 +2622,85 @@ function rebuildIndex() {
   state.index = new MailIndex(state.messages);
 }
 
+function mailPageKey(folder = state.folder, filter = state.filter) {
+  return `${folder}\u0000${filter}`;
+}
+
+function currentMailPage() {
+  return state.mailPages[mailPageKey()] || null;
+}
+
+function mergeMailMessages(messages) {
+  if (!messages || !messages.length) return;
+  const byId = new Map(state.messages.map((message) => [message.id, message]));
+  for (const message of messages) {
+    if (message && message.id) byId.set(message.id, message);
+  }
+  state.messages = Array.from(byId.values());
+  rebuildIndex();
+}
+
+function loadMailPage(folder = state.folder, filter = state.filter) {
+  const key = mailPageKey(folder, filter);
+  const existing = state.mailPages[key];
+  if (existing?.loading && existing.promise) return existing.promise;
+  if (existing?.loaded && !existing.hasMore) return Promise.resolve(existing);
+  const offset = existing?.loaded ? existing.nextOffset : 0;
+  const token = (existing?.token || 0) + 1;
+  const record = {
+    ...(existing || {}), folder, filter, token, loading: true, promise: null
+  };
+  state.mailPages[key] = record;
+  const params = new URLSearchParams({
+    folder, filter, limit: "50", offset: String(offset || 0)
+  });
+  const promise = api(`/api/messages?${params.toString()}`).then((data) => {
+    const current = state.mailPages[key];
+    if (!current || current.token !== token) return null;
+    mergeMailMessages(data.messages || []);
+    const limit = Number(data.limit) || 50;
+    const total = Number.isFinite(Number(data.total)) ? Number(data.total) : (data.messages || []).length;
+    const totalMessages = Number.isFinite(Number(data.totalMessages)) ? Number(data.totalMessages) : total;
+    const page = {
+      folder, filter, loaded: true, loading: false, token,
+      limit, total, totalMessages, hasMore: Boolean(data.hasMore),
+      nextOffset: offset + limit
+    };
+    state.mailPages[key] = page;
+    if (data.folderCounts) state.folderCounts = { ...state.folderCounts, ...data.folderCounts };
+    if (data.folderUnread) state.folderUnread = { ...state.folderUnread, ...data.folderUnread };
+    return data;
+  }).catch((error) => {
+    const current = state.mailPages[key];
+    if (current?.token === token) current.loading = false;
+    throw error;
+  });
+  record.promise = promise;
+  return promise;
+}
+
+function loadMoreMailPage() {
+  const page = currentMailPage();
+  if (!page || page.loading || !page.hasMore) return Promise.resolve();
+  return loadMailPage(state.folder, state.filter)
+    .then((data) => {
+      if (!data) return;
+      renderList({ preserveScroll: true, appendOnly: true });
+      renderFolders();
+      syncSelectionUi();
+      syncCommandBar();
+    })
+    .catch((error) => {
+      showToast(error.message || "Could not load more messages", "error");
+    });
+}
+
+function adjustFolderUnread(folderId, delta) {
+  if (!folderId || !delta) return;
+  const current = Number(state.folderUnread[folderId] || 0);
+  state.folderUnread[folderId] = Math.max(0, current + delta);
+}
+
 function messageById(messageId) {
   return state.messages.find((message) => message.id === messageId) || null;
 }
@@ -2593,6 +2724,19 @@ function threadById(threadId) {
     state.messages.filter((message) => (message.threadId || message.id) === threadId),
     state.messages
   )[0] || null;
+}
+
+async function ensureThreadLoaded(target) {
+  if (!target) return false;
+  if (threadById(target) || messageById(target)) return true;
+  try {
+    const data = await api(`/api/messages?thread=${encodeURIComponent(target)}`);
+    mergeMailMessages(data.messages || []);
+    renderList();
+    return Boolean(threadById(target) || messageById(target));
+  } catch {
+    return false;
+  }
 }
 
 function folderDef(folderId) {
@@ -2880,6 +3024,7 @@ async function signOutCurrent() {
    ============================================================ */
 function unreadCount(folderId) {
   if (folderId === "starred") return 0;
+  if (Number.isFinite(Number(state.folderUnread[folderId]))) return Number(state.folderUnread[folderId]);
   return state.messages.filter((message) => message.folder === folderId && message.unread).length;
 }
 
@@ -2888,8 +3033,10 @@ function folderBadge(folder) {
   const mode = folder.badgeMode || "unread";
   if (mode === "none") return null;
   const count = mode === "total"
-    ? state.messages.filter((message) => message.folder === folder.id).length
-    : unreadCount(folder.id);
+    ? (Number.isFinite(Number(folder.total)) ? Number(folder.total)
+      : Number.isFinite(Number(state.folderCounts[folder.id])) ? Number(state.folderCounts[folder.id])
+      : state.messages.filter((message) => message.folder === folder.id).length)
+    : (Number.isFinite(Number(folder.unread)) ? Number(folder.unread) : unreadCount(folder.id));
   return count ? { count, neutral: mode === "total" } : null;
 }
 
@@ -3169,6 +3316,7 @@ async function folderMenuAction(action) {
    list
    ============================================================ */
 function unreadInboxCount() {
+  if (Number.isFinite(Number(state.folderUnread.inbox))) return Number(state.folderUnread.inbox);
   return state.messages.filter((message) => message.folder === "inbox" && message.unread).length;
 }
 
@@ -3190,26 +3338,82 @@ function threadSearchToken(thread) {
   return `<span class="msg-folder-tag" title="Found in ${esc(label)}">${esc(label)}</span>`;
 }
 
-function renderList() {
+function mailLoadMoreMarkup(page) {
+  return page && page.hasMore
+    ? `<div class="list-load-more" data-load-more>${page.loading ? "Loading more…" : "Scroll to load more"}</div>`
+    : "";
+}
+
+function threadRowMarkup(thread) {
+  const { rep, person, label } = threadRowDisplay(thread);
+  const selected = thread.id === state.selectedThreadId;
+  const checked = state.selectedIds.has(thread.id);
+  const hasFiles = thread.hasAttachments;
+  const unread = thread.unreadCount > 0;
+  const safeId = esc(thread.id);
+  const threadCount = thread.count > 1 ? `<span class="msg-thread-count" title="${thread.count} messages in conversation">${thread.count}</span>` : "";
+  return `<div class="msg${unread ? " is-unread" : ""}${selected ? " is-selected" : ""}${checked ? " is-checked" : ""}${rep.draft ? " is-draft" : ""}" data-thread-id="${safeId}" role="option" aria-selected="${selected ? "true" : "false"}" tabindex="0">
+        <label class="row-check" title="Select conversation">
+          <input type="checkbox" data-thread-check="${safeId}" ${checked ? "checked" : ""} aria-label="Select ${esc(thread.subject)}">
+          <span class="check-visual" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
+        </label>
+        ${avatar(person, "md")}
+        <div class="msg-main">
+          <div class="msg-top">
+            <span class="msg-from">${esc(label)}</span>
+            ${threadCount}
+            ${hasFiles ? `<span class="msg-tag" title="Has attachments"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></span>` : ""}
+            ${thread.flagged ? '<span class="msg-flag" title="Flagged for follow-up" aria-label="Flagged for follow-up"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg></span>' : ""}
+            ${threadSearchToken(thread)}
+            <button class="star-btn pin-btn${thread.pinned ? " is-pinned" : ""}" data-thread-pin="${safeId}" type="button" aria-label="${thread.pinned ? "Unpin conversation" : "Pin conversation"}" aria-pressed="${thread.pinned ? "true" : "false"}" title="${thread.pinned ? "Unpin conversation" : "Pin conversation"}">
+              <svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>
+            </button>
+            <button class="star-btn${thread.starred ? " is-starred" : ""}" data-thread-star="${safeId}" type="button" aria-label="${thread.starred ? "Remove star" : "Star conversation"}" aria-pressed="${thread.starred ? "true" : "false"}" title="${thread.starred ? "Remove star" : "Star conversation"}">
+              <svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>
+            </button>
+            <span class="msg-time">${esc(formatListWhen(rep.date))}</span>
+          </div>
+          <div class="msg-subject">${rep.draft ? '<span class="msg-draft-tag">Draft</span>' : ""}${categoryDots(rep.categories)}${esc(threadSubject(thread))}</div>
+          <div class="msg-snippet">${esc(rep.snippet || htmlToText(rep.bodyHtml).slice(0, 150))}</div>
+        </div>
+      </div>`;
+}
+
+function renderList({ preserveScroll = false, appendOnly = false } = {}) {
+  const previousScroll = preserveScroll ? messageList.scrollTop : 0;
   const threads = computeView();
+  const page = currentMailPage();
   const def = folderDef(state.folder);
   listTitle.textContent = state.query ? "Search results" : def.label;
   const scopeCount = state.viewScope.length;
+  const pageTotal = state.query
+    ? scopeCount
+    : (page ? (inboxViewIndividual() ? (page.totalMessages || page.total) : page.total) : threads.length);
   if (state.query) {
     listCount.textContent = inboxViewIndividual()
       ? `${scopeCount} ${scopeCount === 1 ? "message" : "messages"} · ${threads.length} shown`
       : `${scopeCount} ${scopeCount === 1 ? "message" : "messages"} · ${threads.length} ${viewUnit(threads.length)}`;
+  } else if (!page) {
+    listCount.textContent = "Loading…";
   } else if (state.filter === "unread") {
-    listCount.textContent = `${threads.length} unread`;
+    listCount.textContent = `${threads.length}${page.hasMore ? ` of ${pageTotal}` : ""} unread`;
   } else if (state.filter === "starred") {
-    listCount.textContent = `${threads.length} starred`;
+    listCount.textContent = `${threads.length}${page.hasMore ? ` of ${pageTotal}` : ""} starred`;
   } else if (state.folder === "inbox") {
     listCount.textContent = `${unreadInboxCount()} unread`;
   } else {
-    listCount.textContent = `${threads.length} ${viewUnit(threads.length)}`;
+    listCount.textContent = `${threads.length}${page.hasMore ? ` of ${pageTotal}` : ""} ${viewUnit(pageTotal)}`;
   }
 
   if (!threads.length) {
+    state.renderedThreadIds = new Set();
+    if (!state.query && (!page || page.loading)) {
+      messageList.innerHTML = `<div class="list-empty list-loading">
+        <div class="list-loading-spinner" aria-hidden="true"></div>
+        <h2>Loading ${esc(def.label.toLowerCase())}…</h2>
+        <p>Fetching the newest conversations.</p>
+      </div>`;
+    } else {
     let emptyTitle = "This folder is empty";
     let emptyText = `Messages you move to ${def.label} will appear here.`;
     let emptyIcon = "i-folder";
@@ -3236,49 +3440,32 @@ function renderList() {
       <p>${emptyText}</p>
       ${(state.query || state.filter !== "all") ? `<button class="btn-secondary" data-clear-filters type="button">Clear filters</button>` : ""}
     </div>`;
+    }
+  } else if (appendOnly && state.renderedThreadIds instanceof Set) {
+    const sentinel = messageList.querySelector(".list-load-more");
+    if (sentinel) sentinel.remove();
+    const freshThreads = threads.filter((thread) => !state.renderedThreadIds.has(thread.id));
+    if (freshThreads.length) {
+      messageList.insertAdjacentHTML("beforeend", freshThreads.map(threadRowMarkup).join(""));
+      freshThreads.forEach((thread) => state.renderedThreadIds.add(thread.id));
+    }
+    const more = mailLoadMoreMarkup(page);
+    if (more) messageList.insertAdjacentHTML("beforeend", more);
   } else {
-    messageList.innerHTML = threads.map((thread) => {
-      const { rep, person, label } = threadRowDisplay(thread);
-      const selected = thread.id === state.selectedThreadId;
-      const checked = state.selectedIds.has(thread.id);
-      const hasFiles = thread.hasAttachments;
-      const unread = thread.unreadCount > 0;
-      const safeId = esc(thread.id);
-      const threadCount = thread.count > 1 ? `<span class="msg-thread-count" title="${thread.count} messages in conversation">${thread.count}</span>` : "";
-      return `<div class="msg${unread ? " is-unread" : ""}${selected ? " is-selected" : ""}${checked ? " is-checked" : ""}${rep.draft ? " is-draft" : ""}" data-thread-id="${safeId}" role="option" aria-selected="${selected ? "true" : "false"}" tabindex="0">
-        <label class="row-check" title="Select conversation">
-          <input type="checkbox" data-thread-check="${safeId}" ${checked ? "checked" : ""} aria-label="Select ${esc(thread.subject)}">
-          <span class="check-visual" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
-        </label>
-        ${avatar(person, "md")}
-        <div class="msg-main">
-          <div class="msg-top">
-            <span class="msg-from">${esc(label)}</span>
-            ${threadCount}
-            ${hasFiles ? `<span class="msg-tag" title="Has attachments"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></span>` : ""}
-            ${thread.flagged ? '<span class="msg-flag" title="Flagged for follow-up" aria-label="Flagged for follow-up"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg></span>' : ""}
-            ${threadSearchToken(thread)}
-            <button class="star-btn pin-btn${thread.pinned ? " is-pinned" : ""}" data-thread-pin="${safeId}" type="button" aria-label="${thread.pinned ? "Unpin conversation" : "Pin conversation"}" aria-pressed="${thread.pinned ? "true" : "false"}" title="${thread.pinned ? "Unpin conversation" : "Pin conversation"}">
-              <svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>
-            </button>
-            <button class="star-btn${thread.starred ? " is-starred" : ""}" data-thread-star="${safeId}" type="button" aria-label="${thread.starred ? "Remove star" : "Star conversation"}" aria-pressed="${thread.starred ? "true" : "false"}" title="${thread.starred ? "Remove star" : "Star conversation"}">
-              <svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>
-            </button>
-            <span class="msg-time">${esc(formatListWhen(rep.date))}</span>
-          </div>
-          <div class="msg-subject">${rep.draft ? '<span class="msg-draft-tag">Draft</span>' : ""}${categoryDots(rep.categories)}${esc(threadSubject(thread))}</div>
-          <div class="msg-snippet">${esc(rep.snippet || htmlToText(rep.bodyHtml).slice(0, 150))}</div>
-        </div>
-      </div>`;
-    }).join("");
+    state.renderedThreadIds = new Set(threads.map((thread) => thread.id));
+    messageList.innerHTML = threads.map(threadRowMarkup).join("") + mailLoadMoreMarkup(page);
   }
 
-  statusRange.textContent = threads.length ? `1–${threads.length} of ${threads.length} ${viewUnit(threads.length)}` : `0 ${viewUnit(0)}`;
+  const totalForStatus = state.query ? threads.length : (page?.total || threads.length);
+  statusRange.textContent = threads.length
+    ? `1–${threads.length} of ${totalForStatus} ${viewUnit(totalForStatus)}`
+    : (page?.loading ? "Loading…" : `0 ${viewUnit(0)}`);
   renderFolders();
   renderSearchScope(threads);
   syncSelectionUi();
   syncCommandBar();
   syncSearchContext();
+  if (preserveScroll) messageList.scrollTop = previousScroll;
 }
 
 function renderSearchScope(threads) {
@@ -4015,7 +4202,11 @@ function selectThread(threadId, options = {}) {
   state.selectedThreadId = threadId;
   if (thread.unreadCount && state.markReadOnOpen) {
     const unreadIds = thread.messages.filter((message) => message.unread).map((message) => message.id);
-    thread.messages.forEach((message) => { if (message.unread) message.unread = false; });
+    thread.messages.forEach((message) => {
+      if (!message.unread) return;
+      adjustFolderUnread(message.folder, -1);
+      message.unread = false;
+    });
     unreadIds.forEach((id) => state.dismissedNotifications.add("mail:" + id));
     persistDismissedNotifications();
     rebuildIndex();
@@ -4588,7 +4779,10 @@ async function submitSpamReport() {
 function markThreadUnread(thread) {
   if (!thread) return;
   const ids = thread.messages.filter((message) => !message.draft).map((message) => message.id);
-  thread.messages.forEach((message) => { message.unread = true; });
+  thread.messages.forEach((message) => {
+    if (!message.unread) adjustFolderUnread(message.folder, 1);
+    message.unread = true;
+  });
   rebuildIndex();
   renderFolders();
   renderList();
@@ -4753,7 +4947,7 @@ function openSearchHints() {
   searchHints.hidden = false;
   state.searchHintsOpen = true;
   const scope = document.getElementById("searchScope");
-  if (scope) scope.textContent = state.messages.length ? `Instant local index · ${state.messages.length} messages` : "Instant local index";
+  if (scope) scope.textContent = "Fast server-side search across your mailbox";
 }
 
 function closeSearchHints() {
@@ -7226,7 +7420,11 @@ function syncStatusRange() {
   } else if (state.task === "settings") {
     statusRange.textContent = "Workspace settings";
   } else if (!state.query) {
-    statusRange.textContent = state.viewThreads.length ? `1–${state.viewThreads.length} of ${state.viewThreads.length}` : "0 conversations";
+    const page = currentMailPage();
+    const total = page
+      ? (inboxViewIndividual() ? (page.totalMessages || page.total) : page.total)
+      : state.viewThreads.length;
+    statusRange.textContent = state.viewThreads.length ? `1–${state.viewThreads.length} of ${total}` : "0 conversations";
   }
 }
 
@@ -7238,7 +7436,7 @@ function syncStatusContext() {
   else if (state.task === "files") statusMid.textContent = `Cabinet synced · ${state.storageProviders.filter((provider) => provider.connected).length} storage providers`;
   else if (state.task === "scheduled") statusMid.textContent = "Server outbox synced · Alt8Mail";
   else if (state.task === "settings") statusMid.textContent = "Policy managed by Alt8Mail";
-  else if (state.query) statusMid.textContent = `Searching ${state.messages.length} message index`;
+  else if (state.query) statusMid.textContent = "Searching the mailbox";
   else statusMid.textContent = "Synced just now";
 }
 
@@ -10193,14 +10391,22 @@ function applyHashRoute() {
     const message = messageById(targetId);
     if (message) targetId = selectionIdForMessage(message);
     if (!threadById(targetId)) {
-      showToast("That conversation is no longer available");
-      if (state.selectedThreadId) {
-        state.selectedThreadId = null;
-        state.expandedThreadId = null;
-        renderList();
-        renderReader();
-        syncSelectionUi();
-      }
+      ensureThreadLoaded(targetId).then((found) => {
+        const loaded = messageById(targetId);
+        const selection = loaded ? selectionIdForMessage(loaded) : targetId;
+        if (found && threadById(selection)) {
+          selectThread(selection);
+          return;
+        }
+        showToast("That conversation is no longer available");
+        if (state.selectedThreadId) {
+          state.selectedThreadId = null;
+          state.expandedThreadId = null;
+          renderList();
+          renderReader();
+          syncSelectionUi();
+        }
+      });
       return true;
     }
     selectThread(targetId);
@@ -10315,6 +10521,19 @@ function setFolder(folder) {
   syncStatusContext();
   closeDrawer();
   writeAppHash({ replace: true });
+  const key = mailPageKey(folder, "all");
+  if (!state.mailPages[key]?.loaded) {
+    loadMailPage(folder, "all")
+      .then(() => {
+        if (state.folder === folder && !state.query) {
+          renderList();
+          renderReader();
+          renderFolders();
+          syncSelectionUi();
+        }
+      })
+      .catch((error) => showError(error));
+  }
 }
 
 function setFilter(filter) {
@@ -10324,6 +10543,17 @@ function setFilter(filter) {
   syncChips();
   renderList();
   syncSelectionUi();
+  const key = mailPageKey(state.folder, filter);
+  if (!state.mailPages[key]?.loaded) {
+    loadMailPage(state.folder, filter)
+      .then(() => {
+        if (state.filter === filter && !state.query) {
+          renderList();
+          renderReader();
+        }
+      })
+      .catch((error) => showError(error));
+  }
 }
 
 function openDrawer() {
@@ -11529,6 +11759,15 @@ function bindEvents() {
     event.preventDefault();
     openThreadWindow(row.getAttribute("data-thread-id"));
   });
+
+  messageList.addEventListener("scroll", () => {
+    if (state.query) return;
+    const page = currentMailPage();
+    if (!page || page.loading || !page.hasMore) return;
+    if (messageList.scrollTop + messageList.clientHeight >= messageList.scrollHeight - 280) {
+      loadMoreMailPage();
+    }
+  }, { passive: true });
 
   if (selectAll) selectAll.addEventListener("change", () => selectAllVisible(selectAll.checked));
 

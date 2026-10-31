@@ -774,6 +774,15 @@ stage, message, detail and timestamp for validation, destination, source-folder,
 append, scanner, notification and completion failures. Event rows follow the
 job's cascade when a job is removed.
 
+The webmail does not download a whole mailbox at sign-in. Bootstrap returns the
+newest 50 conversations for the active folder plus drafts, delegated mailboxes
+and database-derived folder counts. `/api/messages` accepts `folder`, `filter`,
+`limit` (default 50, maximum 200) and `offset`; the list requests the next page
+when the user scrolls near the bottom. Pages are selected by conversation, and
+all sibling messages of those conversations are included so reading a thread
+does not require a second lookup. Search continues to use the server-side
+index rather than the loaded page.
+
 Message subjects, sender/recipient names, message identifiers, attachment
 filenames and dispositions are normalized before they enter the normalized
 tables. Raw Windows-1252/Latin-1 header bytes and NULs supplied by a remote

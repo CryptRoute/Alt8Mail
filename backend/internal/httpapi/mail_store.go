@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -307,25 +308,117 @@ func (s *Server) loadMailMessagesByIDs(ctx context.Context, userID string, ids [
 		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE user_id=$1 AND id = ANY($2) ORDER BY sent_at ASC`, userID, ids)
 }
 
-func (s *Server) loadMailMessagesByFolder(ctx context.Context, userID, folder, filter string) ([]map[string]any, map[string]any, error) {
-	query := `SELECT ` + mailMessageColumns + ` FROM mail_messages WHERE user_id=$1`
+func mailFolderCondition(userID, folder, filter string) (string, []any) {
+	conditions := []string{"user_id=$1"}
 	args := []any{userID}
 	if folder == "starred" {
-		query += ` AND (starred OR flagged)`
+		conditions = append(conditions, `(starred OR flagged) AND folder NOT IN ('spam', 'trash')`)
 	} else if folder != "" && folder != "all" {
 		args = append(args, folder)
-		query += fmt.Sprintf(` AND folder = $%d`, len(args))
+		conditions = append(conditions, fmt.Sprintf(`folder = $%d`, len(args)))
 	}
 	switch filter {
 	case "unread":
-		query += ` AND unread`
+		conditions = append(conditions, `unread`)
 	case "starred":
-		query += ` AND (starred OR flagged)`
+		conditions = append(conditions, `(starred OR flagged)`)
 	case "attachments":
-		query += ` AND EXISTS (SELECT 1 FROM mail_message_attachments ma WHERE ma.message_id = mail_messages.id)`
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM mail_message_attachments ma WHERE ma.message_id = mail_messages.id)`)
 	}
-	query += ` ORDER BY sent_at DESC`
-	return s.loadMailMessagesQuery(ctx, userID, query, args...)
+	return strings.Join(conditions, " AND "), args
+}
+
+func (s *Server) loadMailMessagesByFolder(ctx context.Context, userID, folder, filter string) ([]map[string]any, map[string]any, error) {
+	where, args := mailFolderCondition(userID, folder, filter)
+	return s.loadMailMessagesQuery(ctx, userID,
+		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE `+where+` ORDER BY sent_at DESC`, args...)
+}
+
+// mailThreadPage is a page of conversations, not raw messages. Selecting all
+// messages in the page's threads keeps a conversation readable even when its
+// older messages would fall on a later page.
+type mailThreadPage struct {
+	Messages      []map[string]any
+	Total         int
+	TotalMessages int
+	Offset        int
+	Limit         int
+	HasMore       bool
+}
+
+func (s *Server) loadMailThreadPage(ctx context.Context, userID, folder, filter string, limit, offset int) (mailThreadPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	where, args := mailFolderCondition(userID, folder, filter)
+	var total, totalMessages int
+	if err := s.store.DB.QueryRow(ctx, `SELECT count(DISTINCT thread_id), count(*) FROM mail_messages WHERE `+where, args...).Scan(&total, &totalMessages); err != nil {
+		return mailThreadPage{}, err
+	}
+	pageArgs := append(append([]any{}, args...), limit, offset)
+	limitIndex := len(args) + 1
+	offsetIndex := len(args) + 2
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT thread_id FROM mail_messages
+		WHERE `+where+`
+		GROUP BY thread_id
+		ORDER BY max(sent_at) DESC
+		LIMIT $`+strconv.Itoa(limitIndex)+` OFFSET $`+strconv.Itoa(offsetIndex),
+		pageArgs...)
+	if err != nil {
+		return mailThreadPage{}, err
+	}
+	threadIDs := []string{}
+	for rows.Next() {
+		var threadID string
+		if rows.Scan(&threadID) == nil && threadID != "" {
+			threadIDs = append(threadIDs, threadID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return mailThreadPage{}, err
+	}
+	rows.Close()
+	messages := []map[string]any{}
+	if len(threadIDs) > 0 {
+		messages, _, err = s.loadMailMessagesByThreads(ctx, userID, threadIDs)
+		if err != nil {
+			return mailThreadPage{}, err
+		}
+	}
+	return mailThreadPage{
+		Messages: messages, Total: total, TotalMessages: totalMessages,
+		Offset: offset, Limit: limit, HasMore: offset+len(threadIDs) < total,
+	}, nil
+}
+
+func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[string]int, map[string]int, error) {
+	counts := map[string]int{}
+	unread := map[string]int{}
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT folder, count(*), count(*) FILTER (WHERE unread)
+		FROM mail_messages WHERE user_id=$1 GROUP BY folder
+	`, userID)
+	if err != nil {
+		return counts, unread, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var folder string
+		var total, unreadCount int
+		if rows.Scan(&folder, &total, &unreadCount) == nil {
+			counts[folder] = total
+			unread[folder] = unreadCount
+		}
+	}
+	return counts, unread, rows.Err()
 }
 
 func (s *Server) loadMailMessagesByThreads(ctx context.Context, userID string, threadIDs []string) ([]map[string]any, map[string]any, error) {

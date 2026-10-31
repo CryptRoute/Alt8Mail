@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type actionsBody struct {
@@ -83,17 +86,52 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 	if folder == "" {
 		folder = "inbox"
 	}
+	if threadID := strings.TrimSpace(r.URL.Query().Get("thread")); threadID != "" {
+		messages, loadErr := s.loadMailMessageThread(r.Context(), sess.User.ID, threadID)
+		if loadErr != nil {
+			writeError(w, http.StatusInternalServerError, "MESSAGES", "Could not load the conversation")
+			return
+		}
+		filtered := make([]any, 0, len(messages))
+		for _, message := range messages {
+			filtered = append(filtered, publicStateMessage(state, message))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"folder": folder, "thread": threadID, "count": len(filtered), "messages": filtered,
+			"threads": threadSummaries(filtered, filtered), "total": len(filtered),
+			"offset": 0, "limit": len(filtered), "hasMore": false,
+		})
+		return
+	}
 	query := r.URL.Query().Get("q")
 	filter := r.URL.Query().Get("filter")
 	if filter == "" {
 		filter = "all"
 	}
+	limit := 50
+	if value, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && value > 0 {
+		limit = value
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := 0
+	if value, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && value > 0 {
+		offset = value
+	}
 	var matched []map[string]any
+	var page mailThreadPage
 	var err error
+	total := 0
+	hasMore := false
 	if query != "" {
 		matched, _, err = s.searchMailMessages(r.Context(), sess.User.ID, query)
+		total = len(matched)
 	} else {
-		matched, _, err = s.loadMailMessagesByFolder(r.Context(), sess.User.ID, folder, filter)
+		page, err = s.loadMailThreadPage(r.Context(), sess.User.ID, folder, filter, limit, offset)
+		matched = page.Messages
+		total = page.Total
+		hasMore = page.HasMore
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "MESSAGES", "Could not load messages")
@@ -102,6 +140,9 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 	filtered := make([]any, 0, len(matched))
 	threadIDs := []string{}
 	for _, message := range matched {
+		if query == "" && !mailMessageMatchesScope(message, folder, filter) {
+			continue
+		}
 		switch filter {
 		case "unread":
 			if !stateBool(message, "unread") {
@@ -119,25 +160,74 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		filtered = append(filtered, publicStateMessage(state, message))
 		threadIDs = append(threadIDs, stateString(message, "threadId"))
 	}
-	siblings, _, siblingErr := s.loadMailMessagesByThreads(r.Context(), sess.User.ID, uniqueStrings(threadIDs, 1000))
-	if siblingErr != nil {
-		siblings = nil
-	}
-	all := []any{}
-	seen := map[string]bool{}
-	for _, message := range append(append([]map[string]any{}, matched...), siblings...) {
-		id := stateString(message, "id")
-		if id == "" || seen[id] {
-			continue
+	all := make([]any, 0, len(matched))
+	if query == "" {
+		for _, message := range matched {
+			all = append(all, publicStateMessage(state, message))
 		}
-		seen[id] = true
-		all = append(all, publicStateMessage(state, message))
+	} else {
+		siblings, _, siblingErr := s.loadMailMessagesByThreads(r.Context(), sess.User.ID, uniqueStrings(threadIDs, 1000))
+		if siblingErr != nil {
+			siblings = nil
+		}
+		seen := map[string]bool{}
+		for _, message := range append(append([]map[string]any{}, matched...), siblings...) {
+			id := stateString(message, "id")
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			all = append(all, publicStateMessage(state, message))
+		}
 	}
 	filtered = sortByDateDesc(filtered)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"folder": folder, "count": len(filtered), "messages": filtered,
-		"threads": threadSummaries(filtered, all),
+		"folder": folder, "filter": filter, "count": len(filtered), "messages": filtered,
+		"threads": threadSummaries(filtered, all), "total": total,
+		"totalMessages": page.TotalMessages, "offset": offset, "limit": limit, "hasMore": hasMore,
 	})
+}
+
+func (s *Server) loadMailMessageThread(ctx context.Context, userID, target string) ([]map[string]any, error) {
+	var threadID string
+	err := s.store.DB.QueryRow(ctx, `
+		SELECT thread_id FROM mail_messages
+		WHERE user_id=$1 AND (id=$2 OR thread_id=$2)
+		LIMIT 1
+	`, userID, target).Scan(&threadID)
+	if err == pgx.ErrNoRows {
+		return []map[string]any{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if threadID == "" {
+		threadID = target
+	}
+	messages, _, err := s.loadMailMessagesByThreads(ctx, userID, []string{threadID})
+	return messages, err
+}
+
+func mailMessageMatchesScope(message map[string]any, folder, filter string) bool {
+	if folder == "starred" {
+		if !stateBool(message, "starred") && !stateBool(message, "flagged") {
+			return false
+		}
+		if stateString(message, "folder") == "spam" || stateString(message, "folder") == "trash" {
+			return false
+		}
+	} else if folder != "" && folder != "all" && stateString(message, "folder") != folder {
+		return false
+	}
+	switch filter {
+	case "unread":
+		return stateBool(message, "unread")
+	case "starred":
+		return stateBool(message, "starred") || stateBool(message, "flagged")
+	case "attachments":
+		return len(stateSlice(message, "attachments")) > 0
+	}
+	return true
 }
 
 func (s *Server) patchMessage(w http.ResponseWriter, r *http.Request) {

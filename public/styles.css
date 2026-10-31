@@ -1302,6 +1302,26 @@ svg.icon {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+.list-load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 10px 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.list-loading { min-height: 180px; }
+.list-loading-spinner {
+  width: 24px;
+  height: 24px;
+  margin: 0 auto 10px;
+  border: 2px solid var(--border);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: a8m-spin 0.8s linear infinite;
+}
+@keyframes a8m-spin { to { transform: rotate(360deg); } }
 
 .msg {
   position: relative;

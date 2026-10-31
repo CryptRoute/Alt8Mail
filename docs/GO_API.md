@@ -51,7 +51,7 @@ in the request path and its JSON demo data is not read by the live frontend.
 | --- | --- |
 | Session | `POST/GET/DELETE /api/session`, `POST /api/password/change` |
 | Bootstrap / navigation | `GET /api/bootstrap`, `/api/folders`, `/api/aliases` |
-| Messages | `GET /api/messages`, `PATCH /api/messages/:id`, `POST /api/messages/read`, `POST /api/messages/actions`, `POST /api/undo/:token` |
+| Messages | `GET /api/messages?folder=&filter=&limit=50&offset=0` or `GET /api/messages?thread=<thread-or-message-id>`, `PATCH /api/messages/:id`, `POST /api/messages/read`, `POST /api/messages/actions`, `POST /api/undo/:token` |
 | Search | `GET /api/search?q=` |
 | Drafts | `GET /api/drafts`, `PUT/POST /api/drafts/:id`, `DELETE /api/drafts/:id` |
 | Send / outbox | `POST /api/send`, `GET /api/outbox`, `PATCH /api/outbox/:id`, `POST /api/outbox/:id/cancel`, `POST /api/outbox/:id/send-now` |

@@ -532,14 +532,55 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		signatures = []map[string]any{}
 	}
 	stateMap(state, "user")["aliases"] = aliases
-	storedMessages, _, err := s.loadAllMailMessages(ctx, sess.User.ID)
+	folder := strings.TrimSpace(r.URL.Query().Get("folder"))
+	if folder == "" {
+		folder = "inbox"
+	}
+	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
+	if filter == "" {
+		filter = "all"
+	}
+	limit := 50
+	if value, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && value > 0 {
+		limit = value
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := 0
+	if value, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && value > 0 {
+		offset = value
+	}
+	page, err := s.loadMailThreadPage(ctx, sess.User.ID, folder, filter, limit, offset)
 	if err != nil {
 		s.logger.Warn("bootstrap message load failed", "user", sess.User.ID, "err", err)
-		storedMessages = nil
+		page = mailThreadPage{Offset: offset, Limit: limit}
+	}
+	storedMessages := make([]map[string]any, 0, len(page.Messages)+10)
+	seenMessages := map[string]bool{}
+	appendStored := func(items []map[string]any) {
+		for _, message := range items {
+			id := stateString(message, "id")
+			if id == "" || seenMessages[id] {
+				continue
+			}
+			seenMessages[id] = true
+			storedMessages = append(storedMessages, message)
+		}
+	}
+	appendStored(page.Messages)
+	// Drafts are a small, special folder: keep every open/draft message in the
+	// initial bootstrap so compose restoration still works after a reload.
+	if drafts, _, draftErr := s.loadMailMessagesByFolder(ctx, sess.User.ID, "drafts", ""); draftErr == nil {
+		appendStored(drafts)
 	}
 	messages := make([]any, 0, len(storedMessages))
 	for _, message := range storedMessages {
 		messages = append(messages, publicStateMessage(state, message))
+	}
+	folderCounts, folderUnread, countErr := s.loadMailFolderCounts(ctx, sess.User.ID)
+	if countErr != nil {
+		s.logger.Warn("bootstrap folder counts failed", "user", sess.User.ID, "err", countErr)
 	}
 	folders := stateSlice(state, "folders")
 	if len(folders) == 0 {
@@ -562,13 +603,19 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		recentAudit = recentAudit[:12]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user":             user,
-		"aliases":          aliases,
-		"identities":       identities,
-		"signatures":       signatures,
-		"folders":          folders,
-		"people":           people,
-		"messages":         messages,
+		"user":       user,
+		"aliases":    aliases,
+		"identities": identities,
+		"signatures": signatures,
+		"folders":    folders,
+		"people":     people,
+		"messages":   messages,
+		"mailPage": map[string]any{
+			"folder": folder, "filter": filter, "offset": offset, "limit": limit,
+			"total": page.Total, "totalMessages": page.TotalMessages, "hasMore": page.HasMore,
+		},
+		"folderCounts":     folderCounts,
+		"folderUnread":     folderUnread,
 		"tasks":            tasks,
 		"files":            files,
 		"calendarEvents":   calendarEvents,
