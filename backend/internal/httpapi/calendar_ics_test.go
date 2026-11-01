@@ -98,3 +98,19 @@ func TestAllDayICalendarImport(t *testing.T) {
 		t.Fatalf("all-day range = %s – %s", event.StartsAt, event.EndsAt)
 	}
 }
+
+func TestStateSliceHandlesTypedSlices(t *testing.T) {
+	value := stateSlice(map[string]any{
+		"attendees": []calendarAttendeePublic{{Email: "guest@example.com", Name: "Guest"}},
+	}, "attendees")
+	if len(value) != 1 {
+		t.Fatalf("stateSlice returned %d items", len(value))
+	}
+	entry, ok := value[0].(calendarAttendeePublic)
+	if !ok || entry.Email != "guest@example.com" {
+		t.Fatalf("stateSlice item = %#v", value[0])
+	}
+	if got := stateSlice(map[string]any{"items": []string{"a", "b"}}, "items"); len(got) != 2 {
+		t.Fatalf("string slice length = %d", len(got))
+	}
+}
