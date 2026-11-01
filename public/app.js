@@ -912,6 +912,7 @@ const state = {
   statusPop: null,
   bulkMoveOpen: false,
   knownPendingIds: new Set(),
+  pendingMailRemoval: new Set(),
   messageMenuThreadId: "",
   messageMenuMessageId: "",
   messageMenuView: "",
@@ -1678,7 +1679,7 @@ function updateDocumentTitle() {
     title = `Alt8Mail: ${state.user.email || "Alt8Mail account"} - ${TITLE_ACCOUNT}`;
   } else {
     const folderLabel = (folderDef(state.folder).label || "Inbox").trim();
-    const thread = state.selectedThreadId ? currentThread() : null;
+    const thread = state.selectedThreadId ? (viewThreadById(state.selectedThreadId) || currentThread()) : null;
     const imapOffline = state.mailboxMode === "imap" && Boolean(String(state.mailSyncError || "").trim());
     const offline = Boolean(state.offline) || imapOffline;
     if (offline) {
@@ -2158,6 +2159,7 @@ function showLogin() {
   composeSessions = [];
   state.user = null;
   threadIdAliases.clear();
+  state.pendingMailRemoval.clear();
   state.notifications = [];
   state.dismissedNotifications = new Set();
   state.aiReader = null;
@@ -3692,7 +3694,12 @@ async function checkCalendarReminders() {
 }
 
 async function refreshMailbox({ quiet = true } = {}) {
-  const data = await api("/api/bootstrap");
+  const params = new URLSearchParams({
+    folder: state.folder || "inbox",
+    filter: state.filter || "all",
+    limit: "50"
+  });
+  const data = await api(`/api/bootstrap?${params.toString()}`);
   applyBootstrap(data, { restoreDrafts: false });
   if (!quiet) showToast("Mailbox is up to date");
 }
@@ -3801,7 +3808,7 @@ function threadUrlIdForSelection(selectionId = state.selectedThreadId) {
   if (!selection) return "";
   const message = messageById(selection);
   if (message && message.threadId) return message.threadId;
-  const thread = threadById(selection);
+  const thread = viewThreadById(selection) || threadById(selection);
   return (thread && (thread.latest?.threadId || thread.id)) || "";
 }
 
@@ -3814,6 +3821,11 @@ function selectionIdForRoute(target) {
   if (message) return inboxViewIndividual() ? message.id : selectionIdForMessage(message);
   const thread = threadById(canonical);
   return thread ? thread.id : canonical;
+}
+
+function viewThreadById(threadId) {
+  if (!threadId) return null;
+  return state.viewThreads.find((thread) => thread.id === threadId) || null;
 }
 
 function threadById(threadId) {
@@ -3884,6 +3896,9 @@ function scopeMessages() {
   if (state.filter === "toMe") messages = messages.filter((message) => messageIsAddressedToMe(message));
   if (state.filter === "mentions") messages = messages.filter((message) => messageMentionsMe(message));
   if (state.filter === "calendar") messages = messages.filter((message) => messageHasCalendarInvite(message));
+  if (state.pendingMailRemoval.size) {
+    messages = messages.filter((message) => !state.pendingMailRemoval.has(message.id));
+  }
   return messages;
 }
 
@@ -4663,11 +4678,35 @@ async function folderMenuAction(action) {
   if (action === "empty") {
     closeFolderMenu();
     if (!(await appConfirm({ title: `Empty ${folder.label}?`, message: "Every message in this folder will be permanently deleted. This cannot be undone.", confirmLabel: "Empty folder", tone: "danger" }))) return;
-    try {
-      const result = await api(`/api/folders/${encodeURIComponent(folder.id)}/empty`, { method: "POST", body: {} });
-      await refreshMailbox({ quiet: true });
-      showToast(`${result.removed || 0} message${result.removed === 1 ? "" : "s"} removed`);
-    } catch (error) { showError(error); }
+    const snapshot = state.messages.filter((message) => message.folder === folder.id).map(cloneMessageRecord);
+    const visible = state.folder === folder.id;
+    if (visible) messageList.querySelectorAll(".msg").forEach((row) => row.classList.add("is-removing"));
+    const request = api(`/api/folders/${encodeURIComponent(folder.id)}/empty`, { method: "POST", body: {} })
+      .then((result) => ({ ok: true, result }), (error) => ({ ok: false, error }));
+    if (visible) await new Promise((resolve) => setTimeout(resolve, 190));
+    removeFolderMessagesLocally(folder.id);
+    renderFolders();
+    renderList({ preserveScroll: true });
+    renderReader();
+    syncSelectionUi();
+    syncCommandBar();
+    const outcome = await request;
+    if (!outcome.ok) {
+      const byId = new Map(state.messages.map((message) => [message.id, message]));
+      for (const saved of snapshot) {
+        if (byId.has(saved.id)) Object.assign(byId.get(saved.id), saved);
+        else state.messages.push(saved);
+      }
+      rebuildIndex();
+      renderFolders();
+      renderList();
+      renderReader();
+      syncSelectionUi();
+      showError(outcome.error);
+      return;
+    }
+    await refreshMailbox({ quiet: true }).catch(() => {});
+    showToast(`${outcome.result.removed || snapshot.length || 0} message${(outcome.result.removed || snapshot.length || 0) === 1 ? "" : "s"} removed`);
     return;
   }
   if (action === "delete") {
@@ -5707,6 +5746,9 @@ function extendSelectionTo(threadId) {
 function selectThread(threadId, options = {}) {
   const thread = threadById(threadId);
   if (!thread) return;
+  // In individual view the selected row is a message, even when a caller
+  // starts from a thread ID (deep link, notification or shared URL).
+  if (inboxViewIndividual() && thread.id && thread.id !== threadId) threadId = thread.id;
   if (!options.keepSelection && !options.additive && !options.extend) {
     state.selectedIds.clear();
   }
@@ -6269,6 +6311,7 @@ async function runMailActionQueue() {
         }
       });
       mailActionQueue.shift();
+      job.ids.forEach((id) => state.pendingMailRemoval.delete(id));
       if (result?.quota) updateQuotaUi(result.quota);
       if (typeof job.after === "function") {
         try { await job.after(result); } catch (error) { showError(error); }
@@ -6306,6 +6349,7 @@ async function runMailActionQueue() {
 }
 
 async function revertMailActionJob(job, error) {
+  (job.ids || []).forEach((id) => state.pendingMailRemoval.delete(id));
   let refreshed = false;
   if (navigator.onLine) {
     try {
@@ -6434,6 +6478,8 @@ async function performBulkAction(action, folderValue, options = {}) {
 
   const beforeThreadIds = new Set(state.viewThreads.map((thread) => thread.id));
   state.selectedIds.clear();
+  const removesFromCurrentFolder = ["archive", "move", "delete", "spam", "notSpam", "report", "block", "ignore", "snooze"].includes(action);
+  if (removesFromCurrentFolder) ids.forEach((id) => state.pendingMailRemoval.add(id));
   optimisticMailAction(action, folderValue, ids, options);
   rebuildIndex();
   const nextId = nextThreadAfterMailAction(previousThreadId, anchorIndex);
@@ -6475,6 +6521,30 @@ async function performBulkAction(action, folderValue, options = {}) {
   }
   enqueueMailAction(job);
 }
+function removeFolderMessagesLocally(folderId) {
+  const removedSelection = state.selectedThreadId;
+  state.messages = state.messages.filter((message) => message.folder !== folderId);
+  state.folderCounts[folderId] = 0;
+  state.folderUnread[folderId] = 0;
+  for (const [key, page] of Object.entries(state.mailPages)) {
+    if (key.split("\u0000")[0] === folderId) {
+      page.total = 0;
+      page.totalMessages = 0;
+      page.hasMore = false;
+      page.loaded = true;
+    }
+  }
+  state.selectedIds.clear();
+  if (state.selectedThreadId && !threadById(state.selectedThreadId)) {
+    state.selectedThreadId = null;
+    state.expandedThreadId = null;
+    state.expanded = new Set();
+    document.body.classList.remove("reader-open");
+  }
+  if (removedSelection && !state.selectedThreadId) writeAppHash({ replace: true });
+  rebuildIndex();
+}
+
 function messageMenuThread() {
   return state.messageMenuThreadId ? threadById(state.messageMenuThreadId) : null;
 }

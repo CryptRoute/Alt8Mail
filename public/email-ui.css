@@ -1589,3 +1589,15 @@
   cursor: not-allowed;
   box-shadow: none;
 }
+
+/* Empty-folder affordance: let the current rows leave before the empty state. */
+.msg.is-removing {
+  pointer-events: none;
+  animation: mail-row-remove .18s ease forwards;
+}
+@keyframes mail-row-remove {
+  to { opacity: 0; transform: translateX(10px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg.is-removing { animation-duration: .01ms; }
+}

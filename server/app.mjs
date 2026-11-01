@@ -1307,6 +1307,21 @@ export async function createApp(options = {}) {
         sendJson(res, 200, { ok: true, folder });
         return;
       }
+      const emptyFolderMatch = pathname.match(/^\/api\/folders\/([A-Za-z0-9_-]{1,100})\/empty$/);
+      if (emptyFolderMatch && req.method === "POST") {
+        const folder = db.folders.find((item) => item.id === emptyFolderMatch[1]);
+        if (!folder) throw new ApiError(404, "FOLDER_NOT_FOUND", "Folder not found");
+        if (["inbox", "sent", "drafts", "archive"].includes(folder.id)) {
+          throw new ApiError(400, "FOLDER_SYSTEM", "That folder cannot be emptied");
+        }
+        const before = db.messages.length;
+        db.messages = db.messages.filter((message) => message.folder !== folder.id);
+        const removed = before - db.messages.length;
+        addAudit(req, "folder.empty", folder.label, `Emptied ${removed} messages from ${folder.label}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, removed });
+        return;
+      }
       if (mailFolderMatch && req.method === "DELETE") {
         const folder = db.folders.find((item) => item.id === mailFolderMatch[1]);
         if (!folder) throw new ApiError(404, "FOLDER_NOT_FOUND", "Folder not found");
