@@ -3793,6 +3793,29 @@ function selectionIdForMessage(message) {
   return inboxViewIndividual() ? message.id : (message.threadId || message.id);
 }
 
+// The URL must always carry the opaque conversation ID, even when the Inbox
+// is showing individual messages. In individual view the selected row is a
+// message ID, so translate it back to its thread before writing the hash.
+function threadUrlIdForSelection(selectionId = state.selectedThreadId) {
+  const selection = String(selectionId || "");
+  if (!selection) return "";
+  const message = messageById(selection);
+  if (message && message.threadId) return message.threadId;
+  const thread = threadById(selection);
+  return (thread && (thread.latest?.threadId || thread.id)) || "";
+}
+
+// Resolve a hash/deep-link target into the ID used by the current view. Grouped
+// view selects threads; individual view selects messages but keeps thread IDs
+// in the address bar.
+function selectionIdForRoute(target) {
+  const canonical = canonicalThreadId(target);
+  const message = messageById(target) || messageById(canonical);
+  if (message) return inboxViewIndividual() ? message.id : selectionIdForMessage(message);
+  const thread = threadById(canonical);
+  return thread ? thread.id : canonical;
+}
+
 function threadById(threadId) {
   if (!threadId) return null;
   if (inboxViewIndividual()) {
@@ -14974,7 +14997,8 @@ function currentAppHash() {
   if (HASH_TASK_LABELS[state.task]) return `#/${HASH_TASK_LABELS[state.task]}`;
   const label = folderDef(state.folder).label || FOLDER_LABELS[state.folder] || "Inbox";
   const base = `#/${encodeURIComponent(label)}`;
-  return state.selectedThreadId ? `${base}/${encodeURIComponent(state.selectedThreadId)}` : base;
+  const routeThreadId = threadUrlIdForSelection();
+  return routeThreadId ? `${base}/${encodeURIComponent(routeThreadId)}` : base;
 }
 
 function writeAppHash({ replace = true } = {}) {
@@ -15045,13 +15069,10 @@ function applyHashRoute() {
       }
       return true;
     }
-    const message = messageById(targetId);
-    if (message) targetId = selectionIdForMessage(message);
-    if (!threadById(targetId)) {
+    let selection = selectionIdForRoute(targetId);
+    if (!threadById(selection)) {
       ensureThreadLoaded(targetId).then((found) => {
-        const canonical = canonicalThreadId(targetId);
-        const loaded = messageById(targetId) || messageById(canonical);
-        const selection = loaded ? selectionIdForMessage(loaded) : canonical;
+        selection = selectionIdForRoute(targetId);
         if (found && threadById(selection)) {
           selectThread(selection);
           return;
@@ -15067,7 +15088,7 @@ function applyHashRoute() {
       });
       return true;
     }
-    selectThread(targetId);
+    selectThread(selection);
     return true;
   } finally {
     suppressHashSync = false;
@@ -15669,14 +15690,13 @@ async function installApp() {
 }
 
 function selectDeepLinkedThread(requestedThread) {
-  const message = messageById(requestedThread);
-  const threadId = message ? selectionIdForMessage(message) : canonicalThreadId(requestedThread);
-  const thread = threadById(threadId);
+  const selection = selectionIdForRoute(requestedThread);
+  const thread = threadById(selection);
   if (!thread) return false;
   const target = thread.messages.find((item) => item.folder !== "drafts") || thread.latest;
   state.folder = FOLDER_LABELS[target.folder] ? target.folder : "inbox";
   state.filter = "all";
-  state.selectedThreadId = threadId;
+  state.selectedThreadId = selection;
   renderFolders();
   renderList();
   renderReader();
@@ -15684,6 +15704,15 @@ function selectDeepLinkedThread(requestedThread) {
   if (isMobile()) document.body.classList.add("reader-open");
   updateDocumentTitle();
   return true;
+}
+
+function rewriteDeepLinkThreadParam(requestedThread) {
+  const canonical = threadUrlIdForSelection();
+  if (!canonical || canonical === requestedThread) return;
+  const next = new URL(window.location.href);
+  if (next.searchParams.has("thread")) next.searchParams.set("thread", canonical);
+  if (next.searchParams.has("message")) next.searchParams.set("message", canonical);
+  history.replaceState({}, "", next);
 }
 
 function handleDeepLink() {
@@ -15699,19 +15728,15 @@ function handleDeepLink() {
   }
   const requestedThread = params.get("thread") || params.get("message");
   if (requestedThread) {
-    if (!selectDeepLinkedThread(requestedThread)) {
+    if (selectDeepLinkedThread(requestedThread)) {
+      rewriteDeepLinkThreadParam(requestedThread);
+    } else {
       ensureThreadLoaded(requestedThread).then((found) => {
         if (!found || !selectDeepLinkedThread(requestedThread)) {
           showToast("That conversation is no longer available");
           return;
         }
-        const canonical = canonicalThreadId(requestedThread);
-        if (canonical && canonical !== requestedThread) {
-          const next = new URL(window.location.href);
-          if (next.searchParams.has("thread")) next.searchParams.set("thread", canonical);
-          if (next.searchParams.has("message")) next.searchParams.set("message", canonical);
-          history.replaceState({}, "", next);
-        }
+        rewriteDeepLinkThreadParam(requestedThread);
       });
     }
   }
@@ -15721,9 +15746,10 @@ function handleDeepLink() {
 }
 
 function openThreadWindow(threadId) {
-  if (!threadId) return;
-  const url = `${location.origin}/?thread=${encodeURIComponent(threadId)}&popout=1`;
-  const windowName = `a8m-thread-${String(threadId).replace(/[^A-Za-z0-9_-]/g, "")}`;
+  const routeThreadId = threadUrlIdForSelection(threadId);
+  if (!routeThreadId) return;
+  const url = `${location.origin}/?thread=${encodeURIComponent(routeThreadId)}&popout=1`;
+  const windowName = `a8m-thread-${String(routeThreadId).replace(/[^A-Za-z0-9_-]/g, "")}`;
   const win = window.open(url, windowName, "popup=yes,width=1040,height=820,left=120,top=90,resizable=yes,scrollbars=yes");
   if (!win) showToast("Allow pop-ups to open conversations in a new window");
 }

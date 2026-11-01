@@ -69,6 +69,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.6.3** patch keeps conversation addresses opaque in Individual message view. Selecting a message now writes its 22-character thread ID to the hash instead of the message row ID, so an address can no longer fall back to `msg_imap_…`. Pop-out windows and `?thread=`/`?message=` deep links are translated to the same opaque thread address while the selected individual message still opens in the reader.
+
 The **0.6.2** release gives every webmail page a context-aware browser-tab title. Sign-in uses `Alt8Mail: Secure Email with AI built in - Sign-in`; mailbox folders show their unread count, folder name and account address; open conversations show the folder and subject; an IMAP sync failure or browser outage uses the offline format; authenticated non-mail workspaces use the account tagline; and non-auth pages use the general Alt8Mail tagline. Titles update when the folder changes, a conversation opens or closes, messages become read or unread, background sync refreshes the mailbox, or the connection state changes. The bootstrap payload now exposes the last IMAP sync error so an outage can be reflected without reloading the page.
 
 The **0.6.1** patch hardens the opaque-ID migration for clients that still hold a legacy value. Draft saves, sends, restored drafts and task links normalize `t_` and `t_imap_` identifiers before they are written, so an already-open browser tab or an older API client cannot reintroduce a legacy URL after the migration has run.

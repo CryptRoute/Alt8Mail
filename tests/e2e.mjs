@@ -890,6 +890,29 @@ try {
   await sleep(700);
   check(await page.eval("document.title.endsWith('Inbox — avery.chen@a8m.example - Alt8Mail')"), "online tab title returns to the folder format");
 
+  console.log("\n[10b] Individual-view thread URLs");
+  await page.click("#settingsBtn");
+  await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+  await page.click("[data-settings-tab='mail']");
+  await sleep(350);
+  await page.setValue("#inboxViewSelect", "individual");
+  await sleep(700);
+  await page.click(".rail-btn[data-task='mail']");
+  await sleep(500);
+  await page.click(".msg[data-thread-id]");
+  await sleep(400);
+  const individualHash = await page.eval("location.hash");
+  check(/^#[/]Inbox[/][A-Za-z0-9_-]{22}$/.test(individualHash), "individual view writes the opaque thread ID to the URL");
+  check(!individualHash.includes("msg_imap_"), "individual view does not expose message IDs in the URL");
+  await page.click("#settingsBtn");
+  await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+  await page.click("[data-settings-tab='mail']");
+  await sleep(350);
+  await page.setValue("#inboxViewSelect", "grouped");
+  await sleep(700);
+  await page.click(".rail-btn[data-task='mail']");
+  await sleep(350);
+
   console.log("\n[11] Mobile layout");
   const mobile = await browser.newPage("about:blank");
   await mobile.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
