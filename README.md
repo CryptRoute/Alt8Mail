@@ -69,6 +69,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.6.5** patch matches Outlook’s read/unread treatment in the conversation list. Read senders and subjects now use regular weight, while unread conversations stay bold; opening or marking a message read removes the bold styling immediately.
+
 The **0.6.4** release tightens mailbox action feedback and routing. Optimistic archive, move, delete, spam and snooze actions stay hidden while their server write is in flight, even if a background refresh arrives, and selections originating from notifications or deep links are canonicalized to individual-view message rows. Emptying a folder now fades its visible rows out, clears the active list immediately and refreshes the folder that is actually open instead of silently loading Inbox. The tab/URL helpers also reuse the already-built view thread instead of rebuilding the conversation list for every title or hash update. Individual message view still renders one row per message, so large inboxes remain faster in Grouped conversation view.
 
 The **0.6.3** patch keeps conversation addresses opaque in Individual message view. Selecting a message now writes its 22-character thread ID to the hash instead of the message row ID, so an address can no longer fall back to `msg_imap_…`. Pop-out windows and `?thread=`/`?message=` deep links are translated to the same opaque thread address while the selected individual message still opens in the reader.

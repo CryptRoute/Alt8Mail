@@ -120,6 +120,17 @@ try {
   await page.click("#twoFactorSubmit");
   await waitForApp();
   check(await page.eval("document.title.startsWith('(') && document.title.endsWith('Inbox — avery.chen@a8m.example - Alt8Mail')"), "inbox tab title shows folder, unread count and account");
+  check(await page.eval(`(() => {
+    const rows = [...document.querySelectorAll('.msg')];
+    const unread = rows.find((row) => row.classList.contains('is-unread'));
+    const read = rows.find((row) => !row.classList.contains('is-unread'));
+    if (!unread || !read) return false;
+    const weight = (row, selector) => getComputedStyle(row.querySelector(selector)).fontWeight;
+    return weight(unread, '.msg-from') === '700'
+      && weight(unread, '.msg-subject') === '650'
+      && weight(read, '.msg-from') === '400'
+      && weight(read, '.msg-subject') === '400';
+  })()`), "read rows use normal weight while unread rows stay bold");
   equal(await page.eval("document.querySelectorAll('.msg').length"), 12, "12 inbox conversations are listed");
   equal(await page.eval("[...document.querySelectorAll('.msg-thread-count')].map(e=>e.textContent).join(',')"), "3,3,3,3,2", "threaded conversations show message counts");
   check(await page.eval("document.querySelectorAll('.compose-tab').length === 1"), "the server-restored seed draft is in the compose dock");

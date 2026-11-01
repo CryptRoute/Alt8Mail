@@ -1367,13 +1367,13 @@ svg.icon {
   flex: 1;
   min-width: 0;
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: 400;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.msg.is-unread .msg-from { font-weight: 650; }
+.msg.is-unread .msg-from { font-weight: 700; }
 .msg-time {
   flex: none;
   font-size: 0.6875rem;
@@ -1414,7 +1414,7 @@ svg.icon {
 .star-btn.is-starred svg { fill: currentColor; }
 .msg-subject {
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: 400;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -1429,7 +1429,7 @@ svg.icon {
   background: var(--cat);
   vertical-align: 1px;
 }
-.msg.is-unread .msg-subject { font-weight: 600; }
+.msg.is-unread .msg-subject { font-weight: 650; }
 .msg-snippet {
   font-size: 0.75rem;
   color: var(--text-3);
