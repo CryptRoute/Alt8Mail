@@ -61,3 +61,30 @@ func TestMailScopeHidesIgnoredAndSnoozed(t *testing.T) {
 		t.Fatalf("unexpected snoozed condition: %q", where)
 	}
 }
+
+func TestMailScopeProductivityFilters(t *testing.T) {
+	me := "avery.chen@a8m.test"
+	toMe := map[string]any{"folder": "inbox", "to": []any{map[string]any{"email": me}}}
+	if !mailMessageMatchesScope(toMe, "inbox", "toMe", me) {
+		t.Fatal("message addressed to the account should match toMe")
+	}
+	if mailMessageMatchesScope(toMe, "inbox", "toMe", "other@a8m.test") {
+		t.Fatal("message addressed elsewhere should not match toMe")
+	}
+	mention := map[string]any{"folder": "inbox", "bodyText": "Please review this, @avery.chen"}
+	if !mailMessageMatchesScope(mention, "inbox", "mentions", me) {
+		t.Fatal("mention should match mentions filter")
+	}
+	flagged := map[string]any{"folder": "inbox", "flagged": true}
+	if !mailMessageMatchesScope(flagged, "inbox", "flagged", me) {
+		t.Fatal("flagged message should match flagged filter")
+	}
+	invite := map[string]any{"folder": "inbox", "attachments": []any{map[string]any{"mime": "text/calendar; method=REQUEST"}}}
+	if !mailMessageMatchesScope(invite, "inbox", "calendar", me) {
+		t.Fatal("calendar attachment should match calendar filter")
+	}
+	where, _ := mailFolderCondition("user-1", "inbox", "toMe")
+	if !strings.Contains(where, "to_text ILIKE") || !strings.Contains(where, "cc_text ILIKE") {
+		t.Fatalf("toMe condition missing recipient clauses: %q", where)
+	}
+}

@@ -145,7 +145,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 	filtered := make([]any, 0, len(matched))
 	threadIDs := []string{}
 	for _, message := range matched {
-		if query == "" && !mailMessageMatchesScope(message, folder, filter) {
+		if query == "" && !mailMessageMatchesScope(message, folder, filter, sess.User.Email) {
 			continue
 		}
 		switch filter {
@@ -213,7 +213,7 @@ func (s *Server) loadMailMessageThread(ctx context.Context, userID, target strin
 	return messages, err
 }
 
-func mailMessageMatchesScope(message map[string]any, folder, filter string) bool {
+func mailMessageMatchesScope(message map[string]any, folder, filter string, accountEmail ...string) bool {
 	if stateBool(message, "ignored") {
 		return false
 	}
@@ -238,13 +238,50 @@ func mailMessageMatchesScope(message map[string]any, folder, filter string) bool
 			return false
 		}
 	}
+	email := ""
+	if len(accountEmail) > 0 {
+		email = strings.ToLower(strings.TrimSpace(accountEmail[0]))
+	}
 	switch filter {
 	case "unread":
 		return stateBool(message, "unread")
 	case "starred":
 		return stateBool(message, "starred") || stateBool(message, "flagged")
+	case "flagged":
+		return stateBool(message, "flagged")
 	case "attachments":
 		return len(stateSlice(message, "attachments")) > 0
+	case "toMe":
+		if email == "" {
+			return false
+		}
+		for _, field := range []string{"to", "cc", "bcc"} {
+			for _, raw := range stateSlice(message, field) {
+				person, _ := raw.(map[string]any)
+				if person != nil && strings.EqualFold(strings.TrimSpace(stateString(person, "email")), email) {
+					return true
+				}
+			}
+		}
+		return false
+	case "mentions":
+		if email == "" {
+			return false
+		}
+		local := strings.SplitN(email, "@", 2)[0]
+		body := strings.ToLower(stateString(message, "bodyText") + " " + stateString(message, "bodyHtml") + " " + stateString(message, "snippet"))
+		return strings.Contains(body, "@"+email) || (len(local) > 2 && strings.Contains(body, "@"+local))
+	case "calendar":
+		if event, ok := message["event"].(map[string]any); ok && len(event) > 0 {
+			return true
+		}
+		for _, raw := range stateSlice(message, "attachments") {
+			file, _ := raw.(map[string]any)
+			if file != nil && strings.HasPrefix(strings.ToLower(stateString(file, "mime")), "text/calendar") {
+				return true
+			}
+		}
+		return false
 	}
 	return true
 }

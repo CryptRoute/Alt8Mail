@@ -385,8 +385,16 @@ func mailFolderCondition(userID, folder, filter string) (string, []any) {
 		conditions = append(conditions, `unread`)
 	case "starred":
 		conditions = append(conditions, `(starred OR flagged)`)
+	case "flagged":
+		conditions = append(conditions, `flagged`)
 	case "attachments":
 		conditions = append(conditions, `EXISTS (SELECT 1 FROM mail_message_attachments ma WHERE ma.message_id = mail_messages.id)`)
+	case "toMe":
+		conditions = append(conditions, `(to_text ILIKE '%' || (SELECT email::text FROM users WHERE id=$1) || '%' OR cc_text ILIKE '%' || (SELECT email::text FROM users WHERE id=$1) || '%' OR bcc_text ILIKE '%' || (SELECT email::text FROM users WHERE id=$1) || '%')`)
+	case "mentions":
+		conditions = append(conditions, `body_text ILIKE '%@' || split_part((SELECT email::text FROM users WHERE id=$1), '@', 1) || '%'`)
+	case "calendar":
+		conditions = append(conditions, `((event IS NOT NULL AND event::text NOT IN ('null', '{}')) OR EXISTS (SELECT 1 FROM mail_message_attachments ma JOIN attachments a ON a.id=ma.attachment_id WHERE ma.message_id=mail_messages.id AND a.mime LIKE 'text/calendar%'))`)
 	}
 	return strings.Join(conditions, " AND "), args
 }
@@ -431,7 +439,7 @@ func (s *Server) loadMailThreadPage(ctx context.Context, userID, folder, filter 
 		SELECT thread_id FROM mail_messages
 		WHERE `+where+`
 		GROUP BY thread_id
-		ORDER BY max(sent_at) DESC
+		ORDER BY bool_or(pinned) DESC, max(sent_at) DESC
 		LIMIT $`+strconv.Itoa(limitIndex)+` OFFSET $`+strconv.Itoa(offsetIndex),
 		pageArgs...)
 	if err != nil {
@@ -494,6 +502,15 @@ func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[s
 	`, userID).Scan(&snoozed, &snoozedUnread)
 	counts["snoozed"] = snoozed
 	unread["snoozed"] = snoozedUnread
+	var starred, starredUnread int
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE unread)
+		FROM mail_messages
+		WHERE user_id=$1 AND (starred OR flagged) AND folder NOT IN ('spam', 'trash')
+		  AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())
+	`, userID).Scan(&starred, &starredUnread)
+	counts["starred"] = starred
+	unread["starred"] = starredUnread
 	return counts, unread, nil
 }
 

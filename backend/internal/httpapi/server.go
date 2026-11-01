@@ -128,6 +128,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/preferences", s.requireUser(s.patchPreferencesState))
 	mux.HandleFunc("POST /api/preferences/reset", s.requireUser(s.resetPreferencesState))
 
+	mux.HandleFunc("GET /api/labels", s.requireUser(s.getMailLabels))
+	mux.HandleFunc("POST /api/labels", s.requireUser(s.createMailLabel))
+	mux.HandleFunc("PATCH /api/labels/{id}", s.requireUser(s.updateMailLabel))
+	mux.HandleFunc("DELETE /api/labels/{id}", s.requireUser(s.deleteMailLabel))
 	mux.HandleFunc("GET /api/messages", s.requireUser(s.getMessages))
 	mux.HandleFunc("PATCH /api/messages/{id}", s.requireUser(s.patchMessage))
 	mux.HandleFunc("POST /api/messages/read", s.requireUser(s.markRead))
@@ -533,6 +537,12 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("signature load failed", "user", sess.User.ID, "err", err)
 		signatures = []map[string]any{}
 	}
+	labels := []any{}
+	if records, labelErr := s.listMailLabels(ctx, sess.User.ID); labelErr == nil {
+		for _, label := range records {
+			labels = append(labels, label.public())
+		}
+	}
 	stateMap(state, "user")["aliases"] = aliases
 	folder := strings.TrimSpace(r.URL.Query().Get("folder"))
 	if folder == "" {
@@ -609,6 +619,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"aliases":    aliases,
 		"identities": identities,
 		"signatures": signatures,
+		"labels":     labels,
 		"folders":    folders,
 		"people":     people,
 		"messages":   messages,
@@ -1105,6 +1116,7 @@ func capabilities() []string {
 		"scheduled-send", "sieve", "automatic-replies", "sender-trust", "outbound-caps",
 		"quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files",
 		"storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences",
+		"labels", "message-filters",
 	}
 }
 

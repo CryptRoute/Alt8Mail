@@ -607,6 +607,19 @@ const CATEGORIES = {
   sales: { label: "Sales", color: "var(--cat-sales)" }
 };
 
+function allCategories() {
+  const map = { ...CATEGORIES };
+  for (const label of state.labels || []) {
+    if (!label?.id) continue;
+    map[label.id] = { label: label.name || "Label", color: label.color || "#0f6cbd", custom: true };
+  }
+  return map;
+}
+
+function categoryDef(key) {
+  return allCategories()[key] || null;
+}
+
 const ACCENTS = {
   blue: { label: "Blue", value: "#0f6cbd" },
   teal: { label: "Teal", value: "#0f766e" },
@@ -760,6 +773,7 @@ const state = {
   aliases: [],
   identities: [],
   signatures: [],
+  labels: [],
   ai: { enabled: false, languages: [], styles: [] },
   recentAudit: [],
   aiReader: null,
@@ -822,6 +836,7 @@ const state = {
   density: "comfortable",
   externalWarnings: true,
   markReadOnOpen: true,
+  readerLightMode: false,
   defaultPriority: "normal",
   defaultReceipt: false,
   undoSendSeconds: 8,
@@ -863,7 +878,8 @@ const state = {
   messageMenuThreadId: "",
   messageMenuMessageId: "",
   messageMenuView: "",
-  messageMenuPoint: null
+  messageMenuPoint: null,
+  messageMenuSelectionText: ""
 };
 
 state.calendarSelected = `${state.calendarYear}-${String(state.calendarMonth + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`;
@@ -1056,6 +1072,7 @@ const folderMenu = document.getElementById("folderMenu");
 const messageMenu = document.getElementById("messageMenu");
 const htmlSourceOverlay = document.getElementById("htmlSourceOverlay");
 const quickActionsOverlay = document.getElementById("quickActionsOverlay");
+const labelEditorOverlay = document.getElementById("labelEditorOverlay");
 const folderEditorOverlay = document.getElementById("folderEditorOverlay");
 let confirmResolver = null;
 
@@ -1595,8 +1612,22 @@ function setTheme(mode, save = true) {
   syncThemeUI();
 }
 
+function applyReaderLightMode() {
+  const button = document.getElementById("readerLightBtn");
+  const dark = effectiveTheme() === "dark";
+  const active = dark && Boolean(state.readerLightMode);
+  reader?.classList.toggle("is-light-message", active);
+  if (button) {
+    button.hidden = !dark;
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.classList.toggle("is-active", active);
+    button.title = active ? "Return the message to the dark reading background" : "Read message on a light background";
+  }
+}
+
 function syncThemeUI() {
   const mode = effectiveTheme();
+  applyReaderLightMode();
   const themeBtn = document.getElementById("themeBtn");
   if (themeBtn) {
     const label = mode === "dark" ? "Switch to light theme" : "Switch to dark theme";
@@ -2641,6 +2672,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.aliases = data.aliases || [];
   state.identities = data.identities || state.identities || [];
   state.signatures = data.signatures || state.signatures || [];
+  state.labels = data.labels || state.labels || [];
   state.ai = data.ai || { enabled: false };
   state.mailClient = data.mailClient || state.mailClient || null;
   state.recentAudit = data.recentAudit || [];
@@ -2994,8 +3026,31 @@ function scopeMessages() {
   }
   if (state.filter === "unread") messages = messages.filter((message) => message.unread);
   if (state.filter === "starred") messages = messages.filter((message) => message.starred);
+  if (state.filter === "flagged") messages = messages.filter((message) => message.flagged);
   if (state.filter === "attachments") messages = messages.filter((message) => (message.attachments || []).length);
+  if (state.filter === "toMe") messages = messages.filter((message) => messageIsAddressedToMe(message));
+  if (state.filter === "mentions") messages = messages.filter((message) => messageMentionsMe(message));
+  if (state.filter === "calendar") messages = messages.filter((message) => messageHasCalendarInvite(message));
   return messages;
+}
+
+function messageIsAddressedToMe(message) {
+  const me = normalizeEmail(state.user?.email);
+  if (!me) return false;
+  return ["to", "cc", "bcc"].some((field) => (Array.isArray(message[field]) ? message[field] : []).some((person) => normalizeEmail(person?.email) === me));
+}
+
+function messageMentionsMe(message) {
+  const me = normalizeEmail(state.user?.email);
+  if (!me) return false;
+  const local = me.split("@")[0];
+  const haystack = `${message.bodyText || ""} ${message.bodyHtml || ""} ${message.snippet || ""}`.toLowerCase();
+  return haystack.includes(`@${me}`) || (local.length > 2 && haystack.includes(`@${local}`));
+}
+
+function messageHasCalendarInvite(message) {
+  if (message.event && typeof message.event === "object") return true;
+  return (message.attachments || []).some((file) => String(file?.mime || file?.type || "").toLowerCase().startsWith("text/calendar"));
 }
 
 function inboxViewIndividual() {
@@ -3034,6 +3089,13 @@ function viewUnit(count) {
     : (count === 1 ? "conversation" : "conversations");
 }
 
+function pinnedFirstThreads(threads) {
+  const pinned = [];
+  const other = [];
+  for (const thread of threads) (thread.pinned ? pinned : other).push(thread);
+  return pinned.concat(other);
+}
+
 function computeView() {
   const scope = scopeMessages();
   let threads;
@@ -3044,6 +3106,9 @@ function computeView() {
     threads = buildThreads(scope, state.messages);
     if (!state.sortDesc) threads = threads.slice().reverse();
   }
+  // Pinned conversations are a reading priority, not a date order. Keep them
+  // above the normal list in both newest-first and oldest-first modes.
+  threads = pinnedFirstThreads(threads);
   state.viewScope = scope;
   state.viewThreads = threads;
   return threads;
@@ -3337,11 +3402,23 @@ function folderMenuSystem(folder) {
 
 const folderMenuIcon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
+function folderMenuCounts(folder) {
+  const local = (state.messages || []).filter((message) => {
+    if (folder.id === "starred") return (message.starred || message.flagged) && message.folder !== "spam" && message.folder !== "trash";
+    if (folder.id === "snoozed") return message.snoozedUntil && Date.parse(message.snoozedUntil) > Date.now();
+    return message.folder === folder.id;
+  });
+  const total = Number.isFinite(Number(state.folderCounts?.[folder.id])) ? Number(state.folderCounts[folder.id]) : local.length;
+  const unread = Number.isFinite(Number(state.folderUnread?.[folder.id])) ? Number(state.folderUnread[folder.id]) : local.filter((message) => message.unread).length;
+  return { total, unread };
+}
+
 function folderMenuHTML(folder) {
   const system = folderMenuSystem(folder);
   const emptyDisabled = system && folder.id !== "spam" && folder.id !== "trash";
   const disabled = (condition) => condition ? " disabled" : "";
-  return `<div class="folder-menu-head"><svg class="icon" aria-hidden="true"><use href="#${esc(folder.icon || "i-folder")}"/></svg><div><strong>${esc(folder.label)}</strong><span>${system ? "Primary folder" : "Custom folder"}</span></div></div>
+  const counts = folderMenuCounts(folder);
+  return `<div class="folder-menu-head"><svg class="icon" aria-hidden="true"><use href="#${esc(folder.icon || "i-folder")}"/></svg><div><strong>${esc(folder.label)}</strong><span>${counts.total} ${counts.total === 1 ? "message" : "messages"} · ${counts.unread} unread · ${system ? "Primary" : "Custom"}</span></div></div>
     <button type="button" data-folder-action="create-subfolder"${disabled(Boolean(folder.virtual))}>${folderMenuIcon("plus")}Create new subfolder</button>
     <button type="button" data-folder-action="rename"${disabled(system)}>${folderMenuIcon("file")}Rename</button>
     <button type="button" data-folder-action="color">${folderMenuIcon("tag")}Change color<span class="menu-chevron">›</span></button>
@@ -3563,9 +3640,10 @@ function threadSubject(thread) {
 }
 
 function categoryDots(categories) {
-  return (categories || []).map((key) => CATEGORIES[key]
-    ? `<span class="msg-cat-dot" style="--cat:${CATEGORIES[key].color}" title="${esc(CATEGORIES[key].label)}"></span>`
-    : "").join("");
+  return (categories || []).map((key) => {
+    const category = categoryDef(key);
+    return category ? `<span class="msg-cat-dot" style="--cat:${category.color}" title="${esc(category.label)}"></span>` : "";
+  }).join("");
 }
 
 function threadSearchToken(thread) {
@@ -3666,10 +3744,8 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
       : `${scopeCount} ${scopeCount === 1 ? "message" : "messages"} · ${threads.length} ${viewUnit(threads.length)}`;
   } else if (!page) {
     listCount.textContent = "Loading…";
-  } else if (state.filter === "unread") {
-    listCount.textContent = `${threads.length}${page.hasMore ? ` of ${pageTotal}` : ""} unread`;
-  } else if (state.filter === "starred") {
-    listCount.textContent = `${threads.length}${page.hasMore ? ` of ${pageTotal}` : ""} starred`;
+  } else if (state.filter !== "all") {
+    listCount.textContent = `${threads.length}${page.hasMore ? ` of ${pageTotal}` : ""} ${listFilterLabel().toLowerCase()}`;
   } else if (state.folder === "inbox") {
     listCount.textContent = `${unreadInboxCount()} unread`;
   } else {
@@ -3704,6 +3780,22 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
       emptyTitle = "No messages with files";
       emptyText = "Attachments appear here when a conversation includes a file.";
       emptyIcon = "i-paperclip";
+    } else if (state.filter === "flagged") {
+      emptyTitle = "No flagged conversations";
+      emptyText = "Flag a conversation for follow-up to see it here.";
+      emptyIcon = "i-flag";
+    } else if (state.filter === "toMe") {
+      emptyTitle = "No messages addressed to you";
+      emptyText = "Messages where you are in To, Cc or Bcc appear here.";
+      emptyIcon = "i-arrow-left";
+    } else if (state.filter === "mentions") {
+      emptyTitle = "No mentions found";
+      emptyText = "Messages that mention your address appear here.";
+      emptyIcon = "i-at";
+    } else if (state.filter === "calendar") {
+      emptyTitle = "No calendar invitations";
+      emptyText = "Messages carrying meeting or calendar invites appear here.";
+      emptyIcon = "i-calendar";
     }
     messageList.innerHTML = `<div class="list-empty">
       <div class="list-empty-icon"><svg class="icon" aria-hidden="true"><use href="#${emptyIcon}"/></svg></div>
@@ -3887,9 +3979,10 @@ function threadMessageMarkup(message, expanded) {
   const peerLabel = outgoing ? `to ${recipientLabel(message)}` : "to me";
   const trust = trustStatus(message);
   const unread = message.unread;
-  const cats = (message.categories || []).map((key) => CATEGORIES[key]
-    ? `<span class="chip-cat" style="--cat:${CATEGORIES[key].color}"><span class="cat-dot"></span>${esc(CATEGORIES[key].label)}</span>`
-    : "").join("");
+  const cats = (message.categories || []).map((key) => {
+    const category = categoryDef(key);
+    return category ? `<span class="chip-cat" style="--cat:${category.color}"><span class="cat-dot"></span>${esc(category.label)}</span>` : "";
+  }).join("");
   const activityBits = [];
   if (message.repliedAt) {
     activityBits.push(`<span><svg class="icon" aria-hidden="true"><use href="#i-reply"/></svg><strong>Replied</strong> ${esc(formatDateTimeFull(message.repliedAt))}${Number(message.replyCount) > 1 ? ` · ${Number(message.replyCount)} replies` : ""}</span>`);
@@ -3983,7 +4076,7 @@ function renderReader({ preserveScroll = false } = {}) {
   }
   const scrollTop = preserveScroll ? readerScroll.scrollTop : 0;
   const categories = (thread.latest.categories || []).map((key) => {
-    const category = CATEGORIES[key];
+    const category = categoryDef(key);
     return category ? `<span class="chip-cat" style="--cat:${category.color}"><span class="cat-dot"></span>${esc(category.label)}</span>` : "";
   }).join("");
   const classification = thread.latest.classification || "Internal";
@@ -4400,6 +4493,7 @@ function previewFallback(file, message) {
    ============================================================ */
 function syncSelectionUi() {
   const count = state.selectedIds.size;
+  messageList?.classList.toggle("has-selection", count > 0);
   bulkBar.hidden = count === 0;
   if (count) {
     bulkCount.textContent = `${count} ${viewUnit(count)} selected`;
@@ -5254,7 +5348,9 @@ function messageMenuFolderList(kind) {
 function messageMenuCategoryList(thread) {
   const active = new Set(thread?.latest?.categories || []);
   return `<div class="message-menu-head"><button class="icon-btn" type="button" data-message-back aria-label="Back to message actions"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><div><strong>Categorize</strong><span>Apply labels to this conversation</span></div></div>
-    ${Object.entries(CATEGORIES).map(([key, category]) => `<button type="button" data-message-category="${esc(key)}" class="${active.has(key) ? "is-active" : ""}"><span class="msg-cat-dot" style="--cat:${category.color}"></span><span>${esc(category.label)}</span>${active.has(key) ? '<span class="check">✓</span>' : ""}</button>`).join("")}
+    ${Object.entries(allCategories()).map(([key, category]) => `<button type="button" data-message-category="${esc(key)}" class="${active.has(key) ? "is-active" : ""}"><span class="msg-cat-dot" style="--cat:${category.color}"></span><span>${esc(category.label)}</span>${active.has(key) ? '<span class="check">✓</span>' : ""}</button>`).join("")}
+    <div class="message-menu-sep"></div>
+    <button type="button" data-message-new-label="1"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span>New label…</span></button>
     <div class="message-menu-note">Choose any number of categories. Clicking applies the change immediately.</div>`;
 }
 
@@ -5315,9 +5411,58 @@ function messageMenuAdvancedList() {
     ${menuButton("ignore", "i-lock", "Ignore conversation")}`;
 }
 
+function openMessageSelectionMenu(threadId, messageId, text, point) {
+  const thread = threadById(threadId);
+  if (!thread) return;
+  closeMenus();
+  state.messageMenuThreadId = thread.id;
+  state.messageMenuMessageId = messageId || thread.latest?.id || "";
+  state.messageMenuView = "selection";
+  state.messageMenuSelectionText = String(text || "").trim();
+  state.messageMenuPoint = point || { clientX: 120, clientY: 120 };
+  messageMenu.innerHTML = messageMenuMarkup();
+  positionMessageMenu(state.messageMenuPoint);
+  messageMenu.querySelector("button")?.focus();
+}
+
+function messageMenuSelectionMarkup(thread) {
+  const preview = state.messageMenuSelectionText.replace(/\s+/g, " ").trim();
+  return `<div class="message-menu-head"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><div><strong>Selected text</strong><span>${esc(preview.slice(0, 110))}${preview.length > 110 ? "…" : ""}</span></div></div>
+    <button type="button" data-message-command="copyText" class="message-copy-text"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy Text</span><kbd>Ctrl C</kbd></button>
+    ${messageMenuDivider()}
+    ${menuButton("reply", "i-reply", "Reply")}
+    ${menuButton("replyAll", "i-reply-all", "Reply all", replyAllAvailable(thread) ? "" : "disabled")}
+    ${menuButton("forward", "i-forward", "Forward")}
+    ${menuButton("delete", "i-trash", "Delete", "", "is-danger")}`;
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {}
+  try {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand("copy");
+    area.remove();
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
 function messageMenuMarkup() {
   const thread = messageMenuThread();
   if (!thread) return '<div class="message-menu-empty">That conversation is no longer available</div>';
+  if (state.messageMenuView === "selection" && state.messageMenuSelectionText) return messageMenuSelectionMarkup(thread);
   const message = state.messageMenuMessageId ? (thread.messages.find((item) => item.id === state.messageMenuMessageId) || thread.latest) : thread.latest;
   const view = state.messageMenuView;
   if (view === "move" || view === "copy") return messageMenuFolderList(view);
@@ -5381,6 +5526,7 @@ function openMessageMenu(threadId, messageId, point) {
   state.messageMenuThreadId = thread.id;
   state.messageMenuMessageId = messageId || thread.latest?.id || "";
   state.messageMenuView = "";
+  state.messageMenuSelectionText = "";
   state.messageMenuPoint = point || { clientX: 120, clientY: 120 };
   messageMenu.innerHTML = messageMenuMarkup();
   positionMessageMenu(state.messageMenuPoint);
@@ -5392,6 +5538,7 @@ function closeMessageMenu() {
   state.messageMenuThreadId = "";
   state.messageMenuMessageId = "";
   state.messageMenuView = "";
+  state.messageMenuSelectionText = "";
 }
 
 function rerenderMessageMenu() {
@@ -5506,12 +5653,170 @@ async function saveQuickActions() {
   }
 }
 
+async function loadMailLabels() {
+  try {
+    const data = await api("/api/labels");
+    state.labels = data.labels || [];
+    renderLabelSettings();
+    renderList({ preserveScroll: true });
+    renderReader({ preserveScroll: true });
+  } catch {
+    // The standalone reference server predates the labels API; keep the
+    // built-in labels usable until the Go backend is present.
+  }
+}
+
+function renderLabelSettings() {
+  const holder = document.getElementById("labelSettingsList");
+  if (!holder) return;
+  const builtins = Object.entries(CATEGORIES).map(([id, category]) => `
+    <div class="label-settings-row is-builtin">
+      <span class="label-swatch" style="--label:${category.color}"></span>
+      <div class="label-settings-copy"><strong>${esc(category.label)}</strong><span>Built-in label</span></div>
+      <span class="label-builtin-chip">Built-in</span>
+    </div>`).join("");
+  const custom = (state.labels || []).map((label) => `
+    <div class="label-settings-row">
+      <span class="label-swatch" style="--label:${esc(label.color || "#0f6cbd")}"></span>
+      <div class="label-settings-copy"><strong>${esc(label.name)}</strong><span>${esc(label.color || "#0f6cbd")}</span></div>
+      <div class="label-settings-actions">
+        <button class="link-btn" type="button" data-label-edit="${esc(label.id)}">Edit</button>
+        <button class="link-btn danger" type="button" data-label-delete="${esc(label.id)}">Delete</button>
+      </div>
+    </div>`).join("");
+  holder.innerHTML = `<div class="label-settings-grid">${builtins}${custom}</div>${custom ? "" : '<p class="settings-note">No custom labels yet. Use New label to create one.</p>'}`;
+}
+
+function openLabelEditor(label = null, { applyThreadId = "" } = {}) {
+  state.labelEditor = { id: label?.id || "", applyThreadId };
+  document.getElementById("labelEditorTitle").textContent = label ? "Edit label" : "New label";
+  document.getElementById("labelEditorSubtitle").textContent = applyThreadId
+    ? "Create a label and apply it to this conversation immediately."
+    : "Give this label a name and a colour.";
+  document.getElementById("labelEditorName").value = label?.name || "";
+  document.getElementById("labelEditorColor").value = label?.color || "#0f6cbd";
+  document.getElementById("labelEditorError").hidden = true;
+  document.getElementById("labelEditorSave").textContent = label ? "Save changes" : "Create label";
+  updateLabelEditorPreview();
+  labelEditorOverlay.hidden = false;
+  setTimeout(() => document.getElementById("labelEditorName")?.focus(), 40);
+}
+
+function updateLabelEditorPreview() {
+  const color = document.getElementById("labelEditorColor")?.value || "#0f6cbd";
+  const name = document.getElementById("labelEditorName")?.value.trim() || "Label preview";
+  const swatch = document.getElementById("labelColorSwatch");
+  const preview = document.getElementById("labelPreview");
+  if (swatch) swatch.style.setProperty("--label", color);
+  if (preview) {
+    preview.style.setProperty("--cat", color);
+    const text = preview.querySelector("span:last-child");
+    if (text) text.textContent = name;
+  }
+}
+
+function closeLabelEditor() {
+  labelEditorOverlay.hidden = true;
+  state.labelEditor = null;
+}
+
+function applyLabelToThread(threadId, labelId) {
+  const thread = threadById(threadId);
+  if (!thread || !labelId) return;
+  const threads = [thread];
+  const current = new Set(thread.latest?.categories || []);
+  current.add(labelId);
+  const categories = Array.from(current);
+  const ids = actionMessageIds(threads);
+  if (!ids.length) return;
+  const snapshot = captureMailActionSnapshot(ids);
+  optimisticMailAction("categorize", "", ids, { categories });
+  rebuildIndex();
+  renderList({ preserveScroll: true });
+  renderReader({ preserveScroll: true });
+  enqueueMailAction({
+    ids, action: "categorize", categories, threadCount: threads.length,
+    previousThreadId: thread.id, snapshot
+  });
+}
+
+async function saveLabelEditor() {
+  const editor = state.labelEditor;
+  if (!editor) return;
+  const name = document.getElementById("labelEditorName").value.trim();
+  const color = document.getElementById("labelEditorColor").value;
+  const error = document.getElementById("labelEditorError");
+  const button = document.getElementById("labelEditorSave");
+  if (!name) {
+    error.textContent = "Give the label a name.";
+    error.hidden = false;
+    return;
+  }
+  button.disabled = true;
+  button.textContent = "Saving…";
+  try {
+    const data = editor.id
+      ? await api(`/api/labels/${encodeURIComponent(editor.id)}`, { method: "PATCH", body: { name, color } })
+      : await api("/api/labels", { method: "POST", body: { name, color } });
+    const label = data.label;
+    if (editor.id) {
+      state.labels = (state.labels || []).map((item) => item.id === label.id ? label : item);
+    } else {
+      state.labels = [...(state.labels || []), label];
+    }
+    closeLabelEditor();
+    renderLabelSettings();
+    renderList({ preserveScroll: true });
+    renderReader({ preserveScroll: true });
+    if (editor.applyThreadId && label) applyLabelToThread(editor.applyThreadId, label.id);
+    showToast(editor.id ? "Label updated" : "Label created");
+  } catch (saveError) {
+    error.textContent = saveError.message || "Could not save the label.";
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = editor.id ? "Save changes" : "Create label";
+  }
+}
+
+async function deleteMailLabel(id) {
+  const label = (state.labels || []).find((item) => item.id === id);
+  if (!label) return;
+  const ok = await appConfirm({
+    title: "Delete label?",
+    message: `“${label.name}” will be removed from every message that uses it.`,
+    confirmLabel: "Delete label",
+    tone: "danger"
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/labels/${encodeURIComponent(id)}`, { method: "DELETE" });
+    state.labels = (state.labels || []).filter((item) => item.id !== id);
+    state.messages.forEach((message) => {
+      if (Array.isArray(message.categories)) message.categories = message.categories.filter((key) => key !== id);
+    });
+    rebuildIndex();
+    renderLabelSettings();
+    renderList({ preserveScroll: true });
+    renderReader({ preserveScroll: true });
+    showToast("Label deleted");
+  } catch (error) {
+    showError(error);
+  }
+}
+
 async function messageMenuCommand(command, button) {
   const thread = messageMenuThread();
   if (!thread) { closeMessageMenu(); return; }
   const threads = messageMenuActionThreads(thread);
   const target = messageMenuTargetMessage(thread);
+  const selectionText = state.messageMenuSelectionText;
   closeMessageMenu();
+  if (command === "copyText") {
+    const copied = await copyTextToClipboard(selectionText);
+    showToast(copied ? "Selected text copied" : "Could not copy the selected text");
+    return;
+  }
   if (command === "reply") { replyToMessage(target || replyTarget(thread)); return; }
   if (command === "replyAll") { replyToMessage(target || replyTarget(thread), true); return; }
   if (command === "forward") { forwardMessage(target || replyTarget(thread)); return; }
@@ -7842,14 +8147,32 @@ function buildSchedulePresets() {
     { id: "monday-morning", title: "Monday morning", kicker: "Start of week", date: monday, time: workStart }
   ];
   const seen = new Set();
-  return presets.filter((preset) => {
+  const chosen = [];
+  for (const preset of presets) {
     const stamp = zonedWallTimeToUtc(preset.date, preset.time);
-    if (!stamp || stamp.getTime() <= Date.now() + 5000) return false;
+    if (!stamp || stamp.getTime() <= Date.now() + 5000) continue;
     const key = `${preset.date}T${preset.time}`;
-    if (seen.has(key)) return false;
+    if (seen.has(key)) continue;
     seen.add(key);
-    return true;
-  });
+    chosen.push(preset);
+  }
+  // A Sunday or holiday can collapse Recommended, Tomorrow and Monday into
+  // the same slot. Fill the grid with the next distinct work slots so the
+  // scheduling dialog never loses its useful choices.
+  for (let offset = 2; chosen.length < 4 && offset <= 10; offset += 1) {
+    const key = addDaysToKey(today, offset);
+    if (!workDays.has(weekdayOfKey(key))) continue;
+    for (const [suffix, title, time] of [["morning", "Morning", workStart], ["afternoon", "Afternoon", timeFromMinutes(afternoonMinutes)]]) {
+      const stamp = zonedWallTimeToUtc(key, time);
+      if (!stamp || stamp.getTime() <= Date.now() + 5000) continue;
+      const dedupe = `${key}T${time}`;
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      chosen.push({ id: `later-${suffix}-${offset}`, title: `${formatDateOnly(key)} ${title}`, kicker: "Next work slot", date: key, time });
+      if (chosen.length >= 4) break;
+    }
+  }
+  return chosen.slice(0, 4);
 }
 
 function openScheduleDialog(session) {
@@ -8653,7 +8976,7 @@ function openSettings(tab) {
 function renderSettingsDynamic() {
   if (state.task !== "settings" && !["rules", "audit", "account", "security", "regional", "autoreply", "identities"].includes(state.settingsTab)) return;
   if (state.settingsTab === "rules") renderRules();
-  else if (state.settingsTab === "mail") { syncPreferencesUi(); renderSignatureLibrary(); loadSignatures(); }
+  else if (state.settingsTab === "mail") { syncPreferencesUi(); renderSignatureLibrary(); renderLabelSettings(); loadSignatures(); }
   else if (["appearance", "compose", "notifications"].includes(state.settingsTab)) syncPreferencesUi();
   else if (state.settingsTab === "storage") renderStorageSettings();
   else if (state.settingsTab === "identities") { renderIdentities(); refreshIdentities(); loadForwardingSettings(); }
@@ -11498,10 +11821,43 @@ function syncNav() {
   });
 }
 
+const LIST_FILTERS = [
+  { id: "all", label: "All", icon: "i-mail" },
+  { id: "unread", label: "Unread", icon: "i-envelope-open" },
+  { id: "flagged", label: "Flagged", icon: "i-flag" },
+  { id: "toMe", label: "To me", icon: "i-arrow-left" },
+  { id: "attachments", label: "Has files", icon: "i-paperclip" },
+  { id: "mentions", label: "Mentions me", icon: "i-at" },
+  { id: "calendar", label: "Has calendar invites", icon: "i-calendar" }
+];
+
+function listFilterLabel(filter = state.filter) {
+  return LIST_FILTERS.find((item) => item.id === filter)?.label || "All";
+}
+
+function renderListFilterMenu() {
+  const menu = document.getElementById("listFilterMenu");
+  if (!menu) return;
+  menu.innerHTML = LIST_FILTERS.map((item) => `<button type="button" role="menuitemradio" aria-checked="${state.filter === item.id}" data-list-filter="${item.id}" class="${state.filter === item.id ? "is-active" : ""}"><svg class="icon" aria-hidden="true"><use href="#${item.icon}"/></svg><span>${esc(item.label)}</span>${state.filter === item.id ? '<span class="check">✓</span>' : ""}</button>`).join("");
+}
+
+function toggleListFilterMenu(force) {
+  const menu = document.getElementById("listFilterMenu");
+  const button = document.getElementById("filterBtn");
+  if (!menu || !button) return;
+  const open = force === undefined ? menu.hidden : Boolean(force);
+  renderListFilterMenu();
+  menu.hidden = !open;
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+  button.classList.toggle("is-active", open || state.filter !== "all");
+}
+
 function syncChips() {
   $$("button[data-filter]").forEach((button) => {
     button.classList.toggle("is-active", button.getAttribute("data-filter") === state.filter);
   });
+  document.getElementById("filterBtn")?.classList.toggle("is-active", state.filter !== "all");
+  renderListFilterMenu();
 }
 
 function setFolder(folder) {
@@ -11677,10 +12033,12 @@ function closeMenus() {
   moveMenu.hidden = true;
   if (folderMenu) folderMenu.hidden = true;
   if (messageMenu) messageMenu.hidden = true;
+  toggleListFilterMenu(false);
   state.folderMenuTarget = "";
   state.messageMenuThreadId = "";
   state.messageMenuMessageId = "";
   state.messageMenuView = "";
+  state.messageMenuSelectionText = "";
   state.bulkMoveOpen = false;
   const bulkMenu = document.getElementById("bulkMoveMenu");
   if (bulkMenu) bulkMenu.hidden = true;
@@ -12940,6 +13298,13 @@ function bindEvents() {
       if (back) { state.messageMenuView = ""; rerenderMessageMenu(); return; }
       const submenu = event.target.closest("[data-message-submenu]");
       if (submenu) { state.messageMenuView = submenu.getAttribute("data-message-submenu") || ""; rerenderMessageMenu(); return; }
+      const newLabel = event.target.closest("[data-message-new-label]");
+      if (newLabel) {
+        const thread = messageMenuThread();
+        closeMessageMenu();
+        if (thread) openLabelEditor(null, { applyThreadId: thread.id });
+        return;
+      }
       const category = event.target.closest("[data-message-category]");
       if (category) { toggleCategoryForMenu(category.getAttribute("data-message-category")); return; }
       const snooze = event.target.closest("[data-message-snooze]");
@@ -12971,6 +13336,18 @@ function bindEvents() {
     }
   });
   document.addEventListener("contextmenu", (event) => {
+    const selection = window.getSelection();
+    const selectedText = selection && selection.rangeCount > 0 && !selection.isCollapsed ? selection.toString().trim() : "";
+    if (selectedText && selection.anchorNode && readerContent.contains(selection.anchorNode)) {
+      const thread = currentThread();
+      if (thread) {
+        const element = selection.anchorNode.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection.anchorNode.parentElement;
+        const article = element?.closest?.(".thread-msg[data-message-id]");
+        event.preventDefault();
+        openMessageSelectionMenu(thread.id, article?.getAttribute("data-message-id") || thread.latest?.id || "", selectedText, { clientX: event.clientX, clientY: event.clientY });
+        return;
+      }
+    }
     const messageRow = event.target.closest(".thread-msg[data-message-id]");
     if (messageRow) {
       const thread = currentThread();
@@ -13003,6 +13380,20 @@ function bindEvents() {
   document.getElementById("cmdCompose").addEventListener("click", () => openCompose());
   document.getElementById("drawerCompose").addEventListener("click", () => { closeDrawer(); openCompose(); });
   document.getElementById("composeFab").addEventListener("click", () => openCompose());
+  document.getElementById("filterBtn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleListFilterMenu();
+  });
+  document.getElementById("listFilterMenu")?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-list-filter]");
+    if (!option) return;
+    event.preventDefault();
+    setFilter(option.getAttribute("data-list-filter"));
+    toggleListFilterMenu(false);
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#filterBtn") && !event.target.closest("#listFilterMenu")) toggleListFilterMenu(false);
+  });
   document.getElementById("sortBtn").addEventListener("click", () => {
     state.sortDesc = !state.sortDesc;
     const button = document.getElementById("sortBtn");
@@ -13024,6 +13415,12 @@ function bindEvents() {
   document.getElementById("readerBack").addEventListener("click", () => {
     if (document.body.classList.contains("popout")) { window.close(); return; }
     document.body.classList.remove("reader-open");
+  });
+  document.getElementById("readerLightBtn")?.addEventListener("click", () => {
+    state.readerLightMode = !state.readerLightMode;
+    prefs.set("readerLightMode", state.readerLightMode ? "1" : "0");
+    applyReaderLightMode();
+    showToast(state.readerLightMode ? "Message background is now light" : "Message background follows the dark theme");
   });
   document.getElementById("readerPopout").addEventListener("click", () => {
     if (document.body.classList.contains("popout")) { window.close(); return; }
@@ -13592,6 +13989,19 @@ function bindEvents() {
 
   /* Signature library editor, identity editor and spell-check review */
   wireHtmlSourceDialog();
+  document.getElementById("newLabelBtn")?.addEventListener("click", () => openLabelEditor());
+  document.getElementById("labelEditorClose")?.addEventListener("click", closeLabelEditor);
+  document.getElementById("labelEditorCancel")?.addEventListener("click", closeLabelEditor);
+  labelEditorOverlay?.addEventListener("click", (event) => { if (event.target === labelEditorOverlay) closeLabelEditor(); });
+  document.getElementById("labelEditorSave")?.addEventListener("click", saveLabelEditor);
+  document.getElementById("labelEditorColor")?.addEventListener("input", updateLabelEditorPreview);
+  document.getElementById("labelEditorName")?.addEventListener("input", updateLabelEditorPreview);
+  document.getElementById("labelSettingsList")?.addEventListener("click", (event) => {
+    const edit = event.target.closest("[data-label-edit]");
+    if (edit) { const label = (state.labels || []).find((item) => item.id === edit.getAttribute("data-label-edit")); openLabelEditor(label); return; }
+    const remove = event.target.closest("[data-label-delete]");
+    if (remove) deleteMailLabel(remove.getAttribute("data-label-delete"));
+  });
   signatureEditorOverlay?.addEventListener("mousedown", (event) => {
     if (event.target.closest(".signature-editor-toolbar button")) event.preventDefault();
   });
@@ -13791,6 +14201,15 @@ function bindEvents() {
       focusSearch();
       return;
     }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" &&
+        state.task === "mail" && !typing && loginScreen.hidden !== false &&
+        !document.querySelector(".overlay:not([hidden])") &&
+        !composeSessions.some((session) => session.mode !== "minimized")) {
+      event.preventDefault();
+      selectAllVisible(true);
+      showToast(`${state.selectedIds.size} ${viewUnit(state.selectedIds.size)} selected`);
+      return;
+    }
     if (event.key === "Escape") {
       if (!confirmOverlay.hidden) { settleConfirm(false); return; }
       if (!domainBlockedOverlay.hidden) { domainBlockedOverlay.hidden = true; return; }
@@ -13805,6 +14224,7 @@ function bindEvents() {
       if (!shareOverlay.hidden) { shareOverlay.hidden = true; return; }
       if (!recoveryOverlay.hidden) { recoveryOverlay.hidden = true; return; }
       if (folderEditorOverlay && !folderEditorOverlay.hidden) { closeFolderEditor(); return; }
+      if (labelEditorOverlay && !labelEditorOverlay.hidden) { closeLabelEditor(); return; }
       if (folderMenu && !folderMenu.hidden) { closeFolderMenu(); return; }
       if (state.editingTaskId) { state.editingTaskId = null; renderTasks(); return; }
       if (!detailsOverlay.hidden) { closeDetails(); return; }

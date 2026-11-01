@@ -52,6 +52,7 @@ in the request path and its JSON demo data is not read by the live frontend.
 | Session | `POST/GET/DELETE /api/session`, `POST /api/password/change` |
 | Bootstrap / navigation | `GET /api/bootstrap`, `/api/folders`, `/api/aliases` |
 | Messages | `GET /api/messages?folder=&filter=&limit=50&offset=0` or `GET /api/messages?thread=<thread-or-message-id>`, `PATCH /api/messages/:id`, `POST /api/messages/read`, `POST /api/messages/actions`, `POST /api/undo/:token` |
+| Labels | `GET/POST /api/labels`, `PATCH/DELETE /api/labels/:id` (custom name/colour; max 50 per user) |
 | Search | `GET /api/search?q=` |
 | Drafts | `GET /api/drafts`, `PUT/POST /api/drafts/:id`, `DELETE /api/drafts/:id` |
 | Send / outbox | `POST /api/send`, `GET /api/outbox`, `PATCH /api/outbox/:id`, `POST /api/outbox/:id/cancel`, `POST /api/outbox/:id/send-now` |
@@ -91,7 +92,8 @@ response without deleting a message twice. Reply and forward activity is written
 to the source message (`replied_at`, `forwarded_at`, `reply_count`,
 `forward_count`) when the queued outbound item actually commits. `snoozed_until`
 and `ignored` are server-side message state: Snoozed is a virtual folder, and
-future mail in an ignored thread is hidden as it arrives.
+future mail in an ignored thread is hidden as it arrives. The message list also
+accepts `filter=flagged`, `toMe`, `mentions` and `calendar`.
 
 ## Settings persistence
 

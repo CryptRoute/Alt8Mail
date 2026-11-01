@@ -10,12 +10,12 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.14.0">
-<link rel="stylesheet" href="/features.css?v=0.14.0">
-<link rel="stylesheet" href="/workspace.css?v=0.14.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.14.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.14.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.14.0">
+<link rel="stylesheet" href="/styles.css?v=0.15.0">
+<link rel="stylesheet" href="/features.css?v=0.15.0">
+<link rel="stylesheet" href="/workspace.css?v=0.15.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.15.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.15.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.15.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -85,6 +85,10 @@
     <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3.5 13.7 9l5.5 1.7-5.5 1.7L12 18l-1.7-5.6L4.8 10.7 10.3 9 12 3.5Z"/><path d="m19 15.5.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></symbol>
     <symbol id="i-translate" viewBox="0 0 24 24"><path d="M4 5h8M8 5v2.5c0 3-2 5.5-4.5 7"/><path d="M5.5 10.5c1.4 2 3.4 3.4 5.5 4"/><path d="M13 19l3.5-9 3.5 9M14.4 16h4.2"/></symbol>
     <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 5v5h5"/><path d="M4.8 10a8 8 0 1 1 1.2 5.4"/><path d="M12 8v4.5l3 2"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 7h16M7 12h10M10 17h4"/></symbol>
+    <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M15.2 12V9.8a3.8 3.8 0 0 1 7.2 1.8c0 4.7-4.7 8.9-10.4 8.9a8.5 8.5 0 1 1 6.6-3.1"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M8.2 14.8A6 6 0 1 1 15.8 14.8c-.8.6-1.3 1.5-1.5 2.2h-4.6c-.2-.7-.7-1.6-1.5-2.2Z"/></symbol>
   </defs>
 </svg>
 
@@ -475,10 +479,14 @@
               <h1 id="listTitle">Inbox</h1>
               <span class="list-count" id="listCount"></span>
               <div class="list-actions">
+                <button class="icon-btn" id="filterBtn" type="button" aria-label="Filter messages" title="Filter messages" aria-haspopup="menu" aria-expanded="false">
+                  <svg class="icon" aria-hidden="true"><use href="#i-filter"/></svg>
+                </button>
                 <button class="icon-btn" id="sortBtn" type="button" aria-label="Sort messages" title="Sort newest first">
                   <svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg>
                 </button>
               </div>
+              <div class="list-filter-menu" id="listFilterMenu" role="menu" aria-label="Filter messages" hidden></div>
             </div>
             <div class="chips" role="group" aria-label="Filter messages">
               <button class="chip is-active" data-filter="all" type="button">All</button>
@@ -547,6 +555,9 @@
             </button>
             <button class="tool-btn tool-report" id="readerReportBtn" data-action="report" type="button" aria-label="Report email" title="Report email to security">
               <svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg><span class="tool-label">Report</span>
+            </button>
+            <button class="tool-btn reader-light-toggle" id="readerLightBtn" type="button" aria-label="Read message on a light background" title="Read message on a light background" aria-pressed="false" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-bulb"/></svg><span class="tool-label">Light</span>
             </button>
             <div class="ai-reader-split" id="readerAiWrap" data-ai-wrap hidden>
               <button class="ai-reader-primary" id="readerAiBtn" data-ai-toggle type="button" aria-label="AI options for this email" title="AI options for this email" aria-haspopup="menu" aria-expanded="false">
@@ -1026,6 +1037,16 @@
                       <label class="form-field"><span>Forwards</span><select id="signatureDefaultForward" aria-label="Default signature for forwards"></select></label>
                     </div>
                     <p class="settings-note signature-defaults-note">The automatic insertion switch under Composing controls whether these defaults are added when a message starts.</p>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head settings-block-head-row">
+                      <div>
+                        <h3>Labels</h3>
+                        <p>Create your own colour labels for the message menu and reader. Built-in labels are always available; custom labels can be renamed, recoloured or deleted.</p>
+                      </div>
+                      <button class="btn-secondary btn-small" id="newLabelBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New label</button>
+                    </div>
+                    <div class="label-settings-list" id="labelSettingsList"><div class="settings-note">Loading labels…</div></div>
                   </div>
                 </section>
 
@@ -2462,6 +2483,18 @@
   </div>
 </div>
 
+<div class="overlay" id="labelEditorOverlay" hidden>
+  <div class="dialog label-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="labelEditorTitle">
+    <div class="dialog-head"><div><h2 id="labelEditorTitle">New label</h2><p class="dialog-note" id="labelEditorSubtitle">Give this label a name and a colour.</p></div><button class="icon-btn" id="labelEditorClose" type="button" aria-label="Close label editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-body">
+      <label class="form-field"><span>Label name</span><input id="labelEditorName" maxlength="40" placeholder="e.g. Invoices"></label>
+      <div class="label-color-row"><span>Label colour</span><label class="label-color-picker"><input type="color" id="labelEditorColor" value="#0f6cbd" aria-label="Label colour"><span id="labelColorSwatch"></span></label><div class="label-preview" id="labelPreview"><span class="msg-cat-dot"></span><span>Label preview</span></div></div>
+      <p class="onboarding-inline-error" id="labelEditorError" hidden></p>
+    </div>
+    <div class="dialog-foot"><button class="btn-secondary" id="labelEditorCancel" type="button">Cancel</button><button class="btn-primary" id="labelEditorSave" type="button">Save label</button></div>
+  </div>
+</div>
+
 <div class="overlay" id="quickActionsOverlay" hidden>
   <div class="dialog quick-actions-dialog" role="dialog" aria-modal="true" aria-labelledby="quickActionsTitle">
     <div class="dialog-head"><div><h2 id="quickActionsTitle">Set quick actions</h2><p class="dialog-note">Choose the shortcuts that appear when you hover a message in the list.</p></div><button class="icon-btn" id="quickActionsClose" type="button" aria-label="Close quick actions"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
@@ -2473,6 +2506,6 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
-<script type="module" src="/app.js?v=0.14.0"></script>
+<script type="module" src="/app.js?v=0.15.0"></script>
 </body>
 </html>
