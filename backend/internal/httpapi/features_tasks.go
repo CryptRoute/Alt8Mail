@@ -323,6 +323,10 @@ func (s *Server) validateTaskBody(ctx context.Context, sess *sessionRecord, body
 	}
 	if body.LinkedThreadID != nil {
 		linkedThreadID = optionalText(*body.LinkedThreadID, 80)
+		if linkedThreadID != nil {
+			normalized := normalizeThreadID(*linkedThreadID)
+			linkedThreadID = &normalized
+		}
 	}
 	if body.LinkedSubject != nil {
 		linkedSubject = optionalText(*body.LinkedSubject, 240)

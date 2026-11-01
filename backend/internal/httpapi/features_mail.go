@@ -1171,7 +1171,7 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 	if existing != nil {
 		createdAt = stateString(existing, "createdAt")
 		messageID = stateString(existing, "messageId")
-		threadID = stateString(existing, "threadId")
+		threadID = normalizeThreadID(stateString(existing, "threadId"))
 		inReplyTo = existing["inReplyTo"]
 		priority = stateString(existing, "priority")
 		windowMode = stateString(existing, "windowMode")
@@ -1185,7 +1185,7 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 		}
 	}
 	if body.ThreadID != "" {
-		threadID = truncate(body.ThreadID, 100)
+		threadID = truncate(normalizeThreadID(body.ThreadID), 100)
 	}
 	if body.InReplyTo != nil {
 		inReplyTo = truncate(*body.InReplyTo, 400)

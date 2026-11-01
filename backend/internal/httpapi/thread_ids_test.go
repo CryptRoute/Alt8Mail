@@ -39,6 +39,23 @@ func TestNewThreadIDFormatAndUniqueness(t *testing.T) {
 	}
 }
 
+func TestNormalizeLegacyThreadID(t *testing.T) {
+	legacy := "t_imap_ff7b66b977772e84"
+	opaque := "bIvYJV36zA28KuObHxmSGw"
+	if got := normalizeThreadID(legacy); got != opaque {
+		t.Fatalf("legacy normalization = %q, want %q", got, opaque)
+	}
+	if got := normalizeThreadID("  " + legacy + " "); got != opaque {
+		t.Fatalf("trimmed legacy normalization = %q, want %q", got, opaque)
+	}
+	if got := normalizeThreadID(opaque); got != opaque {
+		t.Fatalf("opaque ID changed: %q", got)
+	}
+	if got := normalizeThreadID(""); got != "" {
+		t.Fatalf("empty ID changed: %q", got)
+	}
+}
+
 func TestLegacyThreadIDRecognition(t *testing.T) {
 	valid := []string{
 		"t_imap_ff7b66b977772e84",

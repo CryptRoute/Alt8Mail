@@ -28,6 +28,17 @@ func opaqueThreadID(root string) string {
 	return base64.RawURLEncoding.EncodeToString(digest[:threadIDBytes])
 }
 
+// normalizeThreadID maps a legacy value arriving from an old browser tab or
+// API client to its canonical opaque form. Current IDs and empty values pass
+// through unchanged.
+func normalizeThreadID(value string) string {
+	value = strings.TrimSpace(value)
+	if isLegacyThreadID(value) {
+		return opaqueThreadID(value)
+	}
+	return value
+}
+
 // isLegacyThreadID recognizes the two identifiers used before 0.6.0:
 // "t_" plus the 16-character random payload from newID("t"), and
 // "t_imap_" plus the 16-character hex hash from hashShort. Legacy deep links
