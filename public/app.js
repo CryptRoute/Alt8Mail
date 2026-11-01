@@ -820,6 +820,7 @@ const state = {
   attachmentMaxBytes: 8 * 1024 * 1024,
   selectedThreadId: null,
   selectedIds: new Set(),
+  collapsedMailGroups: new Set(),
   expanded: new Set(),
   expandedThreadId: null,
   viewThreads: [],
@@ -858,6 +859,7 @@ const state = {
   spellcheck: null,
   spellChecker: null,
   knownInboxIds: null,
+  knownSnoozeDueIds: new Set(),
   mailClient: null,
   mailMonitorTimer: null,
   calendarReminderTimer: null,
@@ -2635,6 +2637,7 @@ async function logout() {
     state.folderCounts = {};
     state.folderUnread = {};
     state.knownInboxIds = null;
+    state.knownSnoozeDueIds = new Set();
     state.people = [];
     state.aliases = [];
     state.sieve = null;
@@ -2643,6 +2646,7 @@ async function logout() {
     state.pendingSends = [];
     state.selectedThreadId = null;
     state.selectedIds.clear();
+    state.collapsedMailGroups = new Set();
     rebuildIndex();
     clearThemeAccentForLogout();
     if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
@@ -2806,6 +2810,14 @@ async function pollNewMail() {
   // every returned id as seen; only recent unseen messages trigger a toast.
   incoming.forEach((message) => known.add(message.id));
   state.knownInboxIds = known;
+  const dueNow = incoming.filter((message) => message.unread && message.snoozedUntil && (Date.parse(message.snoozedUntil) || 0) <= Date.now());
+  const dueIds = new Set(dueNow.map((message) => message.id));
+  const freshDue = dueNow.filter((message) => !state.knownSnoozeDueIds.has(message.id));
+  state.knownSnoozeDueIds = dueIds;
+  if (freshDue.length && !fresh.length) {
+    await refreshMailbox({ quiet: true });
+    renderNotifications();
+  }
   if (!fresh.length) return;
   showNewMailNotification(fresh[0], fresh.length);
   await refreshMailbox({ quiet: true });
@@ -3079,7 +3091,9 @@ function individualThreadFor(message) {
     repliedAt: message.repliedAt || "",
     forwardedAt: message.forwardedAt || "",
     replyCount: Number(message.replyCount) || 0,
-    forwardCount: Number(message.forwardCount) || 0
+    forwardCount: Number(message.forwardCount) || 0,
+    snoozeReturned: Boolean(message.unread && message.snoozedUntil && (Date.parse(message.snoozedUntil) || 0) <= Date.now()),
+    snoozeReturnAt: Boolean(message.unread && message.snoozedUntil && (Date.parse(message.snoozedUntil) || 0) <= Date.now()) ? message.snoozedUntil : ""
   };
 }
 
@@ -3091,9 +3105,16 @@ function viewUnit(count) {
 
 function pinnedFirstThreads(threads) {
   const pinned = [];
+  const returnedSnoozes = [];
   const other = [];
-  for (const thread of threads) (thread.pinned ? pinned : other).push(thread);
-  return pinned.concat(other);
+  for (const thread of threads) {
+    if (thread.pinned) pinned.push(thread);
+    else if (thread.snoozeReturned) returnedSnoozes.push(thread);
+    else other.push(thread);
+  }
+  pinned.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+  returnedSnoozes.sort((a, b) => (Date.parse(b.snoozeReturnAt) || 0) - (Date.parse(a.snoozeReturnAt) || 0));
+  return pinned.concat(returnedSnoozes, other);
 }
 
 function computeView() {
@@ -3639,11 +3660,13 @@ function threadSubject(thread) {
   return subject.replace(/^(?:(?:re|fwd|fw):s*)+/i, "").trim() || "(no subject)";
 }
 
-function categoryDots(categories) {
-  return (categories || []).map((key) => {
-    const category = categoryDef(key);
-    return category ? `<span class="msg-cat-dot" style="--cat:${category.color}" title="${esc(category.label)}"></span>` : "";
-  }).join("");
+function categoryBadges(categories) {
+  const labels = (categories || []).map((key) => categoryDef(key)).filter(Boolean);
+  if (!labels.length) return "";
+  const shown = labels.slice(0, 2).map((category) =>
+    `<span class="msg-label-pill" style="--cat:${category.color}">${esc(category.label)}</span>`);
+  if (labels.length > 2) shown.push(`<span class="msg-label-more">+${labels.length - 2}</span>`);
+  return `<span class="msg-labels">${shown.join("")}</span>`;
 }
 
 function threadSearchToken(thread) {
@@ -3691,6 +3714,86 @@ function threadQuickActionsMarkup(thread, unread) {
   return `<span class="msg-quick" role="group" aria-label="Quick actions">${actions.slice(0, 3).map((action) => `<button type="button" class="${action === "delete" || action === "spam" ? "is-danger" : ""}" data-thread-quick="${esc(action)}" data-thread-quick-id="${safeId}" title="${esc(quickActionLabel(action))}" aria-label="${esc(quickActionLabel(action))}"><svg class="icon" aria-hidden="true"><use href="#${quickActionIcon(action)}"/></svg></button>`).join("")}</span>`;
 }
 
+function startOfWeekKey(key, weekStart = state.preferences?.weekStart || "monday") {
+  const weekday = weekdayOfKey(key);
+  if (!weekday) return key;
+  const offset = weekStart === "sunday" ? (weekday === 7 ? 0 : weekday) : weekday - 1;
+  return addDaysToKey(key, -offset);
+}
+
+function dateGroupForThread(thread) {
+  if (thread.pinned) return { key: "pinned", label: "Pinned", kind: "pinned" };
+  if (thread.snoozeReturned) return { key: "today", label: "Today", kind: "today" };
+  const date = new Date(thread.date);
+  if (Number.isNaN(date.getTime())) return { key: "unknown", label: "Older", kind: "older" };
+  const key = dateKeyInZone(date);
+  const today = dateKeyInZone(new Date());
+  if (key === today) return { key: "today", label: "Today", kind: "today" };
+  if (key === addDaysToKey(today, -1)) return { key: "yesterday", label: "Yesterday", kind: "yesterday" };
+  const thisWeek = startOfWeekKey(today);
+  const lastWeek = addDaysToKey(thisWeek, -7);
+  if (key >= thisWeek) return { key: "this-week", label: "This week", kind: "week" };
+  if (key >= lastWeek) return { key: "last-week", label: "Last week", kind: "week" };
+  const parts = keyToParts(key);
+  const todayParts = keyToParts(today);
+  if (!parts || !todayParts) return { key: "older", label: "Older", kind: "older" };
+  if (parts.year === todayParts.year && parts.month === todayParts.month) {
+    return { key: "this-month", label: "This month", kind: "month" };
+  }
+  const monthStart = `${todayParts.year}-${String(todayParts.month).padStart(2, "0")}-01`;
+  const previousMonth = new Date(Date.UTC(todayParts.year, todayParts.month - 2, 1));
+  const previousMonthStart = `${previousMonth.getUTCFullYear()}-${String(previousMonth.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  if (key >= previousMonthStart && key < monthStart) {
+    return { key: `month-${previousMonthStart.slice(0, 7)}`, label: "Last month", kind: "month" };
+  }
+  if (parts.year === todayParts.year) {
+    const label = new Intl.DateTimeFormat(currentLocale(), { month: "long", timeZone: "UTC" }).format(new Date(Date.UTC(parts.year, parts.month - 1, 1, 12)));
+    return { key: `month-${parts.year}-${String(parts.month).padStart(2, "0")}`, label, kind: "month" };
+  }
+  if (parts.year > todayParts.year) return { key: `year-${parts.year}`, label: "Later", kind: "year" };
+  const yearsAgo = todayParts.year - parts.year;
+  return {
+    key: `year-${parts.year}`,
+    label: yearsAgo === 1 ? "Last Year" : `${yearsAgo} Years Ago`,
+    kind: "year"
+  };
+}
+
+function mailThreadGroups(threads) {
+  const groups = [];
+  const byKey = new Map();
+  for (const thread of threads) {
+    const descriptor = dateGroupForThread(thread);
+    let group = byKey.get(descriptor.key);
+    if (!group) {
+      group = { ...descriptor, threads: [] };
+      byKey.set(descriptor.key, group);
+      groups.push(group);
+    }
+    group.threads.push(thread);
+  }
+  return groups;
+}
+
+function mailGroupHeaderMarkup(group) {
+  const collapsed = state.collapsedMailGroups instanceof Set && state.collapsedMailGroups.has(group.key);
+  return `<section class="mail-group-head${group.kind === "pinned" ? " is-pinned-group" : ""}${collapsed ? " is-collapsed" : ""}" data-mail-group-head="${esc(group.key)}">
+    <button type="button" data-mail-group-toggle="${esc(group.key)}" aria-expanded="${collapsed ? "false" : "true"}">
+      <svg class="icon mail-group-chevron" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+      ${group.kind === "pinned" ? '<svg class="icon mail-group-pin" aria-hidden="true"><use href="#i-pin"/></svg>' : ""}
+      <span>${esc(group.label)}</span>
+      <small>${group.threads.length}</small>
+    </button>
+  </section>`;
+}
+
+function mailThreadRowsMarkup(threads) {
+  return mailThreadGroups(threads).map((group) => {
+    const collapsed = state.collapsedMailGroups instanceof Set && state.collapsedMailGroups.has(group.key);
+    return mailGroupHeaderMarkup(group) + (collapsed ? "" : group.threads.map(threadRowMarkup).join(""));
+  }).join("");
+}
+
 function threadRowMarkup(thread) {
   const { rep, person, label } = threadRowDisplay(thread);
   const selected = thread.id === state.selectedThreadId;
@@ -3699,7 +3802,7 @@ function threadRowMarkup(thread) {
   const unread = thread.unreadCount > 0;
   const safeId = esc(thread.id);
   const threadCount = thread.count > 1 ? `<span class="msg-thread-count" title="${thread.count} messages in conversation">${thread.count}</span>` : "";
-  return `<div class="msg${unread ? " is-unread" : ""}${selected ? " is-selected" : ""}${checked ? " is-checked" : ""}${rep.draft ? " is-draft" : ""}" data-thread-id="${safeId}" role="option" aria-selected="${selected ? "true" : "false"}" tabindex="0">
+  return `<div class="msg${unread ? " is-unread" : ""}${selected ? " is-selected" : ""}${checked ? " is-checked" : ""}${rep.draft ? " is-draft" : ""}${thread.pinned ? " is-pinned" : ""}${thread.snoozeReturned ? " is-snooze-returned" : ""}" data-thread-id="${safeId}" role="option" aria-selected="${selected ? "true" : "false"}" tabindex="0">
         <label class="row-check" title="Select conversation">
           <input type="checkbox" data-thread-check="${safeId}" ${checked ? "checked" : ""} aria-label="Select ${esc(thread.subject)}">
           <span class="check-visual" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
@@ -3711,6 +3814,7 @@ function threadRowMarkup(thread) {
             ${threadCount}
             ${hasFiles ? `<span class="msg-tag" title="Has attachments"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></span>` : ""}
             ${thread.flagged ? '<span class="msg-flag" title="Flagged for follow-up" aria-label="Flagged for follow-up"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg></span>' : ""}
+            ${thread.snoozeReturned ? `<span class="msg-snooze" title="Snoozed · returned ${esc(formatDateTimeFull(thread.snoozeReturnAt))}" aria-label="Snoozed message"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></span>` : ""}
             ${threadActivityMarkup(thread)}
             ${threadSearchToken(thread)}
             ${threadQuickActionsMarkup(thread, unread)}
@@ -3722,7 +3826,7 @@ function threadRowMarkup(thread) {
             </button>
             <span class="msg-time">${esc(formatListWhen(rep.date))}</span>
           </div>
-          <div class="msg-subject">${rep.draft ? '<span class="msg-draft-tag">Draft</span>' : ""}${categoryDots(rep.categories)}${esc(threadSubject(thread))}</div>
+          <div class="msg-subject">${rep.draft ? '<span class="msg-draft-tag">Draft</span>' : ""}${categoryBadges(rep.categories)}${esc(threadSubject(thread))}</div>
           <div class="msg-snippet">${esc(rep.snippet || htmlToText(rep.bodyHtml).slice(0, 150))}</div>
         </div>
       </div>`;
@@ -3804,19 +3908,11 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
       ${(state.query || state.filter !== "all") ? `<button class="btn-secondary" data-clear-filters type="button">Clear filters</button>` : ""}
     </div>`;
     }
-  } else if (appendOnly && state.renderedThreadIds instanceof Set) {
-    const sentinel = messageList.querySelector(".list-load-more");
-    if (sentinel) sentinel.remove();
-    const freshThreads = threads.filter((thread) => !state.renderedThreadIds.has(thread.id));
-    if (freshThreads.length) {
-      messageList.insertAdjacentHTML("beforeend", freshThreads.map(threadRowMarkup).join(""));
-      freshThreads.forEach((thread) => state.renderedThreadIds.add(thread.id));
-    }
-    const more = mailLoadMoreMarkup(page);
-    if (more) messageList.insertAdjacentHTML("beforeend", more);
   } else {
+    // Date-group headers must be inserted at section boundaries, so a paged
+    // append re-renders the grouped list while preserving the scroll offset.
     state.renderedThreadIds = new Set(threads.map((thread) => thread.id));
-    messageList.innerHTML = threads.map(threadRowMarkup).join("") + mailLoadMoreMarkup(page);
+    messageList.innerHTML = mailThreadRowsMarkup(threads) + mailLoadMoreMarkup(page);
   }
 
   const totalForStatus = state.query ? threads.length : (page?.total || threads.length);
@@ -4579,6 +4675,7 @@ function selectThread(threadId, options = {}) {
       if (!message.unread) return;
       adjustFolderUnread(message.folder, -1);
       message.unread = false;
+      clearReturnedSnoozeLocal(message);
     });
     unreadIds.forEach((id) => state.dismissedNotifications.add("mail:" + id));
     persistDismissedNotifications();
@@ -4926,9 +5023,14 @@ function localFolderMove(message, targetFolder) {
   adjustFolderCount(targetFolder, 1, wasUnread ? 1 : 0);
 }
 
+function clearReturnedSnoozeLocal(message) {
+  if (message?.snoozedUntil && (Date.parse(message.snoozedUntil) || 0) <= Date.now()) delete message.snoozedUntil;
+}
+
 function localMessageUnread(message, unread) {
   if (!message) return;
   unread = Boolean(unread);
+  if (!unread) clearReturnedSnoozeLocal(message);
   if (Boolean(message.unread) === unread) return;
   message.unread = unread;
   adjustFolderCount(message.folder, 0, unread ? 1 : -1);
@@ -5006,7 +5108,7 @@ function optimisticMailAction(action, folderValue, ids, options = {}) {
         const alreadySnoozed = Boolean(message.snoozedUntil) && Date.parse(message.snoozedUntil) > Date.now();
         adjustFolderCount(alreadySnoozed ? "snoozed" : message.folder, -1, message.unread && !alreadySnoozed ? -1 : 0);
         message.snoozedUntil = options.until;
-        message.unread = false;
+        message.unread = true;
         adjustFolderCount("snoozed", 1, 0);
         break;
       }
@@ -11865,6 +11967,7 @@ function setFolder(folder) {
   state.folder = folder;
   state.filter = "all";
   state.query = "";
+  state.collapsedMailGroups = new Set();
   state.selectedIds.clear();
   state.selectedThreadId = null;
   state.expandedThreadId = null;
@@ -11897,6 +12000,7 @@ function setFolder(folder) {
 function setFilter(filter) {
   if (state.filter === filter) return;
   state.filter = filter;
+  state.collapsedMailGroups = new Set();
   state.selectedIds.clear();
   syncChips();
   renderList();
@@ -12971,6 +13075,16 @@ function bindEvents() {
       return;
     }
 
+    const groupToggle = target.closest("[data-mail-group-toggle]");
+    if (groupToggle) {
+      event.preventDefault();
+      const key = groupToggle.getAttribute("data-mail-group-toggle");
+      if (!(state.collapsedMailGroups instanceof Set)) state.collapsedMailGroups = new Set();
+      if (state.collapsedMailGroups.has(key)) state.collapsedMailGroups.delete(key);
+      else state.collapsedMailGroups.add(key);
+      renderList({ preserveScroll: true });
+      return;
+    }
     const row = target.closest(".msg[data-thread-id]");
     if (row) {
       if (target.closest(".msg-quick")) return;

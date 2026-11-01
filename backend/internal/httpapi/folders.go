@@ -486,6 +486,7 @@ func (s *Server) markFolderRead(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			message["unread"] = false
+			clearReturnedSnooze(message)
 			seen := true
 			mutations = append(mutations, imapAction{
 				MessageID: stateString(message, "messageId"), SourceUID: stateInt(message, "imapUid"),

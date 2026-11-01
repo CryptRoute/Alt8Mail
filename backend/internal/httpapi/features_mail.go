@@ -286,6 +286,15 @@ func mailMessageMatchesScope(message map[string]any, folder, filter string, acco
 	return true
 }
 
+func clearReturnedSnooze(message map[string]any) {
+	if message == nil || stateString(message, "snoozedUntil") == "" {
+		return
+	}
+	if stamp, ok := parseStateTime(stateString(message, "snoozedUntil")); ok && !stamp.After(time.Now()) {
+		delete(message, "snoozedUntil")
+	}
+}
+
 func (s *Server) patchMessage(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	id := r.PathValue("id")
@@ -311,6 +320,9 @@ func (s *Server) patchMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Unread != nil {
 			message["unread"] = *body.Unread
+			if !*body.Unread {
+				clearReturnedSnooze(message)
+			}
 			seen := !*body.Unread
 			mutation.SetSeen = &seen
 			hasMutation = true
@@ -389,6 +401,7 @@ func (s *Server) markRead(w http.ResponseWriter, r *http.Request) {
 			message := findMessageIn(state, id)
 			if message != nil && stateBool(message, "unread") {
 				message["unread"] = false
+				clearReturnedSnooze(message)
 				folder := stateString(message, "imapFolder")
 				if folder == "" {
 					folder = stateString(message, "folder")
@@ -621,6 +634,7 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 				}
 			case "markRead":
 				message["unread"] = false
+				clearReturnedSnooze(message)
 				seen := true
 				mutation.SetSeen = &seen
 			case "markUnread":
@@ -659,9 +673,12 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 				}
 				message["categories"] = categories
 			case "snooze":
+				// A snoozed message comes back as new: it stays out of the
+				// inbox until the target time, then reappears unread with a
+				// clock indicator until the user reads it.
 				message["snoozedUntil"] = strings.TrimSpace(body.Until)
-				message["unread"] = false
-				seen := true
+				message["unread"] = true
+				seen := false
 				mutation.SetSeen = &seen
 			case "unsnooze":
 				delete(message, "snoozedUntil")

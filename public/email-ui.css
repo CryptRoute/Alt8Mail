@@ -432,3 +432,159 @@
 @media (hover: none) {
   .msg .row-check { opacity: 1; pointer-events: auto; }
 }
+
+/* ---------- date groups / pinned rows / raised filter bar ---------- */
+.list-head {
+  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--surface-2) 55%, var(--surface)));
+  box-shadow: 0 3px 9px rgba(15, 23, 42, .07);
+  z-index: 8;
+}
+.mail-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding: 7px 14px 6px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 88%, var(--surface)), var(--surface-2));
+  backdrop-filter: blur(8px);
+}
+.mail-group-head:first-child { border-top: 0; }
+.mail-group-head > button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: .7rem;
+  font-weight: 750;
+  letter-spacing: .015em;
+  text-align: left;
+  cursor: pointer;
+}
+.mail-group-head > button:hover { color: var(--text); }
+.mail-group-head .mail-group-chevron { width: 13px; height: 13px; color: var(--text-3); transition: transform .14s ease; }
+.mail-group-head.is-collapsed .mail-group-chevron { transform: rotate(-90deg); }
+.mail-group-head small {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+}
+.mail-group-pin { width: 13px; height: 13px; color: #d39a06; fill: #eab308; }
+.mail-group-head.is-pinned-group {
+  background: linear-gradient(90deg, color-mix(in srgb, #facc15 24%, var(--surface)), color-mix(in srgb, #facc15 10%, var(--surface-2)) 55%, var(--surface-2));
+  border-bottom-color: color-mix(in srgb, #d39a06 35%, var(--border));
+}
+.mail-group-head.is-pinned-group > button { color: #8a5a00; }
+:root[data-theme="dark"] .mail-group-head.is-pinned-group > button { color: #fde68a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mail-group-head.is-pinned-group > button { color: #fde68a; }
+}
+
+.msg.is-pinned {
+  background:
+    linear-gradient(100deg,
+      color-mix(in srgb, #facc15 25%, var(--surface)) 0%,
+      color-mix(in srgb, #facc15 12%, var(--surface)) 42%,
+      var(--surface) 100%);
+  box-shadow:
+    inset 3px 0 0 #eab308,
+    inset 0 1px 0 color-mix(in srgb, #fff 55%, transparent),
+    0 2px 9px color-mix(in srgb, #eab308 12%, transparent);
+  border-bottom-color: color-mix(in srgb, #d39a06 26%, var(--border));
+}
+.msg.is-pinned::before,
+.msg.is-pinned.is-unread::before,
+.msg.is-pinned.is-selected::before,
+.msg.is-pinned.is-checked::before { background: #eab308; width: 3px; }
+.msg.is-pinned:hover {
+  background:
+    linear-gradient(100deg,
+      color-mix(in srgb, #facc15 34%, var(--surface)) 0%,
+      color-mix(in srgb, #facc15 18%, var(--surface)) 48%,
+      color-mix(in srgb, #facc15 5%, var(--surface)) 100%);
+}
+:root[data-theme="dark"] .msg.is-pinned {
+  background: linear-gradient(100deg, color-mix(in srgb, #a16207 34%, var(--surface)) 0%, color-mix(in srgb, #ca8a04 18%, var(--surface)) 44%, var(--surface) 100%);
+  box-shadow: inset 3px 0 0 #eab308, inset 0 1px 0 rgba(253, 230, 138, .12), 0 0 16px rgba(234, 179, 8, .10);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .msg.is-pinned {
+    background: linear-gradient(100deg, color-mix(in srgb, #a16207 34%, var(--surface)) 0%, color-mix(in srgb, #ca8a04 18%, var(--surface)) 44%, var(--surface) 100%);
+    box-shadow: inset 3px 0 0 #eab308, inset 0 1px 0 rgba(253, 230, 138, .12), 0 0 16px rgba(234, 179, 8, .10);
+  }
+}
+.msg-snooze {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, #0f766e 12%, var(--surface));
+  color: #0f766e;
+  border: 1px solid color-mix(in srgb, #0f766e 28%, transparent);
+}
+.msg-snooze svg { width: 12px; height: 12px; }
+:root[data-theme="dark"] .msg-snooze { color: #5eead4; background: color-mix(in srgb, #14b8a6 16%, var(--surface)); border-color: color-mix(in srgb, #5eead4 30%, transparent); }
+
+/* Raised, squared filter bar and tabs. */
+.chips {
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 75%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #0f172a 5%, transparent),
+    0 2px 4px rgba(15, 23, 42, .06);
+}
+.chip {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.chip:hover { background: color-mix(in srgb, var(--surface-3) 58%, var(--surface)); }
+.chip.is-active {
+  border-color: var(--border-strong);
+  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--surface-2) 72%, var(--surface)));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 88%, transparent),
+    0 1px 2px rgba(15, 23, 42, .10);
+  color: var(--accent-ink);
+  font-weight: 750;
+}
+
+/* Outlook-style label pills. */
+.msg-labels { display: inline-flex; align-items: center; gap: 4px; margin-right: 5px; vertical-align: 1px; }
+.msg-label-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--cat, var(--accent)) 42%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cat, var(--accent)) 13%, var(--surface));
+  color: color-mix(in srgb, var(--cat, var(--accent)) 74%, var(--text));
+  font-size: .625rem;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: .005em;
+}
+.msg-label-more { color: var(--text-3); font-size: .55rem; font-weight: 700; }

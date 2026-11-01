@@ -92,7 +92,9 @@ response without deleting a message twice. Reply and forward activity is written
 to the source message (`replied_at`, `forwarded_at`, `reply_count`,
 `forward_count`) when the queued outbound item actually commits. `snoozed_until`
 and `ignored` are server-side message state: Snoozed is a virtual folder, and
-future mail in an ignored thread is hidden as it arrives. The message list also
+future mail in an ignored thread is hidden as it arrives. A snoozed message
+returns unread at its due time and keeps its clock state until the read action
+clears `snoozed_until`. The message list also
 accepts `filter=flagged`, `toMe`, `mentions` and `calendar`.
 
 ## Settings persistence

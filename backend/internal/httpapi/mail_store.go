@@ -439,7 +439,9 @@ func (s *Server) loadMailThreadPage(ctx context.Context, userID, folder, filter 
 		SELECT thread_id FROM mail_messages
 		WHERE `+where+`
 		GROUP BY thread_id
-		ORDER BY bool_or(pinned) DESC, max(sent_at) DESC
+		ORDER BY bool_or(pinned) DESC,
+		         bool_or(unread AND snoozed_until IS NOT NULL AND snoozed_until <= now()) DESC,
+		         max(sent_at) DESC
 		LIMIT $`+strconv.Itoa(limitIndex)+` OFFSET $`+strconv.Itoa(offsetIndex),
 		pageArgs...)
 	if err != nil {

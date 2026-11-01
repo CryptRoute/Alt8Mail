@@ -342,6 +342,10 @@ export function buildThreads(scope, allMessages) {
     const folders = Array.from(new Set(members.map((message) => message.folder)));
     const replied = members.map((message) => message.repliedAt).filter(Boolean).sort().pop() || "";
     const forwarded = members.map((message) => message.forwardedAt).filter(Boolean).sort().pop() || "";
+    const now = Date.now();
+    const returnedSnoozes = members
+      .filter((message) => message.unread && message.snoozedUntil && (Date.parse(message.snoozedUntil) || 0) <= now)
+      .sort((a, b) => (Date.parse(b.snoozedUntil) || 0) - (Date.parse(a.snoozedUntil) || 0));
     threads.push({
       id: threadId,
       messages: members,
@@ -359,7 +363,9 @@ export function buildThreads(scope, allMessages) {
       repliedAt: replied,
       forwardedAt: forwarded,
       replyCount: members.reduce((total, message) => total + (Number(message.replyCount) || 0), 0),
-      forwardCount: members.reduce((total, message) => total + (Number(message.forwardCount) || 0), 0)
+      forwardCount: members.reduce((total, message) => total + (Number(message.forwardCount) || 0), 0),
+      snoozeReturned: returnedSnoozes.length > 0,
+      snoozeReturnAt: returnedSnoozes[0]?.snoozedUntil || ""
     });
   }
   threads.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
