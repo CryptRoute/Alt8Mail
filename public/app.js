@@ -12884,6 +12884,8 @@ function selectCalendarDate(key, navigate = true) {
     state.calendarYear = date.getUTCFullYear();
     state.calendarMonth = date.getUTCMonth();
   }
+  state.calendarMiniYear = date.getUTCFullYear();
+  state.calendarMiniMonth = date.getUTCMonth();
   renderCalendar();
 }
 
@@ -14966,6 +14968,7 @@ function handleFeatureClick(event) {
     const shareId = revokeShare.getAttribute("data-revoke-share");
     api(`/api/file-shares/${encodeURIComponent(shareId)}`, { method: "DELETE" }).then(async () => {
       if (fileShareTarget) await loadFileShares(fileShareTarget.id);
+      await refreshCabinet();
       showToast("Share link revoked");
     }).catch(showError);
     return true;

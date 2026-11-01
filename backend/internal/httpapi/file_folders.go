@@ -337,7 +337,10 @@ func (s *Server) refreshFolderPaths(ctx context.Context, userID string) {
 	for _, folder := range folders {
 		paths[stateString(folder, "id")] = stateString(folder, "path")
 	}
-	rows, err := s.store.DB.Query(ctx, `SELECT id, COALESCE(folder_id,''), provider_id FROM files WHERE user_id=$1`, userID)
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT id, COALESCE(folder_id,''), provider_id FROM files
+		WHERE user_id=$1 AND (provider_id='a8m' OR folder_id IS NOT NULL)
+	`, userID)
 	if err != nil {
 		return
 	}
@@ -349,13 +352,14 @@ func (s *Server) refreshFolderPaths(ctx context.Context, userID string) {
 		if rows.Scan(&id, &folderID, &providerID) != nil {
 			continue
 		}
+		if providerID != "a8m" && folderID == "" {
+			// Connected-drive paths belong to the provider; folder moves must not
+			// overwrite them with the internal Cabinet label.
+			continue
+		}
 		path := paths[folderID]
 		if path == "" {
-			if providerID == "a8m" {
-				path = "Files"
-			} else {
-				path = "Files"
-			}
+			path = "Files"
 		}
 		updates = append(updates, update{id: id, path: path})
 	}
