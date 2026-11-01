@@ -1243,7 +1243,77 @@ export async function createApp(options = {}) {
         return;
       }
       if (pathname === "/api/folders" && req.method === "GET") {
-        sendJson(res, 200, { folders: db.folders });
+        sendJson(res, 200, { folders: db.folders.map((folder) => ({ collapsed: false, system: ["inbox", "starred", "snoozed", "sent", "drafts", "archive", "spam", "trash"].includes(folder.id), badgeMode: "unread", order: db.folders.indexOf(folder), ...folder })) });
+        return;
+      }
+      const mailFolderMatch = pathname.match(/^\/api\/folders\/([A-Za-z0-9_-]{1,100})$/);
+      if (pathname === "/api/folders" && req.method === "POST") {
+        const body = await readJson(req);
+        const label = String(body.label || "").trim();
+        if (!label) throw new ApiError(400, "FOLDER_NAME", "Enter a folder name");
+        if (db.folders.some((folder) => String(folder.label).toLowerCase() === label.toLowerCase())) throw new ApiError(409, "FOLDER_EXISTS", "A folder with that name already exists");
+        const parentId = String(body.parentId || "").trim();
+        if (parentId) {
+          const parent = db.folders.find((folder) => folder.id === parentId);
+          if (!parent || parent.virtual) throw new ApiError(400, "FOLDER_PARENT", "Parent folder not found");
+          parent.collapsed = false;
+        }
+        const folder = { id: id("folder"), label, icon: "i-folder", section: "folders", system: false, virtual: false, imapFolder: label, order: db.folders.length, badgeMode: "unread", color: String(body.color || ""), parentId, collapsed: false, createdAt: nowIso() };
+        db.folders.push(folder);
+        addAudit(req, "folder.created", label, `Created folder ${label}`);
+        await store.save();
+        sendJson(res, 201, { ok: true, folder });
+        return;
+      }
+      if (mailFolderMatch && req.method === "PATCH") {
+        const folder = db.folders.find((item) => item.id === mailFolderMatch[1]);
+        if (!folder) throw new ApiError(404, "FOLDER_NOT_FOUND", "Folder not found");
+        const body = await readJson(req);
+        const system = ["inbox", "starred", "snoozed", "sent", "drafts", "archive", "spam", "trash"].includes(folder.id);
+        if (body.label !== undefined && !system) {
+          const label = String(body.label || "").trim();
+          if (!label) throw new ApiError(400, "FOLDER_NAME", "Enter a folder name");
+          if (db.folders.some((item) => item.id !== folder.id && String(item.label).toLowerCase() === label.toLowerCase())) throw new ApiError(409, "FOLDER_EXISTS", "A folder with that name already exists");
+          folder.label = label;
+          folder.imapFolder = label;
+        }
+        if (body.color !== undefined) folder.color = String(body.color || "");
+        if (body.section !== undefined) folder.section = body.section === "favorites" ? "favorites" : "folders";
+        if (body.badgeMode !== undefined) folder.badgeMode = ["unread", "total", "none"].includes(body.badgeMode) ? body.badgeMode : "unread";
+        if (body.collapsed !== undefined) folder.collapsed = Boolean(body.collapsed);
+        if (body.parentId !== undefined) {
+          if (system) throw new ApiError(400, "FOLDER_SYSTEM", "Primary folders cannot be moved");
+          const parentId = String(body.parentId || "").trim();
+          if (parentId) {
+            const parent = db.folders.find((item) => item.id === parentId);
+            if (!parent || parent.virtual) throw new ApiError(400, "FOLDER_PARENT", "Parent folder not found");
+            let cursor = parentId;
+            const seen = new Set();
+            while (cursor) {
+              if (cursor === folder.id) throw new ApiError(400, "FOLDER_CYCLE", "A folder cannot be moved inside itself");
+              if (seen.has(cursor)) break;
+              seen.add(cursor);
+              cursor = String(db.folders.find((item) => item.id === cursor)?.parentId || "");
+            }
+            parent.collapsed = false;
+          }
+          folder.parentId = parentId;
+        }
+        addAudit(req, "folder.updated", folder.label, "Updated folder settings");
+        await store.save();
+        sendJson(res, 200, { ok: true, folder });
+        return;
+      }
+      if (mailFolderMatch && req.method === "DELETE") {
+        const folder = db.folders.find((item) => item.id === mailFolderMatch[1]);
+        if (!folder) throw new ApiError(404, "FOLDER_NOT_FOUND", "Folder not found");
+        if (["inbox", "starred", "snoozed", "sent", "drafts", "archive", "spam", "trash"].includes(folder.id)) throw new ApiError(400, "FOLDER_SYSTEM", "Primary folders cannot be deleted");
+        for (const child of db.folders) if (child.parentId === folder.id) child.parentId = folder.parentId || "";
+        db.messages.forEach((message) => { if (message.folder === folder.id) message.folder = "trash"; });
+        db.folders = db.folders.filter((item) => item.id !== folder.id);
+        addAudit(req, "folder.deleted", folder.label, "Deleted folder");
+        await store.save();
+        sendJson(res, 200, { ok: true });
         return;
       }
       if (pathname === "/api/aliases" && req.method === "GET") {

@@ -17,7 +17,7 @@ import {
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.5.2';
 
 const state = {
   csrf: '',

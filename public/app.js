@@ -3467,41 +3467,253 @@ function folderDepth(folder, folders = state.folders) {
   return depth;
 }
 
+const PRIMARY_FOLDER_IDS = new Set(["inbox", "starred", "snoozed", "sent", "drafts", "archive", "spam", "trash"]);
+
+function folderById(id, folders = state.folders) {
+  return (folders || []).find((folder) => folder.id === id) || null;
+}
+
+function folderIsCustom(folder) {
+  return Boolean(folder && !folder.system && !folder.virtual && !folder.delegated && !PRIMARY_FOLDER_IDS.has(folder.id));
+}
+
+function folderCanAcceptChildren(folder) {
+  return Boolean(folder && !folder.virtual && !folder.delegated);
+}
+
+function folderChildrenOf(id, folders = state.folders) {
+  return (folders || [])
+    .filter((folder) => (folder.parentId || "") === id)
+    .sort((a, b) => {
+      const order = folderSortValue(a) - folderSortValue(b);
+      return order || String(a.label || "").localeCompare(String(b.label || ""), undefined, { sensitivity: "base" });
+    });
+}
+
+function folderDescendantIds(id, folders = state.folders) {
+  const descendants = new Set();
+  const collect = (parentId) => {
+    for (const child of folderChildrenOf(parentId, folders)) {
+      if (child.id === id || descendants.has(child.id)) continue;
+      descendants.add(child.id);
+      collect(child.id);
+    }
+  };
+  collect(id);
+  return descendants;
+}
+
+function folderHasRenderableParent(folder, folders) {
+  if (!folder.parentId) return false;
+  const parent = folderById(folder.parentId, folders);
+  return Boolean(parent && !parent.virtual && parent.id !== folder.id);
+}
+
+function folderRowMarkup(folder, depth, folders, visited) {
+  if (visited.has(folder.id)) return "";
+  visited.add(folder.id);
+  const children = folderChildrenOf(folder.id, folders).filter((child) => !visited.has(child.id));
+  const hasChildren = children.length > 0;
+  const collapsed = Boolean(folder.collapsed);
+  const active = state.task === "mail" && state.folder === folder.id && !state.query;
+  const badge = folderBadge(folder);
+  const color = folder.color ? ` style="color:${esc(folder.color)}"` : "";
+  const canDrag = folderIsCustom(folder);
+  const canDrop = folderCanAcceptChildren(folder);
+  const toggle = hasChildren
+    ? `<button class="folder-toggle${collapsed ? " is-collapsed" : ""}" data-folder-toggle="${esc(folder.id)}" type="button" aria-expanded="${collapsed ? "false" : "true"}" aria-label="${collapsed ? "Expand" : "Collapse"} ${esc(folder.label)} subfolders" title="${collapsed ? "Expand" : "Collapse"} subfolders"><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>`
+    : `<span class="folder-toggle-spacer" aria-hidden="true"></span>`;
+  const row = `<div class="folder-row${active ? " is-active" : ""}${depth ? " is-child" : ""}${hasChildren ? " is-parent" : ""}${collapsed ? " is-collapsed" : ""}${canDrag ? " is-draggable" : ""}" data-folder-row="${esc(folder.id)}"${canDrop ? ` data-folder-drop="${esc(folder.id)}"` : ""} style="--folder-depth:${depth}"${canDrag ? ' draggable="true"' : ""}>
+    ${toggle}
+    <button class="folder-item${active ? " is-active" : ""}" data-folder="${esc(folder.id)}" type="button"${active ? ' aria-current="page"' : ""} title="${esc(folder.label)}">
+      <svg class="icon" aria-hidden="true"${color}><use href="#${esc(folder.icon || "i-folder")}"/></svg>
+      <span class="folder-name">${esc(folder.label)}</span>
+      ${badge ? `<span class="folder-badge${badge.neutral ? " neutral" : ""}" data-folder-badge="${esc(folder.id)}">${badge.count > 999 ? "999+" : badge.count}</span>` : ""}
+    </button>
+    <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"${folder.delegated ? " hidden" : ""}><span aria-hidden="true">⋯</span></button>
+  </div>`;
+  if (!hasChildren || collapsed) return row;
+  return row + children.map((child) => folderRowMarkup(child, depth + 1, folders, visited)).join("");
+}
+
 function renderFolders() {
   const folders = (state.folders || []).slice().sort((a, b) => folderSortValue(a) - folderSortValue(b));
   const sections = [
     { key: "favorites", label: "Favorites" },
     { key: "folders", label: "Folders" }
   ];
+  const visited = new Set();
+  const reachable = new Set();
+  const markReachable = (id) => {
+    for (const child of folderChildrenOf(id, folders)) {
+      if (reachable.has(child.id)) continue;
+      reachable.add(child.id);
+      markReachable(child.id);
+    }
+  };
+  folders.filter((folder) => !folderHasRenderableParent(folder, folders)).forEach((folder) => {
+    reachable.add(folder.id);
+    markReachable(folder.id);
+  });
   let html = "";
   for (const section of sections) {
     html += `<div class="folder-section">${section.label}</div>`;
-    folders.filter((folder) => folder.section === section.key).forEach((folder) => {
-      const active = state.task === "mail" && state.folder === folder.id && !state.query;
-      const badge = folderBadge(folder);
-      const depth = folderDepth(folder, folders);
-      const color = folder.color ? ` style="color:${esc(folder.color)}"` : "";
-      html += `<div class="folder-row${active ? " is-active" : ""}${depth ? " is-child" : ""}" data-folder-row="${esc(folder.id)}" style="--folder-depth:${depth}">
-        <button class="folder-item${active ? " is-active" : ""}" data-folder="${esc(folder.id)}" type="button"${active ? ' aria-current="page"' : ""} title="${esc(folder.label)}">
-          <svg class="icon" aria-hidden="true"${color}><use href="#${esc(folder.icon || "i-folder")}"/></svg>
-          <span class="folder-name">${esc(folder.label)}</span>
-          ${badge ? `<span class="folder-badge${badge.neutral ? " neutral" : ""}" data-folder-badge="${esc(folder.id)}">${badge.count > 999 ? "999+" : badge.count}</span>` : ""}
-        </button>
-        <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"${folder.delegated ? " hidden" : ""}><span aria-hidden="true">⋯</span></button>
-      </div>`;
-    });
+    const roots = folders.filter((folder) => folder.section === section.key && !folderHasRenderableParent(folder, folders));
+    html += roots.map((folder) => folderRowMarkup(folder, 0, folders, visited)).join("");
     if (section.key === "favorites") {
       const scheduledCount = state.pendingSends.filter((item) => item.scheduled).length;
       const active = state.task === "scheduled";
-      html += `<div class="folder-row"><button class="folder-item${active ? " is-active" : ""}" data-open-scheduled type="button"${active ? ' aria-current="page"' : ""}>
+      html += `<div class="folder-row folder-scheduled-row"><span class="folder-toggle-spacer" aria-hidden="true"></span><button class="folder-item${active ? " is-active" : ""}" data-open-scheduled type="button"${active ? ' aria-current="page"' : ""}>
         <svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg>
         <span class="folder-name">Scheduled</span>
         ${scheduledCount ? `<span class="folder-badge neutral">${scheduledCount}</span>` : ""}
       </button></div>`;
     }
   }
+  // Safety net for legacy records whose parent disappeared or formed a cycle:
+  // never hide a folder just because its place in the tree is broken. Folders
+  // that are only hidden because a parent is collapsed stay out of this list.
+  const orphans = folders.filter((folder) => !reachable.has(folder.id));
+  if (orphans.length) {
+    html += orphans.map((folder) => folderRowMarkup(folder, 0, folders, visited)).join("");
+  }
   folderList.innerHTML = html;
 }
+
+async function toggleFolderCollapsed(id) {
+  const folder = folderById(id);
+  if (!folder) return;
+  const next = !folder.collapsed;
+  folder.collapsed = next;
+  renderFolders();
+  try {
+    const data = await api(`/api/folders/${encodeURIComponent(id)}`, { method: "PATCH", body: { collapsed: next } });
+    if (data?.folder) {
+      const current = folderById(id);
+      if (current) Object.assign(current, data.folder);
+    }
+  } catch (error) {
+    folder.collapsed = !next;
+    renderFolders();
+    showError(error);
+  }
+}
+
+function setupMailFolderDragAndDrop() {
+  if (!folderList || !messageList) return;
+  let draggedThreadIds = null;
+  let draggedFolderId = null;
+  const clearDropHighlights = () => {
+    folderList.querySelectorAll(".is-mail-drop, .is-folder-drop").forEach((row) => row.classList.remove("is-mail-drop", "is-folder-drop"));
+  };
+  const cleanupDrag = () => {
+    draggedThreadIds = null;
+    draggedFolderId = null;
+    clearDropHighlights();
+    messageList.querySelectorAll(".msg.is-dragging").forEach((row) => row.classList.remove("is-dragging"));
+    folderList.querySelectorAll(".folder-row.is-dragging").forEach((row) => row.classList.remove("is-dragging"));
+  };
+  const interactiveDragStart = (event) => {
+    const under = document.elementFromPoint(event.clientX, event.clientY);
+    return Boolean(under?.closest("button, input, label, a"));
+  };
+
+  folderList.addEventListener("click", (event) => {
+    const toggle = event.target.closest("[data-folder-toggle]");
+    if (!toggle) return;
+    event.preventDefault();
+    event.stopPropagation();
+    toggleFolderCollapsed(toggle.getAttribute("data-folder-toggle"));
+  });
+
+  messageList.addEventListener("dragstart", (event) => {
+    const row = event.target.closest(".msg[data-thread-id]");
+    if (!row || !event.dataTransfer || interactiveDragStart(event)) return;
+    const id = row.getAttribute("data-thread-id");
+    const threads = state.selectedIds.has(id)
+      ? selectedThreads()
+      : [threadById(id)].filter(Boolean);
+    if (!threads.length) { event.preventDefault(); return; }
+    draggedThreadIds = threads.map((thread) => thread.id);
+    event.dataTransfer.setData("application/x-a8m-threads", JSON.stringify(draggedThreadIds));
+    event.dataTransfer.setData("text/plain", threads.map((thread) => thread.subject || "").join("\n"));
+    event.dataTransfer.effectAllowed = "move";
+    row.classList.add("is-dragging");
+  });
+
+  folderList.addEventListener("dragstart", (event) => {
+    const row = event.target.closest('.folder-row[data-folder-row][draggable="true"]');
+    if (!row || !event.dataTransfer) return;
+    const under = document.elementFromPoint(event.clientX, event.clientY);
+    if (under?.closest("button:not(.folder-item), a")) { event.preventDefault(); return; }
+    draggedFolderId = row.getAttribute("data-folder-row");
+    event.dataTransfer.setData("application/x-a8m-mail-folder", draggedFolderId);
+    event.dataTransfer.effectAllowed = "move";
+    row.classList.add("is-dragging");
+  });
+
+  folderList.addEventListener("dragover", (event) => {
+    const types = Array.from(event.dataTransfer?.types || []);
+    if (!types.includes("application/x-a8m-threads") && !types.includes("application/x-a8m-mail-folder")) return;
+    const target = event.target.closest("[data-folder-drop]");
+    if (!target) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    clearDropHighlights();
+    target.classList.add(types.includes("application/x-a8m-threads") ? "is-mail-drop" : "is-folder-drop");
+  });
+
+  folderList.addEventListener("dragleave", (event) => {
+    if (event.relatedTarget && folderList.contains(event.relatedTarget)) return;
+    clearDropHighlights();
+  });
+
+  folderList.addEventListener("drop", async (event) => {
+    const target = event.target.closest("[data-folder-drop]");
+    if (!target) return;
+    const types = Array.from(event.dataTransfer?.types || []);
+    const targetFolderId = target.getAttribute("data-folder-drop");
+    const targetFolder = folderById(targetFolderId);
+    if (!targetFolder) return;
+    if (types.includes("application/x-a8m-threads")) {
+      event.preventDefault();
+      let ids = draggedThreadIds || [];
+      try {
+        const encoded = event.dataTransfer.getData("application/x-a8m-threads");
+        if (encoded) ids = JSON.parse(encoded);
+      } catch {}
+      cleanupDrag();
+      const threads = (ids || []).map((id) => threadById(id)).filter(Boolean);
+      if (!threads.length) return;
+      if (state.task === "mail" && state.folder === targetFolderId && !state.query) {
+        showToast(`Already in ${targetFolder.label}`);
+        return;
+      }
+      await performBulkAction("move", targetFolderId, { threads });
+      showToast(`Moved ${threads.length} conversation${threads.length === 1 ? "" : "s"} to ${targetFolder.label}`);
+      return;
+    }
+    if (types.includes("application/x-a8m-mail-folder")) {
+      event.preventDefault();
+      const sourceId = event.dataTransfer.getData("application/x-a8m-mail-folder") || draggedFolderId;
+      cleanupDrag();
+      const source = folderById(sourceId);
+      if (!source) return;
+      if (!folderIsCustom(source)) { showToast("Primary folders cannot be moved"); return; }
+      if (sourceId === targetFolderId) return;
+      if ((source.parentId || "") === targetFolderId) return;
+      if (folderDescendantIds(sourceId).has(targetFolderId)) {
+        showToast("A folder cannot be moved inside itself or its subfolders");
+        return;
+      }
+      await patchFolder(sourceId, { parentId: targetFolderId }, `Folder moved to ${targetFolder.label}`);
+    }
+  });
+
+  document.addEventListener("dragend", cleanupDrag);
+}
+
+setupMailFolderDragAndDrop();
 
 function folderMenuSystem(folder) {
   return Boolean(folder.system || ["inbox", "starred", "sent", "drafts", "archive", "spam", "trash"].includes(folder.id));
@@ -3615,7 +3827,10 @@ function openFolderEditor(mode = "create", folder = null, parentId = "") {
   }
   parent.innerHTML = `<option value="">Top level</option>` + (state.folders || [])
     .filter((item) => !item.virtual && !item.delegated && !excluded.has(item.id))
-    .map((item) => `<option value="${esc(item.id)}"${state.folderEditor.parentId === item.id ? " selected" : ""}>${esc(item.label)}</option>`).join("");
+    .map((item) => {
+      const indent = "— ".repeat(folderDepth(item, state.folders || []));
+      return `<option value="${esc(item.id)}"${state.folderEditor.parentId === item.id ? " selected" : ""}>${esc(indent + item.label)}</option>`;
+    }).join("");
   parent.disabled = mode === "rename";
   document.getElementById("folderEditorError").hidden = true;
   document.getElementById("folderEditorSave").textContent = mode === "rename" ? "Save changes" : "Create folder";
@@ -3888,7 +4103,7 @@ function threadRowMarkup(thread) {
   const unread = thread.unreadCount > 0;
   const safeId = esc(thread.id);
   const threadCount = thread.count > 1 ? `<span class="msg-thread-count" title="${thread.count} messages in conversation">${thread.count}</span>` : "";
-  return `<div class="msg${unread ? " is-unread" : ""}${selected ? " is-selected" : ""}${checked ? " is-checked" : ""}${rep.draft ? " is-draft" : ""}${thread.pinned ? " is-pinned" : ""}${thread.snoozeReturned ? " is-snooze-returned" : ""}" data-thread-id="${safeId}" role="option" aria-selected="${selected ? "true" : "false"}" tabindex="0">
+  return `<div class="msg${unread ? " is-unread" : ""}${selected ? " is-selected" : ""}${checked ? " is-checked" : ""}${rep.draft ? " is-draft" : ""}${thread.pinned ? " is-pinned" : ""}${thread.snoozeReturned ? " is-snooze-returned" : ""}" data-thread-id="${safeId}" role="option" aria-selected="${selected ? "true" : "false"}" tabindex="0" draggable="true">
         <label class="row-check" title="Select conversation">
           <input type="checkbox" data-thread-check="${safeId}" ${checked ? "checked" : ""} aria-label="Select ${esc(thread.subject)}">
           <span class="check-visual" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>

@@ -69,6 +69,9 @@ func normalizeFolderRecords(folders []any) []any {
 		if stateString(folder, "section") == "" {
 			folder["section"] = "folders"
 		}
+		if _, ok := folder["collapsed"]; !ok {
+			folder["collapsed"] = false
+		}
 		result = append(result, folder)
 	}
 	return result
@@ -153,6 +156,76 @@ func folderLabelTaken(folders []map[string]any, label, exceptID string) bool {
 		}
 	}
 	return false
+}
+
+const maxMailFolderDepth = 5
+
+// folderParentDepth returns how many folders are above the given parent. A
+// top-level folder has depth 0. The second result is false for a missing or
+// cyclic parent chain.
+func folderParentDepth(folders []map[string]any, parentID string) (int, bool) {
+	depth := 0
+	seen := map[string]bool{}
+	cursor := strings.TrimSpace(parentID)
+	for cursor != "" {
+		if seen[cursor] || depth > maxMailFolderDepth+2 {
+			return 0, false
+		}
+		seen[cursor] = true
+		var parent map[string]any
+		for _, folder := range folders {
+			if stateString(folder, "id") == cursor {
+				parent = folder
+				break
+			}
+		}
+		if parent == nil {
+			return 0, false
+		}
+		depth++
+		cursor = strings.TrimSpace(stateString(parent, "parentId"))
+	}
+	return depth, true
+}
+
+func folderIsDescendant(folders []map[string]any, candidateID, ancestorID string) bool {
+	cursor := candidateID
+	seen := map[string]bool{}
+	for cursor != "" {
+		if cursor == ancestorID {
+			return true
+		}
+		if seen[cursor] {
+			return false
+		}
+		seen[cursor] = true
+		var parentID string
+		found := false
+		for _, folder := range folders {
+			if stateString(folder, "id") == cursor {
+				parentID = stateString(folder, "parentId")
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+		cursor = parentID
+	}
+	return false
+}
+
+func folderParentCandidate(folders []map[string]any, parentID string) map[string]any {
+	for _, folder := range folders {
+		if stateString(folder, "id") == parentID {
+			if stateBool(folder, "virtual") || stateBool(folder, "delegated") {
+				return nil
+			}
+			return folder
+		}
+	}
+	return nil
 }
 
 func (s *Server) withUserIMAP(user userRecord, fn func(*imapclient.Client) error) error {
@@ -253,10 +326,15 @@ func (s *Server) createFolder(w http.ResponseWriter, r *http.Request) {
 		}
 		parentID := strings.TrimSpace(body.ParentID)
 		if parentID != "" {
-			parent := findStateFolder(state, parentID)
-			if parent == nil || stateBool(parent, "virtual") {
-				return fail(http.StatusBadRequest, "FOLDER_PARENT", "Parent folder not found")
+			parent := folderParentCandidate(folders, parentID)
+			if parent == nil {
+				return fail(http.StatusBadRequest, "FOLDER_PARENT", "Choose a parent folder that accepts subfolders")
 			}
+			depth, ok := folderParentDepth(folders, parentID)
+			if !ok || depth >= maxMailFolderDepth {
+				return fail(http.StatusBadRequest, "FOLDER_DEPTH", "Folders can be nested up to five levels")
+			}
+			parent["collapsed"] = false
 		}
 		maxOrder := int64(0)
 		for _, folder := range folders {
@@ -269,7 +347,7 @@ func (s *Server) createFolder(w http.ResponseWriter, r *http.Request) {
 			"id": id, "label": label, "icon": "i-folder", "section": "folders",
 			"system": false, "virtual": false, "imapFolder": label,
 			"order": maxOrder + 1, "badgeMode": "unread", "color": color,
-			"parentId": parentID, "createdAt": nowISO(),
+			"parentId": parentID, "collapsed": false, "createdAt": nowISO(),
 		}
 		if parentID != "" {
 			created["parentId"] = parentID
@@ -314,6 +392,7 @@ func (s *Server) updateFolder(w http.ResponseWriter, r *http.Request) {
 		ParentID  *string `json:"parentId"`
 		Section   *string `json:"section"`
 		BadgeMode *string `json:"badgeMode"`
+		Collapsed *bool   `json:"collapsed"`
 	}
 	if !s.decodeBody(w, r, &body, 64*1024) {
 		return
@@ -321,7 +400,7 @@ func (s *Server) updateFolder(w http.ResponseWriter, r *http.Request) {
 	var updated map[string]any
 	var oldIMAPName, newIMAPName string
 	var scriptToPush string
-	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
+	applyUpdate := func(state map[string]any) error {
 		folder := findStateFolder(state, id)
 		if folder == nil {
 			return fail(http.StatusNotFound, "FOLDER_NOT_FOUND", "Folder not found")
@@ -357,6 +436,9 @@ func (s *Server) updateFolder(w http.ResponseWriter, r *http.Request) {
 			}
 			folder["color"] = color
 		}
+		if body.Collapsed != nil {
+			folder["collapsed"] = *body.Collapsed
+		}
 		if body.ParentID != nil {
 			if system {
 				return fail(http.StatusBadRequest, "FOLDER_SYSTEM", "Primary folders cannot be moved")
@@ -365,8 +447,20 @@ func (s *Server) updateFolder(w http.ResponseWriter, r *http.Request) {
 			if parentID == id {
 				return fail(http.StatusBadRequest, "FOLDER_PARENT", "A folder cannot contain itself")
 			}
-			if parentID != "" && findStateFolder(state, parentID) == nil {
-				return fail(http.StatusBadRequest, "FOLDER_PARENT", "Parent folder not found")
+			if parentID != "" {
+				folders := stateFolderList(state)
+				parent := folderParentCandidate(folders, parentID)
+				if parent == nil {
+					return fail(http.StatusBadRequest, "FOLDER_PARENT", "Choose a parent folder that accepts subfolders")
+				}
+				if folderIsDescendant(folders, parentID, id) || parentID == id {
+					return fail(http.StatusBadRequest, "FOLDER_CYCLE", "A folder cannot be moved inside itself or its subfolders")
+				}
+				depth, ok := folderParentDepth(folders, parentID)
+				if !ok || depth >= maxMailFolderDepth {
+					return fail(http.StatusBadRequest, "FOLDER_DEPTH", "Folders can be nested up to five levels")
+				}
+				parent["collapsed"] = false
 			}
 			folder["parentId"] = parentID
 		}
@@ -390,10 +484,23 @@ func (s *Server) updateFolder(w http.ResponseWriter, r *http.Request) {
 				scriptToPush = script
 			}
 		}
-		appendStateAudit(state, "folder.updated", stateString(folder, "label"), sess.User.Name,
-			"Updated folder settings", clientIP(r), sanitizeUserAgent(r.UserAgent()))
+		collapsedOnly := body.Collapsed != nil && body.Label == nil && body.Color == nil &&
+			body.ParentID == nil && body.Section == nil && body.BadgeMode == nil
+		if !collapsedOnly {
+			appendStateAudit(state, "folder.updated", stateString(folder, "label"), sess.User.Name,
+				"Updated folder settings", clientIP(r), sanitizeUserAgent(r.UserAgent()))
+		}
 		return nil
-	})
+	}
+	var err error
+	if body.Label == nil {
+		// Visibility, colour, badge and parent changes only touch the folder
+		// document; avoid loading tens of thousands of message rows to toggle a
+		// disclosure arrow or drag a subfolder.
+		err = s.withState(sess.User.ID, sess.User.TenantID, applyUpdate)
+	} else {
+		err = s.withMailMetadataState(r.Context(), sess.User, applyUpdate)
+	}
 	if err != nil {
 		writeFromError(w, err)
 		return
@@ -592,6 +699,12 @@ func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request) {
 			message["folder"] = "trash"
 			message["imapFolder"] = "trash"
 			message["imapUid"] = 0
+		}
+		parentID := stateString(folder, "parentId")
+		for _, child := range stateFolderList(state) {
+			if stateString(child, "parentId") == id {
+				child["parentId"] = parentID
+			}
 		}
 		state["folders"] = stateRemoveFolder(stateFolderList(state), id)
 		if script, changed := s.rewriteSieveForFolder(state, id); changed {
