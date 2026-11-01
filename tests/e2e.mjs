@@ -106,6 +106,7 @@ try {
 
   console.log("\n[1] Two-factor sign-in and initial mailbox");
   check(await page.eval("!document.getElementById('loginScreen').hidden"), "login screen is shown");
+  equal(await page.eval("document.title"), "Alt8Mail: Secure Email with AI built in - Sign-in", "login tab title matches the sign-in format");
   await fillDemoLogin();
   await page.click("#loginSubmit");
   await page.waitFor(() => !document.getElementById("twoFactorForm").hidden, 8000);
@@ -118,6 +119,7 @@ try {
   equal(await page.eval("[...document.querySelectorAll('#otpInputs input')].map(input => input.value).join('')"), "123456", "demo code fills every OTP box");
   await page.click("#twoFactorSubmit");
   await waitForApp();
+  check(await page.eval("document.title.startsWith('(') && document.title.endsWith('Inbox — avery.chen@a8m.example - Alt8Mail')"), "inbox tab title shows folder, unread count and account");
   equal(await page.eval("document.querySelectorAll('.msg').length"), 12, "12 inbox conversations are listed");
   equal(await page.eval("[...document.querySelectorAll('.msg-thread-count')].map(e=>e.textContent).join(',')"), "3,3,3,3,2", "threaded conversations show message counts");
   check(await page.eval("document.querySelectorAll('.compose-tab').length === 1"), "the server-restored seed draft is in the compose dock");
@@ -128,6 +130,7 @@ try {
   await page.click(".msg[data-thread-id]");
   await sleep(350);
   equal(await page.eval("document.querySelectorAll('.thread-msg').length"), 3, "three messages render in the thread");
+  check(await page.eval("document.title.includes('Inbox · Q4 roadmap review — Thursday 10:00') && document.title.endsWith('— Alt8Mail')"), "open thread title shows the folder and subject");
   equal(await page.eval("document.querySelectorAll('.thread-msg.is-expanded').length"), 1, "latest message is expanded by default");
   check(await page.eval("document.querySelector('.reader-subject h2')?.textContent.includes('Q4 roadmap')"), "thread subject is shown without Re: noise");
   await page.click("#readerCollapseAll");
@@ -514,6 +517,7 @@ try {
   await sleep(400);
   await page.click("[data-folder='spam']");
   await sleep(350);
+  check(await page.eval("document.title.endsWith('Spam — avery.chen@a8m.example - Alt8Mail')"), "switching folders updates the tab title");
   await page.click(".msg:nth-of-type(1)");
   await sleep(400);
   check(await page.eval("!!document.querySelector('.external-banner.is-danger')"), "failed external authentication raises a red banner");
@@ -528,6 +532,7 @@ try {
   console.log("\n[9b] Calendar and directory");
   await page.click(".rail-btn[data-task='calendar']");
   await sleep(450);
+  equal(await page.eval("document.title"), "Alt8Mail: avery.chen@a8m.example - Smarter conversations, AI-powered Email", "non-mail workspace tab title uses the account tagline");
   equal(await page.eval("document.querySelectorAll('.cal-month-cell').length"), 42, "calendar month renders a full six-week grid");
   check(await page.eval("document.querySelectorAll('.agenda-event, .cal-empty').length > 0"), "agenda renders selected-day events");
   await page.screenshot(path.join(artifacts, "15-calendar.png"));
@@ -874,6 +879,16 @@ try {
   await sleep(450);
   check(await page.eval("document.documentElement.getAttribute('data-theme') === 'dark'"), "theme toggle applies dark mode");
   await page.screenshot(path.join(artifacts, "11-dark.png"));
+  await page.click("[data-folder='inbox']");
+  await sleep(350);
+  await page.eval("document.querySelector('[data-close-reader]')?.click()");
+  await sleep(200);
+  await page.eval("window.dispatchEvent(new Event('offline'))");
+  await sleep(200);
+  equal(await page.eval("document.title"), "Offline · Inbox — Alt8Mail", "offline tab title replaces the folder title");
+  await page.eval("window.dispatchEvent(new Event('online'))");
+  await sleep(700);
+  check(await page.eval("document.title.endsWith('Inbox — avery.chen@a8m.example - Alt8Mail')"), "online tab title returns to the folder format");
 
   console.log("\n[11] Mobile layout");
   const mobile = await browser.newPage("about:blank");
@@ -996,6 +1011,7 @@ try {
   check(await page.eval("getComputedStyle(document.querySelector('#bootSplash .boot-progress span')).animationName.includes('boot-progress-drain')"), "the sign-out progress bar drains instead of loading");
   check(await page.eval("getComputedStyle(document.querySelector('#bootSplash .boot-progress span')).backgroundColor === 'rgb(149, 162, 181)'"), "the sign-out progress bar uses a neutral grey");
   await page.waitFor(() => !document.getElementById("loginScreen").hidden, 8000);
+  equal(await page.eval("document.title"), "Alt8Mail: Secure Email with AI built in - Sign-in", "the tab returns to the sign-in title after logout");
   check(Date.now() - logoutStartedAt >= 5800, "login appears only after the six-second closing sequence");
   check(await page.eval("localStorage.getItem('a8m.accent') === null"), "logout clears the cached accent");
   check(await page.eval("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#0f6cbd'"), "the login screen returns to the default system accent");

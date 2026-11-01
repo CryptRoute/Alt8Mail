@@ -999,6 +999,7 @@ export async function createApp(options = {}) {
       capabilities: ["threads", "instant-search", "bulk-actions", "undo", "server-drafts", "undo-send", "scheduled-send", "sieve", "automatic-replies", "sender-trust", "outbound-caps", "quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files", "storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences"],
       attachmentMaxBytes: MAX_UPLOAD_BYTES,
       csrf: session.csrf,
+      mailSync: { lastError: null, lastSyncAt: nowIso() },
       demo: { email: DEMO_EMAIL, holdSeconds: holdOverride != null ? holdOverride / 1000 : 8 },
       serverTime: nowIso()
     };

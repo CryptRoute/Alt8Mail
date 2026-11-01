@@ -908,6 +908,7 @@ const state = {
   settingsTab: "appearance",
   searchHintsOpen: false,
   offline: false,
+  mailSyncError: "",
   statusPop: null,
   bulkMoveOpen: false,
   knownPendingIds: new Set(),
@@ -1659,10 +1660,47 @@ function handleSessionExpired() {
   }
 }
 
+const TITLE_LOGIN = "Alt8Mail: Secure Email with AI built in - Sign-in";
+const TITLE_GENERIC = "Alt8Mail: Secure, AI-Powered Email that thinks with you !";
+const TITLE_ACCOUNT = "Smarter conversations, AI-powered Email";
+
+function documentTitleSubject(thread) {
+  const text = String(threadSubject(thread) || "(no subject)").replace(/\s+/g, " ").trim();
+  if (text.length <= 80) return text;
+  return `${text.slice(0, 79).replace(/[\s·—-]+$/, "")}…`;
+}
+
+function updateDocumentTitle() {
+  let title = TITLE_GENERIC;
+  if (!state.user) {
+    title = loginScreen && !loginScreen.hidden ? TITLE_LOGIN : TITLE_GENERIC;
+  } else if (state.task !== "mail") {
+    title = `Alt8Mail: ${state.user.email || "Alt8Mail account"} - ${TITLE_ACCOUNT}`;
+  } else {
+    const folderLabel = (folderDef(state.folder).label || "Inbox").trim();
+    const thread = state.selectedThreadId ? currentThread() : null;
+    const imapOffline = state.mailboxMode === "imap" && Boolean(String(state.mailSyncError || "").trim());
+    const offline = Boolean(state.offline) || imapOffline;
+    if (offline) {
+      title = thread
+        ? `Offline · ${folderLabel} · ${documentTitleSubject(thread)} — Alt8Mail`
+        : `Offline · ${folderLabel} — Alt8Mail`;
+    } else {
+      const unread = Math.max(0, Math.floor(Number(unreadCount(state.folder)) || 0));
+      const prefix = unread > 0 ? `(${unread}) ` : "";
+      title = thread
+        ? `${prefix}${folderLabel} · ${documentTitleSubject(thread)} — Alt8Mail`
+        : `${prefix}${folderLabel} — ${state.user.email || "Alt8Mail account"} - Alt8Mail`;
+    }
+  }
+  if (document.title !== title) document.title = title;
+}
+
 function setOffline(offline) {
   const next = !!offline;
   if (state.offline === next) return;
   state.offline = next;
+  updateDocumentTitle();
   if (offlineBanner) offlineBanner.hidden = !next;
   const dot = document.getElementById("connDot");
   const text = document.getElementById("connText");
@@ -2173,6 +2211,7 @@ function showLogin() {
   if (state.pendingSends.length && state.user) {
     // A signed-out tab cannot cancel; data remains in the server queue.
   }
+  updateDocumentTitle();
   hideBootSplash();
 }
 
@@ -3426,6 +3465,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   const firstUserLoad = !state.user;
   state.user = data.user;
   state.mailboxMode = data.mailboxMode || "demo";
+  state.mailSyncError = String((data.mailSync && data.mailSync.lastError) || "").trim();
   state.aliases = data.aliases || [];
   state.identities = data.identities || state.identities || [];
   state.signatures = data.signatures || state.signatures || [];
@@ -3535,6 +3575,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.knownPendingIds = new Set(state.pendingSends.map((item) => item.id));
   const onboardingShown = maybeShowOnboarding();
   if (!onboardingShown) maybeShowPasswordChange();
+  updateDocumentTitle();
 }
 
 function applyPreferenceChrome() {
@@ -3740,6 +3781,7 @@ function adjustFolderUnread(folderId, delta) {
   if (!folderId || !delta) return;
   const current = Number(state.folderUnread[folderId] || 0);
   state.folderUnread[folderId] = Math.max(0, current + delta);
+  updateDocumentTitle();
 }
 
 function messageById(messageId) {
@@ -4916,6 +4958,7 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
   syncCommandBar();
   syncSearchContext();
   if (preserveScroll) messageList.scrollTop = previousScroll;
+  updateDocumentTitle();
 }
 
 function renderSearchScope(threads) {
@@ -5151,6 +5194,7 @@ function renderReader({ preserveScroll = false } = {}) {
     syncCommandBar();
     syncReaderToolbar(false);
     updateAiReaderUi();
+    updateDocumentTitle();
     return;
   }
 
@@ -5224,6 +5268,7 @@ function renderReader({ preserveScroll = false } = {}) {
   syncReaderToolbar(true);
   syncCommandBar();
   updateAiReaderUi();
+  updateDocumentTitle();
   requestAnimationFrame(() => { readerScroll.scrollTop = preserveScroll ? scrollTop : 0; });
 }
 
@@ -15097,6 +15142,7 @@ function setTask(task) {
   hideNotify();
   closeMenus();
   writeAppHash({ replace: true });
+  updateDocumentTitle();
 }
 
 function syncNav() {
@@ -15636,7 +15682,7 @@ function selectDeepLinkedThread(requestedThread) {
   renderReader();
   syncSelectionUi();
   if (isMobile()) document.body.classList.add("reader-open");
-  document.title = `${threadSubject(thread)} — Alt8Mail`;
+  updateDocumentTitle();
   return true;
 }
 
