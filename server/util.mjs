@@ -9,6 +9,10 @@ export function id(prefix) {
   return `${prefix}_${randomBytes(9).toString("base64url")}`;
 }
 
+export function newThreadId() {
+  return randomBytes(16).toString("base64url");
+}
+
 export function nowIso() {
   return new Date().toISOString();
 }

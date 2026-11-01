@@ -12,7 +12,7 @@ import { generateTotp, generateRecoveryCodes, verifyTotp } from "./twofactor.mjs
 import {
   ApiError, CSRF_COOKIE, SESSION_COOKIE, SESSION_TTL_MS,
   cookieHeader, csvRow, escapeHtml, formatBytes, id, isSecure, looksLikeEmail,
-  normalizeEmail, nowIso, parseCookies, publicUser, requestIp, safeEqual,
+  normalizeEmail, newThreadId, nowIso, parseCookies, publicUser, requestIp, safeEqual,
   snippetOf, textToHtml
 } from "./util.mjs";
 
@@ -790,7 +790,7 @@ export async function createApp(options = {}) {
       sizeBytes,
       messageId: existing ? existing.messageId : `<${id("draft")}@a8m.example>`,
       inReplyTo: input.inReplyTo == null ? (existing && existing.inReplyTo) || null : String(input.inReplyTo).slice(0, 400),
-      threadId: String(input.threadId || (existing && existing.threadId) || id("t")).slice(0, 100),
+      threadId: String(input.threadId || (existing && existing.threadId) || newThreadId()).slice(0, 100),
       priority: ["low", "normal", "high"].includes(input.priority) ? input.priority : (existing && existing.priority) || "normal",
       receipt: !!input.receipt,
       delivery: !!input.delivery,
@@ -836,7 +836,7 @@ export async function createApp(options = {}) {
       unread: false,
       starred: false,
       sizeBytes: 4 * 1024 + Buffer.byteLength(item.bodyText || "", "utf8") + (item.attachments || []).reduce((sum, file) => sum + (file.sizeBytes || 0), 0),
-      threadId: item.threadId || id("t"),
+      threadId: item.threadId || newThreadId(),
       inReplyTo: item.inReplyTo || null,
       windowMode: "floating",
       external: false,
@@ -860,7 +860,7 @@ export async function createApp(options = {}) {
     if (item.saveCopy !== false) {
       const sent = {
         id: id("msg"),
-        threadId: item.threadId || id("t"),
+        threadId: item.threadId || newThreadId(),
         folder: "sent",
         from: item.from,
         to: item.to,
@@ -1916,7 +1916,7 @@ export async function createApp(options = {}) {
           subject,
           bodyText,
           attachments,
-          threadId: String(body.threadId || (draft && draft.threadId) || id("t")).slice(0, 100),
+          threadId: String(body.threadId || (draft && draft.threadId) || newThreadId()).slice(0, 100),
           inReplyTo: body.inReplyTo ? String(body.inReplyTo).slice(0, 400) : (draft && draft.inReplyTo) || null,
           priority: ["low", "normal", "high"].includes(body.priority) ? body.priority : (draft && draft.priority) || "normal",
           receipt: !!(body.receipt != null ? body.receipt : draft && draft.receipt),
@@ -2300,7 +2300,7 @@ export async function createApp(options = {}) {
         const sender = body.from && body.from.email ? senderPerson(body.from) : senderPerson({ name: "Test Sender", email: "test@external.example" });
         const inserted = {
           id: id("msg"),
-          threadId: id("t"),
+          threadId: newThreadId(),
           folder: "inbox",
           from: sender,
           to: [senderPerson(db.user)],

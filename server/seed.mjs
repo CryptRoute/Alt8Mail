@@ -203,7 +203,7 @@ export function seedDatabase() {
 
   // t1 — Q4 roadmap review (3 messages, one unread)
   messages.push(message({
-    id: "m1", threadId: "t1", folder: "inbox", from: ELENA, to: ME,
+    id: "m1", threadId: "N2Acmhe6TzJMY7c6L5yRfg", folder: "inbox", from: ELENA, to: ME,
     subject: "Q4 roadmap review — Thursday 10:00",
     date: iso(2 * HOUR + 5 * MINUTE), unread: false,
     categories: ["decision", "product"], classification: "Internal",
@@ -217,7 +217,7 @@ export function seedDatabase() {
 <p>Thanks,<br>Elena</p>${signature("Elena Vasquez", "VP Product")}`
   }));
   messages.push(message({
-    id: "m2", threadId: "t1", folder: "sent", from: ME, to: ELENA,
+    id: "m2", threadId: "N2Acmhe6TzJMY7c6L5yRfg", folder: "sent", from: ME, to: ELENA,
     subject: "Re: Q4 roadmap review — Thursday 10:00",
     date: iso(1 * HOUR + 58 * MINUTE), unread: false, sizeBytes: 16 * KIB,
     snippet: "The deck looks tight. I'd keep the shared-inbox beta in Q4 and move the analytics export to early January.",
@@ -225,7 +225,7 @@ export function seedDatabase() {
     bodyHtml: bodyParagraphs(["Elena —", "The deck looks tight. I'd keep the shared-inbox beta in Q4 and move the analytics export to early January, as long as support has the macro library ready.", "I'll bring both questions to Thursday.", "Avery"])
   }));
   messages.push(message({
-    id: "m3", threadId: "t1", folder: "inbox", from: ELENA, to: ME,
+    id: "m3", threadId: "N2Acmhe6TzJMY7c6L5yRfg", folder: "inbox", from: ELENA, to: ME,
     subject: "Re: Q4 roadmap review — Thursday 10:00",
     date: iso(38 * MINUTE), unread: true, sizeBytes: 9 * KIB,
     categories: ["decision"],
@@ -236,7 +236,7 @@ export function seedDatabase() {
 
   // t2 — Brightline order form (3 messages, external, one unread)
   messages.push(message({
-    id: "m4", threadId: "t2", folder: "inbox", from: JORDAN, to: ME,
+    id: "m4", threadId: "ueybGDD1fMb5aj91gacpkA", folder: "inbox", from: JORDAN, to: ME,
     subject: "Brightline — signed order form and next steps",
     date: iso(3 * HOUR + 5 * MINUTE), unread: true, external: true,
     categories: ["sales"], classification: "Internal", attachments: [file("Brightline-order-form.pdf", "1.8 MB", "PDF")],
@@ -245,14 +245,14 @@ export function seedDatabase() {
     bodyHtml: `<p>Avery,</p><p>Attaching the countersigned order form. Procurement has approved the annual term; our security team is finishing its review and we expect to close by Friday.</p><p>Could you confirm the billing contact and the PO reference when you have a moment?</p><p>Jordan</p><p class="sig">Jordan Blake<br><span>Brightline</span></p>`
   }));
   messages.push(message({
-    id: "m5", threadId: "t2", folder: "sent", from: ME, to: JORDAN,
+    id: "m5", threadId: "ueybGDD1fMb5aj91gacpkA", folder: "sent", from: ME, to: JORDAN,
     subject: "Re: Brightline — signed order form and next steps",
     date: iso(2 * HOUR + 40 * MINUTE), unread: false, sizeBytes: 18 * KIB,
     inReplyTo: "<m4@a8m.example>",
     bodyHtml: bodyParagraphs(["Jordan,", "Received — thank you. Billing contact is Priya Shah; the PO reference is PO-2026-0418.", "Avery"])
   }));
   messages.push(message({
-    id: "m6", threadId: "t2", folder: "inbox", from: JORDAN, to: ME,
+    id: "m6", threadId: "ueybGDD1fMb5aj91gacpkA", folder: "inbox", from: JORDAN, to: ME,
     subject: "Re: Brightline — signed order form and next steps",
     date: iso(50 * MINUTE), unread: true, external: true,
     categories: ["sales"],
@@ -264,7 +264,7 @@ export function seedDatabase() {
 
   // t3 — Contract renewal (3 messages)
   messages.push(message({
-    id: "m7", threadId: "t3", folder: "inbox", from: MARCUS, to: ME,
+    id: "m7", threadId: "ExBL27fdy-0XQnHMk9DsBw", folder: "inbox", from: MARCUS, to: ME,
     subject: "Re: Contract renewal — legal has signed off",
     date: iso(4 * HOUR + 15 * MINUTE), unread: true,
     categories: ["legal"], classification: "Confidential", sizeBytes: 42 * KIB,
@@ -272,14 +272,14 @@ export function seedDatabase() {
     bodyHtml: bodyParagraphs(["Avery —", "Good news from legal: the redlines are cleared and the countersigned copy is on its way. Nothing further is needed from your side this week. I'll file the executed agreement once it lands and send you the reference number.", "Marcus"])
   }));
   messages.push(message({
-    id: "m8", threadId: "t3", folder: "sent", from: ME, to: MARCUS,
+    id: "m8", threadId: "ExBL27fdy-0XQnHMk9DsBw", folder: "sent", from: ME, to: MARCUS,
     subject: "Re: Contract renewal — legal has signed off",
     date: iso(3 * HOUR + 55 * MINUTE), unread: false, sizeBytes: 12 * KIB,
     inReplyTo: "<m7@a8m.example>",
     bodyHtml: bodyParagraphs(["Marcus,", "Thanks for pushing this through. Let me know when the countersigned copy is filed and I'll update the vendor record.", "Avery"])
   }));
   messages.push(message({
-    id: "m9", threadId: "t3", folder: "inbox", from: MARCUS, to: ME,
+    id: "m9", threadId: "ExBL27fdy-0XQnHMk9DsBw", folder: "inbox", from: MARCUS, to: ME,
     subject: "Re: Contract renewal — legal has signed off",
     date: iso(2 * HOUR + 20 * MINUTE), unread: false,
     categories: ["legal"], classification: "Confidential",
@@ -290,7 +290,7 @@ export function seedDatabase() {
 
   // t4 — Design review (3 messages)
   messages.push(message({
-    id: "m10", threadId: "t4", folder: "inbox", from: NORA, to: ME,
+    id: "m10", threadId: "iPfeygOctckeGoiJw_UsWw", folder: "inbox", from: NORA, to: ME,
     subject: "Design review notes + updated flows",
     date: iso(6 * HOUR + 20 * MINUTE), unread: false, starred: true,
     attachments: [file("first-run-flows.pdf", "1.1 MB", "PDF")],
@@ -298,14 +298,14 @@ export function seedDatabase() {
     bodyHtml: `<p>Hi Avery,</p><p>Thanks for the sharp feedback yesterday. I folded the empty-state notes into the flows and tightened the first-run copy. The updated prototype is linked in the doc.</p><p>Could you take another pass before Thursday? I'm most unsure about the second step — it may be doing too much for one screen.</p><p>Nora</p>${signature("Nora Patel", "Design Lead")}`
   }));
   messages.push(message({
-    id: "m11", threadId: "t4", folder: "sent", from: ME, to: NORA,
+    id: "m11", threadId: "iPfeygOctckeGoiJw_UsWw", folder: "sent", from: ME, to: NORA,
     subject: "Re: Design review notes + updated flows",
     date: iso(5 * HOUR + 10 * MINUTE), unread: false, sizeBytes: 14 * KIB,
     inReplyTo: "<m10@a8m.example>",
     bodyHtml: bodyParagraphs(["Nora —", "The second step is close. I'd merge the permission prompt into step three and keep the copy short. I left two comments in the doc.", "Avery"])
   }));
   messages.push(message({
-    id: "m12", threadId: "t4", folder: "inbox", from: NORA, to: ME,
+    id: "m12", threadId: "iPfeygOctckeGoiJw_UsWw", folder: "inbox", from: NORA, to: ME,
     subject: "Re: Design review notes + updated flows",
     date: iso(65 * MINUTE), unread: true,
     snippet: "Merged the permission prompt into step three. One question about the mobile empty state.",
@@ -315,7 +315,7 @@ export function seedDatabase() {
 
   // t5 — Invoice approval (2 messages)
   messages.push(message({
-    id: "m13", threadId: "t5", folder: "inbox", from: PRIYA, to: ME,
+    id: "m13", threadId: "HB9FllDzHRJdlanqTCyWvw", folder: "inbox", from: PRIYA, to: ME,
     subject: "Invoice #4821 is ready for approval",
     date: iso(8 * HOUR), unread: true,
     categories: ["finance"], classification: "Confidential", attachments: [file("invoice-4821.pdf", "312 KB", "PDF")],
@@ -323,7 +323,7 @@ export function seedDatabase() {
     bodyHtml: bodyParagraphs(["Hi Avery,", "Invoice #4821 is ready for approval. Please review before Friday; the PO number is on the second page. If everything looks right, a one-line reply is enough and I'll route it to AP.", "Thanks, Priya"])
   }));
   messages.push(message({
-    id: "m14", threadId: "t5", folder: "inbox", from: PRIYA, to: ME,
+    id: "m14", threadId: "HB9FllDzHRJdlanqTCyWvw", folder: "inbox", from: PRIYA, to: ME,
     subject: "Re: Invoice #4821 is ready for approval",
     date: iso(7 * HOUR + 15 * MINUTE), unread: false,
     categories: ["finance"], classification: "Confidential",
@@ -334,14 +334,14 @@ export function seedDatabase() {
 
   // Single-message threads
   messages.push(message({
-    id: "m15", threadId: "t6", folder: "inbox", from: TOMAS, to: ME,
+    id: "m15", threadId: "Us9qmXz-Z5GUl_r5gJobEQ", folder: "inbox", from: TOMAS, to: ME,
     subject: "Customer call recap: Brightline",
     date: iso(26 * HOUR), unread: false,
     snippet: "Three themes came up: onboarding speed, reporting depth, and the export limits on the team plan.",
     bodyHtml: bodyParagraphs(["Avery,", "Three themes came up on the Brightline call: onboarding speed, reporting depth, and the export limits on the team plan. I've written them up with quotes in the shared doc.", "Want to fold the export issue into Thursday's agenda? It sounds like the most urgent one.", "Tomás"])
   }));
   messages.push(message({
-    id: "m16", threadId: "t7", folder: "inbox", from: LENA, to: ME,
+    id: "m16", threadId: "5bOrgjx7zBQqXYkmwHzkTQ", folder: "inbox", from: LENA, to: ME,
     subject: "You're invited: Product offsite — Nov 14",
     date: iso(28 * HOUR), unread: true,
     categories: ["people"], sizeBytes: 22 * KIB,
@@ -350,7 +350,7 @@ export function seedDatabase() {
     bodyHtml: bodyParagraphs(["Hi everyone,", "You're invited to the product offsite on Friday, November 14. Location is still TBD; I'll confirm once we have the headcount. Please add one dietary note to the sheet by Monday.", "I'll share the travel guidance in the same thread.", "Lena"])
   }));
   messages.push(message({
-    id: "m17", threadId: "t8", folder: "inbox", from: DANIEL, to: ME,
+    id: "m17", threadId: "Mqtj01fXbrgc6_RfoGCIvQ", folder: "inbox", from: DANIEL, to: ME,
     subject: "Weekly metrics — week 43",
     date: iso(30 * HOUR), unread: false, starred: true,
     categories: ["analytics"], attachments: [file("week-43-metrics.xlsx", "744 KB", "XLS")],
@@ -358,21 +358,21 @@ export function seedDatabase() {
     bodyHtml: bodyParagraphs(["Hi Avery,", "Active workspaces are up 4.2% week over week; churn is flat. The retention bump is mostly from the new shared-inbox cohort, which is holding better than we expected.", "Full numbers are in the attached sheet. Happy to walk through the cohort view on Thursday if useful.", "Daniel"])
   }));
   messages.push(message({
-    id: "m18", threadId: "t9", folder: "inbox", from: AISHA, to: ME,
+    id: "m18", threadId: "EsON4rc3_VPIl1iy-7UPgw", folder: "inbox", from: AISHA, to: ME,
     subject: "Re: Welcome to the team",
     date: iso(3 * DAY + 2 * HOUR), unread: false,
     snippet: "Thrilled to have you aboard! Your first-week schedule is in the calendar, and I've paired you with Nora.",
     bodyHtml: bodyParagraphs(["Thrilled to have you aboard!", "Your first-week schedule is in the calendar, and I've paired you with Nora for the design walkthrough. Ping me if anything is missing.", "Aisha"])
   }));
   messages.push(message({
-    id: "m19", threadId: "t10", folder: "inbox", from: IT, to: ME,
+    id: "m19", threadId: "wryPYgAojiVBpwI7oJ6caA", folder: "inbox", from: IT, to: ME,
     subject: "Scheduled maintenance: Saturday 02:00–04:00 UTC",
     date: iso(4 * DAY + 3 * HOUR), unread: true,
     snippet: "Mail delivery will continue; the admin console may be briefly unavailable.",
     bodyHtml: bodyParagraphs(["Hello,", "Scheduled maintenance will take place this Saturday, 02:00–04:00 UTC. Mail delivery will continue; the admin console may be briefly unavailable during the window.", "No action is needed from you.", "— Alt8Mail IT"])
   }));
   messages.push(message({
-    id: "m20", threadId: "t11", folder: "inbox", from: NADIA, to: ME,
+    id: "m20", threadId: "PDhv_KY0DU6jsW5owThLjQ", folder: "inbox", from: NADIA, to: ME,
     subject: "Photos from the offsite",
     date: iso(5 * DAY + 1 * HOUR), unread: false,
     attachments: [file("offsite-picks.zip", "18.2 MB", "ZIP"), file("offsite-team.svg", "1.8 MB", "IMG")],
@@ -380,7 +380,7 @@ export function seedDatabase() {
     bodyHtml: bodyParagraphs(["Hi Avery,", "Finally sorted the good ones from the offsite. The album link expires in 30 days, and I've attached a smaller set for the deck.", "Let me know which ones you want to use and I'll send high-resolution versions.", "Nadia"])
   }));
   messages.push(message({
-    id: "m21", threadId: "t12", folder: "inbox", from: FINANCE, to: ME,
+    id: "m21", threadId: "qCGZvEmWdfcm6ie6TkEZhw", folder: "inbox", from: FINANCE, to: ME,
     subject: "Your expense report was approved",
     date: iso(6 * DAY), unread: false,
     categories: ["finance"],
@@ -390,7 +390,7 @@ export function seedDatabase() {
 
   // Archive
   messages.push(message({
-    id: "a1", threadId: "ta1", folder: "archive", from: ANDREW, to: ME,
+    id: "a1", threadId: "xCyYt5JcYsVd6bg5rz1J6w", folder: "archive", from: ANDREW, to: ME,
     subject: "Q3 retrospective notes",
     date: iso(9 * DAY), unread: false, starred: true,
     attachments: [file("q3-retro.pdf", "920 KB", "PDF")],
@@ -398,14 +398,14 @@ export function seedDatabase() {
     bodyHtml: bodyParagraphs(["All,", "The recurring theme was too many handoffs late in the quarter. I've captured the actions and owners in the attached notes. We'll revisit them at the start of Q4.", "Andrew"])
   }));
   messages.push(message({
-    id: "a2", threadId: "ta2", folder: "archive", from: LENA, to: ME,
+    id: "a2", threadId: "kjXmgCzzQjJ9D8K2Ngt23w", folder: "archive", from: LENA, to: ME,
     subject: "Benefits enrollment closes Friday",
     date: iso(14 * DAY), unread: false,
     snippet: "A quick reminder to review your selections before the window closes.",
     bodyHtml: bodyParagraphs(["Hi Avery,", "A quick reminder to review your benefits selections before the enrollment window closes on Friday. Your current choices carry over if you don't change anything.", "Lena"])
   }));
   messages.push(message({
-    id: "a3", threadId: "ta3", folder: "archive", from: PRIYA, to: ME,
+    id: "a3", threadId: "2z5Ft5gFLRaxGO7OORpmcw", folder: "archive", from: PRIYA, to: ME,
     subject: "2027 budget template",
     date: iso(20 * DAY), unread: false,
     attachments: [file("budget-2027.xlsx", "388 KB", "XLS")],
@@ -415,7 +415,7 @@ export function seedDatabase() {
 
   // Spam
   messages.push(message({
-    id: "sp1", threadId: "tsp1", folder: "spam", from: PARCEL, to: ME,
+    id: "sp1", threadId: "vYrBabBz5dzKejJCKsSlnw", folder: "spam", from: PARCEL, to: ME,
     subject: "Your parcel is waiting",
     date: iso(7 * HOUR), unread: true, external: true,
     snippet: "Confirm your details within 24 hours to arrange delivery.",
@@ -423,7 +423,7 @@ export function seedDatabase() {
     bodyHtml: bodyParagraphs(["Your parcel is being held. Confirm your details within 24 hours to arrange delivery."])
   }));
   messages.push(message({
-    id: "sp2", threadId: "tsp2", folder: "spam", from: OFFERS, to: ME,
+    id: "sp2", threadId: "VoAGBOWHVtBGvR4rh2tCfQ", folder: "spam", from: OFFERS, to: ME,
     subject: "Exclusive offer: 70% off",
     date: iso(2 * DAY), unread: true, external: true,
     snippet: "Today only — a selection of deals chosen for you.",
@@ -431,7 +431,7 @@ export function seedDatabase() {
     bodyHtml: bodyParagraphs(["Today only: a selection of deals chosen for you. Unsubscribe at any time."])
   }));
   messages.push(message({
-    id: "sp3", threadId: "tsp3", folder: "spam", from: PHISH, to: ME,
+    id: "sp3", threadId: "BObVfHTeoSvVjefxckgFYQ", folder: "spam", from: PHISH, to: ME,
     subject: "Action required: re-verify your Alt8Mail account",
     date: iso(40 * MINUTE), unread: true, external: true, classification: "Confidential",
     snippet: "Your mailbox will be suspended unless you confirm your password today.",
@@ -441,7 +441,7 @@ export function seedDatabase() {
 
   // Trash
   messages.push(message({
-    id: "tr1", threadId: "ttr1", folder: "trash", from: DESIGNFILE, to: ME,
+    id: "tr1", threadId: "gEBUYWhKzb6ujzYugD21TA", folder: "trash", from: DESIGNFILE, to: ME,
     subject: "This week in product design",
     date: iso(4 * DAY + 5 * HOUR), unread: false, external: true,
     snippet: "Five reads on onboarding, pricing pages and design systems.",
@@ -452,7 +452,7 @@ export function seedDatabase() {
   // A server-backed draft restored into the compose dock on load.
   const draftBody = ["Lena —", "A few questions about the offsite:", "1. Do we have a travel budget per person?", "2. Should the customer-success team join the afternoon session?"].join("\n");
   messages.push(message({
-    id: "draft-offsite", threadId: "tdraft1", folder: "drafts", from: ME, to: LENA,
+    id: "draft-offsite", threadId: "-77suw6-Btxa_xsGwxWhNw", folder: "drafts", from: ME, to: LENA,
     subject: "Offsite logistics",
     date: iso(30 * MINUTE), unread: false, draft: true, bodyText: draftBody,
     bodyHtml: bodyParagraphs(draftBody.split("\n").filter(Boolean)),
@@ -583,48 +583,48 @@ export function seedDatabase() {
       id: "task_invoice", title: "Approve invoice #4821", priority: "high",
       notes: "Route to AP after approval. The PO reference is on page two of the PDF.",
       due: dayKey(0), dueTime: "16:00", tags: ["Finance", "AP"],
-      linkedThreadId: "t5", linkedSubject: "Invoice #4821 is ready for approval",
+      linkedThreadId: "HB9FllDzHRJdlanqTCyWvw", linkedSubject: "Invoice #4821 is ready for approval",
       source: "email", createdAt: iso(8 * HOUR), updatedAt: iso(8 * HOUR)
     }),
     task({
       id: "task_board_deck", title: "Prepare the board metrics review", priority: "urgent",
       notes: "Pull the week 43 cohort numbers and add the shared-inbox retention view.",
       due: dayKey(2), dueTime: "09:00", tags: ["Board", "Analytics"],
-      linkedThreadId: "t8", linkedSubject: "Weekly metrics — week 43",
+      linkedThreadId: "Mqtj01fXbrgc6_RfoGCIvQ", linkedSubject: "Weekly metrics — week 43",
       source: "email", createdAt: iso(30 * HOUR), updatedAt: iso(5 * HOUR)
     }),
     task({
       id: "task_vendor_security", title: "Finish the Brightline security review", priority: "high",
       notes: "Confirm the security contact and file the countersigned order form in the vendor folder.",
       due: dayKey(1), dueTime: "12:00", tags: ["Vendor", "Security"],
-      linkedThreadId: "t2", linkedSubject: "Brightline — signed order form and next steps",
+      linkedThreadId: "ueybGDD1fMb5aj91gacpkA", linkedSubject: "Brightline — signed order form and next steps",
       source: "email", createdAt: iso(3 * HOUR), updatedAt: iso(50 * MINUTE)
     }),
     task({
       id: "task_offsite", title: "Confirm offsite dietary notes", priority: "normal",
       notes: "Collect responses from the product team and send the final headcount to Lena.",
       due: dayKey(-1), tags: ["People", "Offsite"], assignee: LENA,
-      linkedThreadId: "t7", linkedSubject: "You're invited: Product offsite — Nov 14",
+      linkedThreadId: "5bOrgjx7zBQqXYkmwHzkTQ", linkedSubject: "You're invited: Product offsite — Nov 14",
       source: "email", createdAt: iso(28 * HOUR), updatedAt: iso(26 * HOUR)
     }),
     task({
       id: "task_design", title: "Merge permission prompt into step three", priority: "normal",
       notes: "Nora to share the updated prototype after the design review.",
       due: dayKey(3), tags: ["Design", "Product"], assignee: NORA,
-      linkedThreadId: "t4", linkedSubject: "Design review notes + updated flows",
+      linkedThreadId: "iPfeygOctckeGoiJw_UsWw", linkedSubject: "Design review notes + updated flows",
       source: "email", createdAt: iso(6 * HOUR), updatedAt: iso(1 * HOUR)
     }),
     task({
       id: "task_contract", title: "Update the vendor record for the contract renewal", priority: "normal",
       notes: "File the executed agreement under REF-2026-1019.",
       due: dayKey(4), tags: ["Legal", "Vendor"],
-      linkedThreadId: "t3", linkedSubject: "Contract renewal — legal has signed off",
+      linkedThreadId: "ExBL27fdy-0XQnHMk9DsBw", linkedSubject: "Contract renewal — legal has signed off",
       source: "email", createdAt: iso(4 * HOUR), updatedAt: iso(2 * HOUR)
     }),
     task({
       id: "task_done_agenda", title: "Send the Q4 roadmap agenda", priority: "normal", status: "done",
       notes: "Agenda sent to the product leads on Wednesday morning.",
-      due: dayKey(-2), tags: ["Product"], linkedThreadId: "t1",
+      due: dayKey(-2), tags: ["Product"], linkedThreadId: "N2Acmhe6TzJMY7c6L5yRfg",
       linkedSubject: "Q4 roadmap review — Thursday 10:00", source: "email",
       createdAt: iso(2 * DAY), updatedAt: iso(1 * DAY), completedAt: iso(1 * DAY)
     }),

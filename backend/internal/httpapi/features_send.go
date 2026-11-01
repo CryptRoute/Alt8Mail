@@ -144,7 +144,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			threadID = stateString(draft, "threadId")
 		}
 		if threadID == "" {
-			threadID = newID("t")
+			threadID = newThreadID()
 		}
 		inReplyTo := any(nil)
 		if body.InReplyTo != nil {
@@ -535,7 +535,7 @@ func restoreDraft(state map[string]any, item map[string]any) map[string]any {
 		"bodyText": text, "bodyHtml": htmlBody, "attachments": attachments,
 		"date": now, "updatedAt": now, "createdAt": firstNonEmpty(stateString(snapshot, "createdAt"), now),
 		"unread": false, "starred": false, "sizeBytes": sizeBytes,
-		"threadId":  firstNonEmpty(stateString(item, "threadId"), newID("t")),
+		"threadId":  firstNonEmpty(stateString(item, "threadId"), newThreadID()),
 		"inReplyTo": item["inReplyTo"], "windowMode": "floating", "external": false,
 		"priority": firstNonEmpty(stateString(item, "priority"), "normal"),
 		"receipt":  stateBool(item, "receipt"), "delivery": stateBool(item, "delivery"),
@@ -594,7 +594,7 @@ func commitQueued(state map[string]any, item map[string]any) string {
 		}
 		threadID := stateString(item, "threadId")
 		if threadID == "" {
-			threadID = newID("t")
+			threadID = newThreadID()
 		}
 		sent := map[string]any{
 			"id": newID("msg"), "threadId": threadID, "folder": "sent",

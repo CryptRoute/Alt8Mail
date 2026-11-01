@@ -952,6 +952,7 @@ let outboxPollBusy = false;
 let pendingTickTimer = null;
 let lastFocus = null;
 let deferredInstallPrompt = null;
+const threadIdAliases = new Map();
 let searchHintsTimer = null;
 let lastReaderId = null;
 let settingsLoading = false;
@@ -2118,6 +2119,7 @@ function showLogin() {
   composeSessions.slice().forEach((session) => removeComposeSessionUi(session.id));
   composeSessions = [];
   state.user = null;
+  threadIdAliases.clear();
   state.notifications = [];
   state.dismissedNotifications = new Set();
   state.aiReader = null;
@@ -3771,11 +3773,18 @@ async function ensureThreadLoaded(target) {
   try {
     const data = await api(`/api/messages?thread=${encodeURIComponent(target)}`);
     mergeMailMessages(data.messages || []);
+    const canonical = String(data.thread || "").trim();
+    if (canonical && canonical !== target) threadIdAliases.set(String(target), canonical);
     renderList();
-    return Boolean(threadById(target) || messageById(target));
+    return Boolean(threadById(target) || messageById(target) || (canonical && threadById(canonical)));
   } catch {
     return false;
   }
+}
+
+function canonicalThreadId(id) {
+  const key = String(id || "");
+  return threadIdAliases.get(key) || key;
 }
 
 function folderDef(folderId) {
@@ -14995,8 +15004,9 @@ function applyHashRoute() {
     if (message) targetId = selectionIdForMessage(message);
     if (!threadById(targetId)) {
       ensureThreadLoaded(targetId).then((found) => {
-        const loaded = messageById(targetId);
-        const selection = loaded ? selectionIdForMessage(loaded) : targetId;
+        const canonical = canonicalThreadId(targetId);
+        const loaded = messageById(targetId) || messageById(canonical);
+        const selection = loaded ? selectionIdForMessage(loaded) : canonical;
         if (found && threadById(selection)) {
           selectThread(selection);
           return;
@@ -15612,6 +15622,24 @@ async function installApp() {
   if (install) install.hidden = true;
 }
 
+function selectDeepLinkedThread(requestedThread) {
+  const message = messageById(requestedThread);
+  const threadId = message ? selectionIdForMessage(message) : canonicalThreadId(requestedThread);
+  const thread = threadById(threadId);
+  if (!thread) return false;
+  const target = thread.messages.find((item) => item.folder !== "drafts") || thread.latest;
+  state.folder = FOLDER_LABELS[target.folder] ? target.folder : "inbox";
+  state.filter = "all";
+  state.selectedThreadId = threadId;
+  renderFolders();
+  renderList();
+  renderReader();
+  syncSelectionUi();
+  if (isMobile()) document.body.classList.add("reader-open");
+  document.title = `${threadSubject(thread)} — Alt8Mail`;
+  return true;
+}
+
 function handleDeepLink() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("popout") === "1") document.body.classList.add("popout");
@@ -15625,22 +15653,20 @@ function handleDeepLink() {
   }
   const requestedThread = params.get("thread") || params.get("message");
   if (requestedThread) {
-    const message = messageById(requestedThread);
-    const threadId = message ? selectionIdForMessage(message) : requestedThread;
-    const thread = threadById(threadId);
-    if (thread) {
-      const target = thread.messages.find((item) => item.folder !== "drafts") || thread.latest;
-      state.folder = FOLDER_LABELS[target.folder] ? target.folder : "inbox";
-      state.filter = "all";
-      state.selectedThreadId = threadId;
-      renderFolders();
-      renderList();
-      renderReader();
-      syncSelectionUi();
-      if (isMobile()) document.body.classList.add("reader-open");
-      document.title = `${threadSubject(thread)} — Alt8Mail`;
-    } else {
-      showToast("That conversation is no longer available");
+    if (!selectDeepLinkedThread(requestedThread)) {
+      ensureThreadLoaded(requestedThread).then((found) => {
+        if (!found || !selectDeepLinkedThread(requestedThread)) {
+          showToast("That conversation is no longer available");
+          return;
+        }
+        const canonical = canonicalThreadId(requestedThread);
+        if (canonical && canonical !== requestedThread) {
+          const next = new URL(window.location.href);
+          if (next.searchParams.has("thread")) next.searchParams.set("thread", canonical);
+          if (next.searchParams.has("message")) next.searchParams.set("message", canonical);
+          history.replaceState({}, "", next);
+        }
+      });
     }
   }
   if (params.has("compose") || params.has("settings") || params.has("search") || params.get("view") === "scheduled") {

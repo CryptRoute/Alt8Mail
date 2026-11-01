@@ -43,6 +43,7 @@ const equal = (actual, expected, message) => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const DEMO_EMAIL = "avery.chen@a8m.example";
 const DEMO_PASSWORD = "a8m-demo";
+const DEMO_THREAD_ID = "N2Acmhe6TzJMY7c6L5yRfg";
 
 async function fillDemoLogin() {
   await page.setValue("#loginEmail", DEMO_EMAIL);
@@ -566,8 +567,9 @@ try {
     row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
   })()`);
   await sleep(250);
-  check(await page.eval("window.__a8mOpened && window.__a8mOpened.url.includes('thread=t1') && window.__a8mOpened.url.includes('popout=1')"), "double-click opens the thread in a new window URL");
-  const popout = await browser.newPage(base + "/?thread=t1&popout=1");
+  check(await page.eval(`/^#[/]Inbox[/][A-Za-z0-9_-]{22}$/.test(location.hash)`), "conversation URL uses an opaque 22-character thread ID");
+  check(await page.eval(`window.__a8mOpened && window.__a8mOpened.url.includes(${JSON.stringify("thread=" + DEMO_THREAD_ID)}) && window.__a8mOpened.url.includes('popout=1')`), "double-click opens the thread in a new window URL");
+  const popout = await browser.newPage(base + "/?thread=" + DEMO_THREAD_ID + "&popout=1");
   await popout.waitFor(() => document.readyState === "complete", 10000);
   await popout.waitFor(() => !document.getElementById("app").hidden && document.querySelectorAll(".thread-msg").length > 0, 12000);
   await sleep(400);

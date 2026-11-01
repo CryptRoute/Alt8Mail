@@ -1196,7 +1196,7 @@ func importedThreadID(existingByMessageID map[string][]map[string]any, normalize
 			}
 		}
 	}
-	return "t_imap_" + hashShort(root)
+	return opaqueThreadID(root)
 }
 
 func imapMessageKey(folder string, uidValidity, uid int64) string {

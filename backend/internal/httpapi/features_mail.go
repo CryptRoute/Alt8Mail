@@ -92,7 +92,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		folder = "inbox"
 	}
 	if threadID := strings.TrimSpace(r.URL.Query().Get("thread")); threadID != "" {
-		messages, loadErr := s.loadMailMessageThread(r.Context(), sess.User.ID, threadID)
+		messages, canonicalThreadID, loadErr := s.loadMailMessageThread(r.Context(), sess.User.ID, threadID)
 		if loadErr != nil {
 			writeError(w, http.StatusInternalServerError, "MESSAGES", "Could not load the conversation")
 			return
@@ -102,7 +102,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 			filtered = append(filtered, publicStateMessage(state, message))
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"folder": folder, "thread": threadID, "count": len(filtered), "messages": filtered,
+			"folder": folder, "thread": canonicalThreadID, "count": len(filtered), "messages": filtered,
 			"threads": threadSummaries(filtered, filtered), "total": len(filtered),
 			"offset": 0, "limit": len(filtered), "hasMore": false,
 		})
@@ -193,24 +193,37 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) loadMailMessageThread(ctx context.Context, userID, target string) ([]map[string]any, error) {
+func (s *Server) loadMailMessageThread(ctx context.Context, userID, target string) ([]map[string]any, string, error) {
+	target = strings.TrimSpace(target)
 	var threadID string
 	err := s.store.DB.QueryRow(ctx, `
 		SELECT thread_id FROM mail_messages
 		WHERE user_id=$1 AND (id=$2 OR thread_id=$2)
 		LIMIT 1
 	`, userID, target).Scan(&threadID)
+	if err == pgx.ErrNoRows && isLegacyThreadID(target) {
+		// 0.6.0 replaced t_/t_imap_ IDs with opaque identifiers. Keep old
+		// bookmarks and in-flight pop-outs working by translating the legacy
+		// value deterministically, then return the canonical ID so the client
+		// can rewrite the address bar.
+		legacyThreadID := opaqueThreadID(target)
+		err = s.store.DB.QueryRow(ctx, `
+			SELECT thread_id FROM mail_messages
+			WHERE user_id=$1 AND thread_id=$2
+			LIMIT 1
+		`, userID, legacyThreadID).Scan(&threadID)
+	}
 	if err == pgx.ErrNoRows {
-		return []map[string]any{}, nil
+		return []map[string]any{}, target, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, target, err
 	}
 	if threadID == "" {
 		threadID = target
 	}
 	messages, _, err := s.loadMailMessagesByThreads(ctx, userID, []string{threadID})
-	return messages, err
+	return messages, threadID, err
 }
 
 func mailMessageMatchesScope(message map[string]any, folder, filter string, accountEmail ...string) bool {
@@ -1147,7 +1160,7 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 	now := nowISO()
 	createdAt := now
 	messageID := fmt.Sprintf("<%s@a8m.test>", newID("draft"))
-	threadID := newID("t")
+	threadID := newThreadID()
 	inReplyTo := any(nil)
 	priority := "normal"
 	windowMode := "floating"
