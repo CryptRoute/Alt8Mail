@@ -90,13 +90,20 @@ export function publicUser(user) {
   const { password, security, ...safe } = user;
   if (security && security.twoFactor) {
     const factor = security.twoFactor;
+    const passkeys = (factor.passkeys || []).map(({ id, name, createdAt, lastUsedAt }) => ({ id, name, createdAt, lastUsedAt }));
+    const remaining = (factor.recoveryCodes || []).filter((item) => !item.used).length;
+    const methods = [];
+    if (passkeys.length) methods.push("passkey");
+    if (factor.totpSecret) methods.push("authenticator");
+    if (remaining) methods.push("recovery");
     safe.security = {
       twoFactor: {
-        enabled: !!factor.enabled,
+        enabled: Boolean(factor.totpSecret) || passkeys.length > 0,
         enabledAt: factor.enabledAt || null,
-        methods: ["passkey", "authenticator", "recovery"],
-        passkeys: (factor.passkeys || []).map(({ id, name, createdAt, lastUsedAt }) => ({ id, name, createdAt, lastUsedAt })),
-        recoveryCodesRemaining: (factor.recoveryCodes || []).filter((item) => !item.used).length
+        methods,
+        passkeys,
+        recoveryCodesRemaining: remaining,
+        totpEnabled: Boolean(factor.totpSecret)
       }
     };
   }

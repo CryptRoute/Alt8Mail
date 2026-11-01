@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
@@ -87,6 +88,14 @@ func (s *Server) deleteCeremony(ctx context.Context, flow string) {
 	_, _ = s.store.Redis.Del(ctx, "webauthn:"+flow).Result()
 }
 
+func passkeyNameForUserAgent(userAgent, requested string) string {
+	name := "Passkey · " + describeSessionDevice(userAgent)
+	if trimmed := strings.TrimSpace(requested); trimmed != "" {
+		name = truncate(strings.Join(strings.Fields(trimmed), " "), 80)
+	}
+	return name
+}
+
 func (s *Server) beginWebAuthnRegistration(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	if !s.requireWebAuthn(w) {
@@ -148,7 +157,7 @@ func (s *Server) finishRegistrationCommon(w http.ResponseWriter, r *http.Request
 	for _, transport := range credential.Transport {
 		transports = append(transports, string(transport))
 	}
-	name := "Passkey · " + describeSessionDevice(r.UserAgent())
+	name := passkeyNameForUserAgent(r.UserAgent(), r.URL.Query().Get("name"))
 	aaguid := hex.EncodeToString(credential.Authenticator.AAGUID)
 	_, err = s.store.DB.Exec(r.Context(), `
 		INSERT INTO webauthn_credentials
@@ -376,7 +385,7 @@ func (s *Server) finishRegistrationWithUser(w http.ResponseWriter, r *http.Reque
 	for _, transport := range credential.Transport {
 		transports = append(transports, string(transport))
 	}
-	name := "Passkey · " + describeSessionDevice(r.UserAgent())
+	name := passkeyNameForUserAgent(r.UserAgent(), r.URL.Query().Get("name"))
 	aaguid := hex.EncodeToString(credential.Authenticator.AAGUID)
 	_, err = s.store.DB.Exec(r.Context(), `
 		INSERT INTO webauthn_credentials

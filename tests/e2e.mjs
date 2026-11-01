@@ -431,6 +431,81 @@ try {
   await page.screenshot(path.join(artifacts, "09b-recovery-codes.png"));
   await page.click("#recoveryClose");
   await sleep(200);
+
+  console.log("\n[8b] Authenticator and passkey setup");
+  check(await page.eval("Boolean(window.QRCode)"), "self-hosted QR renderer is loaded");
+  // The Node reference server reports demo mailbox mode, so production-only
+  // security controls start hidden. Reveal them to exercise the real dialogs
+  // and their API routes against the reference server.
+  await page.eval("document.getElementById('disableTotpBtn').hidden = false");
+  await page.click("#disableTotpBtn");
+  await page.waitFor(() => !document.getElementById("totpDisableOverlay").hidden, 4000);
+  check(await page.eval("document.getElementById('totpDisableTitle').textContent.includes('Remove authenticator')"), "authenticator removal uses an accessible password dialog");
+  await page.setValue("#totpDisablePassword", "not-the-password");
+  await page.click("#totpDisableConfirm");
+  await page.waitFor(() => !document.getElementById("totpDisableError").hidden, 4000);
+  check(await page.eval("document.getElementById('totpDisableError').textContent.length > 0"), "wrong password shows an inline removal error");
+  await page.setValue("#totpDisablePassword", DEMO_PASSWORD);
+  await page.click("#totpDisableConfirm");
+  await page.waitFor(() => document.getElementById("totpDisableOverlay").hidden, 5000);
+  await page.waitFor(() => document.getElementById("totpMethodStatus").textContent.includes("Not set up"), 4000);
+  check(await page.eval("document.getElementById('totpMethodStatus').textContent.includes('Not set up')"), "the authenticator can be removed after password confirmation");
+  check(await page.eval("document.getElementById('twoFactorStatus').textContent.includes('on')"), "registered passkeys keep two-factor protection active after removing the authenticator");
+
+  await page.eval("document.getElementById('setupTotpBtn').hidden = false");
+  await page.click("#setupTotpBtn");
+  await page.waitFor(() => !document.getElementById("totpSetupOverlay").hidden, 5000);
+  await sleep(450);
+  check(await page.eval("Boolean(document.querySelector('#totpQrHost canvas, #totpQrHost img'))"), "authenticator setup renders a scannable QR code");
+  equal(await page.eval("document.querySelectorAll('#totpProviderList .totp-provider').length"), 3, "Google, Microsoft and Authy authenticator options are shown");
+  check(await page.eval("document.querySelector('.totp-affiliation').textContent.includes('not affiliated')"), "the modal discloses that Alt8Mail is not affiliated with the app vendors");
+  check(await page.eval("document.getElementById('totpProviderDownloads').querySelectorAll('a').length >= 2"), "authenticator download links are provided");
+  equal(await page.eval("document.querySelectorAll('#totpSetupCodeInputs input').length"), 6, "authenticator setup uses six code boxes");
+  await page.click("[data-totp-provider='microsoft']");
+  await sleep(120);
+  check(await page.eval("document.getElementById('totpProviderTip').textContent.includes('Microsoft Authenticator')"), "choosing a provider shows its scan instructions");
+  check(await page.eval("document.getElementById('totpProviderDownloads').textContent.includes('Microsoft')"), "choosing a provider updates its download links");
+  await page.click("#totpKeyToggle");
+  await sleep(150);
+  check(await page.eval("!document.getElementById('totpKeyPanel').hidden"), "manual setup key expands on demand");
+  check(await page.eval("document.getElementById('totpSetupSecret').textContent.includes('•')"), "the setup key is masked until revealed");
+  await page.click("#totpRevealSecret");
+  check(await page.eval("!document.getElementById('totpSetupSecret').textContent.includes('•')"), "the setup key can be revealed for manual entry");
+  await page.screenshot(path.join(artifacts, "09c-authenticator-setup.png"));
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  await sleep(350);
+  await page.screenshot(path.join(artifacts, "09c2-authenticator-setup-mobile.png"));
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
+  const setupCode = "123456";
+  for (let index = 0; index < setupCode.length; index += 1) {
+    await page.setValue(`#totpSetupOtp${index}`, setupCode[index]);
+  }
+  await page.waitFor(() => !document.getElementById("recoveryOverlay").hidden, 8000);
+  check(await page.eval("!document.getElementById('totpSetupOverlay').hidden === false"), "successful verification closes the authenticator setup dialog");
+  equal(await page.eval("document.querySelectorAll('#recoveryCodeList code').length"), 4, "enabling an authenticator generates fresh recovery codes");
+  await page.click("#recoveryClose");
+  await sleep(250);
+  check(await page.eval("document.getElementById('twoFactorStatus').textContent.includes('on')"), "the authenticator is enabled again after verification");
+  check(await page.eval("document.getElementById('totpMethodStatus').textContent.includes('Enabled')"), "the authenticator method card reflects the enabled state");
+
+  await page.eval("document.getElementById('addPasskeyBtn').hidden = false");
+  await page.click("#addPasskeyBtn");
+  await page.waitFor(() => !document.getElementById("passkeySetupOverlay").hidden, 4000);
+  await page.waitFor(() => document.getElementById("passkeySupport").dataset.state !== "checking", 6000);
+  check(await page.eval("['ready', 'partial', 'blocked'].includes(document.getElementById('passkeySupport').dataset.state)"), "passkey setup detects this browser and device");
+  check(await page.eval("document.getElementById('passkeySupportTitle').textContent.length > 0"), "passkey setup explains the detected device capability");
+  equal(await page.eval("document.querySelectorAll('#passkeyMethodGrid .passkey-method').length"), 2, "passkey setup offers this device and a security key");
+  await page.screenshot(path.join(artifacts, "09d-passkey-setup.png"));
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  await sleep(350);
+  await page.screenshot(path.join(artifacts, "09d2-passkey-setup-mobile.png"));
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
+  await page.click("#passkeySetupCancel");
+  await page.waitFor(() => document.getElementById("passkeySetupOverlay").hidden, 4000);
+  check(await page.eval("document.getElementById('passkeySetupOverlay').hidden"), "passkey setup can be cancelled safely");
+
   equal(await page.eval("document.getElementById('outboundUsedValue').textContent"), "38", "security panel shows live outbound usage");
 
   console.log("\n[9] Sender trust panel");

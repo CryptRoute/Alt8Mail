@@ -663,3 +663,929 @@
 .folder-row.is-active .folder-item,
 .folder-row.is-active .folder-item.is-active { background: transparent; color: var(--accent-ink); }
 .folder-row.is-active .folder-toggle { color: var(--accent-ink); }
+
+/* ============================================================
+   Security dialogs — authenticator setup, passkeys and removal
+   ============================================================ */
+.security-dialog {
+  width: min(780px, 100%);
+  max-height: min(92dvh, 940px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.security-dialog-compact { width: min(520px, 100%); }
+.security-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(120% 160% at 0% 0%, var(--accent-soft) 0%, transparent 58%),
+    var(--surface);
+}
+.security-dialog-icon {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35);
+}
+.security-dialog-icon svg { width: 22px; height: 22px; }
+.security-dialog-icon.is-danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--border));
+}
+.security-dialog-heading { flex: 1; min-width: 0; }
+.security-dialog-heading .eyebrow {
+  margin: 0 0 3px;
+  font-size: .5625rem;
+  font-weight: 750;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+.security-dialog-heading h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  font-weight: 650;
+  letter-spacing: -.012em;
+  color: var(--text);
+}
+.security-dialog-heading > p:not(.eyebrow) {
+  margin: 4px 0 0;
+  max-width: 58ch;
+  font-size: .75rem;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.security-dialog-close { flex: none; margin-top: -2px; }
+.security-dialog-body {
+  padding: 16px 20px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.security-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 13px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.security-dialog-actions .btn-primary,
+.security-dialog-actions .btn-secondary { flex: none; }
+.totp-action-hint {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .6875rem;
+  line-height: 1.35;
+  color: var(--text-3);
+}
+.security-setup-note,
+.passkey-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: .6875rem;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.security-setup-note svg,
+.passkey-privacy svg { width: 15px; height: 15px; flex: none; margin-top: 1px; color: var(--accent-ink); }
+.security-setup-note strong,
+.passkey-privacy strong { color: var(--text-2); }
+
+/* ---------- security method cards in Settings ---------- */
+.security-method-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.security-method-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.security-method-icon {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent-ink);
+}
+.security-method-icon svg { width: 18px; height: 18px; }
+.security-method-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.security-method-copy strong { font-size: .78rem; color: var(--text); }
+.security-method-copy span { font-size: .635rem; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.security-method-copy span.is-on { color: var(--success); font-weight: 650; }
+.security-method-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.security-method-actions .danger-link { font-size: .625rem; }
+.passkey-settings-list { display: grid; gap: 7px; }
+.passkey-settings-list:empty { display: none; }
+.passkey-settings-list .settings-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.passkey-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+}
+.passkey-setting-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.passkey-setting-icon svg { width: 17px; height: 17px; }
+.passkey-setting-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.passkey-setting-copy strong { font-size: .75rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.passkey-setting-copy span { font-size: .625rem; color: var(--text-3); }
+.passkey-setting-badge {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: .5625rem;
+  font-weight: 650;
+  color: var(--text-2);
+}
+.passkey-setting-remove { flex: none; color: var(--danger); font-size: .625rem; }
+
+/* ---------- authenticator setup ---------- */
+.totp-stepper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.totp-step { display: flex; align-items: center; gap: 8px; min-width: 0; opacity: .55; }
+.totp-step > span {
+  width: 23px;
+  height: 23px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  font-size: .625rem;
+  font-weight: 750;
+  color: var(--text-3);
+}
+.totp-step strong {
+  display: block;
+  font-size: .6875rem;
+  font-weight: 650;
+  color: var(--text-2);
+  line-height: 1.25;
+}
+.totp-step small { display: block; margin-top: 1px; font-size: .5625rem; color: var(--text-3); }
+.totp-step.is-current { opacity: 1; }
+.totp-step.is-current > span {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.totp-step.is-current strong { color: var(--text); }
+.totp-step.is-done { opacity: 1; }
+.totp-step.is-done > span {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  background: var(--success-soft);
+  color: var(--success);
+}
+.totp-step-line { flex: 1; height: 1px; min-width: 22px; background: var(--border-strong); }
+.totp-scan-grid {
+  display: grid;
+  grid-template-columns: 212px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.totp-qr-column { display: flex; flex-direction: column; align-items: center; gap: 9px; }
+.totp-qr-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px -22px rgba(7, 19, 33, .45);
+}
+.totp-qr-frame {
+  width: 184px;
+  height: 184px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 9px;
+  background: #fff;
+}
+.totp-qr-frame canvas,
+.totp-qr-frame img { width: 100% !important; height: 100% !important; display: block; }
+.totp-qr-frame > div { grid-area: 1 / 1; }
+.totp-qr-placeholder,
+.totp-qr-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px;
+  text-align: center;
+  background: #fff;
+  color: #526070;
+  font-size: .6875rem;
+  line-height: 1.45;
+}
+.totp-qr-placeholder .passkey-spinner { border-color: #d5dce5; border-top-color: #0f6cbd; }
+.totp-qr-fallback svg { width: 24px; height: 24px; color: #b42318; }
+.totp-qr-fallback strong { font-size: .75rem; color: #243447; }
+.totp-qr-caption {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .625rem;
+  font-weight: 550;
+  color: var(--text-3);
+}
+.totp-qr-caption svg { width: 12px; height: 12px; }
+.totp-key-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent-ink);
+  font-size: .656rem;
+  font-weight: 650;
+  line-height: 1.3;
+  text-align: center;
+}
+.totp-key-toggle:hover { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 18%, transparent); }
+.totp-key-toggle svg { width: 14px; height: 14px; flex: none; }
+.totp-provider-column { min-width: 0; }
+.totp-section-title { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 10px; }
+.totp-section-badge {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: .625rem;
+  font-weight: 750;
+}
+.totp-section-title strong { display: block; font-size: .8rem; color: var(--text); line-height: 1.3; }
+.totp-section-title p { margin: 2px 0 0; font-size: .6875rem; line-height: 1.45; color: var(--text-3); }
+.totp-provider-list { display: grid; gap: 7px; }
+.totp-provider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, box-shadow .12s ease;
+}
+.totp-provider:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.totp-provider:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.totp-provider.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.totp-provider-icon {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.totp-provider-icon.totp-provider-authy { padding: 6px; }
+.totp-provider-icon svg { display: block; }
+.totp-provider-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.totp-provider-copy strong { font-size: .75rem; font-weight: 650; color: var(--text); }
+.totp-provider-copy small { font-size: .583rem; color: var(--text-3); }
+.totp-provider-check {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  color: transparent;
+  background: var(--surface);
+}
+.totp-provider-check svg { width: 11px; height: 11px; stroke-width: 3; }
+.totp-provider.is-selected .totp-provider-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.totp-provider-guidance { margin-top: 9px; }
+.totp-provider-guidance > p {
+  margin: 0;
+  min-height: 2.6em;
+  padding: 8px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 0 8px 8px 0;
+  background: var(--surface-2);
+  font-size: .656rem;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.totp-provider-guidance > p strong { color: var(--text); }
+.totp-provider-downloads { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.totp-download-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: .583rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.totp-download-link:hover { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); color: var(--accent-ink); }
+.totp-download-link svg { width: 11px; height: 11px; }
+.totp-download-link svg:last-child { opacity: .6; }
+.totp-affiliation {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 9px 0 0;
+  font-size: .5625rem;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.totp-affiliation svg { width: 12px; height: 12px; flex: none; margin-top: 1px; }
+.totp-key-panel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  animation: totp-reveal .16s ease-out;
+}
+@keyframes totp-reveal { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.totp-key-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.totp-key-head strong { font-size: .72rem; color: var(--text); }
+.totp-key-head span { font-size: .5625rem; color: var(--text-3); }
+.totp-key-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.totp-secret {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .08em;
+  line-height: 1.4;
+  color: var(--text);
+  word-break: break-word;
+  user-select: all;
+}
+.totp-secret.is-masked { letter-spacing: .12em; color: var(--text-3); }
+.totp-key-help { margin: 8px 0 0; font-size: .625rem; line-height: 1.5; color: var(--text-2); }
+.totp-key-warning { display: flex; align-items: flex-start; gap: 5px; margin: 6px 0 0; font-size: .583rem; line-height: 1.45; color: var(--warning); }
+.totp-key-warning svg { width: 12px; height: 12px; flex: none; margin-top: 1px; }
+.totp-verify-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.totp-code-inputs { justify-content: flex-start; gap: 8px; }
+.totp-code-inputs input { width: 48px; height: 52px; font-size: 1.25rem; }
+.totp-code-inputs input.is-filled { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft); }
+.totp-code-hint { margin: 8px 0 0; font-size: .625rem; line-height: 1.45; color: var(--text-3); }
+.totp-verify-section .login-error { margin: 9px 0 0; }
+.totp-troubleshoot { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.totp-troubleshoot summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+  font-size: .656rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.totp-troubleshoot summary::-webkit-details-marker { display: none; }
+.totp-troubleshoot summary svg { width: 13px; height: 13px; color: var(--text-3); }
+.totp-troubleshoot ul { margin: 0; padding: 0 14px 10px 28px; display: grid; gap: 4px; font-size: .625rem; line-height: 1.5; color: var(--text-3); }
+.totp-security-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--success) 18%, var(--border));
+  background: var(--success-soft);
+  font-size: .625rem;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.totp-security-note svg { width: 14px; height: 14px; flex: none; margin-top: 1px; color: var(--success); }
+.totp-security-note strong { color: var(--text); }
+
+/* ---------- TOTP removal ---------- */
+.security-warning-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 13px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--border));
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.security-warning-box > svg { width: 17px; height: 17px; flex: none; margin-top: 1px; }
+.security-warning-box div { display: flex; flex-direction: column; gap: 2px; }
+.security-warning-box strong { font-size: .72rem; }
+.security-warning-box span { font-size: .656rem; line-height: 1.5; color: var(--text-2); }
+#totpDisableForm .form-field { margin-bottom: 0; }
+
+/* ---------- passkey setup ---------- */
+.passkey-setup-dialog { width: min(720px, 100%); }
+.passkey-setup-body { display: flex; flex-direction: column; gap: 13px; }
+.passkey-support {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+.passkey-support[data-state="ready"] {
+  border-color: color-mix(in srgb, var(--success) 22%, var(--border));
+  background: var(--success-soft);
+}
+.passkey-support[data-state="partial"] {
+  border-color: color-mix(in srgb, var(--warning) 22%, var(--border));
+  background: var(--warning-soft);
+}
+.passkey-support[data-state="blocked"] {
+  border-color: color-mix(in srgb, var(--danger) 22%, var(--border));
+  background: var(--danger-soft);
+}
+.passkey-support-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent-ink);
+}
+.passkey-support-icon svg { width: 17px; height: 17px; }
+.passkey-support-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.passkey-support-copy strong { font-size: .72rem; color: var(--text); }
+.passkey-support-copy span { font-size: .625rem; line-height: 1.45; color: var(--text-3); }
+.passkey-support-badge {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: .5625rem;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.passkey-support[data-state="ready"] .passkey-support-badge { color: var(--success); border-color: color-mix(in srgb, var(--success) 25%, var(--border)); }
+.passkey-support[data-state="partial"] .passkey-support-badge { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 25%, var(--border)); }
+.passkey-support[data-state="blocked"] .passkey-support-badge { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 25%, var(--border)); }
+.passkey-setup-form { display: grid; gap: 13px; }
+.passkey-name-field { margin: 0; }
+.passkey-name-field small { display: block; margin-top: 4px; font-size: .583rem; color: var(--text-3); }
+.passkey-method-fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+.passkey-method-fieldset legend { margin-bottom: 7px; padding: 0; font-size: .7rem; font-weight: 650; color: var(--text-2); }
+.passkey-method-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.passkey-method {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, box-shadow .12s ease;
+}
+.passkey-method:hover { border-color: var(--border-strong); }
+.passkey-method.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.passkey-method:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.passkey-method input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.passkey-method-icon {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent-ink);
+}
+.passkey-method-icon svg { width: 18px; height: 18px; }
+.passkey-method-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.passkey-method-copy strong { font-size: .72rem; color: var(--text); }
+.passkey-method-copy span { font-size: .6rem; line-height: 1.4; color: var(--text-3); }
+.passkey-method-badge {
+  flex: none;
+  align-self: flex-start;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: .531rem;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.passkey-method-badge.is-ready { color: var(--success); border-color: color-mix(in srgb, var(--success) 25%, var(--border)); }
+.passkey-method.is-disabled { opacity: .55; cursor: not-allowed; }
+.passkey-method.is-disabled:hover { border-color: var(--border); }
+.passkey-how {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.passkey-how-step { display: inline-flex; align-items: center; gap: 5px; font-size: .583rem; font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.passkey-how-step i {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  font-size: .5rem;
+  font-style: normal;
+  font-weight: 750;
+  color: var(--text-3);
+}
+.passkey-how-line { flex: 1; height: 1px; min-width: 8px; background: var(--border-strong); }
+.passkey-setup-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 22%, var(--border));
+  border-radius: 9px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  animation: shake .3s ease;
+}
+.passkey-setup-error svg { width: 15px; height: 15px; flex: none; margin-top: 1px; }
+.passkey-setup-error div { display: flex; flex-direction: column; gap: 2px; }
+.passkey-setup-error strong { font-size: .6875rem; }
+.passkey-setup-error span { font-size: .625rem; line-height: 1.45; color: var(--text-2); }
+.passkey-setup-waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 7px;
+  padding: 8px 10px 4px;
+}
+.passkey-setup-waiting h3 { margin: 2px 0 0; font-family: var(--font-display); font-size: .92rem; font-weight: 650; color: var(--text); }
+.passkey-setup-waiting p { margin: 0; max-width: 46ch; font-size: .6875rem; line-height: 1.5; color: var(--text-3); }
+.passkey-setup-waiting .passkey-prompt-status { margin: 4px 0 0; color: var(--text-2); }
+.passkey-waiting-tip { font-size: .625rem !important; color: var(--text-3) !important; }
+#passkeySetupAbort { margin-top: 5px; }
+.passkey-setup-dialog.is-busy .passkey-setup-form,
+.passkey-setup-dialog.is-busy .passkey-support { display: none; }
+.passkey-setup-dialog.is-busy .passkey-setup-waiting { display: flex; }
+.passkey-setup-dialog.is-busy .passkey-setup-actions { visibility: hidden; }
+
+/* ---------- passkey sign-in prompt ---------- */
+.passkey-dialog.passkey-prompt-dialog {
+  position: relative;
+  width: min(390px, 100%);
+  padding: 20px 22px 18px;
+  gap: 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(110% 70% at 50% 0%, var(--accent-soft) 0%, transparent 62%),
+    var(--surface);
+}
+.passkey-prompt-close { position: absolute; top: 10px; right: 10px; }
+.passkey-prompt-head { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 2px; }
+.passkey-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .6875rem;
+  font-weight: 750;
+  letter-spacing: -.01em;
+  color: var(--text);
+}
+.passkey-brand > span {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: .56rem;
+  font-weight: 800;
+  letter-spacing: -.04em;
+}
+.passkey-brand svg { width: 13px; height: 13px; color: var(--success); }
+.passkey-prompt-eyebrow { font-size: .5625rem; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.passkey-orbit {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  display: grid;
+  place-items: center;
+  margin: 4px 0 2px;
+}
+.passkey-orbit-ring {
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  animation: passkey-pulse 2.6s ease-out infinite;
+}
+.passkey-orbit-ring-2 { inset: 9px; animation-delay: 1.3s; }
+.passkey-orbit-core {
+  position: relative;
+  z-index: 1;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 17px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  color: var(--accent-ink);
+  box-shadow: 0 10px 24px -18px var(--accent);
+}
+.passkey-orbit-core svg { width: 26px; height: 26px; }
+@keyframes passkey-pulse {
+  0% { transform: scale(.9); opacity: .75; }
+  70% { transform: scale(1.12); opacity: 0; }
+  100% { transform: scale(1.12); opacity: 0; }
+}
+.passkey-orbit-compact { width: 76px; height: 76px; margin: 2px auto 4px; }
+.passkey-orbit-compact .passkey-orbit-core { width: 46px; height: 46px; border-radius: 15px; }
+.passkey-orbit-compact .passkey-orbit-core svg { width: 23px; height: 23px; }
+.passkey-dialog.passkey-prompt-dialog h2 { font-size: 1.06rem; font-weight: 650; letter-spacing: -.015em; color: var(--text); }
+.passkey-dialog.passkey-prompt-dialog > p { max-width: 32ch; font-size: .72rem; line-height: 1.5; color: var(--text-3); }
+.passkey-prompt-device {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  text-align: left;
+}
+.passkey-device-icon {
+  width: 31px;
+  height: 31px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent-ink);
+}
+.passkey-device-icon svg { width: 15px; height: 15px; }
+.passkey-prompt-device div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.passkey-prompt-device strong { font-size: .6875rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.passkey-prompt-device span { font-size: .583rem; color: var(--text-3); }
+.passkey-prompt-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 26px;
+  margin: 3px 0 1px;
+  font-size: .6875rem;
+  color: var(--text-2);
+}
+.passkey-prompt-help {
+  width: 100%;
+  margin-top: 2px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+  text-align: left;
+}
+.passkey-prompt-help summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  cursor: pointer;
+  list-style: none;
+  font-size: .625rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.passkey-prompt-help summary::-webkit-details-marker { display: none; }
+.passkey-prompt-help summary svg { width: 12px; height: 12px; color: var(--text-3); }
+.passkey-prompt-help ul { margin: 0; padding: 0 12px 8px 25px; display: grid; gap: 3px; font-size: .6rem; line-height: 1.5; color: var(--text-3); }
+.passkey-prompt-cancel { width: 100%; justify-content: center; margin-top: 3px; }
+.passkey-dialog.passkey-prompt-dialog .passkey-privacy {
+  justify-content: center;
+  margin: 1px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: .583rem;
+  color: var(--text-3);
+}
+.passkey-dialog.passkey-prompt-dialog .passkey-privacy svg { width: 12px; height: 12px; color: var(--success); }
+
+/* ---------- first-time enrollment QR ---------- */
+.enrollment-totp-qr {
+  width: 154px;
+  height: 154px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid var(--border-strong);
+}
+.enrollment-totp-qr canvas,
+.enrollment-totp-qr img { width: 100% !important; height: 100% !important; display: block; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 720px) {
+  .security-dialog { max-height: calc(100dvh - 24px); }
+  .security-dialog-head { padding: 16px 14px 13px; gap: 10px; }
+  .security-dialog-icon { width: 38px; height: 38px; border-radius: 11px; }
+  .security-dialog-icon svg { width: 19px; height: 19px; }
+  .security-dialog-heading h2 { font-size: .98rem; }
+  .security-dialog-heading > p:not(.eyebrow) { font-size: .7rem; }
+  .security-dialog-body { padding: 13px 14px 15px; }
+  .security-dialog-actions { padding: 11px 14px; }
+  .totp-stepper { padding: 10px 14px; gap: 8px; }
+  .totp-step small { display: none; }
+  .totp-scan-grid { grid-template-columns: 1fr; gap: 13px; }
+  .totp-qr-column { flex-direction: row; align-items: flex-start; gap: 12px; }
+  .totp-qr-card { width: 150px; flex: none; padding: 9px 9px 8px; }
+  .totp-qr-frame { width: 132px; height: 132px; }
+  .totp-qr-caption { display: none; }
+  .totp-qr-column { flex-wrap: wrap; }
+  .totp-key-toggle { flex: 1 1 110px; justify-content: flex-start; padding-left: 0; }
+  .totp-provider-column { width: 100%; }
+  .totp-provider-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .totp-provider { flex-direction: column; align-items: flex-start; gap: 5px; padding: 8px; }
+  .totp-provider-icon { width: 30px; height: 30px; border-radius: 7px; }
+  .totp-provider-icon svg { width: 18px; height: 18px; }
+  .totp-provider-copy small { display: none; }
+  .totp-provider-copy strong { font-size: .625rem; line-height: 1.25; white-space: normal; }
+  .totp-provider-check { position: absolute; top: 6px; right: 6px; width: 15px; height: 15px; }
+  .totp-provider-check svg { width: 9px; height: 9px; }
+  .totp-provider-guidance > p { min-height: 0; }
+  .totp-affiliation { font-size: .54rem; }
+  .security-method-grid { grid-template-columns: 1fr; }
+  .security-method-card { flex-wrap: wrap; }
+  .security-method-actions { margin-left: 48px; }
+  .passkey-method-grid { grid-template-columns: 1fr; }
+  .passkey-how { flex-wrap: wrap; row-gap: 5px; }
+  .passkey-how-line { display: none; }
+  .passkey-support { flex-wrap: wrap; }
+  .passkey-support-badge { margin-left: 44px; }
+  .totp-code-inputs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); max-width: 330px; }
+  .totp-code-inputs input { width: 100%; height: 48px; }
+  .security-dialog-actions .totp-action-hint { flex-basis: 100%; order: -1; }
+  .security-dialog-actions > .btn-secondary,
+  .security-dialog-actions > .btn-primary { flex: 1 1 130px; justify-content: center; }
+}
+@media (max-width: 430px) {
+  .overlay { padding: 8px; }
+  .security-dialog-heading .eyebrow { display: none; }
+  .security-dialog-heading h2 { font-size: .93rem; }
+  .totp-qr-column { flex-direction: column; align-items: stretch; }
+  .totp-qr-card { width: 100%; flex-direction: row; justify-content: center; }
+  .totp-qr-card .totp-qr-caption { display: inline-flex; }
+  .totp-key-toggle { justify-content: center; padding-left: 10px; }
+  .totp-provider-list { grid-template-columns: 1fr; }
+  .totp-provider { flex-direction: row; align-items: center; padding: 8px 9px; }
+  .totp-provider-copy small { display: block; }
+  .totp-provider-check { position: static; }
+  .totp-code-inputs { gap: 5px; }
+  .totp-code-inputs input { height: 44px; font-size: 1.05rem; }
+  .passkey-dialog.passkey-prompt-dialog { padding: 18px 16px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .totp-key-panel { animation: none; }
+  .passkey-orbit-ring { animation: none; opacity: .35; }
+  .passkey-setup-error { animation: none; }
+}
+
+.totp-setup-dialog.is-shaking { animation: shake .32s ease; }
+.btn-secondary.is-copied { border-color: color-mix(in srgb, var(--success) 35%, var(--border)); color: var(--success); }
+
+@media (max-width: 430px) {
+  .totp-key-toggle { flex: 0 0 auto; }
+}
+
+.security-dialog .btn-primary:disabled,
+.security-dialog .btn-secondary:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  box-shadow: none;
+}

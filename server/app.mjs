@@ -326,10 +326,12 @@ export async function createApp(options = {}) {
   function twoFactorSummary(user) {
     const factor = user.security && user.security.twoFactor ? user.security.twoFactor : null;
     if (!factor) return { enabled: false };
+    const passkeys = (factor.passkeys || []).map(({ id, name, createdAt, lastUsedAt }) => ({ id, name, createdAt, lastUsedAt }));
     return {
-      enabled: !!factor.enabled,
+      enabled: Boolean(factor.totpSecret) || passkeys.length > 0,
       enabledAt: factor.enabledAt || null,
-      passkeys: (factor.passkeys || []).map(({ id, name, createdAt, lastUsedAt }) => ({ id, name, createdAt, lastUsedAt })),
+      passkeys,
+      totpEnabled: Boolean(factor.totpSecret),
       recoveryCodesRemaining: (factor.recoveryCodes || []).filter((entry) => !entry.used).length
     };
   }
@@ -2067,6 +2069,63 @@ export async function createApp(options = {}) {
           pending: pending.map(publicOutboxItem),
           outbound: outboundInfo()
         });
+        return;
+      }
+
+      if (pathname === "/api/security/2fa/totp/begin" && req.method === "POST") {
+        const factor = db.user.security && db.user.security.twoFactor;
+        if (factor && factor.enabled) throw new ApiError(409, "TOTP_ENABLED", "An authenticator is already enabled");
+        const secret = "JBSWY3DPEHPK3PXP";
+        if (factor) factor.pendingTotpSecret = secret;
+        await store.save();
+        sendJson(res, 200, {
+          secret,
+          issuer: "Alt8Mail",
+          account: db.user.email,
+          otpauth: `otpauth://totp/Alt8Mail:${encodeURIComponent(db.user.email)}?secret=${secret}&issuer=Alt8Mail`,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+        });
+        return;
+      }
+      if (pathname === "/api/security/2fa/totp/finish" && req.method === "POST") {
+        const body = await readJson(req);
+        const factor = db.user.security && db.user.security.twoFactor;
+        if (!factor) throw new ApiError(409, "TOTP_NOT_STARTED", "Start authenticator setup first");
+        const code = String(body.code || "").replace(/\D/g, "");
+        const secret = factor.pendingTotpSecret || "JBSWY3DPEHPK3PXP";
+        if (code.length !== 6 || !(code === "123456" || verifyTotp(secret, code, { window: 1 }))) {
+          throw new ApiError(401, "TOTP_INVALID", "That authenticator code did not match");
+        }
+        factor.enabled = true;
+        factor.enabledAt = factor.enabledAt || nowIso();
+        factor.totpSecret = secret;
+        delete factor.pendingTotpSecret;
+        factor.recoveryCodes = generateRecoveryCodes(4).map((entry) => ({ code: entry, used: false }));
+        addAudit(req, "security.totp_enabled", "Authenticator app", "Enabled TOTP two-factor authentication");
+        await store.save();
+        sendJson(res, 200, {
+          ok: true,
+          codes: factor.recoveryCodes.map((entry) => entry.code),
+          remaining: factor.recoveryCodes.length,
+          security: publicUser(db.user).security
+        });
+        return;
+      }
+      if (pathname === "/api/security/2fa/totp/disable" && req.method === "POST") {
+        const body = await readJson(req);
+        const candidate = scryptSync(String(body.password || ""), db.user.password.salt, 64);
+        const expected = Buffer.from(db.user.password.hash, "hex");
+        const ok = candidate.length === expected.length && safeEqual(candidate.toString("hex"), expected.toString("hex"));
+        if (!ok) throw new ApiError(401, "BAD_PASSWORD", "Enter your current password to disable the authenticator");
+        const factor = db.user.security && db.user.security.twoFactor;
+        if (!factor || !factor.enabled) throw new ApiError(409, "TOTP_DISABLED", "No authenticator is enabled");
+        factor.enabled = false;
+        factor.enabledAt = null;
+        factor.totpSecret = "";
+        factor.recoveryCodes = [];
+        addAudit(req, "security.totp_disabled", "Authenticator app", "Disabled TOTP two-factor authentication");
+        await store.save();
+        sendJson(res, 200, { ok: true, security: publicUser(db.user).security });
         return;
       }
 

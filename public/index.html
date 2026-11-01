@@ -10,13 +10,13 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.19.0">
-<link rel="stylesheet" href="/features.css?v=0.19.0">
-<link rel="stylesheet" href="/workspace.css?v=0.19.0">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.19.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.19.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.19.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.19.0">
+<link rel="stylesheet" href="/styles.css?v=0.19.1">
+<link rel="stylesheet" href="/features.css?v=0.19.1">
+<link rel="stylesheet" href="/workspace.css?v=0.19.1">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.19.1">
+<link rel="stylesheet" href="/features-0.7.css?v=0.19.1">
+<link rel="stylesheet" href="/onboarding.css?v=0.19.1">
+<link rel="stylesheet" href="/email-ui.css?v=0.19.1">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -265,7 +265,8 @@
         <button class="btn-secondary" id="enrollmentPasskeyBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg>Create a passkey</button>
       </div>
       <div class="enrollment-totp" id="enrollmentTotpBlock" hidden>
-        <p class="settings-note">Add this secret to your authenticator app, then enter the six-digit code.</p>
+        <p class="settings-note">Scan this code with Google Authenticator, Microsoft Authenticator, Authy or any TOTP app, then enter the six-digit code.</p>
+        <div class="enrollment-totp-qr" id="enrollmentQrHost" role="img" aria-label="QR code for authenticator setup"></div>
         <div class="totp-secret-row"><code id="enrollmentTotpSecret">—</code><button class="link-btn" id="enrollmentCopySecret" type="button">Copy secret</button></div>
         <label class="login-field"><span>Six-digit code</span><input id="enrollmentTotpCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456"></label>
         <button class="login-submit" id="enrollmentTotpVerify" type="button">Verify and continue</button>
@@ -1542,12 +1543,31 @@
                       <h3>Second-factor setup</h3>
                       <p>Enroll an authenticator app or a WebAuthn passkey. Secrets are encrypted at rest; recovery codes are hashed.</p>
                     </div>
-                    <div class="pref-list" id="passkeySettingsList"></div>
-                    <div class="settings-actions">
-                      <button class="btn-secondary" id="setupTotpBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Set up authenticator</button>
-                      <button class="btn-secondary" id="addPasskeyBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg>Add passkey</button>
-                      <button class="btn-secondary danger-btn" id="disableTotpBtn" type="button" hidden>Remove authenticator</button>
+                    <div class="security-method-grid">
+                      <div class="security-method-card" id="totpMethodCard">
+                        <span class="security-method-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span>
+                        <div class="security-method-copy">
+                          <strong>Authenticator app</strong>
+                          <span id="totpMethodStatus">Not set up</span>
+                        </div>
+                        <div class="security-method-actions">
+                          <button class="btn-secondary btn-small" id="setupTotpBtn" type="button">Set up</button>
+                          <button class="link-btn danger-link" id="disableTotpBtn" type="button" hidden>Remove</button>
+                        </div>
+                      </div>
+                      <div class="security-method-card" id="passkeyMethodCard">
+                        <span class="security-method-icon"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></span>
+                        <div class="security-method-copy">
+                          <strong>Passkeys</strong>
+                          <span id="passkeyMethodStatus">No passkeys added</span>
+                        </div>
+                        <div class="security-method-actions">
+                          <button class="btn-secondary btn-small" id="addPasskeyBtn" type="button">Add passkey</button>
+                        </div>
+                      </div>
                     </div>
+                    <div class="passkey-settings-list" id="passkeySettingsList"></div>
+                    <p class="security-setup-note"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>Passkeys use your device’s fingerprint, face, PIN or a security key. Your biometric data never leaves your device.</span></p>
                   </div>
                   <div class="settings-block">
                     <div class="settings-block-head">
@@ -2328,25 +2348,220 @@
 </div>
 
 <div class="overlay" id="totpSetupOverlay" hidden>
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="totpSetupTitle">
-    <div class="settings-block-head"><h3 id="totpSetupTitle">Set up authenticator</h3><p>Scan or copy the secret into your authenticator app, then enter the current six-digit code.</p></div>
-    <div class="totp-secret-row"><code id="totpSetupSecret">—</code><button class="link-btn" id="totpCopySecret" type="button">Copy secret</button></div>
-    <p class="settings-note" id="totpSetupUri">—</p>
-    <label class="form-field"><span>Six-digit code</span><input id="totpSetupCode" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456"></label>
-    <p class="login-error" id="totpSetupError" hidden></p>
-    <div class="settings-actions">
-      <button class="btn-secondary" id="totpSetupCancel" type="button">Cancel</button>
-      <button class="btn-primary" id="totpSetupVerify" type="button">Verify and enable</button>
+  <div class="dialog security-dialog totp-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="totpSetupTitle">
+    <header class="security-dialog-head">
+      <span class="security-dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg></span>
+      <div class="security-dialog-heading">
+        <p class="eyebrow">Account security</p>
+        <h2 id="totpSetupTitle">Set up two-factor authentication</h2>
+        <p>Add a second step to password sign-in with a six-digit code from your authenticator app.</p>
+      </div>
+      <button class="icon-btn security-dialog-close" id="totpSetupClose" type="button" aria-label="Close authenticator setup"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="totp-stepper" id="totpStepper" aria-label="Setup progress">
+      <div class="totp-step is-current" data-totp-step="scan"><span>1</span><div><strong>Scan the code</strong><small>Add Alt8Mail to your app</small></div></div>
+      <span class="totp-step-line" aria-hidden="true"></span>
+      <div class="totp-step" data-totp-step="verify"><span>2</span><div><strong>Verify</strong><small>Enter the six-digit code</small></div></div>
     </div>
+    <div class="security-dialog-body">
+      <section class="totp-scan-grid" data-totp-section="scan">
+        <div class="totp-qr-column">
+          <div class="totp-qr-card">
+            <div class="totp-qr-frame" id="totpQrHost" role="img" aria-label="QR code containing your Alt8Mail authenticator setup">
+              <div class="totp-qr-placeholder"><span class="passkey-spinner" aria-hidden="true"></span><span>Preparing QR code…</span></div>
+            </div>
+            <p class="totp-qr-caption"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>Scan with your authenticator app</p>
+          </div>
+          <button class="totp-key-toggle" id="totpKeyToggle" type="button" aria-expanded="false" aria-controls="totpKeyPanel"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>Can’t scan? Use a setup key</button>
+        </div>
+        <div class="totp-provider-column">
+          <div class="totp-section-title"><span class="totp-section-badge">1</span><div><strong>Choose your authenticator</strong><p>Alt8Mail works with any TOTP app. These three are popular.</p></div></div>
+          <div class="totp-provider-list" id="totpProviderList" role="radiogroup" aria-label="Authenticator app">
+            <div class="totp-provider is-selected" data-totp-provider="google" role="radio" aria-checked="true" tabindex="0">
+              <span class="totp-provider-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22"><path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.29a7.1 7.1 0 0 1-.38-2.29c0-.8.14-1.57.38-2.29V6.62H1.29A11.97 11.97 0 0 0 0 12c0 1.94.47 3.76 1.29 5.38l3.98-3.09z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09C6.22 6.86 8.87 4.75 12 4.75z"/></svg>
+              </span>
+              <span class="totp-provider-copy"><strong>Google Authenticator</strong><small>Google · iOS &amp; Android</small></span>
+              <span class="totp-provider-check" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>
+            </div>
+            <div class="totp-provider" data-totp-provider="microsoft" role="radio" aria-checked="false" tabindex="-1">
+              <span class="totp-provider-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="21" height="21"><rect x="2" y="2" width="9" height="9" fill="#F25022"/><rect x="13" y="2" width="9" height="9" fill="#7FBA00"/><rect x="2" y="13" width="9" height="9" fill="#00A4EF"/><rect x="13" y="13" width="9" height="9" fill="#FFB900"/></svg>
+              </span>
+              <span class="totp-provider-copy"><strong>Microsoft Authenticator</strong><small>Microsoft · iOS &amp; Android</small></span>
+              <span class="totp-provider-check" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>
+            </div>
+            <div class="totp-provider" data-totp-provider="authy" role="radio" aria-checked="false" tabindex="-1">
+              <span class="totp-provider-icon totp-provider-authy" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="24" height="24"><rect x="1" y="1" width="22" height="22" rx="6" fill="#EC1C24"/><path d="M12 4.9 6.1 17.2h2.7l1.1-2.5h4.2l1.1 2.5h2.7L12 4.9Zm-1.2 7.5L12 9.6l1.2 2.8h-2.4Z" fill="#fff"/><circle cx="12" cy="19.1" r="1.1" fill="#fff"/></svg>
+              </span>
+              <span class="totp-provider-copy"><strong>Authy</strong><small>Twilio · iOS &amp; Android</small></span>
+              <span class="totp-provider-check" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>
+            </div>
+          </div>
+          <div class="totp-provider-guidance">
+            <p id="totpProviderTip">Open Google Authenticator, tap <strong>+</strong>, then choose <strong>Scan a QR code</strong>.</p>
+            <div class="totp-provider-downloads" id="totpProviderDownloads"></div>
+          </div>
+          <p class="totp-affiliation"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>Google Authenticator, Microsoft Authenticator and Authy are independent third-party apps. Alt8Mail is not affiliated with, endorsed by or sponsored by Google, Microsoft or Twilio. Names and logos belong to their respective owners.</span></p>
+        </div>
+      </section>
+      <div class="totp-key-panel" id="totpKeyPanel" hidden>
+        <div class="totp-key-head"><strong>Manual setup key</strong><span>Time-based · 6 digits · 30 seconds</span></div>
+        <div class="totp-key-row">
+          <code id="totpSetupSecret" class="totp-secret">•••• •••• •••• ••••</code>
+          <button class="btn-secondary btn-small" id="totpRevealSecret" type="button" aria-pressed="false">Show</button>
+          <button class="btn-secondary btn-small" id="totpCopySecret" type="button"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy key</span></button>
+        </div>
+        <p class="totp-key-help" id="totpKeyHelp">Choose <strong>Enter a setup key</strong> in your app, paste the key, and keep the key type set to time-based.</p>
+        <p class="totp-key-warning"><svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg>Treat this key like a password. Anyone with it can generate your codes.</p>
+      </div>
+      <section class="totp-verify-section" data-totp-section="verify">
+        <div class="totp-section-title"><span class="totp-section-badge">2</span><div><strong>Enter the code from your app</strong><p id="totpVerifyHelp">Your app shows a new six-digit code every 30 seconds.</p></div></div>
+        <div class="otp-inputs totp-code-inputs" id="totpSetupCodeInputs" role="group" aria-label="Six-digit authenticator code">
+          <input id="totpSetupOtp0" data-totp-setup-index="0" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="Digit 1">
+          <input id="totpSetupOtp1" data-totp-setup-index="1" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 2">
+          <input id="totpSetupOtp2" data-totp-setup-index="2" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 3">
+          <input id="totpSetupOtp3" data-totp-setup-index="3" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 4">
+          <input id="totpSetupOtp4" data-totp-setup-index="4" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 5">
+          <input id="totpSetupOtp5" data-totp-setup-index="5" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 6">
+        </div>
+        <p class="totp-code-hint" id="totpSetupCodeHint">Codes refresh automatically. Wait for the next code if this one has expired.</p>
+        <p class="login-error" id="totpSetupError" hidden></p>
+        <details class="totp-troubleshoot">
+          <summary><svg class="icon" aria-hidden="true"><use href="#i-help"/></svg>Trouble verifying?</summary>
+          <ul>
+            <li>Make sure your phone’s date and time are set automatically.</li>
+            <li>Check that you chose time-based (TOTP), not counter-based.</li>
+            <li>If you scanned the wrong account, remove it from the app and scan again.</li>
+            <li>Still stuck? Cancel and start setup again to get a fresh key.</li>
+          </ul>
+        </details>
+      </section>
+      <div class="totp-security-note"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span><strong>Your secret stays private.</strong> It is encrypted at rest and never included in sign-in notifications. Recovery codes will be shown after setup.</span></div>
+    </div>
+    <footer class="security-dialog-actions">
+      <span class="totp-action-hint" id="totpSetupActionHint">Scan the QR code to begin</span>
+      <button class="btn-secondary" id="totpSetupCancel" type="button">Cancel</button>
+      <button class="btn-primary" id="totpSetupVerify" type="button" disabled>Verify and enable</button>
+    </footer>
   </div>
 </div>
+<div class="overlay" id="totpDisableOverlay" hidden>
+  <div class="dialog security-dialog security-dialog-compact" role="dialog" aria-modal="true" aria-labelledby="totpDisableTitle">
+    <header class="security-dialog-head">
+      <span class="security-dialog-icon is-danger"><svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg></span>
+      <div class="security-dialog-heading">
+        <p class="eyebrow">Account security</p>
+        <h2 id="totpDisableTitle">Remove authenticator?</h2>
+        <p>You’ll no longer be able to use codes from your authenticator app to sign in.</p>
+      </div>
+      <button class="icon-btn security-dialog-close" id="totpDisableClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="security-dialog-body">
+      <div class="security-warning-box"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><div><strong>Keep at least one way to sign in</strong><span>Your passkeys and recovery codes will still work. If this is your only second factor, password sign-in becomes single-factor.</span></div></div>
+      <form id="totpDisableForm" autocomplete="off">
+        <label class="form-field"><span>Current account password</span><input id="totpDisablePassword" type="password" autocomplete="current-password" placeholder="Confirm it’s you"></label>
+        <p class="login-error" id="totpDisableError" hidden></p>
+      </form>
+    </div>
+    <footer class="security-dialog-actions">
+      <span class="totp-action-hint">Required to protect your account</span>
+      <button class="btn-secondary" id="totpDisableCancel" type="button">Keep authenticator</button>
+      <button class="btn-primary danger-btn" id="totpDisableConfirm" type="button">Remove authenticator</button>
+    </footer>
+  </div>
+</div>
+
+<div class="overlay" id="passkeySetupOverlay" hidden>
+  <div class="dialog security-dialog passkey-setup-dialog" role="dialog" aria-modal="true" aria-labelledby="passkeySetupTitle">
+    <header class="security-dialog-head">
+      <span class="security-dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></span>
+      <div class="security-dialog-heading">
+        <p class="eyebrow">Account security</p>
+        <h2 id="passkeySetupTitle">Add a passkey</h2>
+        <p>Sign in with your fingerprint, face, device PIN or a security key — no password to remember.</p>
+      </div>
+      <button class="icon-btn security-dialog-close" id="passkeySetupClose" type="button" aria-label="Close passkey setup"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="security-dialog-body passkey-setup-body">
+      <div class="passkey-support" id="passkeySupport" data-state="checking">
+        <span class="passkey-support-icon"><span class="passkey-spinner" aria-hidden="true"></span></span>
+        <div class="passkey-support-copy"><strong id="passkeySupportTitle">Checking this device…</strong><span id="passkeySupportDetail">Looking for a built-in authenticator and a secure connection.</span></div>
+        <span class="passkey-support-badge" id="passkeySupportBadge">Checking</span>
+      </div>
+      <form class="passkey-setup-form" id="passkeySetupForm" autocomplete="off">
+        <label class="form-field passkey-name-field"><span>Passkey name</span><input id="passkeySetupName" maxlength="80" placeholder="e.g. Work laptop" autocomplete="off"><small>Give this passkey a name you’ll recognise later.</small></label>
+        <fieldset class="passkey-method-fieldset">
+          <legend>How do you want to sign in?</legend>
+          <div class="passkey-method-grid" id="passkeyMethodGrid">
+            <label class="passkey-method is-selected" data-passkey-attachment="platform" id="passkeyMethodPlatform">
+              <input type="radio" name="passkeyAttachment" value="platform" checked>
+              <span class="passkey-method-icon"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></span>
+              <span class="passkey-method-copy"><strong>This device</strong><span id="passkeyPlatformMethodHint">Windows Hello</span></span>
+              <span class="passkey-method-badge" id="passkeyPlatformBadge">Checking…</span>
+            </label>
+            <label class="passkey-method" data-passkey-attachment="cross-platform" id="passkeyMethodCross">
+              <input type="radio" name="passkeyAttachment" value="cross-platform">
+              <span class="passkey-method-icon"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></span>
+              <span class="passkey-method-copy"><strong>Security key or phone</strong><span>USB/NFC key, phone or tablet</span></span>
+              <span class="passkey-method-badge">Any device</span>
+            </label>
+          </div>
+        </fieldset>
+        <div class="passkey-how">
+          <span class="passkey-how-step"><i>1</i>Confirm it’s you</span><span class="passkey-how-line" aria-hidden="true"></span>
+          <span class="passkey-how-step"><i>2</i>Passkey saved</span><span class="passkey-how-line" aria-hidden="true"></span>
+          <span class="passkey-how-step"><i>3</i>Sign in faster</span>
+        </div>
+        <div class="passkey-setup-error" id="passkeySetupError" hidden role="alert">
+          <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+          <div><strong id="passkeySetupErrorTitle">Couldn’t add the passkey</strong><span id="passkeySetupErrorText"></span></div>
+        </div>
+        <p class="passkey-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span><strong>Private by design.</strong> Biometric data stays on your device. Alt8Mail only stores a public key and a passkey name.</span></p>
+      </form>
+      <div class="passkey-setup-waiting" id="passkeySetupWaiting" hidden>
+        <div class="passkey-orbit passkey-orbit-compact" aria-hidden="true"><span class="passkey-orbit-ring"></span><span class="passkey-orbit-ring passkey-orbit-ring-2"></span><span class="passkey-orbit-core"><svg class="icon"><use href="#i-fingerprint"/></svg></span></div>
+        <h3>Follow your device prompt</h3>
+        <p id="passkeySetupWaitingText">Use Windows Hello to confirm your passkey.</p>
+        <div class="passkey-prompt-status"><span class="passkey-spinner" aria-hidden="true"></span>Waiting for your device…</div>
+        <p class="passkey-waiting-tip">Keep this tab open. Your browser may ask for permission to use your screen lock.</p>
+        <button class="btn-secondary" id="passkeySetupAbort" type="button">Cancel</button>
+      </div>
+    </div>
+    <footer class="security-dialog-actions" id="passkeySetupActions">
+      <span class="totp-action-hint" id="passkeySetupActionHint">Your passkey is added to this Alt8Mail account</span>
+      <button class="btn-secondary" id="passkeySetupCancel" type="button">Cancel</button>
+      <button class="btn-primary" id="passkeySetupCreate" type="button">Create passkey</button>
+    </footer>
+  </div>
+</div>
+
 <div class="overlay" id="passkeyOverlay" hidden>
-  <div class="dialog passkey-dialog" role="dialog" aria-modal="true" aria-labelledby="passkeyPromptTitle">
-    <div class="passkey-prompt-art"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></div>
-    <h2 id="passkeyPromptTitle">Verify with your passkey</h2>
-    <p id="passkeyPromptText">Windows Hello is asking for your fingerprint, face or device PIN.</p>
-    <div class="passkey-prompt-status" id="passkeyPromptStatus"><span class="passkey-spinner" aria-hidden="true"></span>Waiting for your device…</div>
-    <button class="btn-secondary" id="passkeyCancel" type="button">Cancel</button>
+  <div class="dialog passkey-dialog passkey-prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="passkeyPromptTitle">
+    <button class="icon-btn passkey-prompt-close" id="passkeyPromptClose" type="button" aria-label="Cancel passkey verification"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    <div class="passkey-prompt-head">
+      <span class="passkey-brand" aria-hidden="true"><span>A8</span><svg class="icon"><use href="#i-shield-check"/></svg></span>
+      <span class="passkey-prompt-eyebrow">Alt8Mail secure sign-in</span>
+    </div>
+    <div class="passkey-orbit" aria-hidden="true"><span class="passkey-orbit-ring"></span><span class="passkey-orbit-ring passkey-orbit-ring-2"></span><span class="passkey-orbit-core"><svg class="icon"><use href="#i-fingerprint"/></svg></span></div>
+    <h2 id="passkeyPromptTitle">Verify it’s you</h2>
+    <p id="passkeyPromptText">Use your device to confirm your passkey.</p>
+    <div class="passkey-prompt-device">
+      <span class="passkey-device-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span>
+      <div><strong id="passkeyPromptDeviceName">This device</strong><span id="passkeyPromptDeviceHint">Fingerprint, face or device PIN</span></div>
+    </div>
+    <div class="passkey-prompt-status" id="passkeyPromptStatus" role="status" aria-live="polite"><span class="passkey-spinner" aria-hidden="true"></span>Waiting for your device…</div>
+    <details class="passkey-prompt-help">
+      <summary><svg class="icon" aria-hidden="true"><use href="#i-help"/></svg>The prompt didn’t appear?</summary>
+      <ul>
+        <li>Look for a browser or system dialog behind this window.</li>
+        <li>Use the same device or security key you registered.</li>
+        <li>If you cancelled, close this and choose another sign-in method.</li>
+      </ul>
+    </details>
+    <button class="btn-secondary passkey-prompt-cancel" id="passkeyCancel" type="button">Cancel</button>
+    <p class="passkey-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Your fingerprint or face never leaves your device.</p>
   </div>
 </div>
 
@@ -2725,6 +2940,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
-<script type="module" src="/app.js?v=0.19.0"></script>
+<script src="/vendor/qrcode.min.js"></script>
+<script type="module" src="/app.js?v=0.19.1"></script>
 </body>
 </html>

@@ -962,6 +962,16 @@ let currentRulesCache = null;
 let editingRuleId = null;
 let twoFactorChallenge = null;
 let passkeyTimer = null;
+let passkeyPromptAbort = null;
+let passkeySetupAbort = null;
+let passkeySetupCaps = null;
+let passkeySetupCheckSeq = 0;
+let totpSetupData = null;
+let totpSetupAutoTimer = null;
+let totpSetupSubmitting = false;
+let totpSetupAutoTriggered = false;
+let totpSecretVisible = false;
+let totpProviderId = "google";
 let scheduleChoice = "tomorrow-morning";
 let scheduleSession = null;
 let taskEditorMode = false;
@@ -1064,6 +1074,9 @@ const twoFactorSubmit = document.getElementById("twoFactorSubmit");
 const usePasskeyBtn = document.getElementById("usePasskeyBtn");
 const passkeyOverlay = document.getElementById("passkeyOverlay");
 const passkeyPromptStatus = document.getElementById("passkeyPromptStatus");
+const passkeySetupOverlay = document.getElementById("passkeySetupOverlay");
+const totpSetupOverlay = document.getElementById("totpSetupOverlay");
+const totpDisableOverlay = document.getElementById("totpDisableOverlay");
 const tasksView = document.getElementById("tasksView");
 const filesView = document.getElementById("filesView");
 const tasksMeta = document.getElementById("tasksMeta");
@@ -2344,29 +2357,50 @@ async function showPasskeyPrompt() {
     twoFactorError.hidden = false;
     return;
   }
+  const profile = passkeyDeviceProfile();
   const passkey = (twoFactorChallenge.passkeys || [])[0];
-  document.getElementById("passkeyPromptText").textContent = `${passkey ? passkey.name : "Your passkey"} is asking for your fingerprint, face or device PIN.`;
+  document.getElementById("passkeyPromptText").textContent = passkey
+    ? `Confirm “${passkey.name}” to finish signing in.`
+    : "Confirm with your device to finish signing in.";
+  const deviceName = document.getElementById("passkeyPromptDeviceName");
+  const deviceHint = document.getElementById("passkeyPromptDeviceHint");
+  if (deviceName) deviceName.textContent = passkey ? passkey.name : profile.label;
+  if (deviceHint) deviceHint.textContent = `${profile.biometric} · stays on this device`;
   passkeyPromptStatus.innerHTML = '<span class="passkey-spinner" aria-hidden="true"></span>Waiting for your device…';
   passkeyOverlay.hidden = false;
   twoFactorError.hidden = true;
+  usePasskeyBtn.disabled = true;
+  const controller = new AbortController();
+  passkeyPromptAbort = controller;
+  clearTimeout(passkeyTimer);
+  passkeyTimer = setTimeout(() => {
+    if (passkeyOverlay.hidden) return;
+    passkeyPromptStatus.innerHTML = '<span class="passkey-spinner" aria-hidden="true"></span>Still waiting — look for a prompt behind this window.';
+  }, 12000);
   try {
     const begin = await api("/api/session/2fa/webauthn/begin", {
       method: "POST", skipAuth: true,
       body: { challengeId: twoFactorChallenge.challengeId }
     });
     const publicKey = prepareAssertionOptions(begin.publicKey);
-    const credential = await navigator.credentials.get({ publicKey });
+    const credential = await navigator.credentials.get({ publicKey, signal: controller.signal });
     const trust = document.getElementById("trustDevice").checked;
     const data = await api(`/api/session/2fa/webauthn/finish?flow=${encodeURIComponent(begin.flowId)}&trustDevice=${trust ? "1" : "0"}`, {
       method: "POST", skipAuth: true, body: serializeWebAuthnCredential(credential)
     });
-    passkeyPromptStatus.innerHTML = '<svg class="icon" style="width:15px;height:15px;color:var(--success)" aria-hidden="true"><use href="#i-check"/></svg>Passkey confirmed';
-    hidePasskeyPrompt();
+    clearTimeout(passkeyTimer);
+    passkeyTimer = null;
+    passkeyPromptAbort = null;
+    usePasskeyBtn.disabled = false;
+    hidePasskeyPrompt(false);
     state.csrf = data.csrf;
     await finishAuthenticatedSignIn(data);
   } catch (error) {
-    hidePasskeyPrompt();
-    twoFactorError.textContent = error.name === "NotAllowedError" ? "Passkey verification was cancelled or timed out." : (error.message || "Passkey verification failed.");
+    const cancelled = (error && error.name === "AbortError") || passkeyOverlay.hidden;
+    hidePasskeyPrompt(false);
+    usePasskeyBtn.disabled = false;
+    if (cancelled) return;
+    twoFactorError.textContent = webAuthnErrorMessage(error, "login").message;
     twoFactorError.hidden = false;
     twoFactorForm.classList.add("is-shaking");
     setTimeout(() => twoFactorForm.classList.remove("is-shaking"), 350);
@@ -2374,10 +2408,16 @@ async function showPasskeyPrompt() {
   }
 }
 
-function hidePasskeyPrompt() {
+function hidePasskeyPrompt(abortRequest = true) {
   clearTimeout(passkeyTimer);
   passkeyTimer = null;
+  const controller = passkeyPromptAbort;
+  passkeyPromptAbort = null;
   if (passkeyOverlay) passkeyOverlay.hidden = true;
+  if (abortRequest && controller) {
+    try { controller.abort(); } catch {}
+  }
+  usePasskeyBtn.disabled = false;
 }
 
 async function submitTwoFactor(event) {
@@ -2527,6 +2567,11 @@ async function beginEnrollmentTOTP() {
     const data = await api("/api/enrollment/totp/begin", { method: "POST", skipAuth: true, body: { token: challenge.enrollmentToken } });
     document.getElementById("enrollmentTotpSecret").textContent = data.secret;
     document.getElementById("enrollmentTotpBlock").hidden = false;
+    const qrHost = document.getElementById("enrollmentQrHost");
+    if (qrHost) {
+      qrHost.innerHTML = "";
+      requestAnimationFrame(() => renderTotpQr(qrHost, data.otpauth, 320));
+    }
     document.getElementById("enrollmentTotpCode").value = "";
     document.getElementById("enrollmentTotpCode").focus();
   } catch (error) {
@@ -2593,66 +2638,701 @@ async function completeEnrollment(data) {
   }
 }
 
+/* ---------- authenticator setup ---------- */
+const TOTP_PROVIDERS = {
+  google: {
+    label: "Google Authenticator",
+    tip: "Open Google Authenticator, tap <strong>+</strong>, then choose <strong>Scan a QR code</strong>.",
+    keyHelp: "Open Google Authenticator, tap <strong>+</strong> and choose <strong>Enter a setup key</strong>. Paste the key and keep <strong>Time based</strong> selected.",
+    downloads: [
+      { label: "Google Play", href: "https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2" },
+      { label: "App Store", href: "https://apps.apple.com/app/google-authenticator/id388497605" }
+    ]
+  },
+  microsoft: {
+    label: "Microsoft Authenticator",
+    tip: "In Microsoft Authenticator, tap <strong>+</strong> → <strong>Other account</strong> → <strong>Scan a QR code</strong>.",
+    keyHelp: "In Microsoft Authenticator choose <strong>Other account</strong> → <strong>Enter code manually</strong>. Paste the key; Microsoft labels it “secret key”.",
+    downloads: [
+      { label: "Microsoft", href: "https://www.microsoft.com/en-us/security/mobile-authenticator-app" },
+      { label: "Google Play", href: "https://play.google.com/store/apps/details?id=com.azure.authenticator" },
+      { label: "App Store", href: "https://apps.apple.com/app/microsoft-authenticator/id983156458" }
+    ]
+  },
+  authy: {
+    label: "Authy",
+    tip: "Open Authy, tap <strong>+</strong>, choose <strong>Add Account</strong>, then <strong>Scan QR Code</strong>.",
+    keyHelp: "In Authy choose <strong>Add Account</strong> → <strong>Enter key manually</strong>. Paste the key and keep the timer at 30 seconds.",
+    downloads: [
+      { label: "authy.com", href: "https://authy.com/download/" },
+      { label: "Google Play", href: "https://play.google.com/store/apps/details?id=com.authy.authy" },
+      { label: "App Store", href: "https://apps.apple.com/app/authy/id494168017" }
+    ]
+  }
+};
+
+function totpSetupInputs() {
+  return $$("#totpSetupCodeInputs input");
+}
+
+function totpSetupCodeValue() {
+  return totpSetupInputs().map((input) => (input.value || "").replace(/\D/g, "")).join("").slice(0, 6);
+}
+
+function totpGroupedSecret(secret) {
+  const raw = String(secret || "").replace(/\s+/g, "").toUpperCase();
+  return raw.match(/.{1,4}/g)?.join(" ") || "";
+}
+
+function maskedTotpSecret(secret) {
+  return totpGroupedSecret(secret).replace(/[A-Z0-9]/g, "•");
+}
+
+function renderTotpQr(host, uri, size = 360) {
+  if (!host) return false;
+  host.innerHTML = "";
+  if (!uri) {
+    host.innerHTML = '<div class="totp-qr-fallback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v5"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/><path d="M10.3 3.8 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/></svg><strong>No QR code</strong><span>Use the setup key below instead.</span></div>';
+    return false;
+  }
+  if (!window.QRCode) {
+    host.innerHTML = '<div class="totp-qr-fallback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v5"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/><path d="M10.3 3.8 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/></svg><strong>QR preview unavailable</strong><span>Use the setup key below in your authenticator app.</span></div>';
+    return false;
+  }
+  try {
+    new window.QRCode(host, {
+      text: uri,
+      width: size,
+      height: size,
+      correctLevel: window.QRCode.CorrectLevel.M,
+      colorDark: "#0b1a2a",
+      colorLight: "#ffffff"
+    });
+    return true;
+  } catch (error) {
+    host.innerHTML = '<div class="totp-qr-fallback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v5"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/><path d="M10.3 3.8 2.9 17a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/></svg><strong>QR preview couldn’t load</strong><span>Use the setup key below instead.</span></div>';
+    return false;
+  }
+}
+
+function renderTotpSecret() {
+  const secretEl = document.getElementById("totpSetupSecret");
+  if (!secretEl) return;
+  const secret = (totpSetupData && totpSetupData.secret) || secretEl.dataset.rawSecret || "";
+  secretEl.textContent = totpSecretVisible ? totpGroupedSecret(secret) : maskedTotpSecret(secret);
+  secretEl.classList.toggle("is-masked", !totpSecretVisible);
+  const reveal = document.getElementById("totpRevealSecret");
+  if (reveal) {
+    reveal.textContent = totpSecretVisible ? "Hide" : "Show";
+    reveal.setAttribute("aria-pressed", totpSecretVisible ? "true" : "false");
+  }
+}
+
+function selectTotpProvider(id) {
+  const provider = TOTP_PROVIDERS[id] ? id : "google";
+  totpProviderId = provider;
+  $$("#totpProviderList .totp-provider").forEach((card) => {
+    const selected = card.dataset.totpProvider === provider;
+    card.classList.toggle("is-selected", selected);
+    card.setAttribute("aria-checked", selected ? "true" : "false");
+    card.tabIndex = selected ? 0 : -1;
+  });
+  const config = TOTP_PROVIDERS[provider];
+  const tip = document.getElementById("totpProviderTip");
+  if (tip) tip.innerHTML = config.tip;
+  const keyHelp = document.getElementById("totpKeyHelp");
+  if (keyHelp) keyHelp.innerHTML = config.keyHelp;
+  const downloads = document.getElementById("totpProviderDownloads");
+  if (downloads) {
+    downloads.innerHTML = config.downloads.map((link) => `<a class="totp-download-link" href="${esc(link.href)}" target="_blank" rel="noopener noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>${esc(link.label)}</span><svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>`).join("");
+  }
+}
+
+function setTotpSetupStep(step) {
+  const verifying = step === "verify";
+  $$("[data-totp-step]").forEach((element) => {
+    const isVerify = element.dataset.totpStep === "verify";
+    element.classList.toggle("is-current", verifying ? isVerify : !isVerify);
+    element.classList.toggle("is-done", verifying && !isVerify);
+  });
+}
+
+function toggleTotpKeyPanel(force) {
+  const panel = document.getElementById("totpKeyPanel");
+  const toggle = document.getElementById("totpKeyToggle");
+  if (!panel || !toggle) return;
+  const open = typeof force === "boolean" ? force : panel.hidden;
+  panel.hidden = !open;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) renderTotpSecret();
+}
+
+function updateTotpSetupState() {
+  const inputs = totpSetupInputs();
+  const code = totpSetupCodeValue();
+  inputs.forEach((input) => input.classList.toggle("is-filled", Boolean(input.value)));
+  const verify = document.getElementById("totpSetupVerify");
+  if (verify) {
+    verify.disabled = totpSetupSubmitting || code.length !== 6;
+    if (!totpSetupSubmitting) verify.textContent = "Verify and enable";
+  }
+  const actionHint = document.getElementById("totpSetupActionHint");
+  if (actionHint && !totpSetupSubmitting) {
+    if (code.length === 6) actionHint.textContent = "Ready — verify to finish setup";
+    else if (code.length) actionHint.textContent = `${6 - code.length} digit${6 - code.length === 1 ? "" : "s"} to go`;
+    else actionHint.textContent = "Scan the QR code to begin";
+  }
+  const codeHint = document.getElementById("totpSetupCodeHint");
+  if (codeHint && !totpSetupSubmitting) codeHint.textContent = "Codes refresh automatically. Wait for the next code if this one has expired.";
+}
+
+function fillTotpSetupCode(code, focus = true) {
+  const digits = String(code || "").replace(/\D/g, "").slice(0, 6).split("");
+  const inputs = totpSetupInputs();
+  inputs.forEach((input, index) => { input.value = digits[index] || ""; });
+  if (focus) {
+    const target = inputs.find((input) => !input.value) || inputs[inputs.length - 1];
+    if (target) target.focus();
+  }
+  updateTotpSetupState();
+}
+
+function resetTotpSetupCode() {
+  fillTotpSetupCode("", false);
+}
+
+function scheduleTotpSetupVerify(delay = 320) {
+  clearTimeout(totpSetupAutoTimer);
+  totpSetupAutoTimer = null;
+  if (totpSetupAutoTriggered || totpSetupSubmitting) return;
+  if (totpSetupCodeValue().length !== 6) return;
+  totpSetupAutoTriggered = true;
+  totpSetupAutoTimer = setTimeout(() => {
+    totpSetupAutoTimer = null;
+    if (!totpSetupSubmitting && totpSetupCodeValue().length === 6) verifyTotpSetup();
+  }, delay);
+}
+
+async function copyTotpSecret(button) {
+  const secretEl = document.getElementById("totpSetupSecret");
+  const secret = (totpSetupData && totpSetupData.secret) || secretEl?.dataset.rawSecret || "";
+  if (!secret) return;
+  const ok = await copyTextToClipboard(secret);
+  if (!button) return;
+  const original = button.innerHTML;
+  button.innerHTML = ok
+    ? '<svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Copied</span>'
+    : '<svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Copy failed</span>';
+  button.classList.toggle("is-copied", ok);
+  setTimeout(() => {
+    if (button.isConnected) {
+      button.innerHTML = original;
+      button.classList.remove("is-copied");
+    }
+  }, 1800);
+}
+
+function bindTotpSetupInputs() {
+  const inputs = totpSetupInputs();
+  if (!inputs.length) return;
+  inputs.forEach((input, index) => {
+    input.addEventListener("input", () => {
+      const digits = (input.value || "").replace(/\D/g, "");
+      if (digits.length > 1) {
+        totpSetupAutoTriggered = false;
+        fillTotpSetupCode(digits);
+        scheduleTotpSetupVerify();
+        return;
+      }
+      input.value = digits.slice(-1);
+      if (input.value && index < inputs.length - 1) inputs[index + 1].focus();
+      setTotpSetupStep("verify");
+      totpSetupAutoTriggered = false;
+      updateTotpSetupState();
+      scheduleTotpSetupVerify();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Backspace" && !input.value && index > 0) {
+        inputs[index - 1].focus();
+        inputs[index - 1].value = "";
+        totpSetupAutoTriggered = false;
+        updateTotpSetupState();
+        event.preventDefault();
+      } else if (event.key === "ArrowLeft" && index > 0) {
+        inputs[index - 1].focus();
+      } else if (event.key === "ArrowRight" && index < inputs.length - 1) {
+        inputs[index + 1].focus();
+      } else if (event.key === "Enter" && totpSetupCodeValue().length === 6) {
+        event.preventDefault();
+        verifyTotpSetup();
+      }
+    });
+    input.addEventListener("focus", () => setTotpSetupStep("verify"));
+  });
+  document.getElementById("totpSetupCodeInputs")?.addEventListener("paste", (event) => {
+    event.preventDefault();
+    const text = (event.clipboardData || window.clipboardData)?.getData("text") || "";
+    totpSetupAutoTriggered = false;
+    fillTotpSetupCode(text);
+    setTotpSetupStep("verify");
+    scheduleTotpSetupVerify(180);
+  });
+}
+
+function bindTotpProviderChooser() {
+  const cards = $$("#totpProviderList .totp-provider");
+  if (!cards.length) return;
+  const choose = (card) => {
+    selectTotpProvider(card.dataset.totpProvider);
+    card.focus();
+  };
+  cards.forEach((card, index) => {
+    card.addEventListener("click", () => selectTotpProvider(card.dataset.totpProvider));
+    card.addEventListener("keydown", (event) => {
+      if (event.key === " " || event.key === "Enter") {
+        event.preventDefault();
+        choose(card);
+      } else if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+        event.preventDefault();
+        const next = cards[(index + 1) % cards.length];
+        next.tabIndex = 0;
+        choose(next);
+      } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        const previous = cards[(index - 1 + cards.length) % cards.length];
+        previous.tabIndex = 0;
+        choose(previous);
+      }
+    });
+  });
+}
+
+function closeTotpSetup() {
+  clearTimeout(totpSetupAutoTimer);
+  totpSetupAutoTimer = null;
+  if (totpSetupOverlay) totpSetupOverlay.hidden = true;
+  totpSetupSubmitting = false;
+  totpSetupAutoTriggered = false;
+  totpSetupData = null;
+  const secretEl = document.getElementById("totpSetupSecret");
+  if (secretEl) {
+    secretEl.dataset.rawSecret = "";
+    secretEl.textContent = "•••• •••• •••• ••••";
+    secretEl.classList.add("is-masked");
+  }
+  const qrHost = document.getElementById("totpQrHost");
+  if (qrHost) qrHost.replaceChildren();
+  toggleTotpKeyPanel(false);
+}
+
 async function startTotpSetup() {
-  const overlay = document.getElementById("totpSetupOverlay");
+  hideToast();
   const error = document.getElementById("totpSetupError");
-  error.hidden = true;
+  const trigger = document.getElementById("setupTotpBtn");
+  if (error) error.hidden = true;
+  totpSecretVisible = false;
+  totpSetupAutoTriggered = false;
+  totpSetupSubmitting = false;
+  clearTimeout(totpSetupAutoTimer);
+  totpSetupAutoTimer = null;
+  setTotpSetupStep("scan");
+  toggleTotpKeyPanel(false);
+  resetTotpSetupCode();
+  const clearSecretEl = document.getElementById("totpSetupSecret");
+  if (clearSecretEl) {
+    clearSecretEl.dataset.rawSecret = "";
+    clearSecretEl.textContent = "•••• •••• •••• ••••";
+  }
+  renderTotpSecret();
+  selectTotpProvider(totpProviderId);
+  const verify = document.getElementById("totpSetupVerify");
+  if (verify) { verify.disabled = true; verify.textContent = "Verify and enable"; }
+  const actionHint = document.getElementById("totpSetupActionHint");
+  if (actionHint) actionHint.textContent = "Scan the QR code to begin";
+  const qrHost = document.getElementById("totpQrHost");
+  if (qrHost) qrHost.innerHTML = '<div class="totp-qr-placeholder"><span class="passkey-spinner" aria-hidden="true"></span><span>Preparing QR code…</span></div>';
+  if (trigger) { trigger.disabled = true; trigger.textContent = "Starting…"; }
   try {
     const data = await api("/api/security/2fa/totp/begin", { method: "POST", body: {} });
-    document.getElementById("totpSetupSecret").textContent = data.secret;
-    document.getElementById("totpSetupUri").textContent = data.otpauth;
-    document.getElementById("totpSetupSecret").dataset.uri = data.otpauth;
-    document.getElementById("totpSetupCode").value = "";
-    overlay.hidden = false;
-    setTimeout(() => document.getElementById("totpSetupCode").focus(), 40);
-  } catch (err) { showError(err); }
+    totpSetupData = data;
+    const secretEl = document.getElementById("totpSetupSecret");
+    if (secretEl) secretEl.dataset.rawSecret = data.secret || "";
+    renderTotpSecret();
+    if (totpSetupOverlay) {
+      totpSetupOverlay.hidden = false;
+      const body = totpSetupOverlay.querySelector(".security-dialog-body");
+      if (body) body.scrollTop = 0;
+    }
+    requestAnimationFrame(() => {
+      renderTotpQr(qrHost, data.otpauth, 360);
+      updateTotpSetupState();
+      if (window.innerWidth > 720 && window.matchMedia("(pointer: fine)").matches) document.getElementById("totpSetupOtp0")?.focus();
+    });
+  } catch (err) {
+    showError(err);
+  } finally {
+    if (trigger) { trigger.disabled = false; trigger.textContent = "Set up"; }
+  }
 }
 
 async function verifyTotpSetup() {
-  const code = document.getElementById("totpSetupCode").value.replace(/\D/g, "");
+  if (totpSetupSubmitting) return;
+  const code = totpSetupCodeValue();
   const error = document.getElementById("totpSetupError");
-  if (code.length !== 6) { error.textContent = "Enter the six-digit code."; error.hidden = false; return; }
+  if (code.length !== 6) {
+    if (error) { error.textContent = "Enter the six-digit code from your authenticator app."; error.hidden = false; }
+    updateTotpSetupState();
+    return;
+  }
   const button = document.getElementById("totpSetupVerify");
-  button.disabled = true;
+  const actionHint = document.getElementById("totpSetupActionHint");
+  const codeHint = document.getElementById("totpSetupCodeHint");
+  totpSetupSubmitting = true;
+  clearTimeout(totpSetupAutoTimer);
+  totpSetupAutoTimer = null;
+  if (error) error.hidden = true;
+  if (button) { button.disabled = true; button.innerHTML = '<span class="passkey-spinner" aria-hidden="true"></span>Checking…'; }
+  if (actionHint) actionHint.textContent = "Checking your code…";
+  if (codeHint) codeHint.textContent = "Verifying with the Alt8Mail server…";
   try {
-    const data = await api("/api/security/2fa/totp/finish", { method: "POST", body: { code } });
+    const data = await api("/api/security/2fa/totp/finish", { method: "POST", skipAuth: true, body: { code } });
     state.security = data.security || state.security;
-    document.getElementById("totpSetupOverlay").hidden = true;
+    closeTotpSetup();
     renderSecuritySettings();
     if (Array.isArray(data.codes) && data.codes.length) showRecoveryCodes(data.codes, "Save these recovery codes now. They are shown only once.");
-    showToast("Authenticator enabled");
-  } catch (err) { error.textContent = err.message; error.hidden = false; }
-  finally { button.disabled = false; }
+    else showToast("Authenticator enabled");
+  } catch (err) {
+    if (error) {
+      error.textContent = err.message || "That code did not match. Check your app and try again.";
+      error.hidden = false;
+    }
+    totpSetupAutoTriggered = false;
+    resetTotpSetupCode();
+    setTotpSetupStep("verify");
+    document.getElementById("totpSetupOtp0")?.focus();
+    const dialog = totpSetupOverlay?.querySelector(".totp-setup-dialog");
+    if (dialog) {
+      dialog.classList.add("is-shaking");
+      setTimeout(() => dialog.classList.remove("is-shaking"), 350);
+    }
+    if (actionHint) actionHint.textContent = "That code didn’t match — try the next one";
+  } finally {
+    totpSetupSubmitting = false;
+    if (button) button.textContent = "Verify and enable";
+    updateTotpSetupState();
+  }
 }
 
-async function disableTotp() {
-  const password = window.prompt("Enter your current account password to remove the authenticator.");
-  if (!password) return;
+/* ---------- authenticator removal ---------- */
+function openDisableTotp() {
+  hideToast();
+  const error = document.getElementById("totpDisableError");
+  const password = document.getElementById("totpDisablePassword");
+  const button = document.getElementById("totpDisableConfirm");
+  if (error) error.hidden = true;
+  if (password) password.value = "";
+  if (button) { button.disabled = false; button.textContent = "Remove authenticator"; }
+  if (totpDisableOverlay) totpDisableOverlay.hidden = false;
+  setTimeout(() => password?.focus(), 40);
+}
+
+function closeTotpDisable() {
+  if (totpDisableOverlay) totpDisableOverlay.hidden = true;
+  const password = document.getElementById("totpDisablePassword");
+  if (password) password.value = "";
+  const error = document.getElementById("totpDisableError");
+  if (error) error.hidden = true;
+}
+
+async function disableTotp(event) {
+  if (event) event.preventDefault();
+  const passwordEl = document.getElementById("totpDisablePassword");
+  const error = document.getElementById("totpDisableError");
+  const button = document.getElementById("totpDisableConfirm");
+  const password = passwordEl ? passwordEl.value : "";
+  if (!password) {
+    if (error) { error.textContent = "Enter your current account password."; error.hidden = false; }
+    passwordEl?.focus();
+    return;
+  }
+  if (button) { button.disabled = true; button.innerHTML = '<span class="passkey-spinner" aria-hidden="true"></span>Removing…'; }
+  if (error) error.hidden = true;
   try {
-    const data = await api("/api/security/2fa/totp/disable", { method: "POST", body: { password } });
+    const data = await api("/api/security/2fa/totp/disable", { method: "POST", skipAuth: true, body: { password } });
     state.security = data.security || state.security;
+    closeTotpDisable();
     renderSecuritySettings();
     showToast("Authenticator removed");
-  } catch (err) { showError(err); }
+  } catch (err) {
+    if (error) { error.textContent = err.message || "Could not remove the authenticator."; error.hidden = false; }
+    passwordEl?.select();
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "Remove authenticator"; }
+  }
 }
 
-async function addPasskey() {
-  if (!window.PublicKeyCredential || !navigator.credentials) { showToast("This browser does not support passkeys"); return; }
-  const button = document.getElementById("addPasskeyBtn");
-  button.disabled = true;
+/* ---------- passkey setup ---------- */
+function passkeyDeviceProfile() {
+  const userAgent = navigator.userAgent || "";
+  const os = /Windows/i.test(userAgent) ? "Windows"
+    : /Android/i.test(userAgent) ? "Android"
+    : /iPhone|iPad|iPod/i.test(userAgent) ? "iOS"
+    : /Mac OS X|Macintosh/i.test(userAgent) ? "macOS"
+    : /Linux/i.test(userAgent) ? "Linux"
+    : "This device";
+  const browser = /Edg\//i.test(userAgent) ? "Edge"
+    : /Firefox\//i.test(userAgent) ? "Firefox"
+    : /Chrome\//i.test(userAgent) ? "Chrome"
+    : /Safari\//i.test(userAgent) ? "Safari"
+    : "Browser";
+  const biometric = os === "Windows" ? "Windows Hello"
+    : os === "macOS" ? "Touch ID"
+    : os === "iOS" ? "Face ID or Touch ID"
+    : os === "Android" ? "your screen lock"
+    : "your device screen lock";
+  return { os, browser, biometric, label: os === "This device" ? "This device" : `${os} · ${browser}` };
+}
+
+function webAuthnErrorMessage(error, action = "create") {
+  const name = (error && error.name) || "";
+  if (name === "NotAllowedError") {
+    return action === "create"
+      ? { title: "The passkey prompt was dismissed", message: "Your browser or device cancelled the request, or it timed out. Try again and allow the prompt to use your fingerprint, face, PIN or security key." }
+      : { title: "Passkey verification was cancelled", message: "The request timed out or was dismissed. Choose the passkey option again and allow your device to confirm." };
+  }
+  if (name === "InvalidStateError") {
+    return { title: "This passkey is already registered", message: "That device already has a passkey for Alt8Mail. Try a different device, or remove the existing passkey first." };
+  }
+  if (name === "SecurityError") {
+    return { title: "A secure connection is required", message: "Passkeys only work over HTTPS. Open Alt8Mail with a secure address and try again." };
+  }
+  if (name === "NotSupportedError" || name === "ConstraintError") {
+    return { title: "This device can’t create that passkey", message: "The browser or security key doesn’t support the selected option. Try “Security key or phone”, or use a current browser on a device with a screen lock." };
+  }
+  if (name === "AbortError") {
+    return { title: "Passkey request cancelled", message: "Nothing was changed. You can try again whenever you’re ready." };
+  }
+  return {
+    title: action === "create" ? "Couldn’t add the passkey" : "Couldn’t verify the passkey",
+    message: (error && error.message) || "Something went wrong. Please try again."
+  };
+}
+
+async function detectPasskeyCapabilities() {
+  const profile = passkeyDeviceProfile();
+  const supported = Boolean(window.PublicKeyCredential && navigator.credentials && typeof navigator.credentials.create === "function" && typeof navigator.credentials.get === "function");
+  const secure = typeof window.isSecureContext === "boolean" ? window.isSecureContext : location.protocol === "https:";
+  let platform = false;
+  if (supported) {
+    try {
+      platform = typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === "function"
+        ? await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+        : false;
+    } catch { platform = false; }
+  }
+  return { supported, secure, platform, profile };
+}
+
+function syncPasskeyMethodSelection() {
+  $$("#passkeyMethodGrid .passkey-method").forEach((label) => {
+    const input = label.querySelector("input");
+    label.classList.toggle("is-selected", Boolean(input && input.checked));
+    label.classList.toggle("is-disabled", Boolean(input && input.disabled));
+  });
+}
+
+function updatePasskeySetupCreateState() {
+  const create = document.getElementById("passkeySetupCreate");
+  if (!create) return;
+  create.disabled = !passkeySetupCaps || !passkeySetupCaps.supported || !passkeySetupCaps.secure;
+}
+
+function renderPasskeySupport(caps) {
+  const support = document.getElementById("passkeySupport");
+  const icon = support?.querySelector(".passkey-support-icon");
+  const title = document.getElementById("passkeySupportTitle");
+  const detail = document.getElementById("passkeySupportDetail");
+  const badge = document.getElementById("passkeySupportBadge");
+  const platformMethod = document.getElementById("passkeyMethodPlatform");
+  const platformInput = platformMethod?.querySelector("input");
+  const platformHint = document.getElementById("passkeyPlatformMethodHint");
+  const platformBadge = document.getElementById("passkeyPlatformBadge");
+  const hint = document.getElementById("passkeySetupActionHint");
+  if (!support || !icon || !title || !detail || !badge) return;
+  const profile = caps.profile;
+  let state = "ready";
+  if (!caps.supported) state = "blocked";
+  else if (!caps.secure) state = "blocked";
+  else if (!caps.platform) state = "partial";
+  support.dataset.state = state;
+  if (state === "blocked" && !caps.supported) {
+    title.textContent = "Passkeys aren’t available in this browser";
+    detail.textContent = "Use a current version of Chrome, Edge, Safari or Firefox. This browser can’t create a WebAuthn passkey.";
+    badge.textContent = "Unavailable";
+    icon.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>';
+  } else if (state === "blocked") {
+    title.textContent = "A secure connection is required";
+    detail.textContent = "Open Alt8Mail over HTTPS (or localhost) to create a passkey. Passkeys never work over an insecure connection.";
+    badge.textContent = "HTTPS needed";
+    icon.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>';
+  } else if (state === "partial") {
+    title.textContent = "Built-in authenticator not detected";
+    detail.textContent = `You can still add a security key, phone or tablet. ${profile.os} didn’t report a built-in fingerprint, face or PIN authenticator to this browser.`;
+    badge.textContent = "Security key";
+    icon.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-key"/></svg>';
+  } else {
+    title.textContent = `${profile.biometric} is ready`;
+    detail.textContent = `${profile.os} can confirm with your fingerprint, face or PIN. Your biometric data stays on your device.`;
+    badge.textContent = "Ready";
+    icon.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>';
+  }
+  const platformUsable = Boolean(caps.supported && caps.secure && caps.platform);
+  if (platformInput) {
+    platformInput.disabled = !platformUsable;
+    if (!platformUsable && platformInput.checked) {
+      const cross = document.querySelector('#passkeyMethodGrid input[value="cross-platform"]');
+      if (cross) cross.checked = true;
+    }
+  }
+  if (platformHint) platformHint.textContent = platformUsable ? profile.biometric : "Not detected on this device";
+  if (platformBadge) {
+    platformBadge.textContent = platformUsable ? "Ready" : "Not detected";
+    platformBadge.classList.toggle("is-ready", platformUsable);
+  }
+  syncPasskeyMethodSelection();
+  if (hint) {
+    hint.textContent = caps.supported && caps.secure
+      ? "Your passkey is added to this Alt8Mail account"
+      : "Passkeys can’t be created in this browser";
+  }
+  updatePasskeySetupCreateState();
+}
+
+function openPasskeySetup() {
+  if (!passkeySetupOverlay) return;
+  hideToast();
+  const profile = passkeyDeviceProfile();
+  passkeySetupCaps = null;
+  passkeySetupCheckSeq += 1;
+  const checkSeq = passkeySetupCheckSeq;
+  passkeySetupAbort = null;
+  const dialog = passkeySetupOverlay.querySelector(".passkey-setup-dialog");
+  dialog?.classList.remove("is-busy");
+  const waiting = document.getElementById("passkeySetupWaiting");
+  if (waiting) waiting.hidden = true;
+  const error = document.getElementById("passkeySetupError");
+  if (error) error.hidden = true;
+  const name = document.getElementById("passkeySetupName");
+  if (name) name.value = profile.label;
+  const support = document.getElementById("passkeySupport");
+  if (support) support.dataset.state = "checking";
+  const supportIcon = support?.querySelector(".passkey-support-icon");
+  if (supportIcon) supportIcon.innerHTML = '<span class="passkey-spinner" aria-hidden="true"></span>';
+  const supportTitle = document.getElementById("passkeySupportTitle");
+  const supportDetail = document.getElementById("passkeySupportDetail");
+  const supportBadge = document.getElementById("passkeySupportBadge");
+  if (supportTitle) supportTitle.textContent = "Checking this device…";
+  if (supportDetail) supportDetail.textContent = "Looking for a built-in authenticator and a secure connection.";
+  if (supportBadge) supportBadge.textContent = "Checking";
+  const platformHint = document.getElementById("passkeyPlatformMethodHint");
+  if (platformHint) platformHint.textContent = profile.biometric;
+  const platformBadge = document.getElementById("passkeyPlatformBadge");
+  if (platformBadge) { platformBadge.textContent = "Checking…"; platformBadge.classList.remove("is-ready"); }
+  const platformInput = document.querySelector('#passkeyMethodGrid input[value="platform"]');
+  if (platformInput) { platformInput.checked = true; platformInput.disabled = true; }
+  syncPasskeyMethodSelection();
+  const create = document.getElementById("passkeySetupCreate");
+  if (create) create.disabled = true;
+  const hint = document.getElementById("passkeySetupActionHint");
+  if (hint) hint.textContent = "Checking what this device supports…";
+  passkeySetupOverlay.hidden = false;
+  setTimeout(() => { if (!passkeySetupOverlay.hidden && window.innerWidth > 720 && window.matchMedia("(pointer: fine)").matches) name?.focus(); }, 60);
+  detectPasskeyCapabilities().then((caps) => {
+    if (checkSeq !== passkeySetupCheckSeq || passkeySetupOverlay.hidden) return;
+    passkeySetupCaps = caps;
+    renderPasskeySupport(caps);
+  }).catch(() => {
+    if (checkSeq !== passkeySetupCheckSeq || passkeySetupOverlay.hidden) return;
+    passkeySetupCaps = {
+      supported: Boolean(window.PublicKeyCredential && navigator.credentials),
+      secure: typeof window.isSecureContext === "boolean" ? window.isSecureContext : location.protocol === "https:",
+      platform: false,
+      profile
+    };
+    renderPasskeySupport(passkeySetupCaps);
+  });
+}
+
+function closePasskeySetup() {
+  if (!passkeySetupOverlay) return;
+  passkeySetupCheckSeq += 1;
+  const controller = passkeySetupAbort;
+  passkeySetupAbort = null;
+  if (controller) { try { controller.abort(); } catch {} }
+  passkeySetupOverlay.hidden = true;
+  passkeySetupOverlay.querySelector(".passkey-setup-dialog")?.classList.remove("is-busy");
+  const waiting = document.getElementById("passkeySetupWaiting");
+  if (waiting) waiting.hidden = true;
+  passkeySetupCaps = null;
+}
+
+async function createPasskeyFromSetup(event) {
+  if (event) event.preventDefault();
+  if (!passkeySetupOverlay || passkeySetupOverlay.hidden || passkeySetupAbort) return;
+  if (!passkeySetupCaps || !passkeySetupCaps.supported || !passkeySetupCaps.secure) return;
+  const profile = passkeySetupCaps.profile;
+  const nameEl = document.getElementById("passkeySetupName");
+  const name = nameEl ? nameEl.value.trim().slice(0, 80) : "";
+  const selected = document.querySelector('#passkeyMethodGrid input[name="passkeyAttachment"]:checked');
+  let attachment = selected ? selected.value : "cross-platform";
+  if (attachment === "platform" && !passkeySetupCaps.platform) attachment = "cross-platform";
+  const dialog = passkeySetupOverlay.querySelector(".passkey-setup-dialog");
+  const error = document.getElementById("passkeySetupError");
+  const waiting = document.getElementById("passkeySetupWaiting");
+  const waitingText = document.getElementById("passkeySetupWaitingText");
+  const errorTitle = document.getElementById("passkeySetupErrorTitle");
+  const errorText = document.getElementById("passkeySetupErrorText");
+  if (error) error.hidden = true;
+  if (waitingText) {
+    waitingText.textContent = attachment === "platform"
+      ? `Use ${profile.biometric} to confirm your passkey.`
+      : "Insert your security key, or follow the prompt on your phone or tablet.";
+  }
+  if (waiting) waiting.hidden = false;
+  dialog?.classList.add("is-busy");
+  const controller = new AbortController();
+  passkeySetupAbort = controller;
   try {
     const begin = await api("/api/security/webauthn/register/begin", { method: "POST", body: {} });
-    const credential = await navigator.credentials.create({ publicKey: prepareCreationOptions(begin.publicKey) });
+    const options = prepareCreationOptions(begin.publicKey);
+    options.authenticatorSelection = { ...(options.authenticatorSelection || {}), authenticatorAttachment: attachment };
+    const credential = await navigator.credentials.create({ publicKey: options, signal: controller.signal });
     if (!credential) throw new Error("Passkey creation was cancelled");
-    const data = await api(`/api/security/webauthn/register/finish?flow=${encodeURIComponent(begin.flowId)}`, {
+    const query = new URLSearchParams({ flow: begin.flowId });
+    if (name) query.set("name", name);
+    const data = await api(`/api/security/webauthn/register/finish?${query.toString()}`, {
       method: "POST", body: serializeWebAuthnCredential(credential)
     });
+    passkeySetupAbort = null;
+    passkeySetupCheckSeq += 1;
+    passkeySetupOverlay.hidden = true;
+    dialog?.classList.remove("is-busy");
+    if (waiting) waiting.hidden = true;
     state.security = data.security || state.security;
     renderSecuritySettings();
     if (Array.isArray(data.codes) && data.codes.length) showRecoveryCodes(data.codes, "Save these recovery codes now. They are shown only once.");
-    showToast("Passkey added");
-  } catch (err) { showError(err); }
-  finally { button.disabled = false; }
+    else showToast("Passkey added");
+  } catch (err) {
+    passkeySetupAbort = null;
+    dialog?.classList.remove("is-busy");
+    if (waiting) waiting.hidden = true;
+    if ((err && err.name === "AbortError") || passkeySetupOverlay.hidden) return;
+    const friendly = webAuthnErrorMessage(err, "create");
+    if (errorTitle) errorTitle.textContent = friendly.title;
+    if (errorText) errorText.textContent = friendly.message + (err && err.name ? ` (${err.name})` : "");
+    if (error) error.hidden = false;
+    updatePasskeySetupCreateState();
+  }
 }
 
 async function removePasskey(id) {
@@ -2680,6 +3360,7 @@ async function toggleEnrollmentPolicy() {
 }
 
 function showRecoveryCodes(codes, note) {
+  hideToast();
   const list = document.getElementById("recoveryCodeList");
   if (list) list.innerHTML = codes.map((code) => `<code>${esc(code)}</code>`).join("");
   const title = document.getElementById("recoveryTitle");
@@ -9513,7 +10194,7 @@ function renderSecuritySettings() {
   const factor = state.security && state.security.twoFactor;
   const realAuth = state.mailboxMode === "imap";
   const passkeys = (factor && factor.passkeys) || [];
-  const totpEnabled = Boolean(factor && (factor.totpEnabled || (state.mailboxMode !== "imap" && factor.enabled)));
+  const totpEnabled = Boolean(factor && factor.totpEnabled);
   const setupTotpBtn = document.getElementById("setupTotpBtn");
   const addPasskeyBtn = document.getElementById("addPasskeyBtn");
   const disableTotpBtn = document.getElementById("disableTotpBtn");
@@ -9524,13 +10205,36 @@ function renderSecuritySettings() {
   if (disableTotpBtn) disableTotpBtn.hidden = !realAuth || !totpEnabled;
   if (policyRow) policyRow.hidden = !realAuth;
   if (policyToggle) policyToggle.setAttribute("aria-checked", factor && factor.enrollmentRequired ? "true" : "false");
+  const totpMethodStatus = document.getElementById("totpMethodStatus");
+  if (totpMethodStatus) {
+    totpMethodStatus.textContent = totpEnabled ? "Enabled · code required at sign-in" : "Not set up";
+    totpMethodStatus.classList.toggle("is-on", totpEnabled);
+  }
+  const passkeyMethodStatus = document.getElementById("passkeyMethodStatus");
+  if (passkeyMethodStatus) {
+    passkeyMethodStatus.textContent = passkeys.length
+      ? `${passkeys.length} registered · ready to use`
+      : "No passkeys added";
+    passkeyMethodStatus.classList.toggle("is-on", passkeys.length > 0);
+  }
   const passkeyHolder = document.getElementById("passkeySettingsList");
+  const passkeyTransportLabel = (transports) => {
+    const list = Array.isArray(transports) ? transports.map((item) => String(item).toLowerCase()) : [];
+    if (list.includes("internal")) return "This device";
+    if (list.includes("hybrid")) return "Phone";
+    if (list.includes("usb") || list.includes("nfc") || list.includes("ble")) return "Security key";
+    return "Passkey";
+  };
   if (passkeyHolder) {
-    passkeyHolder.innerHTML = passkeys.length ? passkeys.map((passkey) => `<div class="session-row">
-      <span class="session-icon"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></span>
-      <div class="pref-copy"><strong>${esc(passkey.name || "Passkey")}</strong><span>Added ${esc(formatDateOnly(passkey.createdAt))}${passkey.lastUsedAt ? ` · last used ${esc(formatDateOnly(passkey.lastUsedAt))}` : ""}</span></div>
-      <button class="link-btn" data-remove-passkey="${esc(passkey.id)}" type="button">Remove</button>
-    </div>`).join("") : '<div class="settings-note">No passkeys registered.</div>';
+    passkeyHolder.innerHTML = passkeys.length ? passkeys.map((passkey) => `<div class="passkey-setting-row">
+      <span class="passkey-setting-icon"><svg class="icon" aria-hidden="true"><use href="#i-fingerprint"/></svg></span>
+      <div class="passkey-setting-copy">
+        <strong>${esc(passkey.name || "Passkey")}</strong>
+        <span>Added ${esc(formatDateOnly(passkey.createdAt))}${passkey.lastUsedAt ? ` · Last used ${esc(formatDateOnly(passkey.lastUsedAt))}` : " · Not used yet"}</span>
+      </div>
+      <span class="passkey-setting-badge">${esc(passkeyTransportLabel(passkey.transports))}</span>
+      <button class="link-btn passkey-setting-remove" data-remove-passkey="${esc(passkey.id)}" type="button" aria-label="Remove ${esc(passkey.name || "passkey")}">Remove</button>
+    </div>`).join("") : '<div class="settings-note">No passkeys registered. Add one to sign in with your device instead of a code.</div>';
   }
   refreshAppPasswords();
   if (!factor || !factor.enabled) {
@@ -16208,15 +16912,35 @@ function bindEvents() {
   document.getElementById("enrollmentCancel")?.addEventListener("click", cancelEnrollment);
   document.getElementById("enrollmentCopySecret")?.addEventListener("click", () => copyText(document.getElementById("enrollmentTotpSecret")?.textContent || ""));
   document.getElementById("setupTotpBtn")?.addEventListener("click", startTotpSetup);
-  document.getElementById("addPasskeyBtn")?.addEventListener("click", addPasskey);
-  document.getElementById("disableTotpBtn")?.addEventListener("click", disableTotp);
+  document.getElementById("addPasskeyBtn")?.addEventListener("click", openPasskeySetup);
+  document.getElementById("disableTotpBtn")?.addEventListener("click", openDisableTotp);
   document.getElementById("enrollmentPolicyToggle")?.addEventListener("click", toggleEnrollmentPolicy);
   document.getElementById("totpSetupVerify")?.addEventListener("click", verifyTotpSetup);
-  document.getElementById("totpSetupCancel")?.addEventListener("click", () => { document.getElementById("totpSetupOverlay").hidden = true; });
-  document.getElementById("totpCopySecret")?.addEventListener("click", () => copyText(document.getElementById("totpSetupSecret")?.textContent || ""));
+  document.getElementById("totpSetupCancel")?.addEventListener("click", closeTotpSetup);
+  document.getElementById("totpSetupClose")?.addEventListener("click", closeTotpSetup);
+  totpSetupOverlay?.addEventListener("click", (event) => { if (event.target === totpSetupOverlay) closeTotpSetup(); });
+  document.getElementById("totpCopySecret")?.addEventListener("click", (event) => copyTotpSecret(event.currentTarget));
+  document.getElementById("totpRevealSecret")?.addEventListener("click", () => { totpSecretVisible = !totpSecretVisible; renderTotpSecret(); });
+  document.getElementById("totpKeyToggle")?.addEventListener("click", () => toggleTotpKeyPanel());
+  document.getElementById("totpDisableForm")?.addEventListener("submit", disableTotp);
+  document.getElementById("totpDisableConfirm")?.addEventListener("click", disableTotp);
+  document.getElementById("totpDisableCancel")?.addEventListener("click", closeTotpDisable);
+  document.getElementById("totpDisableClose")?.addEventListener("click", closeTotpDisable);
+  totpDisableOverlay?.addEventListener("click", (event) => { if (event.target === totpDisableOverlay) closeTotpDisable(); });
+  bindTotpSetupInputs();
+  bindTotpProviderChooser();
+
+  document.getElementById("passkeySetupCreate")?.addEventListener("click", createPasskeyFromSetup);
+  document.getElementById("passkeySetupForm")?.addEventListener("submit", createPasskeyFromSetup);
+  document.getElementById("passkeySetupCancel")?.addEventListener("click", closePasskeySetup);
+  document.getElementById("passkeySetupClose")?.addEventListener("click", closePasskeySetup);
+  document.getElementById("passkeySetupAbort")?.addEventListener("click", closePasskeySetup);
+  passkeySetupOverlay?.addEventListener("click", (event) => { if (event.target === passkeySetupOverlay) closePasskeySetup(); });
+  $$('#passkeyMethodGrid input[name="passkeyAttachment"]').forEach((input) => input.addEventListener("change", syncPasskeyMethodSelection));
 
   usePasskeyBtn.addEventListener("click", showPasskeyPrompt);
-  document.getElementById("passkeyCancel").addEventListener("click", hidePasskeyPrompt);
+  document.getElementById("passkeyCancel").addEventListener("click", () => hidePasskeyPrompt());
+  document.getElementById("passkeyPromptClose")?.addEventListener("click", () => hidePasskeyPrompt());
   passkeyOverlay.addEventListener("click", (event) => { if (event.target === passkeyOverlay) hidePasskeyPrompt(); });
   document.getElementById("recoveryModeBtn").addEventListener("click", () => setTwoFactorMode("recovery"));
   document.getElementById("otpModeBtn").addEventListener("click", () => setTwoFactorMode("otp"));
@@ -16853,6 +17577,9 @@ function bindEvents() {
       if (!confirmOverlay.hidden) { settleConfirm(false); return; }
       if (!domainBlockedOverlay.hidden) { domainBlockedOverlay.hidden = true; return; }
       if (storageCredentialsOverlay && !storageCredentialsOverlay.hidden) { closeStorageCredentials(); return; }
+      if (totpSetupOverlay && !totpSetupOverlay.hidden) { closeTotpSetup(); return; }
+      if (totpDisableOverlay && !totpDisableOverlay.hidden) { closeTotpDisable(); return; }
+      if (passkeySetupOverlay && !passkeySetupOverlay.hidden) { closePasskeySetup(); return; }
       if (!passkeyOverlay.hidden) { hidePasskeyPrompt(); return; }
       if (!sendNowOverlay.hidden) { closeSendNowDialog(); return; }
       if (!scheduledEditOverlay.hidden) { closeScheduledEdit(); return; }
