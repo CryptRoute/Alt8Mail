@@ -52,6 +52,7 @@ type Server struct {
 	importMu        sync.Mutex
 	activeImports   map[string]bool
 	webAuthn        *webauthn.WebAuthn
+	realtime        *realtimeHub
 }
 
 type Options struct {
@@ -76,6 +77,7 @@ func New(opts Options) *Server {
 		sieveSyncAgain:  map[string]bool{},
 		activeImports:   map[string]bool{},
 		adminLimit:      newLoginLimiter(opts.Config.AdminRateLimitMax, opts.Config.AdminRateWindow),
+		realtime:        newRealtimeHub(),
 	}
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          opts.Config.WebAuthnRPID,
@@ -97,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/.well-known/carddav", s.davWellKnown)
 	mux.HandleFunc("/dav/", s.handleDAV)
 	mux.HandleFunc("GET /files/s/{token}", s.publicSharePage)
+	mux.HandleFunc("GET /calendar/feed/{token}", s.publicCalendarFeed)
 	mux.HandleFunc("GET /api/public/shares/{token}", s.publicShareMetadata)
 	mux.HandleFunc("GET /api/public/shares/{token}/content", s.publicShareContent)
 	mux.HandleFunc("POST /api/public/shares/{token}/replace", s.publicShareReplace)
@@ -104,7 +107,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ready", s.health)
 	mux.HandleFunc("POST /api/session", s.login)
 	mux.HandleFunc("GET /api/session", s.session)
-	mux.HandleFunc("DELETE /api/session", s.requireUser(s.logout))
+	mux.HandleFunc("DELETE /api/session", s.logout)
 	mux.HandleFunc("POST /api/session/2fa", s.verifyTwoFactor)
 	mux.HandleFunc("POST /api/session/2fa/webauthn/begin", s.beginWebAuthnLogin)
 	mux.HandleFunc("POST /api/session/2fa/webauthn/finish", s.finishWebAuthnLogin)
@@ -164,6 +167,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.requireUser(s.deleteTask))
 
 	mux.HandleFunc("GET /api/storage", s.requireUser(s.getStorage))
+	mux.HandleFunc("GET /api/storage/quota", s.requireUser(s.getStorageQuota))
 	mux.HandleFunc("PUT /api/storage/default", s.requireUser(s.setDefaultStorage))
 	mux.HandleFunc("GET /api/storage/credentials", s.requireUser(s.getStorageCredentials))
 	mux.HandleFunc("PUT /api/storage/credentials/{provider}", s.requireUser(s.putStorageCredentials))
@@ -176,12 +180,43 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/files/{id}", s.requireUser(s.patchFile))
 	mux.HandleFunc("DELETE /api/files/{id}", s.requireUser(s.deleteFile))
 	mux.HandleFunc("POST /api/files/{id}/share", s.requireUser(s.shareFile))
+	mux.HandleFunc("POST /api/files/{id}/copy", s.requireUser(s.copyFile))
+	mux.HandleFunc("GET /api/files/{id}/shares", s.requireUser(s.listFileShares))
+	mux.HandleFunc("DELETE /api/file-shares/{id}", s.requireUser(s.revokeFileShare))
 	mux.HandleFunc("GET /api/files/{id}/content", s.requireUser(s.getFileContent))
+	mux.HandleFunc("GET /api/file-folders", s.requireUser(s.getFileFolders))
+	mux.HandleFunc("POST /api/file-folders", s.requireUser(s.createFileFolder))
+	mux.HandleFunc("PATCH /api/file-folders/{id}", s.requireUser(s.updateFileFolder))
+	mux.HandleFunc("DELETE /api/file-folders/{id}", s.requireUser(s.deleteFileFolder))
 
 	mux.HandleFunc("GET /api/calendar/events", s.requireUser(s.getCalendarEvents))
 	mux.HandleFunc("POST /api/calendar/events", s.requireUser(s.createCalendarEvent))
 	mux.HandleFunc("PATCH /api/calendar/events/{id}", s.requireUser(s.updateCalendarEvent))
 	mux.HandleFunc("DELETE /api/calendar/events/{id}", s.requireUser(s.deleteCalendarEvent))
+	mux.HandleFunc("POST /api/calendar/events/{id}/rsvp", s.requireUser(s.rsvpCalendarEvent))
+	mux.HandleFunc("GET /api/calendar/stream", s.requireUser(s.calendarStream))
+	mux.HandleFunc("POST /api/calendar/calendars", s.requireUser(s.createCalendar))
+	mux.HandleFunc("PATCH /api/calendar/calendars/{id}", s.requireUser(s.updateCalendar))
+	mux.HandleFunc("DELETE /api/calendar/calendars/{id}", s.requireUser(s.deleteCalendar))
+	mux.HandleFunc("GET /api/calendar/calendars/{id}/shares", s.requireUser(s.getCalendarShares))
+	mux.HandleFunc("POST /api/calendar/calendars/{id}/share", s.requireUser(s.shareCalendar))
+	mux.HandleFunc("DELETE /api/calendar/calendars/{id}/share/{userId}", s.requireUser(s.unshareCalendar))
+	mux.HandleFunc("POST /api/calendar/calendars/{id}/leave", s.requireUser(s.leaveSharedCalendar))
+	mux.HandleFunc("GET /api/calendar/calendars/{id}/publish", s.requireUser(s.getCalendarPublication))
+	mux.HandleFunc("POST /api/calendar/calendars/{id}/publish", s.requireUser(s.publishCalendar))
+	mux.HandleFunc("DELETE /api/calendar/calendars/{id}/publish", s.requireUser(s.unpublishCalendar))
+	mux.HandleFunc("POST /api/calendar/subscribe", s.requireUser(s.subscribeCalendar))
+	mux.HandleFunc("POST /api/calendar/subscriptions/{id}/sync", s.requireUser(s.syncCalendarSubscription))
+	mux.HandleFunc("DELETE /api/calendar/subscriptions/{id}", s.requireUser(s.deleteCalendarSubscription))
+	mux.HandleFunc("POST /api/calendar/import", s.requireUser(s.importCalendarFile))
+	mux.HandleFunc("GET /api/calendar/export", s.requireUser(s.exportCalendar))
+	mux.HandleFunc("GET /api/calendar/holidays", s.requireUser(s.getHolidayCatalog))
+	mux.HandleFunc("POST /api/calendar/holidays", s.requireUser(s.addHolidayCalendar))
+	mux.HandleFunc("POST /api/calendar/birthdays", s.requireUser(s.addBirthdayCalendar))
+	mux.HandleFunc("GET /api/address-books", s.requireUser(s.getAddressBooks))
+	mux.HandleFunc("POST /api/address-books", s.requireUser(s.createAddressBook))
+	mux.HandleFunc("PATCH /api/address-books/{id}", s.requireUser(s.updateAddressBook))
+	mux.HandleFunc("DELETE /api/address-books/{id}", s.requireUser(s.deleteAddressBook))
 
 	mux.HandleFunc("GET /api/directory", s.requireUser(s.getDirectory))
 	mux.HandleFunc("GET /api/contacts", s.requireUser(s.getContacts))
@@ -332,10 +367,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	demoSignIn := s.demoLogin(email, body.Password)
 	lookupEmail := email
-	signInDetail := "Password sign-in · Go system backend"
+	signInDetail := "New sign-in detected on your email account"
 	if demoSignIn {
 		lookupEmail = s.cfg.DemoUserEmail
-		signInDetail = "Staging demo sign-in · Go system backend"
+		signInDetail = "New sign-in detected on your email account · staging demo"
 	}
 	user, err := s.userByEmail(r.Context(), lookupEmail)
 	passwordOK := demoSignIn
@@ -476,14 +511,15 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// logout always clears the browser cookies, even when the session has already
+// expired or the CSRF token is stale. Requiring CSRF here made a failed sign
+// out leave a valid cookie in place, so a reload returned to signed-in pages.
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	sess, err := s.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in to continue")
-		return
+	w.Header().Set("Cache-Control", "no-store")
+	if sess, err := s.authenticate(r); err == nil && sess != nil {
+		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM sessions WHERE id = $1`, sess.ID)
+		s.audit(r, sess.User, "auth.logout", sess.User.Email, "Signed out")
 	}
-	_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM sessions WHERE id = $1`, sess.ID)
-	s.audit(r, sess.User, "auth.logout", sess.User.Email, "Signed out")
 	s.clearSessionCookies(w)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -606,8 +642,14 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	sieve := publicSieve(state, sess.User.Email)
 	tasks, _ := s.loadTasks(ctx, sess.User.ID)
 	files, _ := s.loadFiles(ctx, sess.User, "")
-	calendarEvents, _ := s.loadCalendarEvents(ctx, sess.User.ID)
+	fileFolders, _ := s.loadFileFolders(ctx, sess.User.ID)
+	_ = s.ensureDefaultCalendar(ctx, sess.User)
+	calendars, _ := s.loadCalendars(ctx, sess.User)
+	calendarEvents, _ := s.loadCalendarEvents(ctx, sess.User)
+	calendarSubscriptions, _ := s.loadCalendarSubscriptions(ctx, sess.User.ID)
+	addressBooks, _ := s.loadAddressBooks(ctx, sess.User)
 	providers, _ := s.publicStorageProviders(ctx, sess.User)
+	storageQuota := storageQuotaPayload(s.storageUsageFor(ctx, sess.User))
 	people, _ := s.directoryPeople(ctx, sess, false)
 	policy := s.tenantPolicyFor(ctx, sess.User.TenantID)
 	recentAudit := stateSlice(state, "audit")
@@ -627,13 +669,18 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 			"folder": folder, "filter": filter, "offset": offset, "limit": limit,
 			"total": page.Total, "totalMessages": page.TotalMessages, "hasMore": page.HasMore,
 		},
-		"folderCounts":     folderCounts,
-		"folderUnread":     folderUnread,
-		"tasks":            tasks,
-		"files":            files,
-		"calendarEvents":   calendarEvents,
-		"storageProviders": providers,
-		"defaultStorage":   s.defaultStorageProvider(ctx, sess.User.ID),
+		"folderCounts":          folderCounts,
+		"folderUnread":          folderUnread,
+		"tasks":                 tasks,
+		"files":                 files,
+		"fileFolders":           fileFolders,
+		"calendarEvents":        calendarEvents,
+		"calendars":             calendars,
+		"calendarSubscriptions": calendarSubscriptions,
+		"addressBooks":          addressBooks,
+		"storageProviders":      providers,
+		"storageQuota":          storageQuota,
+		"defaultStorage":        s.defaultStorageProvider(ctx, sess.User.ID),
 		"tenantPolicy": map[string]any{
 			"mail": map[string]any{
 				"externalTag": policy.Mail.ExternalTag,
@@ -1116,7 +1163,7 @@ func capabilities() []string {
 		"scheduled-send", "sieve", "automatic-replies", "sender-trust", "outbound-caps",
 		"quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files",
 		"storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences",
-		"labels", "message-filters",
+		"labels", "message-filters", "calendar-realtime", "cabinet-folders", "storage-policy", "file-context-menu",
 	}
 }
 

@@ -460,6 +460,16 @@ func provisionUserTx(ctx context.Context, tx pgx.Tx, tenantID, name, email, role
 	`, tenantID, userID, email, name); err != nil {
 		return "", err
 	}
+	_, _ = tx.Exec(ctx, `
+		INSERT INTO calendars (id, tenant_id, user_id, name, color, kind, visible, is_default)
+		VALUES ('default', $1, $2, 'Calendar', '#0f6cbd', 'personal', true, true)
+		ON CONFLICT (user_id, id) DO NOTHING
+	`, tenantID, userID)
+	_, _ = tx.Exec(ctx, `
+		INSERT INTO address_books (id, tenant_id, user_id, name, color, is_default)
+		VALUES ('default', $1, $2, 'Contacts', '#3d6b62', true)
+		ON CONFLICT (user_id, id) DO NOTHING
+	`, tenantID, userID)
 	for _, alias := range aliases {
 		alias = strings.ToLower(strings.TrimSpace(alias))
 		if alias == "" || alias == email {

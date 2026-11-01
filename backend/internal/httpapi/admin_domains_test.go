@@ -31,9 +31,9 @@ func TestVerifyDomainDNSExactDKIMAndMailHost(t *testing.T) {
 	lookup := fakeDomainLookup{
 		txt: map[string][]string{
 			"_a8m-verification.example.test": {"a8m-verify=tok_123"},
-			"example.test":                        {"v=spf1 mx -all"},
+			"example.test":                   {"v=spf1 mx -all"},
 			"a8m._domainkey.example.test":    {"v=DKIM1; k=rsa; p=AbCdEf0123456789+/="},
-			"_dmarc.example.test":                 {"v=DMARC1; p=quarantine; rua=mailto:dmarc@example.test"},
+			"_dmarc.example.test":            {"v=DMARC1; p=quarantine; rua=mailto:dmarc@example.test"},
 		},
 		mx: map[string][]*net.MX{
 			"example.test": {{Host: "mail.a8m.test.", Pref: 10}},
@@ -52,9 +52,9 @@ func TestVerifyDomainDNSRejectsWrongDKIMKey(t *testing.T) {
 	lookup := fakeDomainLookup{
 		txt: map[string][]string{
 			"_a8m-verification.example.test": {"a8m-verify=tok_123"},
-			"example.test":                        {"v=spf1 mx -all"},
+			"example.test":                   {"v=spf1 mx -all"},
 			"a8m._domainkey.example.test":    {"v=DKIM1; k=rsa; p=OTHERKEY"},
-			"_dmarc.example.test":                 {"v=DMARC1; p=reject"},
+			"_dmarc.example.test":            {"v=DMARC1; p=reject"},
 		},
 		mx: map[string][]*net.MX{
 			"example.test": {{Host: "mail.a8m.test."}},
@@ -73,8 +73,8 @@ func TestVerifyDomainDNSMissingKeyAndWrongMX(t *testing.T) {
 	lookup := fakeDomainLookup{
 		txt: map[string][]string{
 			"_a8m-verification.example.test": {"a8m-verify=tok_123"},
-			"example.test":                        {"v=spf1 mx -all"},
-			"_dmarc.example.test":                 {"v=DMARC1; p=none"},
+			"example.test":                   {"v=spf1 mx -all"},
+			"_dmarc.example.test":            {"v=DMARC1; p=none"},
 		},
 		mx: map[string][]*net.MX{
 			"example.test": {{Host: "mx.other.test."}},

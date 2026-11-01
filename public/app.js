@@ -26,6 +26,12 @@ const initialsFrom = (value) => {
   return String(value || "?").slice(0, 2).toUpperCase();
 };
 
+const displayNameFromEmail = (value) => {
+  const local = String(value || "").split("@")[0].replace(/[._-]+/g, " ").trim();
+  if (!local) return "Guest";
+  return local.replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
 const personLabel = (person) => person ? (person.name || person.email) : "Unknown sender";
 const recipientLabel = (message) => {
   const list = Array.isArray(message.to) ? message.to : message.to ? [message.to] : [];
@@ -806,6 +812,33 @@ const state = {
   fileFilter: "all",
   fileProvider: "all",
   selectedFileId: null,
+  fileFolders: [],
+  fileFolderId: null,
+  fileSort: "name",
+  fileGroup: "none",
+  fileView: "list",
+  fileSortDesc: false,
+  fileAction: null,
+  fileShareList: [],
+  fileContextTarget: null,
+  editorLight: false,
+  calendars: [],
+  calendarSubscriptions: [],
+  addressBooks: [],
+  calendarView: "month",
+  calendarSearch: "",
+  calendarActiveId: "default",
+  calendarHidden: new Set(),
+  calendarMiniYear: null,
+  calendarMiniMonth: null,
+  calendarRealtime: null,
+  calendarRefreshTimer: null,
+  eventAttendees: [],
+  eventAttachments: [],
+  eventCalendarId: "default",
+  eventRecurrenceEnd: "",
+  eventRsvpStatus: "",
+  eventEditingId: null,
   scheduledCount: 0,
   scheduledEditId: null,
   scheduledEditPresets: [],
@@ -868,6 +901,7 @@ const state = {
   contactDept: "All",
   peopleQuery: "",
   peopleFilter: "all",
+  peopleBook: "all",
   calendarYear: new Date().getFullYear(),
   calendarMonth: new Date().getMonth(),
   calendarSelected: null,
@@ -885,6 +919,18 @@ const state = {
 };
 
 state.calendarSelected = `${state.calendarYear}-${String(state.calendarMonth + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`;
+state.calendarMiniYear = state.calendarYear;
+state.calendarMiniMonth = state.calendarMonth;
+try {
+  state.fileSort = localStorage.getItem("a8m.cabinet.sort") || "name";
+  state.fileGroup = localStorage.getItem("a8m.cabinet.group") || "none";
+  state.fileView = localStorage.getItem("a8m.cabinet.view") || "list";
+  state.fileSortDesc = localStorage.getItem("a8m.cabinet.sortDesc") === "1";
+  state.editorLight = localStorage.getItem("a8m.editorLight") === "1";
+  state.calendarView = localStorage.getItem("a8m.calendar.view") || "month";
+  const hidden = JSON.parse(localStorage.getItem("a8m.calendar.hidden") || "[]");
+  if (Array.isArray(hidden)) state.calendarHidden = new Set(hidden);
+} catch {}
 
 let composeSessions = [];
 let suppressHashSync = false;
@@ -965,9 +1011,17 @@ const mailView = document.getElementById("mailView");
 const peopleView = document.getElementById("peopleView");
 const calendarView = document.getElementById("calendarView");
 const settingsView = document.getElementById("settingsView");
-const calGrid = document.getElementById("calGrid");
-const calMonthLabel = document.getElementById("calMonthLabel");
-const calWeekLabel = document.getElementById("calWeekLabel");
+const calMain = document.getElementById("calMain");
+const calRangeLabel = document.getElementById("calRangeLabel");
+const calMini = document.getElementById("calMini");
+const calMiniLabel = document.getElementById("calMiniLabel");
+const calMyCalendars = document.getElementById("calMyCalendars");
+const calSharedCalendars = document.getElementById("calSharedCalendars");
+const calOtherCalendars = document.getElementById("calOtherCalendars");
+const calSharedHead = document.getElementById("calSharedHead");
+const calFilterMenu = document.getElementById("calFilterMenu");
+const calSearchInput = document.getElementById("calSearch");
+const calAgendaPane = document.getElementById("calAgendaPane");
 const agendaDate = document.getElementById("agendaDate");
 const agendaList = document.getElementById("agendaList");
 const agendaCount = document.getElementById("agendaCount");
@@ -1040,8 +1094,22 @@ const sendNowOverlay = document.getElementById("sendNowOverlay");
 const sendNowSummary = document.getElementById("sendNowSummary");
 const sendNowConfirm = document.getElementById("sendNowConfirm");
 const filesMeta = document.getElementById("filesMeta");
-const storageStrip = document.getElementById("storageStrip");
 const fileFilters = document.getElementById("fileFilters");
+const fileBreadcrumb = document.getElementById("fileBreadcrumb");
+const cabinetFolderTree = document.getElementById("cabinetFolderTree");
+const cabinetProviderList = document.getElementById("cabinetProviderList");
+const cabinetQuota = document.getElementById("cabinetQuota");
+const cabinetDropOverlay = document.getElementById("cabinetDropOverlay");
+const cabinetDropTarget = document.getElementById("cabinetDropTarget");
+const fileSortSelect = document.getElementById("fileSortSelect");
+const fileGroupSelect = document.getElementById("fileGroupSelect");
+const fileViewSwitch = document.getElementById("fileViewSwitch");
+const fileSortDirection = document.getElementById("fileSortDirection");
+const fileContextMenu = document.getElementById("fileContextMenu");
+const folderOverlay = document.getElementById("folderOverlay");
+const fileActionOverlay = document.getElementById("fileActionOverlay");
+const calendarAddOverlay = document.getElementById("calendarAddOverlay");
+const calendarShareOverlay = document.getElementById("calendarShareOverlay");
 const fileProviderFilter = document.getElementById("fileProviderFilter");
 const fileList = document.getElementById("fileList");
 const fileDetail = document.getElementById("fileDetail");
@@ -2638,6 +2706,8 @@ async function logout() {
     state.folderUnread = {};
     state.knownInboxIds = null;
     state.knownSnoozeDueIds = new Set();
+    try { state.calendarRealtime?.close(); } catch {}
+    state.calendarRealtime = null;
     state.people = [];
     state.aliases = [];
     state.sieve = null;
@@ -2711,6 +2781,15 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
     };
   }
   state.calendarEvents = data.calendarEvents || [];
+  state.capabilities = data.capabilities || [];
+  state.calendars = data.calendars || [];
+  state.calendarSubscriptions = data.calendarSubscriptions || [];
+  state.addressBooks = data.addressBooks || [];
+  state.fileFolders = data.fileFolders || [];
+  if (data.storageQuota) state.storageQuota = data.storageQuota;
+  if (state.calendars.length && !state.calendars.some((calendar) => calendar.id === state.calendarActiveId)) {
+    state.calendarActiveId = state.calendars.find((calendar) => calendar.isDefault)?.id || state.calendars[0].id;
+  }
   state.sieve = data.sieve || null;
   state.quota = data.quota || null;
   state.outbound = data.outbound || null;
@@ -2740,6 +2819,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   updatePendingUi();
   updateScheduledUi();
   startOutboxPolling();
+  startCalendarRealtime();
   syncPreferencesUi();
   renderSignatureLibrary();
   if (["account", "security", "regional", "autoreply", "storage"].includes(state.settingsTab)) renderSettingsDynamic();
@@ -2866,17 +2946,23 @@ function showNewMailNotification(message, count) {
 async function checkCalendarReminders() {
   if (!state.notifyCalendar || document.visibilityState !== "visible") return;
   const now = Date.now();
-  for (const event of state.calendarEvents || []) {
-    const key = String(event.id || `${event.date}-${event.start}-${event.title}`);
+  const today = dateKey(new Date());
+  const tomorrow = addDaysToKey(today, 1);
+  for (const event of calendarOccurrences(today, tomorrow, { all: true })) {
+    if (event.allDay || event.status === "cancelled" || event.myStatus === "declined") continue;
+    const minutes = Number.isFinite(Number(event.reminderMinutes)) ? Number(event.reminderMinutes) : 15;
+    if (minutes <= 0) continue;
+    const key = `${event.id}|${event.occurrenceDate}|${minutes}`;
     if (state.remindedEventIds.has(key)) continue;
-    const start = zonedWallTimeToUtc(event.date, event.start);
+    const start = zonedWallTimeToUtc(event.occurrenceDate, event.start);
     if (!start) continue;
     const diff = start.getTime() - now;
-    if (diff <= 0 || diff > 10 * 60 * 1000) continue;
+    if (diff <= 0 || diff > minutes * 60 * 1000) continue;
     state.remindedEventIds.add(key);
+    const label = minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}` : `${minutes} minutes`;
     const body = `${event.start} · ${event.where || "Calendar"}`;
-    if (!showBrowserNotification("Meeting in 10 minutes", `${event.title} — ${body}`, "a8m-calendar-" + key)) {
-      showToast(`Starting soon: ${event.title} · ${body}`);
+    if (!showBrowserNotification(`Event in ${label}`, `${event.title} — ${body}`, "a8m-calendar-" + key)) {
+      showToast(`Starting in ${label}: ${event.title} · ${body}`);
     }
   }
 }
@@ -6762,6 +6848,21 @@ function composeAiToolbarButton() {
   return `<button type="button" class="compose-ai-btn" data-compose-action="ai" title="AI writing assistant" aria-label="AI writing assistant"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span class="compose-ai-label">AI</span></button>`;
 }
 
+function composeLightButton(session) {
+  return `<button type="button" class="editor-light-btn" data-compose-action="editor-light" title="Light writing area" aria-label="Toggle light writing area" aria-pressed="${session.editorLight ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-bulb"/></svg></button>`;
+}
+
+function setEditorLight(session, enabled) {
+  session.editorLight = Boolean(enabled);
+  state.editorLight = session.editorLight;
+  try { localStorage.setItem("a8m.editorLight", session.editorLight ? "1" : "0"); } catch {}
+  session.el?.querySelector(".compose-editor-wrap")?.classList.toggle("is-editor-light", session.editorLight);
+  session.el?.querySelectorAll('[data-compose-action="editor-light"]').forEach((button) => {
+    button.setAttribute("aria-pressed", session.editorLight ? "true" : "false");
+    button.classList.toggle("is-active", session.editorLight);
+  });
+}
+
 function composeEditorToolbar(session) {
   const button = (cmd, label, title, content = label) =>
     `<button type="button" data-editor-cmd="${cmd}" title="${esc(title)}" aria-label="${esc(title)}">${content}</button>`;
@@ -6813,6 +6914,7 @@ function composeEditorToolbar(session) {
     <button type="button" data-compose-action="source" title="Edit HTML source" aria-label="Edit HTML source">&lt;&gt;</button>
     ${session.hasQuote ? `<span class="editor-sep"></span><button type="button" data-compose-action="toggle-quote" class="compose-quote-toggle${session.quoteCollapsed ? " is-active" : ""}" title="${session.quoteCollapsed ? "Show quoted message" : "Hide quoted message"}" aria-pressed="${session.quoteCollapsed ? "true" : "false"}">❝ Quote</button>` : ""}
     ${composeAiToolbarButton()}
+    ${composeLightButton(session)}
     <span class="compose-toolbar-mode">
       <button type="button" data-compose-action="mode" data-mode="html" class="${session.htmlMode ? "is-active" : ""}">HTML</button>
       <button type="button" data-compose-action="mode" data-mode="plain" class="${session.htmlMode ? "" : "is-active"}">Plain</button>
@@ -6829,9 +6931,10 @@ function composeTemplate(session) {
   const editorHTML = sanitizeEditorHTML(session.bodyHtml || textToEditorHTML(session.body));
   const modeSwitch = `<span class="compose-toolbar-mode"><button type="button" data-compose-action="mode" data-mode="html" class="${htmlMode ? "is-active" : ""}">HTML</button><button type="button" data-compose-action="mode" data-mode="plain" class="${htmlMode ? "" : "is-active"}">Plain</button></span>`;
   const aiButton = composeAiToolbarButton();
+  const lightClass = session.editorLight ? " is-editor-light" : "";
   const bodyField = htmlMode
-    ? `<div class="compose-editor-wrap">${composeEditorToolbar(session)}<div class="compose-editor${session.quoteCollapsed ? " is-quote-collapsed" : ""}" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…">${editorHTML}</div></div>`
-    : `<div class="compose-editor-wrap"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${aiButton}${modeSwitch}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea></div>`;
+    ? `<div class="compose-editor-wrap${lightClass}">${composeEditorToolbar(session)}<div class="compose-editor${session.quoteCollapsed ? " is-quote-collapsed" : ""}" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…">${editorHTML}</div></div>`
+    : `<div class="compose-editor-wrap${lightClass}"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${aiButton}${composeLightButton(session)}${modeSwitch}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea></div>`;
   return `<section class="compose${htmlMode ? " has-html-editor" : ""}" data-compose-id="${esc(session.id)}" role="dialog" aria-label="${esc(title)}">
     <div class="compose-head" data-compose-head>
       <span class="compose-grip" aria-hidden="true"></span>
@@ -6958,6 +7061,7 @@ function openCompose(prefill = {}, options = {}) {
     body: bodyText,
     bodyHtml,
     htmlMode,
+    editorLight: state.editorLight,
     hasQuote,
     quoteCollapsed: false,
     fromEmail,
@@ -9625,9 +9729,24 @@ function openSignatureEditor(signature = null, { onSaved = null } = {}) {
   document.getElementById("signatureDefaultReplyFlag").checked = Boolean(signature?.defaultReply);
   document.getElementById("signatureDefaultForwardFlag").checked = Boolean(signature?.defaultForward);
   document.getElementById("signatureEditorStatus").textContent = "";
+  applySignatureEditorLight(state.editorLight);
   setSignatureEditorMode(state.signatureEditor.format);
   signatureEditorOverlay.hidden = false;
   setTimeout(() => (signature ? document.getElementById("signatureEditorBody") : document.getElementById("signatureEditorName")).focus(), 80);
+}
+
+function applySignatureEditorLight(enabled) {
+  state.editorLight = Boolean(enabled);
+  try { localStorage.setItem("a8m.editorLight", state.editorLight ? "1" : "0"); } catch {}
+  const wrap = document.getElementById("signatureRichWrap");
+  const plain = document.getElementById("signatureEditorPlain");
+  const button = document.getElementById("signatureLightBtn");
+  if (wrap) wrap.classList.toggle("is-editor-light", state.editorLight);
+  if (plain) plain.classList.toggle("is-editor-light", state.editorLight);
+  if (button) {
+    button.classList.toggle("is-active", state.editorLight);
+    button.setAttribute("aria-pressed", state.editorLight ? "true" : "false");
+  }
 }
 
 function closeSignatureEditor() {
@@ -10487,49 +10606,249 @@ function storageConnected(providerId) {
   return Boolean(provider && provider.connected);
 }
 
+function fileFolderById(id) {
+  if (!id) return null;
+  return (state.fileFolders || []).find((folder) => folder.id === id) || null;
+}
+
+function fileFolderTrail(id) {
+  const trail = [];
+  const seen = new Set();
+  let folder = fileFolderById(id);
+  while (folder && !seen.has(folder.id) && trail.length < 10) {
+    seen.add(folder.id);
+    trail.unshift(folder);
+    folder = fileFolderById(folder.parentId);
+  }
+  return trail;
+}
+
+function fileFolderDepth(folder) {
+  return Math.max(0, fileFolderTrail(folder.id).length - 1);
+}
+
+function childFileFolders(parentId) {
+  return (state.fileFolders || [])
+    .filter((folder) => (folder.parentId || "") === (parentId || ""))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+function fileProviderName(file) {
+  return storageProvider(file.providerId)?.name || "Storage";
+}
+
+function fileIsImage(file) {
+  return String(file.mime || "").startsWith("image/") && !String(file.mime || "").includes("svg");
+}
+
 function fileMatchesFilter(file) {
   if (!storageConnected(file.providerId)) return false;
   if (state.fileProvider !== "all" && file.providerId !== state.fileProvider) return false;
+  if (state.fileProvider === "all" || state.fileProvider === "a8m") {
+    if (state.fileFolderId && file.folderId !== state.fileFolderId) return false;
+  }
   if (state.fileFilter === "recent") {
     const modified = new Date(file.modifiedAt);
     if (Number.isNaN(modified.getTime()) || Date.now() - modified.getTime() > 7 * 86400000) return false;
   }
   if (state.fileFilter === "shared" && !(file.sharedWith || []).length) return false;
   if (state.fileFilter === "images" && !String(file.mime || "").startsWith("image/")) return false;
-  if (state.fileFilter === "documents" && !["PDF", "DOC", "XLS", "PPT", "TXT"].includes(file.type)) return false;
+  if (state.fileFilter === "documents" && !["PDF", "DOC", "DOCX", "XLS", "XLSX", "PPT", "PPTX", "TXT"].includes(String(file.type || "").toUpperCase())) return false;
   if (state.fileFilter === "starred" && !file.starred) return false;
   const query = state.query.toLowerCase();
   if (query) {
-    const haystack = [file.name, file.path, file.description, file.owner && file.owner.name, file.type].join(" ").toLowerCase();
+    const haystack = [file.name, file.path, file.description, file.owner && file.owner.name, file.type, fileProviderName(file)].join(" ").toLowerCase();
     if (!haystack.includes(query)) return false;
   }
   return true;
+}
+
+function folderMatchesQuery(folder) {
+  const query = state.query.toLowerCase();
+  if (!query) return true;
+  return [folder.name, folder.path].join(" ").toLowerCase().includes(query);
 }
 
 function fileTypeClass(file) {
   return String(file.type || "FILE").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5);
 }
 
+function fileModifiedStamp(file) {
+  const stamp = Date.parse(file.modifiedAt || file.updatedAt || file.createdAt || "");
+  return Number.isNaN(stamp) ? 0 : stamp;
+}
+
+function cabinetSortValue(file) {
+  switch (state.fileSort) {
+    case "modified": return fileModifiedStamp(file);
+    case "size": return Number(file.sizeBytes) || 0;
+    case "type": return String(file.type || "").toLowerCase();
+    default: return String(file.name || "").toLowerCase();
+  }
+}
+
+function sortCabinetFiles(files) {
+  const direction = state.fileSortDesc ? -1 : 1;
+  return files.slice().sort((a, b) => {
+    const left = cabinetSortValue(a);
+    const right = cabinetSortValue(b);
+    let result;
+    if (typeof left === "number" && typeof right === "number") result = left - right;
+    else result = String(left).localeCompare(String(right), undefined, { sensitivity: "base", numeric: true });
+    return result * direction;
+  });
+}
+
+function cabinetGroupKey(file) {
+  if (state.fileGroup === "type") return String(file.type || "Files").toUpperCase() || "FILES";
+  if (state.fileGroup === "provider") return fileProviderName(file);
+  if (state.fileGroup === "date") {
+    const modified = new Date(fileModifiedStamp(file));
+    if (!fileModifiedStamp(file)) return "Older";
+    const today = new Date();
+    const todayKey = dateKey(today);
+    const key = dateKey(modified);
+    if (key === todayKey) return "Today";
+    if (key === addDaysToKey(todayKey, -1)) return "Yesterday";
+    if (Date.now() - modified.getTime() < 7 * 86400000) return "Earlier this week";
+    if (Date.now() - modified.getTime() < 31 * 86400000) return "Earlier this month";
+    if (modified.getFullYear() === today.getFullYear()) return "Earlier this year";
+    return String(modified.getFullYear());
+  }
+  return "";
+}
+
+function cabinetFileRow(file) {
+  const provider = storageProvider(file.providerId);
+  const selected = file.id === state.selectedFileId;
+  const shared = (file.sharedWith || []).length > 0;
+  return `<div class="file-row cabinet-row${selected ? " is-selected" : ""}" data-file-id="${esc(file.id)}" tabindex="0" role="button" draggable="true" aria-pressed="${selected}" aria-label="${esc(file.name)}">
+    <span class="file-type ${fileTypeClass(file)}">${esc(file.type || "FILE")}</span>
+    <div class="file-main"><strong>${esc(file.name)}</strong><span>${esc(file.path || "Files")} · ${esc(provider ? provider.name : "Storage")}</span></div>
+    <span class="file-owner">${esc(file.owner ? file.owner.name : "—")}</span>
+    <span class="file-modified">${esc(formatDateOnly(file.modifiedAt))}</span>
+    <span class="file-size">${esc(formatBytes(file.sizeBytes))}</span>
+    <span class="file-flags">${shared ? '<svg class="icon" aria-label="Shared" title="Shared"><use href="#i-people"/></svg>' : ""}${file.locked ? '<svg class="icon" aria-label="Locked" title="Locked"><use href="#i-lock"/></svg>' : ""}</span>
+    <button class="star-btn${file.starred ? " is-starred" : ""}" data-file-star="${esc(file.id)}" type="button" aria-label="${file.starred ? "Remove star" : "Star file"}" aria-pressed="${file.starred ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>
+    <button class="icon-btn cabinet-row-more" data-file-menu="${esc(file.id)}" type="button" aria-label="More actions for ${esc(file.name)}"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
+  </div>`;
+}
+
+function cabinetFolderRow(folder) {
+  const active = state.fileFolderId === folder.id;
+  return `<div class="file-row cabinet-row cabinet-folder-row${active ? " is-selected" : ""}" data-folder-open="${esc(folder.id)}" data-folder-drop="${esc(folder.id)}" tabindex="0" role="button" draggable="true" aria-label="Open folder ${esc(folder.name)}">
+    <span class="file-type folder"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg></span>
+    <div class="file-main"><strong>${esc(folder.name)}</strong><span>${esc(folder.path)}</span></div>
+    <span class="file-owner">Folder</span>
+    <span class="file-modified">${esc(formatDateOnly(folder.updatedAt))}</span>
+    <span class="file-size">${folder.count || 0} ${Number(folder.count) === 1 ? "item" : "items"}</span>
+    <span class="file-flags"></span>
+    <button class="icon-btn cabinet-row-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="More actions for ${esc(folder.name)}"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
+  </div>`;
+}
+
+function cabinetFolderTile(folder, mode) {
+  return `<article class="cabinet-tile cabinet-folder-tile ${mode === "thumbs" ? "is-thumb" : ""}" data-folder-open="${esc(folder.id)}" data-folder-drop="${esc(folder.id)}" tabindex="0" role="button" draggable="true" aria-label="Open folder ${esc(folder.name)}">
+    <div class="cabinet-tile-art"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span class="cabinet-tile-badge">${folder.count || 0}</span></div>
+    <strong>${esc(folder.name)}</strong>
+    <span>${esc(folder.path)}</span>
+    <button class="icon-btn cabinet-tile-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="More actions for ${esc(folder.name)}"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
+  </article>`;
+}
+
+function cabinetFileTile(file, mode) {
+  const provider = storageProvider(file.providerId);
+  const selected = file.id === state.selectedFileId;
+  const image = fileIsImage(file) && file.contentUrl;
+  return `<article class="cabinet-tile${selected ? " is-selected" : ""}${mode === "thumbs" ? " is-thumb" : ""}" data-file-id="${esc(file.id)}" tabindex="0" role="button" draggable="true" aria-pressed="${selected}" aria-label="${esc(file.name)}">
+    <div class="cabinet-tile-art ${fileTypeClass(file)}">${mode === "thumbs" && image ? `<img src="${esc(file.contentUrl)}" alt="" loading="lazy">` : `<span class="file-type ${fileTypeClass(file)}">${esc(file.type || "FILE")}</span>`}${file.starred ? '<span class="cabinet-star-mark"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></span>' : ""}</div>
+    <strong>${esc(file.name)}</strong>
+    <span>${esc(provider ? provider.name : "Storage")} · ${esc(formatBytes(file.sizeBytes))}</span>
+    <span class="cabinet-tile-meta">${esc(formatDateOnly(file.modifiedAt))}</span>
+    <button class="icon-btn cabinet-tile-more" data-file-menu="${esc(file.id)}" type="button" aria-label="More actions for ${esc(file.name)}"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
+  </article>`;
+}
+
+function renderCabinetBreadcrumb() {
+  if (!fileBreadcrumb) return;
+  const trail = fileFolderTrail(state.fileFolderId);
+  const crumbs = [`<button type="button" data-folder-open="" data-folder-drop="" class="${trail.length ? "" : "is-current"}"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg>All files</button>`];
+  trail.forEach((folder, index) => {
+    crumbs.push(`<svg class="icon crumb-sep" aria-hidden="true"><use href="#i-chevron-right"/></svg>`);
+    crumbs.push(`<button type="button" data-folder-open="${esc(folder.id)}" class="${index === trail.length - 1 ? "is-current" : ""}" data-folder-drop="${esc(folder.id)}">${esc(folder.name)}</button>`);
+  });
+  fileBreadcrumb.innerHTML = crumbs.join("");
+}
+
+function renderCabinetSidebar(filteredFiles) {
+  if (cabinetFolderTree) {
+    const folders = (state.fileFolders || []).slice().sort((a, b) => String(a.path).localeCompare(String(b.path), undefined, { sensitivity: "base" }));
+    cabinetFolderTree.innerHTML = folders.length ? folders.map((folder) => `<button class="cabinet-folder-link${state.fileFolderId === folder.id ? " is-active" : ""}" style="--folder-depth:${fileFolderDepth(folder)};--folder-color:${esc(folder.color || "#0f6cbd")}" data-folder-open="${esc(folder.id)}" data-folder-drop="${esc(folder.id)}" type="button" title="${esc(folder.path)}"><span class="folder-dot" aria-hidden="true"></span><span>${esc(folder.name)}</span><em>${folder.count || 0}</em></button>`).join("") : `<div class="cabinet-folder-empty"><svg class="icon" aria-hidden="true"><use href="#i-folder-plus"/></svg><span>No folders yet</span><button class="link-btn" type="button" data-new-folder>Create one</button></div>`;
+  }
+  if (cabinetProviderList) {
+    cabinetProviderList.innerHTML = state.storageProviders.map((provider) => {
+      const percent = provider.limitBytes ? Math.min(100, (provider.usedBytes / provider.limitBytes) * 100) : 0;
+      return `<div class="storage-card cabinet-provider${provider.connected ? " is-connected" : ""}" style="--provider:${provider.color}">
+        ${storageProviderMarkup(provider)}
+        <div class="cabinet-provider-copy"><strong>${esc(provider.name)}</strong><span>${provider.connected ? `${formatBytes(provider.usedBytes)}${provider.limitBytes ? ` of ${formatBytes(provider.limitBytes)}` : ""}` : "Not connected"}</span>${provider.connected && provider.limitBytes ? `<div class="usage-bar"><span style="width:${percent}%"></span></div>` : ""}</div>
+        ${provider.connected ? '<span class="storage-status"><span class="status-dot"></span></span>' : `<button class="link-btn" data-storage-connect="${esc(provider.id)}" type="button">Connect</button>`}
+      </div>`;
+    }).join("");
+  }
+  const rootCount = document.getElementById("fileRootCount");
+  if (rootCount) rootCount.textContent = `${state.files.length} item${state.files.length === 1 ? "" : "s"} across ${(state.fileFolders || []).length} folder${(state.fileFolders || []).length === 1 ? "" : "s"}`;
+  if (cabinetQuota) {
+    const quota = state.storageQuota || (storageProvider("a8m")?.quota) || null;
+    if (quota) {
+      const percent = Math.min(100, Math.max(0, Number(quota.percent) || 0));
+      cabinetQuota.innerHTML = `<div class="cabinet-quota-head"><span>${quota.combined ? "Mail + Cabinet" : "Cabinet storage"}</span><strong>${Math.round(percent)}%</strong></div>
+        <div class="usage-bar"><span style="width:${percent}%"></span></div>
+        <p>${esc(quota.label || `${formatBytes(quota.usedBytes)} of ${formatBytes(quota.limitBytes)}`)}</p>
+        <small>${quota.combined ? "Shared mailbox allowance" : "Separate Cabinet allowance"} · ${esc(quota.source || "organization")} policy</small>`;
+    } else {
+      const provider = storageProvider("a8m");
+      cabinetQuota.innerHTML = `<div class="cabinet-quota-head"><span>Cabinet storage</span><strong>${provider ? formatBytes(provider.usedBytes) : "—"}</strong></div><p>Connected to Alt8Mail Drive</p>`;
+    }
+  }
+}
+
+function cabinetGroupedMarkup(folders, files, mode) {
+  const groups = new Map();
+  for (const file of files) {
+    const key = cabinetGroupKey(file) || "Files";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(file);
+  }
+  const folderMarkup = (list) => mode === "list" || state.fileView === "list"
+    ? `<div class="cabinet-list">${list.map(cabinetFolderRow).join("")}</div>`
+    : `<div class="cabinet-tiles">${list.map((folder) => cabinetFolderTile(folder, mode)).join("")}</div>`;
+  const fileMarkup = (list) => state.fileView === "list"
+    ? `<div class="cabinet-list">${list.map(cabinetFileRow).join("")}</div>`
+    : `<div class="cabinet-tiles${state.fileView === "thumbs" ? " is-thumbs" : ""}">${list.map((file) => cabinetFileTile(file, state.fileView === "thumbs" ? "thumbs" : "tiles")).join("")}</div>`;
+  let html = "";
+  if (folders.length) {
+    html += `<section class="cabinet-group cabinet-folder-group"><header class="cabinet-group-head"><strong>Folders</strong><span>${folders.length}</span></header>${folderMarkup(folders)}</section>`;
+  }
+  if (state.fileGroup === "none") {
+    if (files.length) html += fileMarkup(files);
+  } else {
+    for (const [key, list] of groups) {
+      html += `<section class="cabinet-group"><header class="cabinet-group-head"><strong>${esc(key)}</strong><span>${list.length}</span></header>${fileMarkup(sortCabinetFiles(list))}</section>`;
+    }
+  }
+  return html;
+}
+
 function renderFiles() {
   if (!filesView || !fileList) return;
   const connected = state.storageProviders.filter((provider) => provider.connected);
   const available = state.files.filter((file) => storageConnected(file.providerId));
-  const filtered = available.filter(fileMatchesFilter).sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+  const filtered = sortCabinetFiles(available.filter(fileMatchesFilter));
   if (!filtered.some((file) => file.id === state.selectedFileId)) state.selectedFileId = filtered[0] ? filtered[0].id : null;
   const used = connected.reduce((sum, provider) => sum + (Number(provider.usedBytes) || 0), 0);
   const limit = connected.reduce((sum, provider) => sum + (Number(provider.limitBytes) || 0), 0);
-  filesMeta.textContent = `${available.length} items · ${connected.length} connected drive${connected.length === 1 ? "" : "s"} · ${formatBytes(used)}${limit ? ` of ${formatBytes(limit)}` : ""}`;
-  storageStrip.innerHTML = state.storageProviders.map((provider) => {
-    const percent = provider.limitBytes ? Math.min(100, (provider.usedBytes / provider.limitBytes) * 100) : 0;
-    return `<article class="storage-card${provider.connected ? " is-connected" : ""}" style="--provider:${provider.color}">
-      <div class="storage-card-head">
-        ${storageProviderMarkup(provider)}
-        <div class="storage-card-name"><strong>${esc(provider.name)}</strong><span>${provider.connected ? esc(provider.account || "Connected") : provider.kind === "internal" ? "Internal storage" : "Available to connect"}</span></div>
-        ${provider.connected ? '<span class="storage-status"><span class="status-dot"></span>Synced</span>' : `<button class="link-btn" data-storage-connect="${esc(provider.id)}" type="button">Connect</button>`}
-      </div>
-      ${provider.connected ? `<div class="storage-usage">${provider.limitBytes ? `<div class="usage-bar"><span style="width:${percent}%"></span></div><div class="storage-usage-meta"><span>${formatBytes(provider.usedBytes)} of ${formatBytes(provider.limitBytes)}</span><span>${Math.round(percent)}%</span></div>` : `<div class="storage-usage-meta"><span>${formatBytes(provider.usedBytes)} used</span><span>Connected bucket</span></div>`}</div>` : `<p class="storage-card-note">${esc(provider.description)}</p>`}
-    </article>`;
-  }).join("");
+  const currentFolder = fileFolderById(state.fileFolderId);
+  filesMeta.textContent = `${available.length} item${available.length === 1 ? "" : "s"} · ${connected.length} connected drive${connected.length === 1 ? "" : "s"} · ${formatBytes(used)}${limit ? ` of ${formatBytes(limit)}` : ""}`;
   const providerOptions = [`<option value="all">All connected drives</option>`, ...connected.map((provider) => `<option value="${esc(provider.id)}"${state.fileProvider === provider.id ? " selected" : ""}>${esc(provider.name)}</option>`)].join("");
   if (fileProviderFilter.innerHTML !== providerOptions) fileProviderFilter.innerHTML = providerOptions;
   if (state.fileProvider !== "all" && !connected.some((provider) => provider.id === state.fileProvider)) state.fileProvider = "all";
@@ -10538,19 +10857,27 @@ function renderFiles() {
   syncStorageDefaultSelects();
   const manageCredentials = document.getElementById("manageStorageCredentialsBtn");
   if (manageCredentials) manageCredentials.hidden = !storageCanManage();
-  fileList.innerHTML = filtered.length ? filtered.map((file) => {
-    const provider = storageProvider(file.providerId);
-    const selected = file.id === state.selectedFileId;
-    return `<div class="file-row${selected ? " is-selected" : ""}" data-file-id="${esc(file.id)}" tabindex="0" role="button" aria-pressed="${selected}">
-      <span class="file-type ${fileTypeClass(file)}">${esc(file.type)}</span>
-      <div class="file-main"><strong>${esc(file.name)}</strong><span>${esc(file.path)} · ${esc(provider ? provider.name : "Storage")}</span></div>
-      <span class="file-owner">${esc(file.owner ? file.owner.name : "—")}</span>
-      <span class="file-modified">${esc(formatDateOnly(file.modifiedAt))}</span>
-      <span class="file-size">${esc(formatBytes(file.sizeBytes))}</span>
-      <span class="file-flags">${(file.sharedWith || []).length ? '<svg class="icon" aria-label="Shared" title="Shared"><use href="#i-people"/></svg>' : ""}${file.locked ? '<svg class="icon" aria-label="Locked" title="Locked"><use href="#i-lock"/></svg>' : ""}</span>
-      <button class="star-btn${file.starred ? " is-starred" : ""}" data-file-star="${esc(file.id)}" type="button" aria-label="${file.starred ? "Remove star" : "Star file"}" aria-pressed="${file.starred ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>
-    </div>`;
-  }).join("") : `<div class="file-empty"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg><strong>Cabinet is empty</strong><span>${state.query ? "Try a different search." : "Save an email attachment, connect a drive or upload a document."}</span></div>`;
+  if (fileSortSelect) fileSortSelect.value = state.fileSort;
+  if (fileGroupSelect) fileGroupSelect.value = state.fileGroup;
+  if (fileSortDirection) fileSortDirection.classList.toggle("is-desc", state.fileSortDesc);
+  fileViewSwitch?.querySelectorAll("[data-file-view]").forEach((button) => {
+    button.classList.toggle("is-active", button.getAttribute("data-file-view") === state.fileView);
+  });
+  renderCabinetBreadcrumb();
+  renderCabinetSidebar(filtered);
+  const folderScope = state.fileProvider === "all" || state.fileProvider === "a8m";
+  const folders = folderScope
+    ? childFileFolders(state.fileFolderId).filter(folderMatchesQuery).filter((folder) => {
+        if (state.fileFilter === "starred" || state.fileFilter === "shared" || state.fileFilter === "images" || state.fileFilter === "documents") return false;
+        return true;
+      })
+    : [];
+  fileList.className = `file-scroll cabinet-view-${state.fileView}`;
+  if (!folders.length && !filtered.length) {
+    fileList.innerHTML = `<div class="file-empty"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg><strong>${state.query ? "No matching files" : currentFolder ? "This folder is empty" : "Cabinet is empty"}</strong><span>${state.query ? "Try a different search." : "Drop files here, upload a document or save an email attachment."}</span><button class="btn-secondary" type="button" data-cabinet-upload><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload files</button></div>`;
+  } else {
+    fileList.innerHTML = cabinetGroupedMarkup(folders, filtered, state.fileView);
+  }
   renderFileDetail();
   syncStatusRange();
   syncStatusContext();
@@ -10560,16 +10887,18 @@ function renderFileDetail() {
   if (!fileDetail) return;
   const file = state.files.find((item) => item.id === state.selectedFileId);
   if (!file) {
-    fileDetail.innerHTML = `<div class="file-detail-empty"><span class="file-detail-mark"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg></span><h2>Your Cabinet, connected</h2><p>Keep documents, attachments and connected-drive files together in one secure workspace.</p><button class="btn-secondary" data-open-storage type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add storage</button><div class="file-detail-tips"><span>${state.files.filter((item) => storageConnected(item.providerId)).length} indexed items</span><span>OAuth-ready connectors</span><span>Enterprise sharing controls</span></div></div>`;
+    const folder = fileFolderById(state.fileFolderId);
+    fileDetail.innerHTML = `<div class="file-detail-empty"><span class="file-detail-mark"><svg class="icon" aria-hidden="true"><use href="#${folder ? "i-folder" : "i-cabinet"}"/></svg></span><h2>${folder ? esc(folder.name) : "Your Cabinet, connected"}</h2><p>${folder ? "Create a folder inside, or drop files here to upload." : "Keep documents, attachments and connected-drive files together in one secure workspace."}</p><div class="file-detail-actions"><button class="btn-secondary" data-open-storage type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add storage</button><button class="btn-secondary" data-cabinet-upload type="button"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload</button></div><div class="file-detail-tips"><span>${state.files.filter((item) => storageConnected(item.providerId)).length} indexed items</span><span>OAuth-ready connectors</span><span>Enterprise sharing controls</span></div></div>`;
     return;
   }
   const provider = storageProvider(file.providerId);
-  const image = String(file.mime || "").startsWith("image/") && file.contentUrl;
+  const image = fileIsImage(file) && file.contentUrl;
   const pdf = file.mime === "application/pdf" && file.contentUrl;
+  const folder = fileFolderById(file.folderId);
   fileDetail.innerHTML = `<div class="file-detail-head"><div><span class="eyebrow">File details</span><h2>${esc(file.name)}</h2></div><button class="icon-btn file-detail-back" data-file-back type="button" aria-label="Back to files"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg></button></div>
     <div class="file-preview-card ${fileTypeClass(file)}">
       ${image ? `<img src="${esc(file.contentUrl)}" alt="${esc(file.name)}" loading="lazy">` : pdf ? `<span class="file-preview-pdf"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>PDF</span>` : `<span class="file-preview-generic"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg><strong>${esc(file.type)}</strong></span>`}
-      <div class="file-preview-overlay"><button class="btn-secondary" data-file-preview="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg>${file.previewable ? "Preview" : "Open details"}</button></div>
+      <div class="file-preview-overlay"><button class="btn-secondary" data-file-preview="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg>${file.previewable ? "Preview" : "Open details"}</button><button class="btn-secondary" data-file-menu="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>More</button></div>
     </div>
     <div class="file-badges"><span class="provider-badge" style="--provider:${provider ? provider.color : "#64748b"}">${esc(provider ? provider.name : "Storage")}</span>${file.starred ? '<span class="policy-chip">Starred</span>' : ""}${file.locked ? '<span class="policy-chip">Locked</span>' : ""}${(file.sharedWith || []).length ? `<span class="policy-chip">${file.sharedWith.length} shared</span>` : ""}</div>
     <p class="file-description">${esc(file.description || "No description.")}</p>
@@ -10579,16 +10908,514 @@ function renderFileDetail() {
       <div><span>Size</span><strong>${esc(formatBytes(file.sizeBytes))}</strong></div>
       <div><span>Version</span><strong>${esc(file.version || "1")}</strong></div>
     </div>
-    <div class="file-path"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg>${esc(file.path)}</div>
+    <div class="file-path"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><button class="link-btn" data-folder-open="${esc(file.folderId || "")}" type="button">${esc(folder ? folder.path : "All files")}</button></div>
     <div class="file-detail-actions">
       <button class="btn-primary" data-file-preview="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg>Preview</button>
       <button class="btn-secondary" data-file-download="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</button>
       <button class="btn-secondary" data-file-share="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Share</button>
-      <button class="btn-secondary" data-file-star="${esc(file.id)}" type="button">${file.starred ? "Unstar" : "Star"}</button>
-      <button class="btn-secondary danger-btn" data-file-delete="${esc(file.id)}" type="button">Delete</button>
+      <button class="btn-secondary" data-file-send="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Send</button>
+      <button class="btn-secondary" data-file-menu="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>More</button>
     </div>
     ${(file.sharedWith || []).length ? `<div class="file-shared-list"><h3>Shared with</h3>${file.sharedWith.map((email) => `<span>${avatar({ name: email.split("@")[0], email, initials: initialsFrom(email.split("@")[0]), color: colorForString(email) }, "sm")}${esc(email)}</span>`).join("")}</div>` : ""}`;
 }
+
+async function refreshCabinet() {
+  try {
+    const data = await api("/api/files");
+    state.files = data.files || state.files;
+    state.fileFolders = data.folders || state.fileFolders;
+    if (data.providers) state.storageProviders = data.providers;
+    if (data.quota) state.storageQuota = data.quota;
+    renderFiles();
+    return data;
+  } catch (error) {
+    showError(error);
+    return null;
+  }
+}
+
+function persistCabinetView() {
+  try {
+    localStorage.setItem("a8m.cabinet.sort", state.fileSort);
+    localStorage.setItem("a8m.cabinet.group", state.fileGroup);
+    localStorage.setItem("a8m.cabinet.view", state.fileView);
+    localStorage.setItem("a8m.cabinet.sortDesc", state.fileSortDesc ? "1" : "0");
+  } catch {}
+}
+
+function openFileFolder(folderId) {
+  state.fileFolderId = folderId || null;
+  state.selectedFileId = null;
+  document.body.classList.remove("file-open");
+  renderFiles();
+}
+
+function fileFolderOptions({ excludeId = "", includeRoot = true, selected = "" } = {}) {
+  const excluded = new Set([excludeId]);
+  if (excludeId) {
+    let changed = true;
+    for (let pass = 0; pass < 12 && changed; pass += 1) {
+      changed = false;
+      for (const folder of state.fileFolders || []) {
+        if (!excluded.has(folder.id) && excluded.has(folder.parentId)) {
+          excluded.add(folder.id);
+          changed = true;
+        }
+      }
+    }
+  }
+  const options = includeRoot ? [`<option value=""${selected === "" ? " selected" : ""}>All files</option>`] : [];
+  for (const folder of (state.fileFolders || []).slice().sort((a, b) => String(a.path).localeCompare(String(b.path)))) {
+    if (excluded.has(folder.id)) continue;
+    options.push(`<option value="${esc(folder.id)}"${selected === folder.id ? " selected" : ""}>${esc(folder.path)}</option>`);
+  }
+  return options.join("");
+}
+
+function openFolderDialog(folderId = null, parentId = state.fileFolderId) {
+  const folder = fileFolderById(folderId);
+  state.folderEditingId = folder ? folder.id : "";
+  document.getElementById("folderDialogTitle").textContent = folder ? "Rename folder" : "New folder";
+  document.getElementById("folderDialogSubtitle").textContent = folder ? "Rename or move this Cabinet folder." : "Create a folder and optionally place it inside another.";
+  document.getElementById("folderName").value = folder ? folder.name : "";
+  document.getElementById("folderColor").value = folder?.color || "#0f6cbd";
+  document.getElementById("folderParent").innerHTML = fileFolderOptions({ excludeId: folder?.id || "", selected: folder ? folder.parentId || "" : parentId || "" });
+  document.getElementById("folderSave").textContent = folder ? "Save folder" : "Create folder";
+  folderOverlay.hidden = false;
+  setTimeout(() => document.getElementById("folderName").focus(), 40);
+}
+
+async function saveFolderDialog() {
+  const name = document.getElementById("folderName").value.trim();
+  if (!name) { showToast("Give the folder a name"); document.getElementById("folderName").focus(); return; }
+  const body = {
+    name,
+    parentId: document.getElementById("folderParent").value || "",
+    color: document.getElementById("folderColor").value || ""
+  };
+  const button = document.getElementById("folderSave");
+  button.disabled = true;
+  try {
+    const editing = state.folderEditingId;
+    const data = await api(editing ? `/api/file-folders/${encodeURIComponent(editing)}` : "/api/file-folders", {
+      method: editing ? "PATCH" : "POST", body
+    });
+    state.fileFolders = data.folders || state.fileFolders;
+    if (data.files) state.files = data.files;
+    folderOverlay.hidden = true;
+    state.folderEditingId = "";
+    renderFiles();
+    showToast(editing ? "Folder updated" : "Folder created");
+  } catch (error) { showError(error); }
+  finally { button.disabled = false; }
+}
+
+async function deleteFileFolder(folderId) {
+  const folder = fileFolderById(folderId);
+  if (!folder) return;
+  const ok = await appConfirm({
+    title: "Delete this folder?",
+    message: `Files and subfolders inside “${folder.name}” move up one level. The files are not deleted.`,
+    confirmLabel: "Delete folder", tone: "danger"
+  });
+  if (!ok) return;
+  try {
+    const data = await api(`/api/file-folders/${encodeURIComponent(folderId)}`, { method: "DELETE" });
+    state.fileFolders = data.folders || state.fileFolders;
+    if (data.files) state.files = data.files;
+    if (state.fileFolderId === folderId) state.fileFolderId = folder.parentId || null;
+    renderFiles();
+    showToast("Folder deleted");
+  } catch (error) { showError(error); }
+}
+
+async function moveFileToFolder(fileId, folderId) {
+  const file = state.files.find((item) => item.id === fileId);
+  if (!file) return;
+  if ((file.folderId || "") === (folderId || "")) return;
+  try {
+    const data = await api(`/api/files/${encodeURIComponent(fileId)}`, { method: "PATCH", body: { folderId: folderId || "" } });
+    const index = state.files.findIndex((item) => item.id === fileId);
+    if (index >= 0) state.files[index] = data.file;
+    state.fileFolders = (await refreshCabinet())?.folders || state.fileFolders;
+    renderFiles();
+    const folder = fileFolderById(folderId);
+    showToast(`${file.name} moved to ${folder ? folder.name : "All files"}`);
+  } catch (error) { showError(error); }
+}
+
+async function moveFolderToFolder(folderId, parentId) {
+  const folder = fileFolderById(folderId);
+  if (!folder || folderId === parentId) return;
+  try {
+    const data = await api(`/api/file-folders/${encodeURIComponent(folderId)}`, { method: "PATCH", body: { parentId: parentId || "" } });
+    state.fileFolders = data.folders || state.fileFolders;
+    if (data.files) state.files = data.files;
+    renderFiles();
+    showToast(`${folder.name} moved to ${fileFolderById(parentId)?.name || "All files"}`);
+  } catch (error) { showError(error); }
+}
+
+function fileMenuIcon(name) {
+  return `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+}
+
+function fileMenuEntry(action, label, icon, extra = "") {
+  return `<button type="button" role="menuitem" data-file-menu-action="${esc(action)}"${extra}>${fileMenuIcon(icon)}<span>${esc(label)}</span>${/^(openin|share-menu|saveas|more)$/.test(action) ? '<svg class="icon menu-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>' : ""}</button>`;
+}
+
+function fileContextTargetRecord() {
+  const target = state.fileContextTarget;
+  if (!target) return null;
+  if (target.type === "folder") {
+    const folder = fileFolderById(target.id);
+    return folder ? { type: "folder", folder } : null;
+  }
+  const file = state.files.find((item) => item.id === target.id);
+  return file ? { type: "file", file } : null;
+}
+
+function renderFileContextMenu() {
+  if (!fileContextMenu) return;
+  const record = fileContextTargetRecord();
+  if (!record) { fileContextMenu.hidden = true; return; }
+  const view = state.fileMenuView || "";
+  const back = view ? `<button type="button" class="file-menu-back" data-file-menu-back>${fileMenuIcon("arrow-left")}<span>Back</span></button>` : "";
+  let items = "";
+  if (record.type === "file") {
+    const file = record.file;
+    if (!view) {
+      items = [
+        fileMenuEntry("preview", "Preview", "file"),
+        fileMenuEntry("download", "Download", "download"),
+        `<div class="file-menu-sep"></div>`,
+        fileMenuEntry("openin", "Open in", "external"),
+        fileMenuEntry("copy-link", "Copy link", "link"),
+        fileMenuEntry("more-send", "Send via email", "send"),
+        fileMenuEntry("share-menu", "Share", "people"),
+        fileMenuEntry("permissions", "Manage permissions", "lock"),
+        `<div class="file-menu-sep"></div>`,
+        fileMenuEntry("rename", "Rename", "pencil"),
+        fileMenuEntry("move", "Move", "folder"),
+        fileMenuEntry("copy", "Copy", "copy"),
+        fileMenuEntry("saveas", "Save as…", "download"),
+        `<div class="file-menu-sep"></div>`,
+        fileMenuEntry("delete", "Delete", "trash"),
+        fileMenuEntry("info", "File info", "info"),
+        fileMenuEntry("more", "More", "more")
+      ].join("");
+    } else if (view === "openin") {
+      items = [
+        fileMenuEntry("preview", "Preview in Alt8Mail", "expand"),
+        fileMenuEntry("open-browser", "Open in a new tab", "external"),
+        file.providerId !== "a8m" && file.externalUrl ? fileMenuEntry("open-provider", `Open in ${fileProviderName(file)}`, "cloud") : "",
+        fileMenuEntry("openmail", "Send via email", "send")
+      ].join("");
+    } else if (view === "share") {
+      items = [
+        fileMenuEntry("share-dialog", "Share with a link…", "link"),
+        fileMenuEntry("permissions", "Manage permissions", "lock"),
+        fileMenuEntry("share-email", "Send as email attachment", "send")
+      ].join("");
+    } else if (view === "saveas") {
+      items = [
+        fileMenuEntry("saveas-copy", "Save a copy to Cabinet", "copy"),
+        fileMenuEntry("download", "Download to this device", "download")
+      ].join("");
+    } else if (view === "more") {
+      items = [
+        fileMenuEntry("more-send", "Send via email", "send"),
+        fileMenuEntry("more-star", file.starred ? "Remove from favourites" : "Add to favourites", "star"),
+        fileMenuEntry("more-refresh", "Refresh Cabinet", "refresh"),
+        fileMenuEntry("info", "File information", "info")
+      ].join("");
+    }
+  } else {
+    const folder = record.folder;
+    if (!view) {
+      items = [
+        fileMenuEntry("folder-open", "Open folder", "folder"),
+        fileMenuEntry("folder-new", "New subfolder", "folder-plus"),
+        `<div class="file-menu-sep"></div>`,
+        fileMenuEntry("folder-rename", "Rename", "pencil"),
+        fileMenuEntry("folder-color", "Change colour", "sliders"),
+        fileMenuEntry("folder-move", "Move folder", "folder"),
+        `<div class="file-menu-sep"></div>`,
+        fileMenuEntry("folder-delete", "Delete folder", "trash"),
+        fileMenuEntry("folder-info", "Folder info", "info")
+      ].join("");
+    }
+  }
+  fileContextMenu.innerHTML = `${back}${items}`;
+  fileContextMenu.hidden = false;
+  const point = state.fileMenuPoint || { x: 80, y: 120 };
+  const rect = fileContextMenu.getBoundingClientRect();
+  fileContextMenu.style.left = `${Math.max(8, Math.min(point.x, window.innerWidth - rect.width - 12))}px`;
+  fileContextMenu.style.top = `${Math.max(8, Math.min(point.y, window.innerHeight - rect.height - 12))}px`;
+}
+
+function openFileContextMenu(type, id, x, y, view = "") {
+  state.fileContextTarget = { type, id };
+  state.fileMenuView = view;
+  state.fileMenuPoint = { x, y };
+  renderFileContextMenu();
+}
+
+function closeFileContextMenu() {
+  if (!fileContextMenu) return;
+  fileContextMenu.hidden = true;
+  state.fileContextTarget = null;
+  state.fileMenuView = "";
+}
+
+function openFileActionDialog(mode, fileId) {
+  const folderRecord = mode === "folder-info" ? fileFolderById(fileId) : null;
+  const file = mode === "folder-info" ? null : state.files.find((item) => item.id === fileId);
+  if (!file && !folderRecord) return;
+  state.fileAction = { mode, fileId };
+  const title = document.getElementById("fileActionTitle");
+  const subtitle = document.getElementById("fileActionSubtitle");
+  const body = document.getElementById("fileActionBody");
+  const icon = document.getElementById("fileActionIcon");
+  icon.innerHTML = fileMenuIcon(mode === "info" ? "info" : mode === "copy" || mode === "saveas" ? "copy" : mode === "move" ? "folder" : "pencil");
+  if (mode === "rename") {
+    title.textContent = "Rename file";
+    subtitle.textContent = "The new name is visible to everyone you share this file with.";
+    body.innerHTML = `<label class="form-field"><span>File name</span><input id="fileActionName" maxlength="200" value="${esc(file.name)}"></label>
+      <div class="dialog-actions"><button class="btn-secondary" data-file-action-cancel type="button">Cancel</button><button class="btn-primary" id="fileActionConfirm" type="button">Save name</button></div>`;
+  } else if (mode === "move") {
+    title.textContent = "Move file";
+    subtitle.textContent = "Choose a Cabinet folder. Connected-drive files keep their provider path.";
+    body.innerHTML = `<label class="form-field"><span>Destination</span><select id="fileActionFolder">${fileFolderOptions({ selected: file.folderId || "" })}</select></label>
+      <div class="dialog-actions"><button class="btn-secondary" data-file-action-cancel type="button">Cancel</button><button class="btn-primary" id="fileActionConfirm" type="button">Move file</button></div>`;
+  } else if (mode === "copy" || mode === "saveas") {
+    title.textContent = mode === "saveas" ? "Save a copy" : "Copy file";
+    subtitle.textContent = "Keep the original and create another copy in the Cabinet.";
+    const base = file.name || "File";
+    const ext = base.includes(".") ? base.slice(base.lastIndexOf(".")) : "";
+    const stem = ext ? base.slice(0, -ext.length) : base;
+    body.innerHTML = `<label class="form-field"><span>Copy name</span><input id="fileActionName" maxlength="200" value="${esc(`${stem} copy${ext}`)}"></label>
+      <label class="form-field"><span>Destination</span><select id="fileActionFolder">${fileFolderOptions({ selected: state.fileFolderId || "" })}</select></label>
+      <div class="dialog-actions"><button class="btn-secondary" data-file-action-cancel type="button">Cancel</button><button class="btn-primary" id="fileActionConfirm" type="button">${mode === "saveas" ? "Save copy" : "Copy file"}</button></div>`;
+  } else if (mode === "info") {
+    title.textContent = file.name;
+    subtitle.textContent = "File information and Cabinet metadata.";
+    body.innerHTML = `<div class="file-info-grid">
+      <div><span>Type</span><strong>${esc(file.mime || file.type || "Unknown")}</strong></div>
+      <div><span>Size</span><strong>${esc(formatBytes(file.sizeBytes))}</strong></div>
+      <div><span>Storage</span><strong>${esc(fileProviderName(file))}</strong></div>
+      <div><span>Folder</span><strong>${esc(fileFolderById(file.folderId)?.path || "All files")}</strong></div>
+      <div><span>Owner</span><strong>${esc(file.owner?.name || state.user?.name || "—")}</strong></div>
+      <div><span>Created</span><strong>${esc(formatDateTimeFull(file.createdAt) || "—")}</strong></div>
+      <div><span>Modified</span><strong>${esc(formatDateTimeFull(file.modifiedAt) || "—")}</strong></div>
+      <div><span>Version</span><strong>${esc(file.version || "1")}</strong></div>
+      <div><span>File ID</span><strong class="mono">${esc(file.id)}</strong></div>
+      <div><span>Checksum</span><strong class="mono">${esc(file.checksum || "Not recorded")}</strong></div>
+    </div><div class="dialog-actions"><button class="btn-secondary" data-file-action-cancel type="button">Close</button><button class="btn-primary" data-file-action-copy-link type="button">Copy link</button></div>`;
+  } else if (mode === "folder-info") {
+    const folder = folderRecord;
+    title.textContent = folder.name;
+    subtitle.textContent = "Folder information.";
+    body.innerHTML = `<div class="file-info-grid"><div><span>Path</span><strong>${esc(folder.path)}</strong></div><div><span>Items</span><strong>${folder.count || 0}</strong></div><div><span>Created</span><strong>${esc(formatDateOnly(folder.createdAt) || "—")}</strong></div><div><span>Updated</span><strong>${esc(formatDateOnly(folder.updatedAt) || "—")}</strong></div><div><span>Folder ID</span><strong class="mono">${esc(folder.id)}</strong></div></div><div class="dialog-actions"><button class="btn-secondary" data-file-action-cancel type="button">Close</button></div>`;
+  }
+  fileActionOverlay.hidden = false;
+  setTimeout(() => body.querySelector("input")?.focus(), 40);
+}
+
+async function runFileActionDialog() {
+  const action = state.fileAction;
+  if (!action) return;
+  const file = state.files.find((item) => item.id === action.fileId);
+  const button = document.getElementById("fileActionConfirm");
+  if (!file || !button) return;
+  button.disabled = true;
+  try {
+    if (action.mode === "rename") {
+      const name = document.getElementById("fileActionName").value.trim();
+      if (!name) { showToast("Give the file a name"); return; }
+      const data = await api(`/api/files/${encodeURIComponent(file.id)}`, { method: "PATCH", body: { name } });
+      const index = state.files.findIndex((item) => item.id === file.id);
+      if (index >= 0) state.files[index] = data.file;
+      await refreshCabinet();
+      showToast("File renamed");
+    } else if (action.mode === "move") {
+      const folderId = document.getElementById("fileActionFolder").value || "";
+      await moveFileToFolder(file.id, folderId);
+    } else if (action.mode === "copy" || action.mode === "saveas") {
+      const name = document.getElementById("fileActionName").value.trim();
+      const folderId = document.getElementById("fileActionFolder").value || "";
+      const data = await api(`/api/files/${encodeURIComponent(file.id)}/copy`, { method: "POST", body: { name, folderId } });
+      state.files.unshift(data.file);
+      await refreshCabinet();
+      showToast(action.mode === "saveas" ? "Copy saved to Cabinet" : "File copied");
+    }
+    fileActionOverlay.hidden = true;
+    state.fileAction = null;
+  } catch (error) { showError(error); }
+  finally { button.disabled = false; }
+}
+
+async function createShareForFile(file, options = {}) {
+  const data = await api(`/api/files/${encodeURIComponent(file.id)}/share`, {
+    method: "POST",
+    body: {
+      access: options.access || "view",
+      expiresDays: Number(options.expiresDays) || 7,
+      recipientEmail: options.recipientEmail || ""
+    }
+  });
+  return data.share;
+}
+
+async function copyFileLink(fileId) {
+  const file = state.files.find((item) => item.id === fileId);
+  if (!file) return;
+  try {
+    const share = await createShareForFile(file);
+    const copied = await copyTextToClipboard(share.url);
+    showToast(copied ? "Share link copied" : share.url);
+    if (!(file.sharedWith || []).length) file.sharedWith = ["External link"];
+    renderFiles();
+  } catch (error) { showError(error); }
+}
+
+async function sendFileViaEmail(fileId) {
+  const file = state.files.find((item) => item.id === fileId);
+  if (!file) return;
+  try {
+    const session = openCompose({ subject: `Sharing ${file.name}`, bodyText: `Hi,\n\nI'm sharing ${file.name} from the Alt8Mail Cabinet.\n\n` });
+    attachPickerSessionId = session.id;
+    await attachWorkspaceFile(file.id);
+    closeComposeAttach();
+    showToast(`${file.name} attached to the message`);
+  } catch (error) { showError(error); }
+}
+
+async function downloadCabinetFile(fileId) {
+  const file = state.files.find((item) => item.id === fileId);
+  if (!file || !file.contentUrl) { showToast("Download is not available for this file"); return; }
+  const link = document.createElement("a");
+  link.href = `${file.contentUrl}${file.contentUrl.includes("?") ? "&" : "?"}download=1`;
+  link.download = file.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+async function handleFileMenuAction(action) {
+  const record = fileContextTargetRecord();
+  const file = record?.type === "file" ? record.file : null;
+  const folder = record?.type === "folder" ? record.folder : null;
+  if (["openin", "share-menu", "saveas", "more"].includes(action)) {
+    state.fileMenuView = action;
+    renderFileContextMenu();
+    return;
+  }
+  closeFileContextMenu();
+  if (!record) return;
+  if (action === "preview" && file) previewFileRecord(file);
+  else if (action === "download" && file) await downloadCabinetFile(file.id);
+  else if (action === "copy-link" && file) await copyFileLink(file.id);
+  else if (action === "share-dialog" && file) openShareDialog(file.id);
+  else if (action === "permissions" && file) openShareDialog(file.id);
+  else if (action === "share-email" && file) await sendFileViaEmail(file.id);
+  else if (action === "rename" && file) openFileActionDialog("rename", file.id);
+  else if (action === "move" && file) openFileActionDialog("move", file.id);
+  else if (action === "copy" && file) openFileActionDialog("copy", file.id);
+  else if (action === "saveas-copy" && file) openFileActionDialog("saveas", file.id);
+  else if (action === "delete" && file) await deleteFile(file.id);
+  else if (action === "info" && file) openFileActionDialog("info", file.id);
+  else if (action === "open-browser" && file) window.open(file.contentUrl, "_blank", "noopener");
+  else if (action === "open-provider" && file && file.externalUrl) window.open(file.externalUrl, "_blank", "noopener");
+  else if (action === "openmail" && file) await sendFileViaEmail(file.id);
+  else if (action === "more-send" && file) await sendFileViaEmail(file.id);
+  else if (action === "more-star" && file) await toggleFileStar(file.id);
+  else if (action === "more-refresh") await refreshCabinet();
+  else if (action === "folder-open" && folder) openFileFolder(folder.id);
+  else if (action === "folder-new" && folder) openFolderDialog(null, folder.id);
+  else if (action === "folder-rename" && folder) openFolderDialog(folder.id);
+  else if (action === "folder-color" && folder) openFolderDialog(folder.id);
+  else if (action === "folder-move" && folder) openFolderDialog(folder.id);
+  else if (action === "folder-delete" && folder) await deleteFileFolder(folder.id);
+  else if (action === "folder-info" && folder) openFileActionDialog("folder-info", folder.id);
+}
+
+function setupCabinetInteractions() {
+  if (!filesView) return;
+  filesView.addEventListener("dragstart", (event) => {
+    const fileRow = event.target.closest("[data-file-id][draggable='true']");
+    const folderRow = event.target.closest("[data-folder-open][draggable='true']");
+    if (!event.dataTransfer) return;
+    if (fileRow) {
+      event.dataTransfer.setData("application/x-a8m-file", fileRow.getAttribute("data-file-id"));
+      event.dataTransfer.effectAllowed = "move";
+    } else if (folderRow) {
+      event.dataTransfer.setData("application/x-a8m-folder", folderRow.getAttribute("data-folder-open"));
+      event.dataTransfer.effectAllowed = "move";
+    }
+  });
+  filesView.addEventListener("dragover", (event) => {
+    const types = Array.from(event.dataTransfer?.types || []);
+    if (!types.includes("Files") && !types.includes("application/x-a8m-file") && !types.includes("application/x-a8m-folder")) return;
+    event.preventDefault();
+    if (cabinetDropOverlay) cabinetDropOverlay.hidden = false;
+    const dropTarget = event.target.closest("[data-folder-drop]");
+    if (cabinetDropTarget) cabinetDropTarget.textContent = dropTarget ? (fileFolderById(dropTarget.getAttribute("data-folder-drop"))?.name || "All files") : (fileFolderById(state.fileFolderId)?.name || "All files");
+    filesView.querySelectorAll(".is-drop-target").forEach((element) => element.classList.remove("is-drop-target"));
+    if (dropTarget) dropTarget.classList.add("is-drop-target");
+  });
+  filesView.addEventListener("dragleave", (event) => {
+    if (event.relatedTarget && filesView.contains(event.relatedTarget)) return;
+    if (cabinetDropOverlay) cabinetDropOverlay.hidden = true;
+    filesView.querySelectorAll(".is-drop-target").forEach((element) => element.classList.remove("is-drop-target"));
+  });
+  filesView.addEventListener("drop", async (event) => {
+    const types = Array.from(event.dataTransfer?.types || []);
+    if (!types.includes("Files") && !types.includes("application/x-a8m-file") && !types.includes("application/x-a8m-folder")) return;
+    event.preventDefault();
+    if (cabinetDropOverlay) cabinetDropOverlay.hidden = true;
+    const dropTarget = event.target.closest("[data-folder-drop]");
+    const folderId = dropTarget ? dropTarget.getAttribute("data-folder-drop") || null : state.fileFolderId;
+    filesView.querySelectorAll(".is-drop-target").forEach((element) => element.classList.remove("is-drop-target"));
+    if (types.includes("Files")) {
+      await uploadFiles(event.dataTransfer.files, folderId);
+      return;
+    }
+    const fileId = event.dataTransfer.getData("application/x-a8m-file");
+    const draggedFolder = event.dataTransfer.getData("application/x-a8m-folder");
+    if (fileId) await moveFileToFolder(fileId, folderId);
+    else if (draggedFolder && draggedFolder !== folderId) await moveFolderToFolder(draggedFolder, folderId);
+  });
+}
+
+fileContextMenu?.addEventListener("click", (event) => {
+  const menuAction = event.target.closest("[data-file-menu-action]");
+  if (menuAction) { event.preventDefault(); handleFileMenuAction(menuAction.getAttribute("data-file-menu-action")); return; }
+  if (event.target.closest("[data-file-menu-back]")) { state.fileMenuView = ""; renderFileContextMenu(); }
+});
+document.addEventListener("click", (event) => {
+  if (fileContextMenu && !fileContextMenu.hidden && !event.target.closest("#fileContextMenu") && !event.target.closest("[data-file-menu]") && !event.target.closest("[data-folder-menu]")) closeFileContextMenu();
+});
+document.addEventListener("contextmenu", (event) => {
+  if (!filesView || filesView.hidden || !filesView.contains(event.target)) return;
+  const fileRow = event.target.closest("[data-file-id]");
+  const folderRow = event.target.closest("[data-folder-open][data-folder-drop]");
+  if (!fileRow && !folderRow) return;
+  event.preventDefault();
+  if (fileRow) openFileContextMenu("file", fileRow.getAttribute("data-file-id"), event.clientX, event.clientY);
+  else openFileContextMenu("folder", folderRow.getAttribute("data-folder-open"), event.clientX, event.clientY);
+});
+filesView?.addEventListener("dblclick", (event) => {
+  const folderRow = event.target.closest("[data-folder-open]");
+  if (folderRow) { event.preventDefault(); openFileFolder(folderRow.getAttribute("data-folder-open") || null); return; }
+  const fileRow = event.target.closest("[data-file-id]");
+  if (fileRow) {
+    event.preventDefault();
+    const file = state.files.find((item) => item.id === fileRow.getAttribute("data-file-id"));
+    if (file) previewFileRecord(file);
+  }
+});
+setupCabinetInteractions();
 
 function colorForString(value) {
   const palette = ["#34557a", "#3d6b62", "#5b4a7e", "#7a4a5c", "#7a5a3a", "#3f6570", "#476b4f", "#4f5673"];
@@ -10836,6 +11663,32 @@ async function syncStorage(providerId) {
   } catch (error) { showError(error); }
 }
 
+function renderSharePermissions() {
+  const holder = document.getElementById("sharePermissions");
+  if (!holder) return;
+  const shares = state.fileShareList || [];
+  if (!shares.length) {
+    holder.innerHTML = `<div class="share-permissions-head"><strong>People with access</strong><span>No active links</span></div><p class="share-permissions-empty">Create a link to let someone outside your organization view or edit this file.</p>`;
+    return;
+  }
+  holder.innerHTML = `<div class="share-permissions-head"><strong>People with access</strong><span>${shares.filter((share) => share.active).length} active</span></div>
+    <div class="share-permission-list">${shares.map((share) => `<div class="share-permission-row${share.active ? "" : " is-revoked"}">
+      <span class="share-permission-icon"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></span>
+      <div><strong>${esc(share.recipient || "Anyone with the link")}</strong><span>${share.access === "edit" ? "Can edit" : "Can view"} · ${share.active ? `expires ${esc(formatDateOnly(share.expiresAt))}` : "revoked"} · ${share.accessCount || 0} opens</span></div>
+      ${share.active ? `<button class="link-btn danger-link" data-revoke-share="${esc(share.id)}" type="button">Revoke</button>` : '<span class="policy-chip">Revoked</span>'}
+    </div>`).join("")}</div>`;
+}
+
+async function loadFileShares(fileId) {
+  try {
+    const data = await api(`/api/files/${encodeURIComponent(fileId)}/shares`);
+    state.fileShareList = data.shares || [];
+  } catch {
+    state.fileShareList = [];
+  }
+  renderSharePermissions();
+}
+
 function openShareDialog(fileId) {
   const file = state.files.find((item) => item.id === fileId);
   if (!file) return;
@@ -10844,7 +11697,10 @@ function openShareDialog(fileId) {
   shareResult.hidden = true;
   shareUrl.value = "";
   document.getElementById("createShare").hidden = false;
+  state.fileShareList = [];
+  renderSharePermissions();
   shareOverlay.hidden = false;
+  loadFileShares(file.id);
 }
 
 async function createShareLink() {
@@ -10853,15 +11709,14 @@ async function createShareLink() {
   button.disabled = true;
   button.textContent = "Creating…";
   try {
-    const data = await api(`/api/files/${encodeURIComponent(fileShareTarget.id)}/share`, {
-      method: "POST",
-      body: {
-        access: document.getElementById("shareAccess").value,
-        expiresDays: Number(document.getElementById("shareExpiry").value),
-        recipientEmail: (document.getElementById("shareRecipient")?.value || "").trim()
-      }
+    const share = await createShareForFile(fileShareTarget, {
+      access: document.getElementById("shareAccess").value,
+      expiresDays: Number(document.getElementById("shareExpiry").value),
+      recipientEmail: (document.getElementById("shareRecipient")?.value || "").trim()
     });
-    shareUrl.value = data.share.url;
+    state.fileShareList = [{ ...share, recipient: share.recipientEmail || "", active: true, accessCount: 0 }, ...(state.fileShareList || [])];
+    renderSharePermissions();
+    shareUrl.value = share.url;
     shareResult.hidden = false;
     button.hidden = true;
     showToast("Share link created");
@@ -10910,7 +11765,7 @@ async function deleteFile(fileId) {
     await api(`/api/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
     state.files = state.files.filter((item) => item.id !== fileId);
     state.selectedFileId = null;
-    renderFiles();
+    await refreshCabinet();
     showToast("File removed");
   } catch (error) {
     showError(error);
@@ -10926,12 +11781,13 @@ function fileToBase64(file) {
   });
 }
 
-async function uploadFiles(files) {
+async function uploadFiles(files, folderId = state.fileFolderId) {
   if (uploadBusy || !files || !files.length) return;
   uploadBusy = true;
   const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
   const targetProvider = state.fileProvider !== "all" && storageConnected(state.fileProvider) ? state.fileProvider : "a8m";
   const targetName = targetProvider === "a8m" ? "Alt8Mail Drive" : (storageProvider(targetProvider)?.name || "connected storage");
+  const targetFolder = fileFolderById(folderId);
   let uploaded = 0;
   for (const file of Array.from(files)) {
     if (file.size > max) {
@@ -10946,7 +11802,7 @@ async function uploadFiles(files) {
       });
       const created = await api("/api/files", {
         method: "POST",
-        body: { providerId: targetProvider, attachmentId: attachment.attachment.id, path: "Uploads" }
+        body: { providerId: targetProvider, attachmentId: attachment.attachment.id, folderId: targetProvider === "a8m" ? (folderId || "") : "" }
       });
       state.files.unshift(created.file);
       uploaded += 1;
@@ -10955,10 +11811,10 @@ async function uploadFiles(files) {
     }
   }
   uploadBusy = false;
-  fileUploadInput.value = "";
+  if (fileUploadInput) fileUploadInput.value = "";
   if (uploaded) {
-    renderFiles();
-    showToast(`${uploaded} file${uploaded === 1 ? "" : "s"} uploaded to ${targetName}`);
+    await refreshCabinet();
+    showToast(`${uploaded} file${uploaded === 1 ? "" : "s"} uploaded to ${targetFolder ? targetFolder.name : targetName}`);
   }
 }
 
@@ -11318,15 +12174,26 @@ function peopleListDeduped() {
   return result;
 }
 
+function renderPeopleBookOptions() {
+  const select = document.getElementById("peopleBookFilter");
+  if (!select) return;
+  const options = [`<option value="all">All address books</option>`, ...(state.addressBooks || []).map((book) => `<option value="${esc(book.id)}">${esc(book.name)} (${book.count || 0})</option>`)].join("");
+  if (select.innerHTML !== options) select.innerHTML = options;
+  if (state.peopleBook !== "all" && !(state.addressBooks || []).some((book) => book.id === state.peopleBook)) state.peopleBook = "all";
+  select.value = state.peopleBook;
+}
+
 function renderPeople() {
   const list = document.getElementById("peopleList");
   if (!list) return;
   const everyone = peopleListDeduped();
   const query = state.peopleQuery.trim().toLowerCase();
   const filter = state.peopleFilter || "all";
+  const book = state.peopleBook || "all";
   const matches = (person) => {
     if (filter === "directory" && person.source !== "directory") return false;
     if (filter === "contacts" && person.source === "directory") return false;
+    if (book !== "all" && person.source !== "directory" && (person.addressBookId || "default") !== book) return false;
     if (!query) return true;
     return [person.name, person.email, person.company, person.title, person.team, person.role]
       .join(" ").toLowerCase().includes(query);
@@ -11340,6 +12207,7 @@ function renderPeople() {
   const contacts = everyone.length - internal;
   const count = document.getElementById("peopleCount");
   if (count) count.textContent = `${visible.length} shown · ${internal} directory · ${contacts} saved`;
+  renderPeopleBookOptions();
   document.querySelectorAll("[data-people-filter]").forEach((button) => {
     const active = button.getAttribute("data-people-filter") === filter;
     button.classList.toggle("is-active", active);
@@ -11399,12 +12267,43 @@ async function openContactDialog(email = null) {
   document.getElementById("contactPhone").value = record ? record.phone || "" : "";
   document.getElementById("contactLocation").value = record ? record.location || "" : "";
   document.getElementById("contactNotes").value = record ? record.notes || "" : "";
+  const bookSelect = document.getElementById("contactAddressBook");
+  if (bookSelect) {
+    bookSelect.innerHTML = (state.addressBooks || []).map((book) => `<option value="${esc(book.id)}"${(record?.addressBookId || "default") === book.id ? " selected" : ""}>${esc(book.name)}</option>`).join("");
+  }
+  const birthday = document.getElementById("contactBirthday");
+  if (birthday) birthday.value = record?.birthday || "";
   document.getElementById("contactDelete").hidden = !record;
   document.getElementById("contactSave").innerHTML = record
     ? `<svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save contact`
     : `<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Create contact`;
   document.getElementById("contactOverlay").hidden = false;
   setTimeout(() => document.getElementById("contactName").focus(), 30);
+}
+
+function openAddressBookDialog() {
+  const overlay = document.getElementById("addressBookOverlay");
+  if (!overlay) return;
+  document.getElementById("addressBookName").value = "";
+  document.getElementById("addressBookColor").value = "#3d6b62";
+  overlay.hidden = false;
+  setTimeout(() => document.getElementById("addressBookName").focus(), 30);
+}
+
+async function saveAddressBook() {
+  const name = document.getElementById("addressBookName").value.trim();
+  if (!name) { showToast("Give the address book a name"); return; }
+  try {
+    const data = await api("/api/address-books", {
+      method: "POST",
+      body: { name, color: document.getElementById("addressBookColor").value || "#3d6b62" }
+    });
+    state.addressBooks = data.addressBooks || state.addressBooks;
+    document.getElementById("addressBookOverlay").hidden = true;
+    state.peopleBook = data.id || "all";
+    renderPeople();
+    showToast("Address book created");
+  } catch (error) { showError(error); }
 }
 
 function closeContactDialog() {
@@ -11419,7 +12318,8 @@ function contactToPerson(contact) {
     name: contact.name, email: contact.email, role: source === "directory" ? contact.role || "Contact" : "Contact",
     company: contact.company || "", team: "", title: contact.title || "", phone: contact.phone || "",
     location: contact.location || "", reportsTo: "", initials: contact.initials || initialsFrom(contact.name),
-    color: contact.color || "#3d6b62", source
+    color: contact.color || "#3d6b62", source,
+    birthday: contact.birthday || "", addressBookId: contact.addressBookId || "default"
   };
 }
 
@@ -11443,7 +12343,9 @@ async function saveContact() {
     title: document.getElementById("contactTitle").value.trim(),
     phone: document.getElementById("contactPhone").value.trim(),
     location: document.getElementById("contactLocation").value.trim(),
-    notes: document.getElementById("contactNotes").value.trim()
+    notes: document.getElementById("contactNotes").value.trim(),
+    addressBookId: document.getElementById("contactAddressBook")?.value || "default",
+    birthday: document.getElementById("contactBirthday")?.value || ""
   };
   try {
     const editingId = contactEditingId;
@@ -11511,6 +12413,8 @@ function renderPersonDetail() {
       <div class="info-row"><span class="info-label">Email</span><span class="info-value">${esc(person.email)}</span></div>
       <div class="info-row"><span class="info-label">Phone</span><span class="info-value">${esc(person.phone || "—")}</span></div>
       <div class="info-row"><span class="info-label">Company</span><span class="info-value">${esc(person.company || "—")}</span></div>
+      <div class="info-row"><span class="info-label">Birthday</span><span class="info-value">${esc(person.birthday ? formatDateOnly(person.birthday) : "—")}</span></div>
+      <div class="info-row"><span class="info-label">Address book</span><span class="info-value">${esc((state.addressBooks || []).find((book) => book.id === (person.addressBookId || "default"))?.name || "Contacts")}</span></div>
       <div class="info-row"><span class="info-label">Title</span><span class="info-value">${esc(person.title || "—")}</span></div>
       <div class="info-row"><span class="info-label">Team</span><span class="info-value">${esc(person.team || "—")}</span></div>
       <div class="info-row"><span class="info-label">Location</span><span class="info-value">${esc(person.location || "—")}</span></div>
@@ -11568,6 +12472,11 @@ function openMessageFromPeople(messageId) {
    calendar
    ============================================================ */
 const CAL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const CAL_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const CAL_COLORS = ["#0f6cbd", "#3d6b62", "#7a4a5c", "#8a5a2b", "#476b4f", "#5b4a7e", "#a23b72", "#34557a", "#b45309", "#2563eb", "#0f766e", "#9d174d"];
+const CAL_HOUR_START = 7;
+const CAL_HOUR_END = 22;
+const CAL_HOUR_HEIGHT = 56;
 
 function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -11581,151 +12490,1497 @@ function isoWeek(date) {
   return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 }
 
-function eventsFor(key) {
-  return state.calendarEvents.filter((event) => event.date === key).sort((a, b) => a.start.localeCompare(b.start));
+function utcDateKey(date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
-function renderAgenda() {
-  const selectedDate = new Date(state.calendarSelected + "T12:00:00");
-  const events = eventsFor(state.calendarSelected);
-  agendaDate.textContent = selectedDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  agendaCount.textContent = `${events.length} ${events.length === 1 ? "event" : "events"}`;
-  const upcoming = state.calendarEvents
-    .filter((event) => event.date > state.calendarSelected)
-    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
-    .slice(0, 3);
-  const upcomingHtml = upcoming.length ? `<div class="agenda-upcoming">
-    <div class="agenda-upcoming-head">Coming up</div>
-    ${upcoming.map((event) => {
-      const date = new Date(event.date + "T12:00:00");
-      return `<div class="upcoming-item" style="--ev:${event.color}">
-        <span class="upcoming-date">${date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>
-        <div class="upcoming-main"><div class="agenda-title">${esc(event.title)}</div><div class="upcoming-meta">${esc(event.start)} · ${esc(event.where)}</div></div>
-      </div>`;
-    }).join("")}
-  </div>` : "";
-  agendaList.innerHTML = (events.length
-    ? events.map((event) => `<button class="agenda-event" style="--ev:${event.color}" data-edit-event="${esc(event.id)}" type="button" title="Edit ${esc(event.title)}">
-        <span class="agenda-bar" aria-hidden="true"></span>
-        <div class="agenda-time"><strong>${esc(event.start)}</strong>${esc(event.end)}</div>
-        <div class="agenda-main"><div class="agenda-title">${esc(event.title)}</div><div class="agenda-meta"><span><svg class="icon" aria-hidden="true"><use href="#i-location"/></svg>${esc(event.where)}</span><span><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>${event.attendees}</span></div></div>
-        <svg class="icon agenda-edit-icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>
-      </button>`).join("")
-    : `<div class="cal-empty">No events scheduled.</div>`) + upcomingHtml;
+function calendarDateFromKey(key) {
+  const parts = keyToParts(key);
+  return parts ? new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12)) : new Date();
 }
 
-function renderCalendar() {
-  const year = state.calendarYear;
-  const month = state.calendarMonth;
-  const monthStart = new Date(year, month, 1);
-  const offset = (monthStart.getDay() + 6) % 7;
-  const gridStart = new Date(year, month, 1 - offset);
-  calMonthLabel.textContent = `${CAL_MONTHS[month]} ${year}`;
-  const selectedDate = new Date(state.calendarSelected + "T12:00:00");
-  calWeekLabel.textContent = "Week " + isoWeek(selectedDate.getMonth() === month ? selectedDate : monthStart);
-  let html = "";
-  for (let i = 0; i < 42; i += 1) {
-    const date = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i);
-    const key = dateKey(date);
-    const outside = date.getMonth() !== month;
-    const events = eventsFor(key);
-    const isToday = key === dateKey(new Date());
-    const selected = key === state.calendarSelected;
-    const weekend = (i % 7) >= 5;
-    const ariaLabel = date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }) + (events.length ? `, ${events.length} events` : ", no events");
-    html += `<button class="cal-cell${outside ? " is-outside" : ""}${weekend ? " is-weekend" : ""}${isToday ? " is-today" : ""}${selected ? " is-selected" : ""}" data-cal-date="${key}" type="button" role="gridcell" aria-selected="${selected}" aria-label="${esc(ariaLabel)}">
-      <span class="cal-daynum">${date.getDate()}</span>
-      <span class="cal-events">${events.slice(0, 3).map((event) => `<span class="cal-event" style="--ev:${event.color}">${esc(event.title)}</span>`).join("")}${events.length > 3 ? `<span class="cal-more">+${events.length - 3} more</span>` : ""}</span>
-    </button>`;
+function calendarById(id) {
+  return (state.calendars || []).find((calendar) => calendar.id === id) || null;
+}
+
+function calIsOwned(calendar) {
+  return Boolean(calendar && calendar.owned);
+}
+
+function calCanEdit(calendar) {
+  return Boolean(calendar && (calendar.owned || calendar.access === "edit"));
+}
+
+function calendarIsVisible(event) {
+  if (state.calendarHidden.has(event.calendarId)) return false;
+  const calendar = calendarById(event.calendarId);
+  if (calendar && calendar.visible === false) return false;
+  return true;
+}
+
+function calendarColorFor(event) {
+  return event.color || calendarById(event.calendarId)?.color || "#0f6cbd";
+}
+
+function persistCalendarVisibility() {
+  try { localStorage.setItem("a8m.calendar.hidden", JSON.stringify(Array.from(state.calendarHidden))); } catch {}
+}
+
+function toggleCalendarVisibility(calendarId, visible) {
+  if (visible) state.calendarHidden.delete(calendarId);
+  else state.calendarHidden.add(calendarId);
+  persistCalendarVisibility();
+  const calendar = calendarById(calendarId);
+  if (calendar?.owned) {
+    api(`/api/calendar/calendars/${encodeURIComponent(calendarId)}`, { method: "PATCH", body: { visible } }).catch(() => {});
+    calendar.visible = visible;
   }
-  calGrid.innerHTML = html;
-  renderAgenda();
-  syncStatusRange();
-}
-
-function shiftMonth(delta) {
-  const next = new Date(state.calendarYear, state.calendarMonth + delta, 1);
-  state.calendarYear = next.getFullYear();
-  state.calendarMonth = next.getMonth();
-  const today = new Date();
-  state.calendarSelected = today.getMonth() === state.calendarMonth && today.getFullYear() === state.calendarYear ? dateKey(today) : dateKey(new Date(state.calendarYear, state.calendarMonth, 1));
   renderCalendar();
 }
 
+function calendarMatchesSearch(event) {
+  const query = state.calendarSearch.trim().toLowerCase();
+  if (!query) return true;
+  const haystack = [
+    event.title, event.description, event.where, event.organizer, event.organizerName,
+    event.calendarName, ...(event.attendeeList || []).map((attendee) => `${attendee.name} ${attendee.email}`)
+  ].join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function parseCalendarRule(rule) {
+  const parsed = { freq: "", interval: 1, count: 0, until: "", byDay: [] };
+  if (!rule) return parsed;
+  for (const part of String(rule).replace(/^RRULE:/i, "").split(";")) {
+    const [rawKey, rawValue] = part.split("=");
+    const key = String(rawKey || "").trim().toUpperCase();
+    const value = String(rawValue || "").trim().toUpperCase();
+    if (key === "FREQ") parsed.freq = value;
+    else if (key === "INTERVAL") parsed.interval = Math.max(1, Number(value) || 1);
+    else if (key === "COUNT") parsed.count = Math.max(0, Number(value) || 0);
+    else if (key === "UNTIL") parsed.until = value.length >= 8 ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : value;
+    else if (key === "BYDAY") parsed.byDay = value.split(",").map((day) => day.slice(-2)).filter(Boolean);
+  }
+  return parsed;
+}
+
+function calendarWeekdayCode(date) {
+  return ["SU", "MO", "TU", "WE", "TH", "FR", "SA"][date.getUTCDay()];
+}
+
+function calendarOccurrenceKeys(event, startKey, endKey) {
+  const base = calendarDateFromKey(event.date);
+  if (Number.isNaN(base.getTime())) return [];
+  const rule = parseCalendarRule(event.recurrenceRule);
+  const start = calendarDateFromKey(startKey);
+  const end = calendarDateFromKey(endKey);
+  if (!rule.freq) return event.date >= startKey && event.date <= endKey ? [event.date] : [];
+  const keys = [];
+  let produced = 0;
+  const baseDay = base.getUTCDate();
+  const baseMonth = base.getUTCMonth();
+  for (let cursor = new Date(base), guard = 0; cursor <= end && guard < 4000; guard += 1) {
+    const key = utcDateKey(cursor);
+    if (rule.until && key > rule.until) break;
+    if (rule.count && produced >= rule.count) break;
+    const daysDiff = Math.round((cursor.getTime() - base.getTime()) / 86400000);
+    const weeksDiff = Math.floor(daysDiff / 7);
+    const monthsDiff = (cursor.getUTCFullYear() - base.getUTCFullYear()) * 12 + (cursor.getUTCMonth() - baseMonth);
+    const yearsDiff = cursor.getUTCFullYear() - base.getUTCFullYear();
+    let matches = false;
+    if (rule.freq === "DAILY") matches = daysDiff % rule.interval === 0;
+    else if (rule.freq === "WEEKLY") {
+      matches = rule.byDay.length
+        ? weeksDiff % rule.interval === 0 && rule.byDay.includes(calendarWeekdayCode(cursor))
+        : daysDiff % (7 * rule.interval) === 0;
+    } else if (rule.freq === "MONTHLY") {
+      matches = monthsDiff % rule.interval === 0 && cursor.getUTCDate() === baseDay;
+    } else if (rule.freq === "YEARLY") {
+      matches = yearsDiff % rule.interval === 0 && cursor.getUTCMonth() === baseMonth && cursor.getUTCDate() === baseDay;
+    }
+    if (matches) {
+      produced += 1;
+      if (key >= startKey && key <= endKey) keys.push(key);
+    }
+    cursor = new Date(cursor.getTime() + 86400000);
+  }
+  return keys;
+}
+
+function calendarOccurrences(startKey, endKey, { all = false } = {}) {
+  const out = [];
+  for (const event of state.calendarEvents || []) {
+    if (!all && !calendarIsVisible(event)) continue;
+    if (!all && state.calendarHideDeclined && (event.myStatus === "declined" || event.status === "cancelled")) continue;
+    if (!all && !calendarMatchesSearch(event)) continue;
+    const keys = calendarOccurrenceKeys(event, startKey, endKey);
+    for (const key of keys) {
+      out.push({ ...event, occurrenceDate: key, occurrenceKey: `${event.id}|${key}`, recurring: Boolean(event.recurrenceRule) });
+    }
+  }
+  out.sort((a, b) => (a.occurrenceDate === b.occurrenceDate ? String(a.start).localeCompare(String(b.start)) : a.occurrenceDate.localeCompare(b.occurrenceDate)));
+  return out.slice(0, 2000);
+}
+
+function eventsFor(key) {
+  return calendarOccurrences(key, key).filter((event) => calendarIsVisible(event));
+}
+
+function calendarSelectedDate() {
+  return calendarDateFromKey(state.calendarSelected || dateKey(new Date()));
+}
+
+function calendarMonthGridStart(year, month) {
+  const first = new Date(Date.UTC(year, month, 1, 12));
+  const offset = (first.getUTCDay() + 6) % 7;
+  return new Date(first.getTime() - offset * 86400000);
+}
+
+function calendarViewRange() {
+  const selected = calendarSelectedDate();
+  if (state.calendarView === "month" || state.calendarView === "split") {
+    const start = calendarMonthGridStart(selected.getUTCFullYear(), selected.getUTCMonth());
+    return { startKey: utcDateKey(start), endKey: utcDateKey(new Date(start.getTime() + 41 * 86400000)) };
+  }
+  if (state.calendarView === "week" || state.calendarView === "workweek") {
+    const startKey = startOfWeekKey(state.calendarSelected, "monday");
+    return { startKey, endKey: addDaysToKey(startKey, 6) };
+  }
+  if (state.calendarView === "day") return { startKey: state.calendarSelected, endKey: state.calendarSelected };
+  return { startKey: state.calendarSelected, endKey: addDaysToKey(state.calendarSelected, 120) };
+}
+
+function calendarRangeLabel(startKey, endKey) {
+  const start = calendarDateFromKey(startKey);
+  const end = calendarDateFromKey(endKey);
+  if (state.calendarView === "day") {
+    return start.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  }
+  if (state.calendarView === "week" || state.calendarView === "workweek") {
+    const last = state.calendarView === "workweek" ? calendarDateFromKey(addDaysToKey(startKey, 4)) : end;
+    if (start.getUTCMonth() === last.getUTCMonth()) {
+      return `${start.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" })} ${start.getUTCDate()}–${last.getUTCDate()}, ${start.getUTCFullYear()}`;
+    }
+    return `${start.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })} – ${last.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}`;
+  }
+  if (state.calendarView === "agenda") {
+    return `Agenda · ${start.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}`;
+  }
+  const monthAnchor = calendarSelectedDate();
+  return monthAnchor.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+function calendarEventChip(event, { showTime = true, draggable = true } = {}) {
+  const declined = event.myStatus === "declined" || event.status === "cancelled";
+  return `<button class="cal-event-chip${event.allDay ? " is-all-day" : ""}${event.invited ? " is-invited" : ""}${declined ? " is-declined" : ""}${event.recurring ? " is-recurring" : ""}" style="--ev:${calendarColorFor(event)}" type="button" data-edit-event="${esc(event.id)}" data-cal-occurrence="${esc(event.occurrenceDate)}"${draggable ? ' draggable="true"' : ""} title="${esc(`${event.start}–${event.end} · ${event.title}${event.where ? ` · ${event.where}` : ""}`)}">
+    ${showTime && !event.allDay ? `<span class="cal-event-time">${esc(event.start)}</span>` : ""}
+    <span class="cal-event-title">${esc(event.title)}</span>
+    ${event.recurring ? '<svg class="icon cal-event-repeat" aria-label="Recurring"><use href="#i-repeat"/></svg>' : ""}
+    ${event.invited ? `<span class="cal-rsvp-dot is-${esc(event.myStatus || "needs-action")}" title="${esc(event.myStatus || "No response")}"></span>` : ""}
+  </button>`;
+}
+
+function renderCalendar() {
+  if (!calMain) return;
+  if (!state.calendars.length) {
+    calMain.innerHTML = `<div class="cal-loading"><span class="passkey-spinner" aria-hidden="true"></span>Loading calendars…</div>`;
+    return;
+  }
+  const range = calendarViewRange();
+  const occurrences = calendarOccurrences(range.startKey, range.endKey);
+  if (calRangeLabel) calRangeLabel.textContent = calendarRangeLabel(range.startKey, range.endKey);
+  document.querySelectorAll("#calViewSwitch [data-cal-view]").forEach((button) => {
+    button.classList.toggle("is-active", button.getAttribute("data-cal-view") === state.calendarView);
+  });
+  const hideAgenda = state.calendarView === "agenda";
+  if (calAgendaPane) calAgendaPane.hidden = hideAgenda;
+  renderCalendarMini();
+  renderCalendarLists();
+  if (state.calendarView === "month") calMain.innerHTML = monthViewMarkup(occurrences, range);
+  else if (state.calendarView === "split") calMain.innerHTML = splitViewMarkup(occurrences, range);
+  else if (state.calendarView === "agenda") calMain.innerHTML = agendaViewMarkup(occurrences);
+  else calMain.innerHTML = timeViewMarkup(calendarDaysForView(), occurrences);
+  renderCalendarAgenda();
+  syncStatusRange();
+  syncStatusContext();
+}
+
+function renderCalendarMini() {
+  if (!calMini) return;
+  const year = state.calendarMiniYear ?? state.calendarYear;
+  const month = state.calendarMiniMonth ?? state.calendarMonth;
+  if (calMiniLabel) calMiniLabel.textContent = `${CAL_MONTHS[month]} ${year}`;
+  const start = calendarMonthGridStart(year, month);
+  const endKey = utcDateKey(new Date(start.getTime() + 41 * 86400000));
+  const occurrences = calendarOccurrences(utcDateKey(start), endKey);
+  const eventDates = new Set(occurrences.map((event) => event.occurrenceDate));
+  const todayKey = dateKey(new Date());
+  let html = `<div class="cal-mini-weekdays">${["S", "M", "T", "W", "T", "F", "S"].map((day) => `<span>${day}</span>`).join("")}</div><div class="cal-mini-grid">`;
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(start.getTime() + index * 86400000);
+    const key = utcDateKey(date);
+    const outside = date.getUTCMonth() !== month;
+    const classes = ["cal-mini-day", outside ? "is-outside" : "", key === todayKey ? "is-today" : "", key === state.calendarSelected ? "is-selected" : "", eventDates.has(key) ? "has-events" : ""].filter(Boolean).join(" ");
+    html += `<button class="${classes}" type="button" data-cal-mini-date="${key}" aria-label="${esc(key)}"><span>${date.getUTCDate()}</span></button>`;
+  }
+  html += "</div>";
+  calMini.innerHTML = html;
+}
+
+function calendarListRow(calendar) {
+  const checked = !state.calendarHidden.has(calendar.id) && calendar.visible !== false;
+  const active = state.calendarActiveId === calendar.id;
+  return `<div class="cal-list-row${active ? " is-active" : ""}${calendar.shared ? " is-shared" : ""}" data-calendar-row="${esc(calendar.id)}">
+    <label class="cal-list-check" title="Show or hide ${esc(calendar.name)}"><input type="checkbox" data-calendar-visibility="${esc(calendar.id)}" ${checked ? "checked" : ""} aria-label="Show ${esc(calendar.name)}"><span class="cal-color" style="--cal:${esc(calendar.color)}"></span></label>
+    <button class="cal-list-name" type="button" data-calendar-select="${esc(calendar.id)}" title="${esc(calendar.name)}${calendar.shared ? ` · shared by ${esc(calendar.ownerName || calendar.ownerEmail)}` : ""}">${esc(calendar.name)}${calendar.shared ? `<small>${esc(calendar.ownerName || calendar.ownerEmail)}</small>` : ""}</button>
+    <span class="cal-list-count">${calendar.eventCount || 0}</span>
+    <button class="icon-btn cal-list-more" type="button" data-calendar-menu="${esc(calendar.id)}" aria-label="Options for ${esc(calendar.name)}"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
+  </div>`;
+}
+
+function renderCalendarLists() {
+  const owned = (state.calendars || []).filter((calendar) => calendar.owned && (calendar.kind === "personal" || calendar.kind === "shared"));
+  const shared = (state.calendars || []).filter((calendar) => !calendar.owned);
+  const other = (state.calendars || []).filter((calendar) => calendar.owned && ["holiday", "birthday", "subscription"].includes(calendar.kind));
+  if (calMyCalendars) calMyCalendars.innerHTML = owned.length ? owned.map(calendarListRow).join("") : `<p class="cal-list-empty">No calendars yet.</p>`;
+  if (calSharedHead) calSharedHead.hidden = !shared.length;
+  if (calSharedCalendars) calSharedCalendars.innerHTML = shared.map(calendarListRow).join("");
+  if (calOtherCalendars) calOtherCalendars.innerHTML = other.length ? other.map(calendarListRow).join("") : `<p class="cal-list-empty">Add holidays or birthdays for more context.</p>`;
+}
+
+function monthViewMarkup(occurrences, range) {
+  const start = calendarDateFromKey(range.startKey);
+  const month = calendarSelectedDate().getUTCMonth();
+  const byDate = new Map();
+  for (const event of occurrences) {
+    if (!byDate.has(event.occurrenceDate)) byDate.set(event.occurrenceDate, []);
+    byDate.get(event.occurrenceDate).push(event);
+  }
+  const todayKey = dateKey(new Date());
+  let html = `<section class="cal-month-view"><div class="cal-month-weekdays">${CAL_WEEKDAYS.map((day) => `<span>${day}</span>`).join("")}</div><div class="cal-month-grid">`;
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(start.getTime() + index * 86400000);
+    const key = utcDateKey(date);
+    const events = byDate.get(key) || [];
+    const classes = ["cal-month-cell", date.getUTCMonth() !== month ? "is-outside" : "", [5, 6].includes(index % 7) ? "is-weekend" : "", key === todayKey ? "is-today" : "", key === state.calendarSelected ? "is-selected" : ""].filter(Boolean).join(" ");
+    html += `<div class="${classes}" data-cal-date="${key}" data-cal-drop-date="${key}" role="gridcell" aria-label="${esc(`${key}: ${events.length} events`)}">
+      <div class="cal-month-cell-head"><span class="cal-daynum">${date.getUTCDate()}</span><button class="cal-cell-add" type="button" data-cal-new-date="${key}" aria-label="New event on ${esc(key)}"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button></div>
+      <div class="cal-month-events">${events.slice(0, 3).map((event) => calendarEventChip(event)).join("")}${events.length > 3 ? `<button class="cal-more-events" type="button" data-cal-date="${key}">+${events.length - 3} more</button>` : ""}</div>
+    </div>`;
+  }
+  html += "</div></section>";
+  return html;
+}
+
+function calendarDaysForView() {
+  if (state.calendarView === "day") return [state.calendarSelected];
+  const startKey = startOfWeekKey(state.calendarSelected, "monday");
+  const count = state.calendarView === "workweek" ? 5 : 7;
+  return Array.from({ length: count }, (_, index) => addDaysToKey(startKey, index));
+}
+
+function timeViewMarkup(days, occurrences) {
+  const byDate = new Map();
+  for (const event of occurrences) {
+    if (!byDate.has(event.occurrenceDate)) byDate.set(event.occurrenceDate, []);
+    byDate.get(event.occurrenceDate).push(event);
+  }
+  const todayKey = dateKey(new Date());
+  const totalHours = CAL_HOUR_END - CAL_HOUR_START;
+  const gridHeight = totalHours * CAL_HOUR_HEIGHT;
+  const allDayEvents = days.flatMap((day) => (byDate.get(day) || []).filter((event) => event.allDay));
+  const timed = (day) => (byDate.get(day) || []).filter((event) => !event.allDay);
+  let html = `<section class="cal-time-view" style="--days:${days.length};--hour-height:${CAL_HOUR_HEIGHT}px">
+    <div class="cal-time-head"><div class="cal-time-gutter-head"></div>${days.map((day) => {
+      const date = calendarDateFromKey(day);
+      return `<div class="cal-time-day-head${day === todayKey ? " is-today" : ""}${day === state.calendarSelected ? " is-selected" : ""}" data-cal-date="${day}"><span>${date.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}</span><strong>${date.getUTCDate()}</strong></div>`;
+    }).join("")}</div>
+    <div class="cal-time-allday"><div class="cal-time-gutter-label">All day</div>${days.map((day) => `<div class="cal-time-allday-cell" data-cal-date="${day}" data-cal-drop-date="${day}">${(byDate.get(day) || []).filter((event) => event.allDay).map((event) => calendarEventChip(event, { showTime: false })).join("")}</div>`).join("")}</div>
+    <div class="cal-time-scroll">
+      <div class="cal-time-gutter" style="height:${gridHeight}px">${Array.from({ length: totalHours + 1 }, (_, index) => `<span style="top:${index * CAL_HOUR_HEIGHT}px">${String(CAL_HOUR_START + index).padStart(2, "0")}:00</span>`).join("")}</div>
+      <div class="cal-time-columns" style="height:${gridHeight}px">${days.map((day) => {
+        const events = timed(day);
+        const now = new Date();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        const showNow = day === todayKey;
+        return `<div class="cal-time-col" data-cal-date="${day}" data-cal-drop-date="${day}" data-cal-slot="${day}">
+          <div class="cal-hour-lines" style="height:${gridHeight}px"></div>
+          ${events.map((event) => {
+            const [hour, minute] = String(event.start || "09:00").split(":").map(Number);
+            const [endHour, endMinute] = String(event.end || "10:00").split(":").map(Number);
+            const top = Math.max(0, (hour * 60 + minute - CAL_HOUR_START * 60) / 60 * CAL_HOUR_HEIGHT);
+            const height = Math.max(22, ((endHour * 60 + endMinute) - (hour * 60 + minute)) / 60 * CAL_HOUR_HEIGHT - 3);
+            return `<div class="cal-time-event" style="--ev:${calendarColorFor(event)};top:${top}px;height:${height}px">${calendarEventChip(event, { showTime: false })}</div>`;
+          }).join("")}
+          ${showNow && nowMinutes >= CAL_HOUR_START * 60 && nowMinutes <= CAL_HOUR_END * 60 ? `<div class="cal-now-line" style="top:${(nowMinutes - CAL_HOUR_START * 60) / 60 * CAL_HOUR_HEIGHT}px"><span>${now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</span></div>` : ""}
+        </div>`;
+      }).join("")}</div>
+    </div>
+  </section>`;
+  return html;
+}
+
+function splitViewMarkup(occurrences, range) {
+  const month = monthViewMarkup(occurrences, range);
+  const dayOccurrences = calendarOccurrences(state.calendarSelected, state.calendarSelected);
+  return `<div class="cal-split-view"><div class="cal-split-month">${month}</div><div class="cal-split-day">${timeViewMarkup([state.calendarSelected], dayOccurrences)}</div></div>`;
+}
+
+function agendaViewMarkup(occurrences) {
+  if (!occurrences.length) {
+    return `<div class="cal-agenda-main-empty"><span class="file-detail-mark"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span><h2>${state.calendarSearch ? "No matching events" : "Your schedule is clear"}</h2><p>${state.calendarSearch ? "Try a different search term." : "Create an event or add a shared calendar to see it here."}</p><button class="btn-primary" type="button" data-cal-new-date="${state.calendarSelected}"><svg class="icon" aria-hidden="true"><use href="#i-calendar-plus"/></svg>New event</button></div>`;
+  }
+  const groups = new Map();
+  for (const event of occurrences) {
+    if (!groups.has(event.occurrenceDate)) groups.set(event.occurrenceDate, []);
+    groups.get(event.occurrenceDate).push(event);
+  }
+  let html = `<div class="cal-agenda-main"><header><h2>${state.calendarSearch ? `Results for “${esc(state.calendarSearch)}”` : "Upcoming schedule"}</h2><span>${occurrences.length} event${occurrences.length === 1 ? "" : "s"}</span></header>`;
+  for (const [day, events] of groups) {
+    const date = calendarDateFromKey(day);
+    html += `<section class="cal-agenda-day"><div class="cal-agenda-day-head"><strong>${date.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" })}</strong><span>${date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</span></div>`;
+    html += events.map((event) => `<button class="cal-agenda-row" type="button" data-edit-event="${esc(event.id)}" data-cal-occurrence="${esc(event.occurrenceDate)}" style="--ev:${calendarColorFor(event)}">
+      <span class="cal-agenda-time">${event.allDay ? "All day" : `${esc(event.start)}<small>${esc(event.end)}</small>`}</span>
+      <span class="cal-agenda-bar"></span>
+      <span class="cal-agenda-copy"><strong>${esc(event.title)}</strong><span>${event.where ? `<svg class="icon" aria-hidden="true"><use href="#i-location"/></svg>${esc(event.where)}` : ""}${event.calendarName ? `<em>${esc(event.calendarName)}</em>` : ""}${event.attendees ? `<em>${event.attendees} attendee${event.attendees === 1 ? "" : "s"}</em>` : ""}</span></span>
+      ${event.invited ? `<span class="cal-rsvp-chip is-${esc(event.myStatus || "needs-action")}">${esc(event.myStatus === "accepted" ? "Accepted" : event.myStatus === "declined" ? "Declined" : event.myStatus === "tentative" ? "Tentative" : "Respond")}</span>` : ""}
+      ${event.recurring ? '<svg class="icon cal-agenda-repeat" aria-label="Recurring"><use href="#i-repeat"/></svg>' : ""}
+    </button>`).join("");
+    html += "</section>";
+  }
+  html += "</div>";
+  return html;
+}
+
+function renderCalendarAgenda() {
+  if (!agendaList) return;
+  const selected = state.calendarSelected;
+  const events = calendarOccurrences(selected, selected);
+  const date = calendarDateFromKey(selected);
+  if (agendaDate) agendaDate.textContent = date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
+  if (agendaCount) agendaCount.textContent = `${events.length} event${events.length === 1 ? "" : "s"}`;
+  const upcoming = calendarOccurrences(addDaysToKey(selected, 1), addDaysToKey(selected, 30)).slice(0, 4);
+  const eventsHtml = events.length ? events.map((event) => `<button class="agenda-event" style="--ev:${calendarColorFor(event)}" data-edit-event="${esc(event.id)}" data-cal-occurrence="${esc(event.occurrenceDate)}" type="button" title="Edit ${esc(event.title)}">
+      <span class="agenda-bar" aria-hidden="true"></span>
+      <div class="agenda-time"><strong>${event.allDay ? "All day" : esc(event.start)}</strong>${event.allDay ? "" : esc(event.end)}</div>
+      <div class="agenda-main"><div class="agenda-title">${esc(event.title)}</div><div class="agenda-meta">${event.where ? `<span><svg class="icon" aria-hidden="true"><use href="#i-location"/></svg>${esc(event.where)}</span>` : ""}<span><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>${event.attendees || 0}</span>${event.invited ? `<span class="cal-rsvp-chip is-${esc(event.myStatus || "needs-action")}">${esc(event.myStatus || "Respond")}</span>` : ""}</div></div>
+      <svg class="icon agenda-edit-icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+    </button>`).join("") : `<div class="cal-empty"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg><strong>No events</strong><span>This day is clear.</span><button class="link-btn" type="button" data-cal-new-date="${selected}">Add an event</button></div>`;
+  const upcomingHtml = upcoming.length ? `<div class="agenda-upcoming"><div class="agenda-upcoming-head">Coming up</div>${upcoming.map((event) => {
+    const eventDate = calendarDateFromKey(event.occurrenceDate);
+    return `<button class="upcoming-item" style="--ev:${calendarColorFor(event)}" type="button" data-edit-event="${esc(event.id)}" data-cal-occurrence="${esc(event.occurrenceDate)}">
+      <span class="upcoming-date">${eventDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })}</span>
+      <div class="upcoming-main"><div class="agenda-title">${esc(event.title)}</div><div class="upcoming-meta">${event.allDay ? "All day" : esc(event.start)} · ${esc(event.where || "No location")}</div></div>
+    </button>`;
+  }).join("")}</div>` : "";
+  agendaList.innerHTML = eventsHtml + upcomingHtml;
+}
+
 function selectCalendarDate(key, navigate = true) {
-  const date = new Date(key + "T12:00:00");
+  if (!key) return;
   state.calendarSelected = key;
-  if (navigate) { state.calendarYear = date.getFullYear(); state.calendarMonth = date.getMonth(); }
+  const date = calendarDateFromKey(key);
+  if (navigate) {
+    state.calendarYear = date.getUTCFullYear();
+    state.calendarMonth = date.getUTCMonth();
+  }
+  renderCalendar();
+}
+
+function shiftCalendarPeriod(delta) {
+  if (state.calendarView === "month" || state.calendarView === "split") {
+    const next = new Date(Date.UTC(state.calendarYear, state.calendarMonth + delta, 1, 12));
+    state.calendarYear = next.getUTCFullYear();
+    state.calendarMonth = next.getUTCMonth();
+    const today = new Date();
+    state.calendarSelected = today.getMonth() === state.calendarMonth && today.getFullYear() === state.calendarYear
+      ? dateKey(today)
+      : utcDateKey(new Date(Date.UTC(state.calendarYear, state.calendarMonth, 1, 12)));
+  } else if (state.calendarView === "week" || state.calendarView === "workweek") {
+    state.calendarSelected = addDaysToKey(state.calendarSelected, delta * 7);
+    const date = calendarDateFromKey(state.calendarSelected);
+    state.calendarYear = date.getUTCFullYear();
+    state.calendarMonth = date.getUTCMonth();
+  } else if (state.calendarView === "day") {
+    state.calendarSelected = addDaysToKey(state.calendarSelected, delta);
+    const date = calendarDateFromKey(state.calendarSelected);
+    state.calendarYear = date.getUTCFullYear();
+    state.calendarMonth = date.getUTCMonth();
+  } else {
+    state.calendarSelected = addDaysToKey(state.calendarSelected, delta * 31);
+    const date = calendarDateFromKey(state.calendarSelected);
+    state.calendarYear = date.getUTCFullYear();
+    state.calendarMonth = date.getUTCMonth();
+  }
+  renderCalendar();
+}
+
+function shiftMonth(delta) { shiftCalendarPeriod(delta); }
+
+function setCalendarView(view) {
+  state.calendarView = view;
+  try { localStorage.setItem("a8m.calendar.view", view); } catch {}
   renderCalendar();
 }
 
 let calendarEditingId = null;
+let calendarEditingPayload = null;
 
-function openEventDialog(eventId = null) {
+function calendarTimezoneOptions(selected) {
+  const zones = [
+    "UTC", "Africa/Lagos", "Africa/Cairo", "Africa/Johannesburg", "America/New_York", "America/Chicago",
+    "America/Denver", "America/Los_Angeles", "America/Sao_Paulo", "America/Mexico_City", "Asia/Dubai",
+    "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Asia/Shanghai", "Australia/Sydney", "Europe/London",
+    "Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Europe/Rome", "Europe/Amsterdam", "Europe/Warsaw",
+    "Europe/Istanbul", "Pacific/Auckland"
+  ];
+  if (selected && !zones.includes(selected)) zones.push(selected);
+  return zones.map((zone) => `<option value="${esc(zone)}"${zone === selected ? " selected" : ""}>${esc(zone.replace(/_/g, " "))}</option>`).join("");
+}
+
+function calendarRuleForForm(rule) {
+  const parsed = parseCalendarRule(rule);
+  if (!parsed.freq) return { value: "", until: "" };
+  if (parsed.freq === "DAILY") return { value: "daily", until: parsed.until };
+  if (parsed.freq === "WEEKLY" && parsed.byDay.length === 5 && ["MO", "TU", "WE", "TH", "FR"].every((day) => parsed.byDay.includes(day))) return { value: "weekdays", until: parsed.until };
+  if (parsed.freq === "WEEKLY") return { value: "weekly", until: parsed.until };
+  if (parsed.freq === "MONTHLY") return { value: "monthly", until: parsed.until };
+  if (parsed.freq === "YEARLY") return { value: "yearly", until: parsed.until };
+  return { value: "", until: "" };
+}
+
+function openEventDialog(eventId = null, options = {}) {
   hideNotify();
   closeMenus();
-  const event = eventId ? state.calendarEvents.find((item) => item.id === eventId) : null;
+  closeFileContextMenu();
+  const event = eventId ? (state.calendarEvents || []).find((item) => item.id === eventId) : null;
   calendarEditingId = event ? event.id : null;
-  document.getElementById("eventDialogTitle").textContent = event ? "Edit event" : "New event";
-  document.getElementById("eventName").value = event ? event.title : "";
-  document.getElementById("eventDate").value = event ? event.date : (state.calendarSelected || dateKey(new Date()));
-  document.getElementById("eventStart").value = event ? event.start : "10:00";
-  document.getElementById("eventEnd").value = event ? event.end : "10:30";
-  document.getElementById("eventWhere").value = event ? event.where || "" : "";
-  document.getElementById("eventSave").innerHTML = event
-    ? `<svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save event`
-    : `<svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add event`;
+  calendarEditingPayload = event || null;
+  state.eventEditingId = calendarEditingId;
+  state.eventAttendees = (event?.attendeeList || []).map((attendee) => ({ ...attendee }));
+  state.eventAttachments = (event?.attachments || []).map((file) => ({ ...file }));
+  state.eventCalendarId = event?.calendarId || state.calendarActiveId || "default";
+  const date = options.date || event?.date || state.calendarSelected || dateKey(new Date());
+  if (options.time) {
+    const [hour, minute] = String(options.time).split(":").map(Number);
+    const end = new Date(0, 0, 0, hour, minute + 30);
+    document.getElementById("eventStart").value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    document.getElementById("eventEnd").value = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
+  } else {
+    document.getElementById("eventStart").value = event?.start || "10:00";
+    document.getElementById("eventEnd").value = event?.end || "10:30";
+  }
+  document.getElementById("eventDialogEyebrow").textContent = event ? (event.invited ? "Invitation" : "Edit event") : "New event";
+  document.getElementById("eventDialogTitle").textContent = event ? (event.invited ? "Meeting invitation" : "Edit event") : options.invite ? "Invite people to a meeting" : "Schedule an event";
+  document.getElementById("eventName").value = event?.title || options.title || "";
+  document.getElementById("eventDate").value = date;
+  document.getElementById("eventWhere").value = event?.where || "";
+  document.getElementById("eventMeetingUrl").value = event?.meetingUrl || "";
+  document.getElementById("eventDescription").value = event?.description || "";
+  document.getElementById("eventAllDay").checked = Boolean(event?.allDay);
+  document.getElementById("eventReminder").value = String(event?.reminderMinutes ?? 15);
+  document.getElementById("eventTransparency").value = event?.transparency || "busy";
+  document.getElementById("eventColorSelect").value = event?.color || "#0f6cbd";
+  document.getElementById("eventColorSelect").style.setProperty("--event-color", event?.color || "#0f6cbd");
+  const titleMark = document.getElementById("eventColorMark");
+  if (titleMark) titleMark.style.background = event?.color || "#0f6cbd";
+  const calendarDot = document.getElementById("eventCalendarDot");
+  if (calendarDot) calendarDot.style.background = event?.color || "#0f6cbd";
+  const ruleState = calendarRuleForForm(event?.recurrenceRule || "");
+  document.getElementById("eventRecurrence").value = ruleState.value;
+  document.getElementById("eventUntil").value = ruleState.until || "";
+  document.getElementById("eventUntilWrap").hidden = !ruleState.value;
+  const zone = event?.timezone || state.preferences.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  document.getElementById("eventTimezone").innerHTML = calendarTimezoneOptions(zone);
+  const editableCalendars = (state.calendars || []).filter((calendar) => calCanEdit(calendar));
+  if (!editableCalendars.some((calendar) => calendar.id === state.eventCalendarId)) {
+    state.eventCalendarId = editableCalendars[0]?.id || "default";
+  }
+  document.getElementById("eventCalendarSelect").innerHTML = editableCalendars.map((calendar) => `<option value="${esc(calendar.id)}"${calendar.id === state.eventCalendarId ? " selected" : ""}>${esc(calendar.name)}${calendar.shared ? ` · ${esc(calendar.ownerName || "shared")}` : ""}</option>`).join("");
+  const canEdit = !event || (event.canEdit !== false && !event.invited);
   document.getElementById("eventDelete").hidden = !event;
+  document.getElementById("eventDelete").textContent = event?.invited && !canEdit ? "Decline invitation" : "Delete";
+  document.getElementById("eventSave").disabled = !canEdit;
+  document.getElementById("eventAllDay").disabled = !canEdit;
+  document.getElementById("eventName").readOnly = !canEdit;
+  document.getElementById("eventDescription").readOnly = !canEdit;
+  document.getElementById("eventWhere").readOnly = !canEdit;
+  document.getElementById("eventMeetingUrl").readOnly = !canEdit;
+  document.getElementById("eventDate").disabled = !canEdit;
+  document.getElementById("eventStart").disabled = !canEdit;
+  document.getElementById("eventEnd").disabled = !canEdit;
+  document.getElementById("eventRecurrence").disabled = !canEdit;
+  document.getElementById("eventCalendarSelect").disabled = !canEdit;
+  document.getElementById("eventColorSelect").disabled = !canEdit;
+  state.eventRsvpStatus = event?.myStatus || "needs-action";
+  renderEventRsvp();
+  renderEventAttendees();
+  renderEventAttachments();
+  updateEventTimeFields();
+  updateEventPreview();
   eventOverlay.hidden = false;
-  setTimeout(() => document.getElementById("eventName").focus(), 30);
+  setTimeout(() => (canEdit ? document.getElementById("eventName") : document.getElementById("eventClose")).focus(), 50);
 }
 
 function closeEventDialog() {
   eventOverlay.hidden = true;
   calendarEditingId = null;
+  calendarEditingPayload = null;
+  state.eventEditingId = null;
+  state.eventAttendees = [];
+  state.eventAttachments = [];
+  document.getElementById("eventAttendeeSuggest").hidden = true;
+}
+
+function updateEventTimeFields() {
+  const allDay = document.getElementById("eventAllDay").checked;
+  const readOnly = document.getElementById("eventSave").disabled;
+  const fields = document.getElementById("eventTimeFields");
+  fields.classList.toggle("is-disabled", allDay);
+  document.getElementById("eventStart").disabled = allDay || readOnly;
+  document.getElementById("eventEnd").disabled = allDay || readOnly;
+  document.getElementById("eventUntilWrap").hidden = !document.getElementById("eventRecurrence").value;
+}
+
+function renderEventAttendees() {
+  const holder = document.getElementById("eventAttendeeChips");
+  if (!holder) return;
+  const organizer = calendarEditingPayload?.organizer;
+  holder.innerHTML = state.eventAttendees.map((attendee, index) => {
+    const isOrganizer = attendee.organizer || (organizer && attendee.email.toLowerCase() === organizer.toLowerCase());
+    return `<span class="event-attendee-chip${isOrganizer ? " is-organizer" : ""}${attendee.status ? ` is-${esc(attendee.status)}` : ""}" title="${esc(attendee.email)}">
+      <span class="event-attendee-avatar" style="--attendee:${colorForString(attendee.email)}">${esc(initialsFrom(attendee.name || attendee.email.split("@")[0]))}</span>
+      <span>${esc(attendee.name || attendee.email.split("@")[0])}${isOrganizer ? " · Organizer" : ""}</span>
+      ${isOrganizer ? "" : `<button type="button" data-event-attendee-remove="${index}" aria-label="Remove ${esc(attendee.email)}"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>`}
+    </span>`;
+  }).join("");
+  const count = document.getElementById("eventPreviewNote");
+  if (count) count.textContent = state.eventAttendees.length ? `${state.eventAttendees.length} attendee${state.eventAttendees.length === 1 ? "" : "s"} will be invited.` : "Times are shown in the event time zone.";
+}
+
+function addEventAttendee(email, name = "") {
+  email = String(email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("Enter a valid email address"); return; }
+  if (state.eventAttendees.some((attendee) => attendee.email.toLowerCase() === email)) { showToast("That person is already invited"); return; }
+  state.eventAttendees.push({ email, name: name || displayNameFromEmail(email), status: "needs-action" });
+  renderEventAttendees();
+  updateEventPreview();
+}
+
+function renderEventAttendeeSuggest() {
+  const input = document.getElementById("eventAttendeeInput");
+  const suggest = document.getElementById("eventAttendeeSuggest");
+  if (!input || !suggest) return;
+  const query = input.value.trim().toLowerCase();
+  const people = (state.people || []).filter((person) => {
+    if (!person.email) return false;
+    if (state.eventAttendees.some((attendee) => attendee.email.toLowerCase() === String(person.email).toLowerCase())) return false;
+    return !query || `${person.name} ${person.email}`.toLowerCase().includes(query);
+  }).slice(0, 6);
+  if (!people.length) { suggest.hidden = true; return; }
+  suggest.innerHTML = people.map((person) => `<button type="button" data-event-attendee-add="${esc(person.email)}" data-event-attendee-name="${esc(person.name || "")}"><span class="event-attendee-avatar" style="--attendee:${colorForString(person.email)}">${esc(initialsFrom(person.name || person.email))}</span><span><strong>${esc(person.name || person.email)}</strong><small>${esc(person.email)}</small></span></button>`).join("");
+  suggest.hidden = false;
+}
+
+function renderEventAttachments() {
+  const holder = document.getElementById("eventAttachments");
+  if (!holder) return;
+  holder.innerHTML = state.eventAttachments.length ? state.eventAttachments.map((file, index) => `<div class="event-attachment-card"><span class="file-type ${String(file.mime || "").split("/").pop().replace(/[^a-z0-9]/gi, "").slice(0, 5)}">${esc(String(file.name || "FILE").split(".").pop().slice(0, 4).toUpperCase())}</span><div><strong>${esc(file.name)}</strong><span>${esc(formatBytes(file.sizeBytes || 0))}</span></div><button class="icon-btn" type="button" data-event-attachment-remove="${index}" aria-label="Remove ${esc(file.name)}"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>`).join("") : `<p class="event-attachments-empty">No files attached. Add a proposal, agenda or deck from the Cabinet.</p>`;
+}
+
+function renderEventAttachmentPicker() {
+  const holder = document.getElementById("eventAttachmentPicker");
+  if (!holder) return;
+  const files = (state.files || []).filter((file) => storageConnected(file.providerId)).slice(0, 40);
+  holder.innerHTML = files.length ? files.map((file) => `<button type="button" class="event-attach-pick" data-event-attach-file="${esc(file.id)}"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg><span><strong>${esc(file.name)}</strong><small>${esc(fileProviderName(file))} · ${esc(formatBytes(file.sizeBytes))}</small></span></button>`).join("") : `<p class="event-attachments-empty">No Cabinet files available.</p>`;
+}
+
+function eventFormRecurrence() {
+  const value = document.getElementById("eventRecurrence").value;
+  const until = document.getElementById("eventUntil").value;
+  const weekday = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"][calendarDateFromKey(document.getElementById("eventDate").value).getUTCDay()];
+  let rule = "";
+  if (value === "daily") rule = "FREQ=DAILY";
+  else if (value === "weekdays") rule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR";
+  else if (value === "weekly") rule = `FREQ=WEEKLY;BYDAY=${weekday}`;
+  else if (value === "monthly") rule = "FREQ=MONTHLY";
+  else if (value === "yearly") rule = "FREQ=YEARLY";
+  if (rule && until) rule += `;UNTIL=${until.replace(/-/g, "")}T235959Z`;
+  return rule;
+}
+
+function updateEventPreview() {
+  const colorInput = document.getElementById("eventColorSelect");
+  if (colorInput) {
+    const color = colorInput.value;
+    colorInput.style.setProperty("--event-color", color);
+    const titleMark = document.getElementById("eventColorMark");
+    if (titleMark) titleMark.style.background = color;
+    const calendarDot = document.getElementById("eventCalendarDot");
+    if (calendarDot) calendarDot.style.background = color;
+  }
+  const grid = document.getElementById("eventPreview");
+  if (!grid) return;
+  const date = document.getElementById("eventDate").value || state.calendarSelected;
+  const start = document.getElementById("eventAllDay").checked ? "00:00" : document.getElementById("eventStart").value || "10:00";
+  const end = document.getElementById("eventAllDay").checked ? "23:59" : document.getElementById("eventEnd").value || "10:30";
+  const title = document.getElementById("eventName").value.trim() || "New event";
+  const color = document.getElementById("eventColorSelect").value;
+  const zone = document.getElementById("eventTimezone").value;
+  const range = document.getElementById("eventPreviewRange");
+  const zoneLabel = document.getElementById("eventPreviewZone");
+  if (range) range.textContent = calendarDateFromKey(date).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
+  if (zoneLabel) zoneLabel.textContent = (zone || "UTC").replace(/_/g, " ");
+  const events = calendarOccurrences(date, date).filter((event) => event.id !== calendarEditingId);
+  const [startHour, startMinute] = start.split(":").map(Number);
+  const [endHour, endMinute] = end.split(":").map(Number);
+  const top = Math.max(0, (startHour * 60 + startMinute - CAL_HOUR_START * 60) / 60 * CAL_HOUR_HEIGHT);
+  const height = Math.max(24, ((endHour * 60 + endMinute) - (startHour * 60 + startMinute)) / 60 * CAL_HOUR_HEIGHT - 2);
+  grid.innerHTML = `<div class="event-preview-hours">${Array.from({ length: 9 }, (_, index) => `<span style="top:${index * CAL_HOUR_HEIGHT * 1.4}px">${String(CAL_HOUR_START + index * 2).padStart(2, "0")}:00</span>`).join("")}</div>
+    <div class="event-preview-col" style="height:${(CAL_HOUR_END - CAL_HOUR_START) * CAL_HOUR_HEIGHT * 1.4}px">
+      <div class="event-preview-lines"></div>
+      ${events.slice(0, 4).map((event) => {
+        const [hour, minute] = String(event.start).split(":").map(Number);
+        const [endH, endM] = String(event.end).split(":").map(Number);
+        return `<span class="event-preview-ghost" style="--ev:${calendarColorFor(event)};top:${(hour * 60 + minute - CAL_HOUR_START * 60) / 60 * CAL_HOUR_HEIGHT * 1.4}px;height:${Math.max(20, ((endH * 60 + endM) - (hour * 60 + minute)) / 60 * CAL_HOUR_HEIGHT * 1.4)}px">${esc(event.title)}</span>`;
+      }).join("")}
+      <span class="event-preview-block" style="--ev:${color};top:${top * 1.4}px;height:${height * 1.4}px"><strong>${esc(title)}</strong><span>${start}–${end}</span></span>
+    </div>`;
 }
 
 async function saveEvent() {
   const title = document.getElementById("eventName").value.trim();
   const date = document.getElementById("eventDate").value;
-  const start = document.getElementById("eventStart").value;
-  const end = document.getElementById("eventEnd").value;
+  const allDay = document.getElementById("eventAllDay").checked;
+  const start = allDay ? "00:00" : document.getElementById("eventStart").value;
+  const end = allDay ? "23:59" : document.getElementById("eventEnd").value;
   const where = document.getElementById("eventWhere").value.trim();
+  const description = document.getElementById("eventDescription").value;
+  const timezone = document.getElementById("eventTimezone").value;
+  const color = document.getElementById("eventColorSelect").value;
+  const calendarId = document.getElementById("eventCalendarSelect").value;
+  const meetingUrl = document.getElementById("eventMeetingUrl").value.trim();
   if (!title) { showToast("Add an event title"); document.getElementById("eventName").focus(); return; }
-  if (!date || !start || !end) { showToast("Choose a date, start and end time"); return; }
-  if (end <= start) { showToast("End time must be after the start time"); return; }
+  if (!date) { showToast("Choose a date"); return; }
+  if (!allDay && (!start || !end || end <= start)) { showToast("End time must be after the start time"); return; }
+  const payload = {
+    title, date, start, end, allDay, where, description, timezone, color, calendarId,
+    meetingUrl, recurrenceRule: eventFormRecurrence(),
+    reminderMinutes: Number(document.getElementById("eventReminder").value),
+    transparency: document.getElementById("eventTransparency").value,
+    attendeeEmails: state.eventAttendees.map((attendee) => attendee.email),
+    attendeeNames: Object.fromEntries(state.eventAttendees.map((attendee) => [attendee.email, attendee.name || ""])),
+    attachmentIds: state.eventAttachments.map((file) => file.id)
+  };
+  const button = document.getElementById("eventSave");
+  button.disabled = true;
   try {
     const editingId = calendarEditingId;
     const data = await api(editingId ? `/api/calendar/events/${encodeURIComponent(editingId)}` : "/api/calendar/events", {
-      method: editingId ? "PATCH" : "POST",
-      body: { title, date, start, end, where: where || "Alt8Mail HQ", color: "#3d6b62" }
+      method: editingId ? "PATCH" : "POST", body: payload
     });
-    if (editingId) {
-      const index = state.calendarEvents.findIndex((item) => item.id === editingId);
-      if (index >= 0) state.calendarEvents[index] = data.event;
-    } else {
-      state.calendarEvents.push(data.event);
-    }
-    const selected = new Date(date + "T12:00:00");
+    const selected = calendarDateFromKey(date);
     state.calendarSelected = date;
-    state.calendarYear = selected.getFullYear();
-    state.calendarMonth = selected.getMonth();
+    state.calendarYear = selected.getUTCFullYear();
+    state.calendarMonth = selected.getUTCMonth();
     closeEventDialog();
-    if (state.task === "calendar") renderCalendar();
-    showToast(editingId ? "Event updated" : "Event added to calendar");
+    await refreshCalendarData();
+    showToast(editingId ? "Event updated" : state.eventAttendees.length ? "Event created and invitations queued" : "Event added to calendar");
+    if (data.event?.id) state.calendarSelected = data.event.date || date;
+    renderCalendar();
   } catch (error) { showError(error); }
+  finally { button.disabled = false; }
 }
 
 async function deleteCalendarEvent(id) {
-  if (!id || !(await appConfirm({ title: "Delete this event?", message: "The calendar event will be removed from your calendar.", confirmLabel: "Delete event", tone: "danger" }))) return;
+  if (!id) return;
+  const event = (state.calendarEvents || []).find((item) => item.id === id);
+  if (event?.invited && !event.canEdit) {
+    await rsvpCalendarEvent("declined");
+    return;
+  }
+  if (!(await appConfirm({ title: "Delete this event?", message: event?.recurrenceRule ? "The entire recurring series will be removed. Invitees receive a cancellation." : "The event will be removed and invitees receive a cancellation.", confirmLabel: "Delete event", tone: "danger" }))) return;
   try {
     await api(`/api/calendar/events/${encodeURIComponent(id)}`, { method: "DELETE" });
     state.calendarEvents = state.calendarEvents.filter((item) => item.id !== id);
     closeEventDialog();
-    if (state.task === "calendar") renderCalendar();
+    await refreshCalendarData();
+    renderCalendar();
     showToast("Event deleted");
   } catch (error) { showError(error); }
 }
+
+function renderEventRsvp() {
+  const holder = document.getElementById("eventRsvp");
+  if (!holder) return;
+  const event = calendarEditingPayload;
+  if (!event?.invited) { holder.hidden = true; holder.innerHTML = ""; return; }
+  holder.hidden = false;
+  holder.innerHTML = `<div><strong>Going?</strong><span>Your response is visible to the organizer.</span></div><div class="event-rsvp-actions">${[["accepted", "Accept"], ["tentative", "Tentative"], ["declined", "Decline"]].map(([value, label]) => `<button type="button" class="event-rsvp-btn is-${value}${state.eventRsvpStatus === value ? " is-selected" : ""}" data-event-rsvp="${value}">${label}</button>`).join("")}</div>`;
+}
+
+async function rsvpCalendarEvent(status) {
+  const id = calendarEditingId;
+  if (!id) return;
+  try {
+    const data = await api(`/api/calendar/events/${encodeURIComponent(id)}/rsvp`, { method: "POST", body: { status } });
+    state.eventRsvpStatus = status;
+    if (data.event) {
+      const index = state.calendarEvents.findIndex((event) => event.id === id);
+      if (index >= 0) state.calendarEvents[index] = data.event;
+      calendarEditingPayload = data.event;
+    }
+    renderEventRsvp();
+    await refreshCalendarData();
+    renderCalendar();
+    showToast(status === "accepted" ? "Invitation accepted" : status === "declined" ? "Invitation declined" : "Marked as tentative");
+  } catch (error) { showError(error); }
+}
+
+async function refreshCalendarData() {
+  try {
+    const data = await api("/api/calendar/events");
+    state.calendarEvents = data.events || [];
+    state.calendars = data.calendars || state.calendars;
+    state.calendarSubscriptions = data.subscriptions || state.calendarSubscriptions;
+    if (data.addressBooks) state.addressBooks = data.addressBooks;
+    if (!state.calendars.some((calendar) => calendar.id === state.calendarActiveId)) {
+      state.calendarActiveId = state.calendars.find((calendar) => calendar.isDefault)?.id || state.calendars[0]?.id || "default";
+    }
+    if (state.task === "calendar") renderCalendar();
+    return data;
+  } catch (error) {
+    return null;
+  }
+}
+
+function startCalendarRealtime() {
+  if (state.calendarRealtime || typeof EventSource === "undefined") return;
+  if (!(state.capabilities || []).includes("calendar-realtime")) return;
+  try {
+    const source = new EventSource("/api/calendar/stream");
+    state.calendarRealtime = source;
+    source.addEventListener("calendar", () => {
+      clearTimeout(state.calendarRefreshTimer);
+      state.calendarRefreshTimer = setTimeout(() => { refreshCalendarData().catch(() => {}); }, 300);
+    });
+  } catch {}
+  if (!state.calendarPollTimer) {
+    state.calendarPollTimer = setInterval(() => {
+      if (document.visibilityState === "visible" && state.user) refreshCalendarData().catch(() => {});
+    }, 60000);
+  }
+}
+
+function applyCalendarPayload(data) {
+  if (!data) return;
+  if (data.calendars) state.calendars = data.calendars;
+  if (data.events || data.calendarEvents) state.calendarEvents = data.events || data.calendarEvents || [];
+  if (data.subscriptions) state.calendarSubscriptions = data.subscriptions;
+  if (!state.calendars.some((calendar) => calendar.id === state.calendarActiveId)) {
+    state.calendarActiveId = state.calendars.find((calendar) => calendar.isDefault)?.id || state.calendars[0]?.id || "default";
+  }
+  renderCalendar();
+}
+
+function calendarDraftColor(selected) {
+  return CAL_COLORS.map((color) => `<button type="button" class="cal-color-choice${color === selected ? " is-active" : ""}" style="--swatch:${color}" data-cal-color-choice="${color}" aria-label="Use colour ${color}"></button>`).join("");
+}
+
+function openCalendarAdd(tab = "create", calendarId = "") {
+  state.calendarAddTab = tab;
+  state.calendarEditId = calendarId || state.calendars.find((calendar) => calendar.owned)?.id || "default";
+  calendarAddOverlay.hidden = false;
+  renderCalendarAdd();
+  if (tab === "holidays" && !state.holidayCountries?.length) loadHolidayCatalog();
+}
+
+function renderCalendarAdd() {
+  const panel = document.getElementById("calendarAddPanel");
+  if (!panel) return;
+  const tab = state.calendarAddTab || "create";
+  document.querySelectorAll("#calendarAddNav [data-cal-add-tab]").forEach((button) => {
+    button.classList.toggle("is-active", button.getAttribute("data-cal-add-tab") === tab);
+  });
+  if (tab === "create") {
+    const color = state.calendarDraftCreateColor || CAL_COLORS[0];
+    panel.innerHTML = `<div class="cal-add-copy"><h3>Create blank calendar</h3><p>This calendar is private until you share it or publish a read-only feed.</p></div>
+      <label class="form-field"><span>Calendar name</span><input id="calCreateName" maxlength="80" placeholder="e.g. Product launches"></label>
+      <div class="cal-add-colors"><span>Colour</span><div>${calendarDraftColor(color)}<input id="calCreateColor" type="color" value="${color}" aria-label="Custom calendar colour"></div></div>
+      <div class="cal-add-swatches"><span>Charm</span><div>${["📅", "🚀", "💼", "🎯", "📊", "🧭", "🎓", "🌍"].map((charm) => `<button type="button" class="cal-charm${state.calendarCharm === charm ? " is-active" : ""}" data-cal-charm="${charm}">${charm}</button>`).join("")}</div></div>
+      <div class="cal-add-foot"><button class="btn-secondary" type="button" data-cal-add-close>Discard</button><button class="btn-primary" id="calCreateSave" type="button">Save calendar</button></div>`;
+  } else if (tab === "edit") {
+    const calendars = (state.calendars || []).filter((calendar) => calendar.owned);
+    if (!calendars.some((calendar) => calendar.id === state.calendarEditId)) state.calendarEditId = calendars[0]?.id || "";
+    const calendar = calendars.find((item) => item.id === state.calendarEditId);
+    panel.innerHTML = `<div class="cal-add-copy"><h3>Edit my calendars</h3><p>Rename, recolour, share or remove a calendar you own.</p></div>
+      <label class="form-field"><span>Select a calendar</span><select id="calEditSelect">${calendars.map((item) => `<option value="${esc(item.id)}"${item.id === state.calendarEditId ? " selected" : ""}>${esc(item.name)}</option>`).join("")}</select></label>
+      ${calendar ? `<label class="form-field"><span>Calendar name</span><input id="calEditName" maxlength="80" value="${esc(calendar.name)}"></label>
+      <div class="cal-add-colors"><span>Colour</span><div>${calendarDraftColor(calendar.color)}<input id="calEditColor" type="color" value="${esc(calendar.color)}" aria-label="Custom calendar colour"></div></div>
+      <div class="cal-edit-actions"><button class="btn-secondary" type="button" data-cal-edit-share="${esc(calendar.id)}"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Share</button><button class="btn-secondary" type="button" data-cal-edit-publish="${esc(calendar.id)}"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Publish</button><button class="btn-secondary" type="button" data-cal-edit-export="${esc(calendar.id)}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export .ics</button><button class="btn-secondary danger-btn" type="button" data-cal-edit-delete="${esc(calendar.id)}">Delete calendar</button></div>
+      <div class="cal-add-foot"><span class="cal-add-hint">${calendar.shared ? "Shared calendar" : `${calendar.eventCount || 0} events`}</span><button class="btn-primary" id="calEditSave" type="button">Save changes</button></div>` : `<p class="cal-add-empty">You do not own a calendar yet. Create one first.</p>`}`;
+  } else if (tab === "subscribe") {
+    panel.innerHTML = `<div class="cal-add-copy"><h3>Subscribe from web</h3><p>Paste a public or secret iCalendar address. Changes made by the author sync automatically, including Google Calendar and Apple iCloud links.</p></div>
+      <label class="form-field"><span>Calendar address</span><input id="calSubscribeUrl" type="url" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" spellcheck="false"></label>
+      <div class="form-row"><label class="form-field grow"><span>Name <small>optional</small></span><input id="calSubscribeName" maxlength="80" placeholder="Team calendar"></label><label class="form-field"><span>Colour</span><input id="calSubscribeColor" type="color" value="#7a4a5c"></label></div>
+      <div class="cal-add-polish"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span>Only https:// and webcal:// feeds are fetched. Private network addresses are rejected.</span></div>
+      <div class="cal-add-foot"><button class="btn-secondary" type="button" data-cal-add-close>Cancel</button><button class="btn-primary" id="calSubscribeImport" type="button"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Import calendar</button></div>`;
+  } else if (tab === "upload") {
+    panel.innerHTML = `<div class="cal-add-copy"><h3>Upload from file</h3><p>Import events from an .ics file by choosing it here. The file is parsed on the server and appears as a new calendar.</p></div>
+      <label class="cal-upload-zone" id="calUploadZone"><input id="calImportFile" type="file" accept=".ics,text/calendar"><span class="cal-upload-art"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg></span><strong>Choose an .ics file</strong><span>or drag it onto this panel</span><em id="calImportFileName">No file selected</em></label>
+      <div class="cal-add-polish"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><span>Imported calendars are private to your account.</span></div>
+      <div class="cal-add-foot"><button class="btn-secondary" type="button" data-cal-add-close>Cancel</button><button class="btn-primary" id="calImportAdd" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-calendar-plus"/></svg>Add to my calendars</button></div>`;
+  } else if (tab === "holidays") {
+    panel.innerHTML = `<div class="cal-add-copy"><h3>Holidays</h3><p>Add major public holidays for any of ${state.holidayCountries?.length || "190+"} countries. Weekends and public holidays help you plan meetings realistically.</p></div>
+      <label class="cal-holiday-search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input id="calHolidayFilter" type="search" placeholder="Filter countries" autocomplete="off"></label>
+      <div class="cal-holiday-list" id="calHolidayList"><div class="cal-add-empty">${state.holidayCountries?.length ? "" : "Loading countries…"}</div></div>
+      <div class="cal-add-foot"><span class="cal-add-hint" id="calHolidayHint">Choose up to five countries</span><button class="btn-primary" id="calHolidayAdd" type="button"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Add holiday calendar</button></div>`;
+    renderHolidayList();
+  } else if (tab === "birthdays") {
+    const hasBirthdayCalendar = (state.calendars || []).some((calendar) => calendar.kind === "birthday");
+    panel.innerHTML = `<div class="cal-add-copy"><h3>Birthdays</h3><p>Keep track of the people in your address books. Birthdays are read from contact records and recur every year.</p></div>
+      <div class="cal-birthday-art"><span>🎂</span><div><strong>${state.people.filter((person) => person.birthday).length} contact birthdays found</strong><p>Contacts without a birthday are skipped. Add birthdays from the People page to include them.</p></div></div>
+      <label class="compose-check cal-birthday-toggle"><input type="checkbox" id="calBirthdayToggle" ${hasBirthdayCalendar ? "checked" : ""}>Turn on the birthday calendar</label>
+      <div class="cal-add-polish"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg><span>Birthdays stay inside Alt8Mail and are never sent to a third party.</span></div>
+      <div class="cal-add-foot"><button class="btn-secondary" type="button" data-cal-add-close>Close</button><button class="btn-primary" id="calBirthdaySave" type="button">${hasBirthdayCalendar ? "Refresh birthdays" : "Turn on birthdays"}</button></div>`;
+  }
+}
+
+async function loadHolidayCatalog() {
+  try {
+    const data = await api("/api/calendar/holidays");
+    state.holidayCountries = data.countries || [];
+    renderHolidayList();
+  } catch (error) { showError(error); }
+}
+
+function renderHolidayList() {
+  const holder = document.getElementById("calHolidayList");
+  if (!holder) return;
+  const filter = (document.getElementById("calHolidayFilter")?.value || "").toLowerCase();
+  const selected = state.holidaySelection || new Set();
+  const countries = (state.holidayCountries || []).filter((country) => !filter || country.name.toLowerCase().includes(filter));
+  holder.innerHTML = countries.length ? countries.map((country) => `<label class="cal-holiday-row"><input type="checkbox" data-holiday-country="${esc(country.code)}" ${selected.has(country.code) ? "checked" : ""}><span>${esc(country.name)}</span></label>`).join("") : `<div class="cal-add-empty">No countries match that filter.</div>`;
+  const hint = document.getElementById("calHolidayHint");
+  if (hint) hint.textContent = selected.size ? `${selected.size} selected` : "Choose up to five countries";
+}
+
+async function saveNewCalendar() {
+  const name = document.getElementById("calCreateName")?.value.trim();
+  const color = document.getElementById("calCreateColor")?.value || CAL_COLORS[0];
+  if (!name) { showToast("Give the calendar a name"); document.getElementById("calCreateName")?.focus(); return; }
+  const button = document.getElementById("calCreateSave");
+  button.disabled = true;
+  try {
+    const data = await api("/api/calendar/calendars", { method: "POST", body: { name, color } });
+    applyCalendarPayload(data);
+    calendarAddOverlay.hidden = true;
+    showToast("Calendar created");
+  } catch (error) { showError(error); }
+  finally { button.disabled = false; }
+}
+
+async function saveEditedCalendar() {
+  const id = state.calendarEditId;
+  const name = document.getElementById("calEditName")?.value.trim();
+  const color = document.getElementById("calEditColor")?.value;
+  if (!id || !name) return;
+  try {
+    const data = await api(`/api/calendar/calendars/${encodeURIComponent(id)}`, { method: "PATCH", body: { name, color } });
+    applyCalendarPayload(data);
+    renderCalendarAdd();
+    showToast("Calendar updated");
+  } catch (error) { showError(error); }
+}
+
+async function deleteCalendarFromEditor() {
+  const id = state.calendarEditId;
+  const calendar = calendarById(id);
+  if (!calendar) return;
+  if (id === "default") { showToast("The default calendar cannot be deleted"); return; }
+  const ok = await appConfirm({ title: `Delete “${calendar.name}”?`, message: "The calendar and all of its events are removed for everyone it was shared with.", confirmLabel: "Delete calendar", tone: "danger" });
+  if (!ok) return;
+  try {
+    const data = await api(`/api/calendar/calendars/${encodeURIComponent(id)}`, { method: "DELETE" });
+    applyCalendarPayload(data);
+    calendarAddOverlay.hidden = true;
+    showToast("Calendar deleted");
+  } catch (error) { showError(error); }
+}
+
+async function subscribeCalendarFromWeb() {
+  const url = document.getElementById("calSubscribeUrl")?.value.trim();
+  if (!url) { showToast("Paste a calendar address"); return; }
+  const button = document.getElementById("calSubscribeImport");
+  button.disabled = true;
+  button.textContent = "Importing…";
+  try {
+    const data = await api("/api/calendar/subscribe", {
+      method: "POST",
+      body: {
+        url,
+        name: document.getElementById("calSubscribeName")?.value.trim() || "",
+        color: document.getElementById("calSubscribeColor")?.value || "#7a4a5c"
+      }
+    });
+    applyCalendarPayload(data);
+    calendarAddOverlay.hidden = true;
+    showToast("Calendar subscribed");
+  } catch (error) { showError(error); }
+  finally { button.disabled = false; button.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Import calendar`; }
+}
+
+async function importCalendarFromFile() {
+  const input = document.getElementById("calImportFile");
+  const file = input?.files?.[0];
+  if (!file) { showToast("Choose an .ics file"); return; }
+  const button = document.getElementById("calImportAdd");
+  button.disabled = true;
+  button.textContent = "Importing…";
+  try {
+    const dataBase64 = await fileToBase64(file);
+    const data = await api("/api/calendar/import", { method: "POST", body: { name: file.name, dataBase64 } });
+    await refreshCalendarData();
+    calendarAddOverlay.hidden = true;
+    showToast(`${data.imported || 0} events imported`);
+  } catch (error) { showError(error); }
+  finally { if (button) { button.disabled = false; button.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-calendar-plus"/></svg>Add to my calendars`; } }
+}
+
+async function addHolidayCalendars() {
+  const selected = Array.from(state.holidaySelection || []);
+  if (!selected.length) { showToast("Choose at least one country"); return; }
+  const button = document.getElementById("calHolidayAdd");
+  button.disabled = true;
+  button.textContent = "Adding…";
+  let added = 0;
+  try {
+    for (const country of selected.slice(0, 5)) {
+      const data = await api("/api/calendar/holidays", { method: "POST", body: { country, year: state.calendarYear } });
+      applyCalendarPayload(data);
+      added += 1;
+    }
+    state.holidaySelection = new Set();
+    calendarAddOverlay.hidden = true;
+    showToast(`${added} holiday calendar${added === 1 ? "" : "s"} added`);
+  } catch (error) { showError(error); }
+  finally { if (button) { button.disabled = false; button.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Add holiday calendar`; } }
+}
+
+async function saveBirthdayCalendar() {
+  const button = document.getElementById("calBirthdaySave");
+  button.disabled = true;
+  try {
+    const data = await api("/api/calendar/birthdays", { method: "POST", body: {} });
+    applyCalendarPayload(data);
+    calendarAddOverlay.hidden = true;
+    showToast("Birthday calendar ready");
+  } catch (error) { showError(error); }
+  finally { button.disabled = false; }
+}
+
+/* ---------- calendar sharing + publication ---------- */
+async function openCalendarShare(calendarId) {
+  const calendar = calendarById(calendarId) || calendarById(state.calendarActiveId);
+  if (!calendar) { showToast("Choose a calendar first"); return; }
+  state.calendarShareId = calendar.id;
+  state.calendarShareTab = "people";
+  state.calendarShares = [];
+  state.calendarPublication = null;
+  calendarShareOverlay.hidden = false;
+  renderCalendarShare();
+  if (calendar.owned) {
+    loadCalendarShares(calendar.id);
+    loadCalendarPublication(calendar.id);
+  }
+}
+
+function renderCalendarShare() {
+  const calendar = calendarById(state.calendarShareId);
+  const body = document.getElementById("calendarShareBody");
+  if (!calendar || !body) return;
+  document.getElementById("calendarShareTitle").textContent = calendar.shared ? calendar.name : `Share “${calendar.name}”`;
+  document.getElementById("calendarShareSubtitle").textContent = calendar.shared
+    ? `Shared by ${calendar.ownerName || calendar.ownerEmail || "the owner"}`
+    : "Invite coworkers with view or edit access, or publish a read-only calendar feed.";
+  document.querySelectorAll("[data-cal-share-tab]").forEach((button) => {
+    button.classList.toggle("is-active", button.getAttribute("data-cal-share-tab") === state.calendarShareTab);
+    button.hidden = calendar.shared && button.getAttribute("data-cal-share-tab") === "publish";
+  });
+  if (calendar.shared) {
+    body.innerHTML = `<div class="cal-share-shared"><span class="cal-share-icon" style="--cal:${esc(calendar.color)}"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></span><div><strong>${esc(calendar.name)}</strong><p>Owner: ${esc(calendar.ownerName || calendar.ownerEmail)} · ${calendar.access === "edit" ? "You can edit events" : "View only"}</p></div></div>
+      <div class="cal-add-foot"><button class="btn-secondary danger-btn" type="button" data-cal-leave="${esc(calendar.id)}">Leave shared calendar</button><button class="btn-primary" type="button" data-cal-share-close>Done</button></div>`;
+    return;
+  }
+  if (state.calendarShareTab === "publish") {
+    const publication = state.calendarPublication;
+    body.innerHTML = `<div class="cal-publish-intro"><span class="cal-share-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span><div><strong>Publish a read-only iCalendar feed</strong><p>Google Calendar, Apple Calendar, iPhone, iPad and Outlook can subscribe to this address. Events update automatically.</p></div></div>
+      ${publication?.published ? `<label class="form-field"><span>Calendar feed URL</span><div class="copy-field"><input id="calPublishUrl" readonly value="${esc(publication.url)}"><button class="btn-secondary" type="button" data-copy-cal-url="${esc(publication.url)}">Copy</button></div></label>
+      <div class="cal-publish-links"><a class="btn-secondary" href="${esc(publication.webcal)}">Open in Apple Calendar</a><a class="btn-secondary" href="https://calendar.google.com/calendar/u/0/r/settings/addbyurl" target="_blank" rel="noopener">Add to Google Calendar</a></div>
+      <div class="cal-publish-hints"><div><strong>Google Calendar</strong><span>Other calendars → From URL → paste the feed URL.</span></div><div><strong>Apple Calendar</strong><span>File → New Calendar Subscription → paste the feed URL.</span></div><div><strong>Outlook</strong><span>Add calendar → Subscribe from web → paste the feed URL.</span></div></div>
+      <div class="cal-add-foot"><button class="btn-secondary" type="button" data-cal-rotate>Rotate link</button><button class="btn-secondary danger-btn" type="button" data-cal-unpublish>Stop publishing</button><button class="btn-primary" type="button" data-cal-share-close>Done</button></div>`
+      : `<div class="cal-publish-empty"><span>Your calendar is private. Publishing creates a secret address that only people with the link can read.</span><button class="btn-primary" type="button" data-cal-publish><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Publish calendar</button></div>
+      <div class="cal-publish-hints"><div><strong>Google Calendar</strong><span>Works with “From URL” subscriptions.</span></div><div><strong>Apple Calendar</strong><span>Works with “New Calendar Subscription”.</span></div><div><strong>Revocable</strong><span>Stop publishing or rotate the link at any time.</span></div></div>
+      <div class="cal-add-foot"><button class="btn-secondary" type="button" data-cal-share-close>Cancel</button></div>`}`;
+    return;
+  }
+  body.innerHTML = `<div class="cal-share-invite">
+      <label class="form-field grow"><span>Invite a coworker</span><input id="calShareEmail" type="email" placeholder="name@company.com" autocomplete="off"></label>
+      <label class="form-field"><span>Access</span><select id="calShareAccess"><option value="view">Can view</option><option value="edit">Can edit</option></select></label>
+      <button class="btn-primary" type="button" data-cal-share-invite>Send invite</button>
+    </div>
+    <div class="cal-share-list"><div class="cal-share-list-head"><strong>People with access</strong><span>${state.calendarShares.length}</span></div>
+      ${state.calendarShares.length ? state.calendarShares.map((share) => `<div class="cal-share-row"><span class="event-attendee-avatar" style="--attendee:${colorForString(share.email)}">${esc(initialsFrom(share.name || share.email))}</span><div><strong>${esc(share.name || share.email)}</strong><span>${esc(share.email)}</span></div><span class="policy-chip">${share.access === "edit" ? "Can edit" : "Can view"}</span><button class="link-btn danger-link" type="button" data-cal-unshare="${esc(share.userId)}">Remove</button></div>`).join("") : `<p class="cal-share-empty">Only you can see this calendar. Invite a coworker to collaborate.</p>`}
+    </div>
+    <div class="cal-share-owner-note"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span>People with edit access can create and change events. Everyone else can view the calendar and RSVP to invitations.</span></div>
+    <div class="cal-add-foot"><button class="btn-secondary" type="button" data-cal-share-tab-jump="publish"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Publish to Google / Apple</button><button class="btn-primary" type="button" data-cal-share-close>Done</button></div>`;
+}
+
+async function loadCalendarShares(calendarId) {
+  try {
+    const data = await api(`/api/calendar/calendars/${encodeURIComponent(calendarId)}/shares`);
+    state.calendarShares = data.shares || [];
+  } catch { state.calendarShares = []; }
+  if (state.calendarShareTab === "people") renderCalendarShare();
+}
+
+async function inviteCalendarShare() {
+  const email = document.getElementById("calShareEmail")?.value.trim();
+  if (!email) { showToast("Enter a coworker email"); return; }
+  try {
+    const data = await api(`/api/calendar/calendars/${encodeURIComponent(state.calendarShareId)}/share`, {
+      method: "POST", body: { email, access: document.getElementById("calShareAccess").value }
+    });
+    applyCalendarPayload(data);
+    await loadCalendarShares(state.calendarShareId);
+    showToast("Calendar shared");
+  } catch (error) { showError(error); }
+}
+
+async function removeCalendarShare(userId) {
+  try {
+    const data = await api(`/api/calendar/calendars/${encodeURIComponent(state.calendarShareId)}/share/${encodeURIComponent(userId)}`, { method: "DELETE" });
+    applyCalendarPayload(data);
+    await loadCalendarShares(state.calendarShareId);
+    showToast("Access removed");
+  } catch (error) { showError(error); }
+}
+
+async function loadCalendarPublication(calendarId) {
+  try {
+    const data = await api(`/api/calendar/calendars/${encodeURIComponent(calendarId)}/publish`);
+    state.calendarPublication = data;
+  } catch { state.calendarPublication = { published: false }; }
+  if (state.calendarShareTab === "publish") renderCalendarShare();
+}
+
+async function publishCalendar() {
+  try {
+    const data = await api(`/api/calendar/calendars/${encodeURIComponent(state.calendarShareId)}/publish`, { method: "POST" });
+    state.calendarPublication = data;
+    renderCalendarShare();
+    await refreshCalendarData();
+    showToast("Calendar published");
+  } catch (error) { showError(error); }
+}
+
+async function rotateCalendarPublication() {
+  try {
+    const data = await api(`/api/calendar/calendars/${encodeURIComponent(state.calendarShareId)}/publish?rotate=1`, { method: "POST" });
+    state.calendarPublication = data;
+    renderCalendarShare();
+    showToast("New feed link created");
+  } catch (error) { showError(error); }
+}
+
+async function unpublishCalendar() {
+  try {
+    await api(`/api/calendar/calendars/${encodeURIComponent(state.calendarShareId)}/publish`, { method: "DELETE" });
+    state.calendarPublication = { published: false };
+    renderCalendarShare();
+    await refreshCalendarData();
+    showToast("Calendar feed removed");
+  } catch (error) { showError(error); }
+}
+
+async function leaveSharedCalendar(calendarId) {
+  const calendar = calendarById(calendarId);
+  if (!calendar) return;
+  const ok = await appConfirm({ title: `Leave “${calendar.name}”?`, message: "The calendar disappears from your sidebar. You can be invited again later.", confirmLabel: "Leave calendar", tone: "danger" });
+  if (!ok) return;
+  try {
+    const data = await api(`/api/calendar/calendars/${encodeURIComponent(calendarId)}/leave`, { method: "POST" });
+    applyCalendarPayload(data);
+    calendarShareOverlay.hidden = true;
+    showToast("Left shared calendar");
+  } catch (error) { showError(error); }
+}
+
+/* ---------- calendar filter and row menu ---------- */
+function renderCalendarFilterMenu() {
+  if (!calFilterMenu) return;
+  const rows = (state.calendars || []).map((calendar) => `<label class="cal-filter-row"><input type="checkbox" data-cal-filter-id="${esc(calendar.id)}" ${!state.calendarHidden.has(calendar.id) && calendar.visible !== false ? "checked" : ""}><span class="cal-color" style="--cal:${esc(calendar.color)}"></span><span>${esc(calendar.name)}</span><em>${calendar.eventCount || 0}</em></label>`).join("");
+  calFilterMenu.innerHTML = `<div class="cal-filter-head"><strong>Show calendars</strong><button class="link-btn" type="button" data-cal-filter-all>Show all</button></div>${rows}
+    <div class="cal-filter-sep"></div>
+    <label class="cal-filter-row"><input type="checkbox" data-cal-filter-declined ${state.calendarHideDeclined ? "checked" : ""}><span class="cal-color" style="--cal:#98a2b3"></span><span>Hide declined invitations</span></label>`;
+}
+
+function openCalendarRowMenu(calendarId, x, y) {
+  const calendar = calendarById(calendarId);
+  if (!calendar || !calFilterMenu) return;
+  state.calendarRowMenuId = calendarId;
+  state.calendarMenuMode = "row";
+  calFilterMenu.innerHTML = `<div class="cal-filter-head"><strong>${esc(calendar.name)}</strong><span>${calendar.shared ? "Shared" : calCanEdit(calendar) ? "Owner" : "View"}</span></div>
+    <button class="cal-menu-action" type="button" data-cal-row-action="open"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>Open calendar</button>
+    <button class="cal-menu-action" type="button" data-cal-row-action="visibility"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>${state.calendarHidden.has(calendar.id) ? "Show in view" : "Hide from view"}</button>
+    ${calendar.owned ? `<button class="cal-menu-action" type="button" data-cal-row-action="edit"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>Rename or recolour</button>
+    <button class="cal-menu-action" type="button" data-cal-row-action="share"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Share and publish</button>
+    ${calendar.id !== "default" ? `<button class="cal-menu-action danger-link" type="button" data-cal-row-action="delete"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Delete calendar</button>` : ""}` : `<button class="cal-menu-action danger-link" type="button" data-cal-row-action="leave"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg>Leave calendar</button>`}`;
+  calFilterMenu.hidden = false;
+  calFilterMenu.style.position = "fixed";
+  const rect = calFilterMenu.getBoundingClientRect();
+  calFilterMenu.style.left = `${Math.max(8, Math.min(x || 80, window.innerWidth - rect.width - 12))}px`;
+  calFilterMenu.style.top = `${Math.max(8, Math.min(y || 120, window.innerHeight - rect.height - 12))}px`;
+}
+
+async function moveCalendarOccurrence(eventId, date) {
+  const event = (state.calendarEvents || []).find((item) => item.id === eventId);
+  if (!event) return;
+  if (!event.canEdit) { showToast("You can only RSVP to this invitation"); return; }
+  if (event.date === date) return;
+  if (event.recurrenceRule) {
+    const ok = await appConfirm({ title: "Move the whole series?", message: `“${event.title}” repeats. Moving it to ${formatDateOnly(date)} shifts the entire recurring series.`, confirmLabel: "Move series" });
+    if (!ok) return;
+  }
+  try {
+    await api(`/api/calendar/events/${encodeURIComponent(eventId)}`, { method: "PATCH", body: { date } });
+    state.calendarSelected = date;
+    const parsed = calendarDateFromKey(date);
+    state.calendarYear = parsed.getUTCFullYear();
+    state.calendarMonth = parsed.getUTCMonth();
+    await refreshCalendarData();
+    renderCalendar();
+    showToast(`Event moved to ${formatDateOnly(date)}`);
+  } catch (error) { showError(error); }
+}
+
+function setupCalendarInteractions() {
+  if (!calendarView) return;
+  calendarView.addEventListener("click", (event) => {
+    const target = event.target;
+    const newDate = target.closest("[data-cal-new-date]");
+    if (newDate) { event.preventDefault(); event.stopPropagation(); openEventDialog(null, { date: newDate.getAttribute("data-cal-new-date") }); return; }
+    const edit = target.closest("[data-edit-event]");
+    if (edit) { event.preventDefault(); event.stopPropagation(); openEventDialog(edit.getAttribute("data-edit-event"), { date: edit.getAttribute("data-cal-occurrence") || "" }); return; }
+    const miniDate = target.closest("[data-cal-mini-date]");
+    if (miniDate) {
+      event.preventDefault(); event.stopPropagation();
+      state.calendarSelected = miniDate.getAttribute("data-cal-mini-date");
+      const parsed = calendarDateFromKey(state.calendarSelected);
+      state.calendarYear = parsed.getUTCFullYear();
+      state.calendarMonth = parsed.getUTCMonth();
+      state.calendarMiniYear = state.calendarYear;
+      state.calendarMiniMonth = state.calendarMonth;
+      renderCalendar();
+      return;
+    }
+    const viewButton = target.closest("[data-cal-view]");
+    if (viewButton) { event.preventDefault(); event.stopPropagation(); setCalendarView(viewButton.getAttribute("data-cal-view")); return; }
+    const calendarSelect = target.closest("[data-calendar-select]");
+    if (calendarSelect) { event.preventDefault(); event.stopPropagation(); state.calendarActiveId = calendarSelect.getAttribute("data-calendar-select"); renderCalendarLists(); return; }
+    const calendarMenu = target.closest("[data-calendar-menu]");
+    if (calendarMenu) {
+      event.preventDefault(); event.stopPropagation();
+      const button = calendarMenu.getBoundingClientRect();
+      openCalendarRowMenu(calendarMenu.getAttribute("data-calendar-menu"), button.left, button.bottom + 4);
+      return;
+    }
+    const shortcut = target.closest("[data-cal-shortcut]");
+    if (shortcut) { event.preventDefault(); event.stopPropagation(); openCalendarAdd(shortcut.getAttribute("data-cal-shortcut") === "birthdays" ? "birthdays" : "holidays"); return; }
+    const monthCell = target.closest(".cal-month-cell[data-cal-date]");
+    if (monthCell) { event.preventDefault(); selectCalendarDate(monthCell.getAttribute("data-cal-date")); return; }
+    const allDayCell = target.closest(".cal-time-allday-cell[data-cal-date]");
+    if (allDayCell) { event.preventDefault(); selectCalendarDate(allDayCell.getAttribute("data-cal-date")); return; }
+    const timeCol = target.closest(".cal-time-col[data-cal-date]");
+    if (timeCol && !target.closest(".cal-time-event")) {
+      event.preventDefault();
+      const rect = timeCol.getBoundingClientRect();
+      const offset = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+      const minutes = Math.round((CAL_HOUR_START * 60 + (offset / rect.height) * (CAL_HOUR_END - CAL_HOUR_START) * 60) / 15) * 15;
+      const hour = Math.floor(minutes / 60);
+      const minute = minutes % 60;
+      selectCalendarDate(timeCol.getAttribute("data-cal-date"), false);
+      openEventDialog(null, { date: timeCol.getAttribute("data-cal-date"), time: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}` });
+      return;
+    }
+  });
+  calendarView.addEventListener("change", (event) => {
+    const visibility = event.target.closest("[data-calendar-visibility]");
+    if (visibility) toggleCalendarVisibility(visibility.getAttribute("data-calendar-visibility"), visibility.checked);
+  });
+  calendarView.addEventListener("dragstart", (event) => {
+    const chip = event.target.closest("[data-edit-event]");
+    if (!chip || !event.dataTransfer) return;
+    event.dataTransfer.setData("application/x-a8m-event", chip.getAttribute("data-edit-event"));
+    event.dataTransfer.effectAllowed = "move";
+  });
+  calendarView.addEventListener("dragover", (event) => {
+    if (!event.dataTransfer?.types?.includes("application/x-a8m-event")) return;
+    const drop = event.target.closest("[data-cal-drop-date]");
+    if (!drop) return;
+    event.preventDefault();
+    calendarView.querySelectorAll(".is-drop-target").forEach((element) => element.classList.remove("is-drop-target"));
+    drop.classList.add("is-drop-target");
+  });
+  calendarView.addEventListener("dragleave", (event) => {
+    if (event.relatedTarget && calendarView.contains(event.relatedTarget)) return;
+    calendarView.querySelectorAll(".is-drop-target").forEach((element) => element.classList.remove("is-drop-target"));
+  });
+  calendarView.addEventListener("drop", (event) => {
+    const eventId = event.dataTransfer?.getData("application/x-a8m-event");
+    if (!eventId) return;
+    const drop = event.target.closest("[data-cal-drop-date]");
+    if (!drop) return;
+    event.preventDefault();
+    calendarView.querySelectorAll(".is-drop-target").forEach((element) => element.classList.remove("is-drop-target"));
+    moveCalendarOccurrence(eventId, drop.getAttribute("data-cal-drop-date"));
+  });
+
+  document.getElementById("calPrev")?.addEventListener("click", () => shiftCalendarPeriod(-1));
+  document.getElementById("calNext")?.addEventListener("click", () => shiftCalendarPeriod(1));
+  document.getElementById("calToday")?.addEventListener("click", () => {
+    const today = new Date();
+    state.calendarYear = today.getFullYear();
+    state.calendarMonth = today.getMonth();
+    state.calendarSelected = dateKey(today);
+    state.calendarMiniYear = state.calendarYear;
+    state.calendarMiniMonth = state.calendarMonth;
+    renderCalendar();
+  });
+  document.getElementById("calMiniPrev")?.addEventListener("click", () => {
+    const next = new Date(Date.UTC(state.calendarMiniYear ?? state.calendarYear, (state.calendarMiniMonth ?? state.calendarMonth) - 1, 1, 12));
+    state.calendarMiniYear = next.getUTCFullYear();
+    state.calendarMiniMonth = next.getUTCMonth();
+    renderCalendarMini();
+  });
+  document.getElementById("calMiniNext")?.addEventListener("click", () => {
+    const next = new Date(Date.UTC(state.calendarMiniYear ?? state.calendarYear, (state.calendarMiniMonth ?? state.calendarMonth) + 1, 1, 12));
+    state.calendarMiniYear = next.getUTCFullYear();
+    state.calendarMiniMonth = next.getUTCMonth();
+    renderCalendarMini();
+  });
+  calSearchInput?.addEventListener("input", () => { state.calendarSearch = calSearchInput.value; renderCalendar(); });
+  document.getElementById("calAddCalendar")?.addEventListener("click", () => openCalendarAdd("create"));
+  document.getElementById("calSidebarAdd")?.addEventListener("click", () => openCalendarAdd("create"));
+  document.getElementById("calListMore")?.addEventListener("click", () => openCalendarAdd("edit"));
+  document.getElementById("calShareBtn")?.addEventListener("click", () => openCalendarShare(state.calendarActiveId));
+  document.getElementById("calPrintBtn")?.addEventListener("click", () => window.print());
+  document.getElementById("calFilterBtn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!calFilterMenu) return;
+    const opening = calFilterMenu.hidden || state.calendarMenuMode !== "filter";
+    if (opening) {
+      state.calendarMenuMode = "filter";
+      state.calendarRowMenuId = "";
+      renderCalendarFilterMenu();
+      calFilterMenu.hidden = false;
+      calFilterMenu.style.position = "absolute";
+      const rect = event.currentTarget.getBoundingClientRect();
+      calFilterMenu.style.left = `${Math.max(8, Math.min(rect.right - 280, window.innerWidth - 300))}px`;
+      calFilterMenu.style.top = `${rect.bottom + 6}px`;
+    } else calFilterMenu.hidden = true;
+  });
+  calFilterMenu?.addEventListener("change", (event) => {
+    const filter = event.target.closest("[data-cal-filter-id]");
+    if (filter) { toggleCalendarVisibility(filter.getAttribute("data-cal-filter-id"), filter.checked); renderCalendarFilterMenu(); return; }
+    if (event.target.closest("[data-cal-filter-declined]")) { state.calendarHideDeclined = event.target.checked; renderCalendar(); }
+  });
+  calFilterMenu?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-cal-filter-all]")) {
+      state.calendarHidden.clear();
+      persistCalendarVisibility();
+      (state.calendars || []).forEach((calendar) => {
+        if (calendar.owned && calendar.visible === false) {
+          calendar.visible = true;
+          api(`/api/calendar/calendars/${encodeURIComponent(calendar.id)}`, { method: "PATCH", body: { visible: true } }).catch(() => {});
+        }
+      });
+      renderCalendar();
+      renderCalendarFilterMenu();
+      return;
+    }
+    const action = event.target.closest("[data-cal-row-action]");
+    if (!action) return;
+    const calendar = calendarById(state.calendarRowMenuId);
+    calFilterMenu.hidden = true;
+    if (!calendar) return;
+    const kind = action.getAttribute("data-cal-row-action");
+    if (kind === "open") { state.calendarActiveId = calendar.id; renderCalendarLists(); }
+    else if (kind === "visibility") toggleCalendarVisibility(calendar.id, state.calendarHidden.has(calendar.id));
+    else if (kind === "edit") openCalendarAdd("edit", calendar.id);
+    else if (kind === "share") openCalendarShare(calendar.id);
+    else if (kind === "delete") { state.calendarEditId = calendar.id; deleteCalendarFromEditor(); }
+    else if (kind === "leave") leaveSharedCalendar(calendar.id);
+  });
+  document.addEventListener("click", (event) => {
+    if (calFilterMenu && !calFilterMenu.hidden && !event.target.closest("#calFilterMenu") && !event.target.closest("#calFilterBtn") && !event.target.closest("[data-calendar-menu]")) calFilterMenu.hidden = true;
+  });
+
+  const calNew = document.getElementById("calNew");
+  const calNewMenu = document.getElementById("calNewMenu");
+  calNew?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (event.target.closest(".cal-new-caret")) {
+      calNewMenu.hidden = !calNewMenu.hidden;
+      return;
+    }
+    calNewMenu.hidden = true;
+    openEventDialog();
+  });
+  calNewMenu?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cal-new]");
+    if (!button) return;
+    calNewMenu.hidden = true;
+    const kind = button.getAttribute("data-cal-new");
+    if (kind === "holiday") openCalendarAdd("holidays");
+    else openEventDialog(null, { invite: kind === "invite" });
+  });
+  document.addEventListener("click", (event) => {
+    if (calNewMenu && !calNewMenu.hidden && !event.target.closest("#calNewMenu") && !event.target.closest("#calNew")) calNewMenu.hidden = true;
+  });
+
+  calendarAddOverlay?.addEventListener("click", (event) => {
+    if (event.target === calendarAddOverlay || event.target.closest("#calendarAddClose") || event.target.closest("[data-cal-add-close]")) { calendarAddOverlay.hidden = true; return; }
+    const tab = event.target.closest("[data-cal-add-tab]");
+    if (tab) { state.calendarAddTab = tab.getAttribute("data-cal-add-tab"); renderCalendarAdd(); if (state.calendarAddTab === "holidays" && !state.holidayCountries?.length) loadHolidayCatalog(); return; }
+    const color = event.target.closest("[data-cal-color-choice]");
+    if (color) {
+      const value = color.getAttribute("data-cal-color-choice");
+      if (state.calendarAddTab === "create") { state.calendarDraftCreateColor = value; const input = document.getElementById("calCreateColor"); if (input) input.value = value; }
+      else { const input = document.getElementById("calEditColor"); if (input) input.value = value; }
+      color.parentElement.querySelectorAll("[data-cal-color-choice]").forEach((button) => button.classList.toggle("is-active", button === color));
+      return;
+    }
+    const charm = event.target.closest("[data-cal-charm]");
+    if (charm) { state.calendarCharm = charm.getAttribute("data-cal-charm"); charm.parentElement.querySelectorAll("[data-cal-charm]").forEach((button) => button.classList.toggle("is-active", button === charm)); return; }
+    if (event.target.closest("#calCreateSave")) { saveNewCalendar(); return; }
+    if (event.target.closest("#calEditSave")) { saveEditedCalendar(); return; }
+    const editShare = event.target.closest("[data-cal-edit-share]");
+    if (editShare) { calendarAddOverlay.hidden = true; openCalendarShare(editShare.getAttribute("data-cal-edit-share")); return; }
+    const editPublish = event.target.closest("[data-cal-edit-publish]");
+    if (editPublish) { calendarAddOverlay.hidden = true; openCalendarShare(editPublish.getAttribute("data-cal-edit-publish")); state.calendarShareTab = "publish"; renderCalendarShare(); return; }
+    const editExport = event.target.closest("[data-cal-edit-export]");
+    if (editExport) { window.location.href = `/api/calendar/export?calendarId=${encodeURIComponent(editExport.getAttribute("data-cal-edit-export"))}`; return; }
+    const editDelete = event.target.closest("[data-cal-edit-delete]");
+    if (editDelete) { deleteCalendarFromEditor(); return; }
+    if (event.target.closest("#calSubscribeImport")) { subscribeCalendarFromWeb(); return; }
+    if (event.target.closest("#calImportAdd")) { importCalendarFromFile(); return; }
+    if (event.target.closest("#calHolidayAdd")) { addHolidayCalendars(); return; }
+    if (event.target.closest("#calBirthdaySave")) { saveBirthdayCalendar(); return; }
+  });
+  calendarAddOverlay?.addEventListener("change", (event) => {
+    if (event.target.id === "calEditSelect") { state.calendarEditId = event.target.value; renderCalendarAdd(); return; }
+    if (event.target.id === "calImportFile") {
+      const name = event.target.files?.[0]?.name || "No file selected";
+      const label = document.getElementById("calImportFileName");
+      if (label) label.textContent = name;
+      const button = document.getElementById("calImportAdd");
+      if (button) button.disabled = !event.target.files?.length;
+      return;
+    }
+    const country = event.target.closest("[data-holiday-country]");
+    if (country) {
+      state.holidaySelection = state.holidaySelection || new Set();
+      if (country.checked && state.holidaySelection.size >= 5) { country.checked = false; showToast("Choose up to five countries at a time"); return; }
+      if (country.checked) state.holidaySelection.add(country.getAttribute("data-holiday-country"));
+      else state.holidaySelection.delete(country.getAttribute("data-holiday-country"));
+      renderHolidayList();
+    }
+  });
+  calendarAddOverlay?.addEventListener("input", (event) => {
+    if (event.target.id === "calHolidayFilter") renderHolidayList();
+  });
+  calendarAddOverlay?.addEventListener("dragover", (event) => {
+    if (event.target.closest("#calUploadZone")) event.preventDefault();
+  });
+  calendarAddOverlay?.addEventListener("drop", (event) => {
+    if (!event.target.closest("#calUploadZone")) return;
+    event.preventDefault();
+    const input = document.getElementById("calImportFile");
+    if (input && event.dataTransfer.files?.length) {
+      input.files = event.dataTransfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+
+  calendarShareOverlay?.addEventListener("click", (event) => {
+    if (event.target === calendarShareOverlay || event.target.closest("#calendarShareClose") || event.target.closest("[data-cal-share-close]")) { calendarShareOverlay.hidden = true; return; }
+    const tab = event.target.closest("[data-cal-share-tab]");
+    if (tab) { state.calendarShareTab = tab.getAttribute("data-cal-share-tab"); renderCalendarShare(); if (state.calendarShareTab === "publish" && !state.calendarPublication) loadCalendarPublication(state.calendarShareId); return; }
+    const jump = event.target.closest("[data-cal-share-tab-jump]");
+    if (jump) { state.calendarShareTab = jump.getAttribute("data-cal-share-tab-jump"); renderCalendarShare(); if (!state.calendarPublication) loadCalendarPublication(state.calendarShareId); return; }
+    if (event.target.closest("[data-cal-share-invite]")) { inviteCalendarShare(); return; }
+    const unshare = event.target.closest("[data-cal-unshare]");
+    if (unshare) { removeCalendarShare(unshare.getAttribute("data-cal-unshare")); return; }
+    if (event.target.closest("[data-cal-publish]")) { publishCalendar(); return; }
+    if (event.target.closest("[data-cal-rotate]")) { rotateCalendarPublication(); return; }
+    if (event.target.closest("[data-cal-unpublish]")) { unpublishCalendar(); return; }
+    const leave = event.target.closest("[data-cal-leave]");
+    if (leave) { leaveSharedCalendar(leave.getAttribute("data-cal-leave")); return; }
+    const copy = event.target.closest("[data-copy-cal-url]");
+    if (copy) { copyTextToClipboard(copy.getAttribute("data-copy-cal-url")).then((ok) => showToast(ok ? "Calendar feed link copied" : copy.getAttribute("data-copy-cal-url"))); return; }
+  });
+
+  eventOverlay?.addEventListener("input", (event) => {
+    if (event.target.id === "eventAttendeeInput") { renderEventAttendeeSuggest(); return; }
+    if (["eventName", "eventDate", "eventStart", "eventEnd", "eventColorSelect", "eventRecurrence", "eventUntil", "eventTimezone"].includes(event.target.id)) updateEventPreview();
+  });
+  eventOverlay?.addEventListener("change", (event) => {
+    if (event.target.id === "eventAllDay") { updateEventTimeFields(); updateEventPreview(); return; }
+    if (event.target.id === "eventRecurrence") { document.getElementById("eventUntilWrap").hidden = !event.target.value; document.getElementById("eventUntil").value = event.target.value ? (document.getElementById("eventUntil").value || "") : ""; updateEventPreview(); return; }
+    if (["eventDate", "eventStart", "eventEnd", "eventColorSelect", "eventUntil", "eventTimezone"].includes(event.target.id)) updateEventPreview();
+  });
+  eventOverlay?.addEventListener("keydown", (event) => {
+    if (event.target.id === "eventAttendeeInput" && event.key === "Enter") {
+      event.preventDefault();
+      const email = event.target.value.trim();
+      if (email) { addEventAttendee(email); event.target.value = ""; document.getElementById("eventAttendeeSuggest").hidden = true; }
+    }
+  });
+  eventOverlay?.addEventListener("click", (event) => {
+    const add = event.target.closest("[data-event-attendee-add]");
+    if (add) { addEventAttendee(add.getAttribute("data-event-attendee-add"), add.getAttribute("data-event-attendee-name")); const input = document.getElementById("eventAttendeeInput"); if (input) input.value = ""; document.getElementById("eventAttendeeSuggest").hidden = true; return; }
+    const remove = event.target.closest("[data-event-attendee-remove]");
+    if (remove) { state.eventAttendees.splice(Number(remove.getAttribute("data-event-attendee-remove")), 1); renderEventAttendees(); updateEventPreview(); return; }
+    if (event.target.closest("#eventAttachBtn")) {
+      const picker = document.getElementById("eventAttachmentPicker");
+      picker.hidden = !picker.hidden;
+      if (!picker.hidden) renderEventAttachmentPicker();
+      return;
+    }
+    const pick = event.target.closest("[data-event-attach-file]");
+    if (pick) {
+      const file = state.files.find((item) => item.id === pick.getAttribute("data-event-attach-file"));
+      if (file && !state.eventAttachments.some((item) => item.id === file.id) && state.eventAttachments.length < 10) {
+        state.eventAttachments.push({ id: file.id, name: file.name, mime: file.mime, sizeBytes: file.sizeBytes, providerId: file.providerId, contentUrl: file.contentUrl });
+        renderEventAttachments();
+      }
+      return;
+    }
+    const removeAttach = event.target.closest("[data-event-attachment-remove]");
+    if (removeAttach) { state.eventAttachments.splice(Number(removeAttach.getAttribute("data-event-attachment-remove")), 1); renderEventAttachments(); return; }
+    const rsvp = event.target.closest("[data-event-rsvp]");
+    if (rsvp) { rsvpCalendarEvent(rsvp.getAttribute("data-event-rsvp")); return; }
+  });
+
+  document.getElementById("eventClose")?.addEventListener("click", closeEventDialog);
+  document.getElementById("eventCancel")?.addEventListener("click", closeEventDialog);
+  document.getElementById("eventSave")?.addEventListener("click", saveEvent);
+  document.getElementById("eventDelete")?.addEventListener("click", () => deleteCalendarEvent(calendarEditingId));
+  eventOverlay?.addEventListener("click", (event) => { if (event.target === eventOverlay) closeEventDialog(); });
+}
+
+setupCalendarInteractions();
 
 /* ============================================================
    navigation + chrome
@@ -12670,7 +14925,51 @@ function handleFeatureClick(event) {
   if (storageDisconnect) { event.preventDefault(); disconnectStorage(storageDisconnect.getAttribute("data-storage-disconnect")); return true; }
   const storageSync = target.closest("[data-storage-sync]");
   if (storageSync) { event.preventDefault(); syncStorage(storageSync.getAttribute("data-storage-sync")); return true; }
-  if (target.closest("#uploadFileBtn")) { event.preventDefault(); fileUploadInput.click(); return true; }
+  if (target.closest("#uploadFileBtn") || target.closest("[data-cabinet-upload]")) { event.preventDefault(); fileUploadInput.click(); return true; }
+  if (target.closest("#newFolderBtn") || target.closest("#sidebarNewFolder") || target.closest("[data-new-folder]")) { event.preventDefault(); openFolderDialog(); return true; }
+  const fileViewButton = target.closest("[data-file-view]");
+  if (fileViewButton) { event.preventDefault(); state.fileView = fileViewButton.getAttribute("data-file-view"); persistCabinetView(); renderFiles(); return true; }
+  if (target.closest("#fileSortDirection")) { event.preventDefault(); state.fileSortDesc = !state.fileSortDesc; persistCabinetView(); renderFiles(); return true; }
+  if (target.closest("#folderClose") || target.closest("#folderCancel") || target === folderOverlay) { folderOverlay.hidden = true; state.folderEditingId = ""; return true; }
+  if (target.closest("#folderSave")) { event.preventDefault(); saveFolderDialog(); return true; }
+  if (target.closest("#fileActionClose") || target.closest("[data-file-action-cancel]") || target === fileActionOverlay) { fileActionOverlay.hidden = true; state.fileAction = null; return true; }
+  if (target.closest("#fileActionConfirm")) { event.preventDefault(); runFileActionDialog(); return true; }
+  if (target.closest("[data-file-action-copy-link]")) { event.preventDefault(); if (state.fileAction?.fileId) copyFileLink(state.fileAction.fileId); return true; }
+  const fileSend = target.closest("[data-file-send]");
+  if (fileSend) { event.preventDefault(); sendFileViaEmail(fileSend.getAttribute("data-file-send")); return true; }
+  const fileMenuButton = target.closest("[data-file-menu]");
+  if (fileMenuButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = fileMenuButton.getBoundingClientRect();
+    openFileContextMenu("file", fileMenuButton.getAttribute("data-file-menu"), rect.left, rect.bottom + 4);
+    return true;
+  }
+  const folderMenuButton = target.closest("[data-folder-menu]");
+  if (folderMenuButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = folderMenuButton.getBoundingClientRect();
+    openFileContextMenu("folder", folderMenuButton.getAttribute("data-folder-menu"), rect.left, rect.bottom + 4);
+    return true;
+  }
+  const folderOpen = target.closest("[data-folder-open]");
+  if (folderOpen) {
+    event.preventDefault();
+    openFileFolder(folderOpen.getAttribute("data-folder-open") || null);
+    return true;
+  }
+  if (target.closest("[data-folder-root]")) { event.preventDefault(); openFileFolder(null); return true; }
+  const revokeShare = target.closest("[data-revoke-share]");
+  if (revokeShare) {
+    event.preventDefault();
+    const shareId = revokeShare.getAttribute("data-revoke-share");
+    api(`/api/file-shares/${encodeURIComponent(shareId)}`, { method: "DELETE" }).then(async () => {
+      if (fileShareTarget) await loadFileShares(fileShareTarget.id);
+      showToast("Share link revoked");
+    }).catch(showError);
+    return true;
+  }
   const fileFilter = target.closest("[data-file-filter]");
   if (fileFilter) { event.preventDefault(); state.fileFilter = fileFilter.getAttribute("data-file-filter"); renderFiles(); return true; }
   const fileStar = target.closest("[data-file-star]");
@@ -12710,6 +15009,14 @@ function handleFeatureClick(event) {
   if (fileRow) {
     event.preventDefault();
     state.selectedFileId = fileRow.getAttribute("data-file-id");
+    renderFiles();
+    if (isMobile()) document.body.classList.add("file-open");
+    return true;
+  }
+  const fileTile = target.closest(".cabinet-tile[data-file-id]");
+  if (fileTile) {
+    event.preventDefault();
+    state.selectedFileId = fileTile.getAttribute("data-file-id");
     renderFiles();
     if (isMobile()) document.body.classList.add("file-open");
     return true;
@@ -13597,16 +15904,13 @@ function bindEvents() {
     refreshMailbox({ quiet: false }).catch(showError);
   });
 
-  document.getElementById("calPrev").addEventListener("click", () => shiftMonth(-1));
-  document.getElementById("calNext").addEventListener("click", () => shiftMonth(1));
-  document.getElementById("calToday").addEventListener("click", () => {
-    const today = new Date();
-    state.calendarYear = today.getFullYear();
-    state.calendarMonth = today.getMonth();
-    state.calendarSelected = dateKey(today);
-    renderCalendar();
-  });
   document.getElementById("newContactBtn")?.addEventListener("click", () => openContactDialog());
+  document.getElementById("peopleBookFilter")?.addEventListener("change", (event) => { state.peopleBook = event.target.value; renderPeople(); });
+  document.getElementById("newAddressBookBtn")?.addEventListener("click", openAddressBookDialog);
+  document.getElementById("addressBookClose")?.addEventListener("click", () => { document.getElementById("addressBookOverlay").hidden = true; });
+  document.getElementById("addressBookCancel")?.addEventListener("click", () => { document.getElementById("addressBookOverlay").hidden = true; });
+  document.getElementById("addressBookSave")?.addEventListener("click", saveAddressBook);
+  document.getElementById("addressBookOverlay")?.addEventListener("click", (event) => { if (event.target.id === "addressBookOverlay") event.target.hidden = true; });
   document.getElementById("peopleSearch")?.addEventListener("input", (event) => {
     state.peopleQuery = event.target.value;
     renderPeople();
@@ -13629,14 +15933,8 @@ function bindEvents() {
   document.getElementById("contactSave")?.addEventListener("click", saveContact);
   document.getElementById("contactDelete")?.addEventListener("click", () => deleteContactByEmail(contactEditingEmail));
   document.getElementById("contactOverlay")?.addEventListener("click", (event) => { if (event.target.id === "contactOverlay") closeContactDialog(); });
-  document.getElementById("calNew").addEventListener("click", () => openEventDialog());
   document.getElementById("detailsClose").addEventListener("click", closeDetails);
-  document.getElementById("eventClose").addEventListener("click", closeEventDialog);
-  document.getElementById("eventCancel").addEventListener("click", closeEventDialog);
-  document.getElementById("eventSave").addEventListener("click", saveEvent);
-  document.getElementById("eventDelete").addEventListener("click", () => deleteCalendarEvent(calendarEditingId));
   detailsOverlay.addEventListener("click", (event) => { if (event.target === detailsOverlay) closeDetails(); });
-  eventOverlay.addEventListener("click", (event) => { if (event.target === eventOverlay) closeEventDialog(); });
   document.getElementById("externalWarningToggle").addEventListener("click", (event) => {
     setPreference("externalWarnings", event.currentTarget.getAttribute("aria-checked") !== "true", true);
   });
@@ -13770,7 +16068,14 @@ function bindEvents() {
       if (wrap) wrap.hidden = target.value !== "custom";
       return;
     }
-    if (target.id === "fileProviderFilter") { state.fileProvider = target.value; renderFiles(); return; }
+    if (target.id === "fileProviderFilter") {
+      state.fileProvider = target.value;
+      if (state.fileProvider !== "all" && state.fileProvider !== "a8m") state.fileFolderId = null;
+      renderFiles();
+      return;
+    }
+    if (target.id === "fileSortSelect") { state.fileSort = target.value; persistCabinetView(); renderFiles(); return; }
+    if (target.id === "fileGroupSelect") { state.fileGroup = target.value; persistCabinetView(); renderFiles(); return; }
     if (target.id === "scheduleDate" || target.id === "scheduleTime") {
       scheduleChoice = "custom";
       $$("[data-schedule-preset]", schedulePresets).forEach((button) => button.classList.toggle("is-selected", button.getAttribute("data-schedule-preset") === "custom"));
@@ -13903,6 +16208,7 @@ function bindEvents() {
         });
       } else if (kind === "attach") { openComposeAttach(session.id); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
+      else if (kind === "editor-light") { setEditorLight(session, !session.editorLight); }
       else if (kind === "toggle-quote") { toggleComposeQuote(session); }
       else if (kind === "source") { openHtmlSource({ kind: "compose", sessionId: session.id }); }
       else if (kind === "insert-signature") { openSignaturePicker(session); }
@@ -14136,6 +16442,7 @@ function bindEvents() {
     if (block) { applySignatureRichCommand(document.getElementById("signatureEditorBody"), "formatBlock", block.getAttribute("data-signature-block")); return; }
     if (event.target.closest("[data-signature-source]")) { openHtmlSource({ kind: "signature" }); return; }
     if (event.target.closest("#signatureEditorSave")) { saveSignatureEditor(); return; }
+    if (event.target.closest("#signatureLightBtn")) { applySignatureEditorLight(!state.editorLight); return; }
   });
   signatureEditorOverlay?.addEventListener("change", (event) => {
     const editor = document.getElementById("signatureEditorBody");

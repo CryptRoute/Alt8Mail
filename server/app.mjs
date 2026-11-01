@@ -312,7 +312,7 @@ export async function createApp(options = {}) {
         cookieHeader(CSRF_COOKIE, csrf, cookieOptions)
       ]
     };
-    addAudit(req, "auth.login", db.user.email, detail || "Password sign-in · browser session");
+    addAudit(req, "auth.login", db.user.email, detail || "New sign-in detected on your email account");
     return {
       session,
       headers,
@@ -925,6 +925,53 @@ export async function createApp(options = {}) {
     };
   }
 
+  function calendarEventPayload(event) {
+    const date = String(event.date || "");
+    return {
+      calendarId: "default", calendarName: "Calendar", calendarColor: "#0f6cbd",
+      calendarKind: "personal", timezone: "UTC", allDay: false, recurrenceRule: "",
+      status: "confirmed", visibility: "default", organizer: db.user.email,
+      organizerName: db.user.name, attendeeList: [], attendees: Number(event.attendees) || 1,
+      attachments: [], reminderMinutes: 15, transparency: "busy", canEdit: true,
+      owned: true, access: "owner", invited: false, myStatus: "", responseRequested: true,
+      createdAt: event.createdAt || nowIso(), updatedAt: event.updatedAt || nowIso(),
+      startsAt: `${date}T${event.start || "09:00"}:00Z`, endsAt: `${date}T${event.end || "10:00"}:00Z`,
+      ...event
+    };
+  }
+
+  function calendarList() {
+    return [{
+      id: "default", name: "Calendar", color: "#0f6cbd", kind: "personal", visible: true,
+      isDefault: true, owned: true, access: "owner", shared: false, published: false,
+      eventCount: db.calendarEvents.length, ownerEmail: db.user.email, ownerName: db.user.name,
+      createdAt: nowIso(), updatedAt: nowIso()
+    }];
+  }
+
+  function addressBookList() {
+    return [{
+      id: "default", name: "Contacts", color: "#3d6b62", isDefault: true, source: "local",
+      count: db.people.filter((person) => person.source !== "directory").length, createdAt: nowIso()
+    }];
+  }
+
+  function storageQuotaInfo() {
+    const quota = quotaInfo();
+    const cabinetUsed = db.files.filter((file) => file.providerId === "a8m").reduce((sum, file) => sum + (Number(file.sizeBytes) || 0), 0);
+    const used = quota.usedBytes + cabinetUsed;
+    return {
+      policy: { mode: "combined", emailQuotaBytes: 0, storageQuotaBytes: 0, source: "organization", domain: db.user.email.split("@")[1] || "" },
+      mode: "combined", combined: true, source: "organization",
+      mailUsedBytes: quota.usedBytes, mailLimitBytes: quota.limitBytes,
+      cabinetUsedBytes: cabinetUsed, storageLimitBytes: 0,
+      usedBytes: used, limitBytes: quota.limitBytes,
+      percent: quota.limitBytes ? Math.round((used / quota.limitBytes) * 1000) / 10 : 0,
+      label: `${formatBytes(used)} of ${formatBytes(quota.limitBytes)}`,
+      refreshedAt: nowIso()
+    };
+  }
+
   function bootstrapPayload(session) {
     return {
       user: publicUser(db.user),
@@ -932,7 +979,12 @@ export async function createApp(options = {}) {
       folders: db.folders,
       people: db.people.map((person) => ({ ...person, source: person.source || "directory" })),
       messages: db.messages.map(publicMessage),
-      calendarEvents: db.calendarEvents,
+      calendarEvents: db.calendarEvents.map(calendarEventPayload),
+      calendars: calendarList(),
+      calendarSubscriptions: [],
+      addressBooks: addressBookList(),
+      fileFolders: [],
+      storageQuota: storageQuotaInfo(),
       tasks: db.tasks,
       files: db.files,
       storageProviders: db.storageProviders,
@@ -1084,7 +1136,7 @@ export async function createApp(options = {}) {
         }
         const established = startSession(req, {
           remember: body.remember !== false,
-          detail: method === "sso" ? "Single sign-on · browser session" : "Password sign-in · browser session"
+          detail: method === "sso" ? "New sign-in detected on your email account · single sign-on" : "New sign-in detected on your email account"
         });
         await store.save();
         sendJson(res, 200, { ...established.payload, method }, established.headers);
@@ -2160,6 +2212,87 @@ export async function createApp(options = {}) {
         return;
       }
 
+      if (pathname === "/api/calendar/events" && req.method === "GET") {
+        const events = db.calendarEvents.map(calendarEventPayload);
+        sendJson(res, 200, {
+          events, calendarEvents: events, count: events.length,
+          calendars: calendarList(), subscriptions: [], addressBooks: addressBookList()
+        });
+        return;
+      }
+      if (pathname === "/api/calendar/events" && req.method === "POST") {
+        const body = await readJson(req);
+        const date = String(body.date || nowIso().slice(0, 10));
+        const record = calendarEventPayload({
+          id: id("cal"), date,
+          start: String(body.start || "09:00"), end: String(body.end || "10:00"),
+          title: String(body.title || "New event").slice(0, 240),
+          where: String(body.where || ""), description: String(body.description || ""),
+          color: String(body.color || "#0f6cbd"),
+          attendeeEmails: Array.isArray(body.attendeeEmails) ? body.attendeeEmails : [],
+          reminderMinutes: Number(body.reminderMinutes) || 15,
+          recurrenceRule: String(body.recurrenceRule || ""),
+          createdAt: nowIso(), updatedAt: nowIso()
+        });
+        db.calendarEvents.push(record);
+        addAudit(req, "calendar.created", record.title, "Event added to calendar");
+        await store.save();
+        sendJson(res, 201, { event: record });
+        return;
+      }
+      const calendarEventMatch = pathname.match(/^\/api\/calendar\/events\/([A-Za-z0-9_-]{1,100})(\/rsvp)?$/);
+      if (calendarEventMatch) {
+        const event = db.calendarEvents.find((item) => item.id === calendarEventMatch[1]);
+        if (!event) throw new ApiError(404, "NOT_FOUND", "Event not found");
+        if (calendarEventMatch[2] === "/rsvp" && req.method === "POST") {
+          const body = await readJson(req);
+          event.myStatus = String(body.status || "accepted");
+          event.updatedAt = nowIso();
+          addAudit(req, "calendar.rsvp", event.title, `RSVP ${event.myStatus}`);
+          await store.save();
+          sendJson(res, 200, { ok: true, event: calendarEventPayload(event) });
+          return;
+        }
+        if (req.method === "PATCH") {
+          const body = await readJson(req);
+          for (const key of ["title", "date", "start", "end", "where", "description", "color", "timezone", "recurrenceRule", "meetingUrl"]) {
+            if (body[key] !== undefined) event[key] = String(body[key]);
+          }
+          if (body.allDay !== undefined) event.allDay = Boolean(body.allDay);
+          if (body.reminderMinutes !== undefined) event.reminderMinutes = Number(body.reminderMinutes) || 0;
+          event.updatedAt = nowIso();
+          addAudit(req, "calendar.updated", event.title, "Event updated");
+          await store.save();
+          sendJson(res, 200, { event: calendarEventPayload(event) });
+          return;
+        }
+        if (req.method === "DELETE") {
+          db.calendarEvents = db.calendarEvents.filter((item) => item.id !== event.id);
+          addAudit(req, "calendar.deleted", event.title, "Event removed");
+          await store.save();
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+      }
+      if (pathname === "/api/calendar/holidays" && req.method === "GET") {
+        const names = ["United States", "United Kingdom", "Canada", "Nigeria", "Germany", "France", "Australia", "Japan"];
+        const codes = ["US", "GB", "CA", "NG", "DE", "FR", "AU", "JP"];
+        const countries = names.map((name, index) => ({ code: codes[index], name }));
+        sendJson(res, 200, { countries, count: countries.length });
+        return;
+      }
+      if (pathname === "/api/address-books" && req.method === "GET") {
+        sendJson(res, 200, { addressBooks: addressBookList(), count: 1 });
+        return;
+      }
+      if (pathname === "/api/storage/quota" && req.method === "GET") {
+        sendJson(res, 200, storageQuotaInfo());
+        return;
+      }
+      if (pathname === "/api/file-folders" && req.method === "GET") {
+        sendJson(res, 200, { folders: [], count: 0 });
+        return;
+      }
       throw new ApiError(404, "NOT_FOUND", "API route not found");
     } catch (error) {
       if (res.headersSent) {

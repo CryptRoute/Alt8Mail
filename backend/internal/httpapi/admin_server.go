@@ -118,7 +118,7 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /session", s.adminLogin)
 	mux.HandleFunc("POST /session/2fa", s.adminVerifyTwoFactor)
 	mux.HandleFunc("GET /session", s.adminCurrentSession)
-	mux.HandleFunc("DELETE /session", s.adminRequire(s.adminLogout))
+	mux.HandleFunc("DELETE /session", s.adminLogout)
 	mux.HandleFunc("GET /bootstrap", s.adminRequire(s.adminBootstrap))
 	mux.HandleFunc("POST /context", s.adminRequire(s.adminSwitchTenant))
 	mux.HandleFunc("GET /tenants", s.adminRequirePermission("system.tenants.manage", s.adminListTenants))
@@ -208,6 +208,15 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /security/totp/disable", s.adminRequire(s.adminDisableTOTP))
 	mux.HandleFunc("GET /security/sessions", s.adminRequire(s.adminListAdminSessions))
 	mux.HandleFunc("POST /security/sessions/revoke-others", s.adminRequire(s.adminRevokeOtherAdminSessions))
+
+	mux.HandleFunc("POST /account/password", s.adminRequire(s.adminChangePassword))
+
+	mux.HandleFunc("GET /storage/policies", s.adminRequirePermission("policies.read", s.adminStoragePolicies))
+	mux.HandleFunc("PUT /storage/policies/tenant", s.adminRequirePermission("policies.manage", s.adminPutStorageTenantPolicy))
+	mux.HandleFunc("PUT /storage/policies/domain", s.adminRequirePermission("policies.manage", s.adminPutStorageDomainPolicy))
+	mux.HandleFunc("DELETE /storage/policies/domain/{domain}", s.adminRequirePermission("policies.manage", s.adminDeleteStorageDomainPolicy))
+	mux.HandleFunc("PUT /storage/policies/user", s.adminRequirePermission("policies.manage", s.adminPutStorageUserPolicy))
+	mux.HandleFunc("DELETE /storage/policies/user/{id}", s.adminRequirePermission("policies.manage", s.adminDeleteStorageUserPolicy))
 
 	mux.HandleFunc("GET /settings", s.adminRequirePermission("tenant.read", s.adminGetTenantSettings))
 	mux.HandleFunc("PATCH /settings", s.adminRequirePermission("tenant.manage", s.adminUpdateTenantSettings))
@@ -488,9 +497,14 @@ func (s *Server) adminCurrentSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminLogout(w http.ResponseWriter, r *http.Request) {
-	sess := s.requireAdminSession(r)
-	_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM admin_sessions WHERE id = $1`, sess.ID)
-	s.recordAdminAudit(r.Context(), sess, sess.User, "admin.logout", sess.User.Email, "Signed out of admin console", nil)
+	w.Header().Set("Cache-Control", "no-store")
+	// Sign-out must not depend on a CSRF token or a still-valid session: if the
+	// request arrives after the session expired we still clear the cookies so a
+	// reload cannot land back in the console.
+	if sess, err := s.adminAuthenticate(r); err == nil && sess != nil {
+		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM admin_sessions WHERE id = $1`, sess.ID)
+		s.recordAdminAudit(r.Context(), sess, sess.User, "admin.logout", sess.User.Email, "Signed out of admin console", nil)
+	}
 	s.clearAdminCookies(w)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -643,7 +657,7 @@ func (s *Server) adminAuthenticate(r *http.Request) (*adminSessionRecord, error)
 	}
 	sess.ActiveTenant = activeTenant
 	policy := tenantPolicyFromSettings(activeTenant.Settings)
-	if policy.Security.SessionTimeoutMinutes > 0 && time.Since(sess.LastSeenAt) > time.Duration(policy.Security.IdleTimeoutMinutes)*time.Minute {
+	if policy.Security.IdleTimeoutMinutes > 0 && time.Since(sess.LastSeenAt) > time.Duration(policy.Security.IdleTimeoutMinutes)*time.Minute {
 		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM admin_sessions WHERE id = $1`, sess.ID)
 		return nil, errors.New("admin session idle timeout")
 	}

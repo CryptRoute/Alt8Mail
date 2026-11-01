@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 )
 
 type webAuthnUser struct {

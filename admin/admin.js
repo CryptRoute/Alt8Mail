@@ -262,14 +262,18 @@ $("#useRecoveryBtn").addEventListener("click", () => {
 async function logout() {
   try { await api("session", { method: "DELETE" }); } catch {}
   state.admin = null;
-  location.hash = "";
-  showLogin();
+  state.csrf = "";
+  try { sessionStorage.clear(); } catch {}
+  closeModal();
+  // A full reload guarantees no in-memory console state survives sign-out.
+  const base = location.href.split("#")[0].split("?")[0];
+  location.replace(base + "?signedout=1");
 }
 
 /* ------------------------------------------------------------
    Navigation / route
 ------------------------------------------------------------ */
-const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "policies", "ai", "quarantine", "audit", "tenants", "settings"]);
+const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "policies", "storage", "ai", "quarantine", "audit", "tenants", "settings"]);
 
 function route() {
   if (!state.admin) return;
@@ -282,7 +286,7 @@ function route() {
   else if (view === "mailboxes" && parts[1] === "import") view = "import-mailboxes";
   state.routeParam = routeParam;
   state.view = views.has(view) ? view : "overview";
-  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", policies: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
+  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", policies: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
   if (required && !can(required)) { state.view = "overview"; location.hash = "#/overview"; return; }
   const navView = ["user-detail", "import-users", "import-mailboxes"].includes(state.view) ? "users" : state.view;
   $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === navView));
@@ -298,6 +302,7 @@ function route() {
     case "domains": renderDomains(); break;
     case "roles": renderRoles(); break;
     case "policies": renderPolicies(); break;
+    case "storage": renderStoragePolicy(); break;
     case "ai": renderAI(); break;
     case "quarantine": renderQuarantine(); break;
     case "audit": renderAudit(); break;
@@ -1551,7 +1556,7 @@ async function openSecurityModal() {
       title: "My security",
       subtitle: "Protect your administrative access with a second factor and revoke stale sessions.",
       wide: true,
-      body: `<div class="detail-list"><div class="detail-row"><span>Authenticator</span><b>${summary.totpEnabled ? "Enabled" : "Not enrolled"}</b></div><div class="detail-row"><span>Recovery codes</span><b>${security.recoveryRemaining || 0} remaining</b></div><div class="detail-row"><span>Admin sessions</span><b>${sessions.count || 0} active</b></div></div><div class="mini-section"><h3>Sessions</h3>${(sessions.sessions || []).map((session) => `<div class="detail-row"><span>${esc(session.device)}<br><small class="muted">${esc(session.ip || "Unknown")}</small></span><b>${session.current ? "This session" : relativeTime(session.lastSeenAt)}</b></div>`).join("")}<button class="btn secondary small" data-action="revoke-other-admins" style="margin-top:9px">${icon("devices")}Sign out other admin sessions</button></div>${summary.totpEnabled ? `<div class="mini-section"><h3>Remove authenticator</h3><p class="muted" style="font-size:11px">Requires your password and a current authenticator or recovery code.</p><button class="btn danger" data-action="disable-admin-totp">${icon("trash")}Remove authenticator</button></div>` : `<div class="mini-section"><h3>Add an authenticator</h3><p class="muted" style="font-size:11px">You will scan or enter the secret in your authenticator app, then verify a six-digit code.</p><button class="btn primary" data-action="begin-admin-totp">${icon("shield")}Set up authenticator</button></div>`}`,
+      body: `<div class="detail-list"><div class="detail-row"><span>Authenticator</span><b>${summary.totpEnabled ? "Enabled" : "Not enrolled"}</b></div><div class="detail-row"><span>Recovery codes</span><b>${security.recoveryRemaining || 0} remaining</b></div><div class="detail-row"><span>Admin sessions</span><b>${sessions.count || 0} active</b></div></div><div class="mini-section"><h3>Sessions</h3>${(sessions.sessions || []).map((session) => `<div class="detail-row"><span>${esc(session.device)}<br><small class="muted">${esc(session.ip || "Unknown")}</small></span><b>${session.current ? "This session" : relativeTime(session.lastSeenAt)}</b></div>`).join("")}<button class="btn secondary small" data-action="revoke-other-admins" style="margin-top:9px">${icon("devices")}Sign out other admin sessions</button></div><div class="mini-section"><h3>Password</h3><p class="muted" style="font-size:11px">Changing your password also updates the mailbox password and signs out other admin and webmail sessions.</p><button class="btn secondary small" data-action="change-admin-password">${icon("key")}Change password</button></div>${summary.totpEnabled ? `<div class="mini-section"><h3>Remove authenticator</h3><p class="muted" style="font-size:11px">Requires your password and a current authenticator or recovery code.</p><button class="btn danger" data-action="disable-admin-totp">${icon("trash")}Remove authenticator</button></div>` : `<div class="mini-section"><h3>Add an authenticator</h3><p class="muted" style="font-size:11px">You will scan or enter the secret in your authenticator app, then verify a six-digit code.</p><button class="btn primary" data-action="begin-admin-totp">${icon("shield")}Set up authenticator</button></div>`}`,
       footer: `<button class="btn secondary" data-modal-close>Close</button>`
     });
     $('[data-action="revoke-other-admins"]')?.addEventListener("click", async () => {
@@ -1559,6 +1564,7 @@ async function openSecurityModal() {
       try { const result = await api("security/sessions/revoke-others", { method: "POST", body: {} }); toast(`${result.revoked || 0} admin session(s) revoked`); closeModal(); } catch (error) { showError(error); }
     });
     $('[data-action="begin-admin-totp"]')?.addEventListener("click", beginAdminTOTP);
+    $('[data-action="change-admin-password"]')?.addEventListener("click", openChangePasswordModal);
     $('[data-action="disable-admin-totp"]')?.addEventListener("click", disableAdminTOTP);
   } catch (error) { showError(error); }
 }
@@ -1776,6 +1782,7 @@ document.addEventListener("click", async (event) => {
       else if (formId === "newTenantForm") await submitTenantForm();
       else if (formId === "adminTotpForm") await submitAdminTOTP();
       else if (formId === "disableTotpForm") await submitDisableAdminTOTP();
+      else if (formId === "adminPasswordForm") await submitAdminPassword();
     } catch (error) { showError(error); setBusy(submit, false); }
   }
 });
@@ -1790,9 +1797,216 @@ document.addEventListener("click", (event) => {
   if (tenantAction) { /* reserved */ }
 });
 
+/* ------------------------------------------------------------
+   Storage policy (Cabinet quotas)
+------------------------------------------------------------ */
+const STORAGE_GB = 1024 * 1024 * 1024;
+
+function quotaGB(value) {
+  const bytes = Number(value) || 0;
+  if (!bytes) return 0;
+  return Math.round((bytes / STORAGE_GB) * 10) / 10;
+}
+
+function quotaBytes(value) {
+  const gb = Number(value) || 0;
+  if (gb <= 0) return 0;
+  return Math.round(gb * STORAGE_GB);
+}
+
+function storageModeLabel(mode) {
+  return mode === "split" ? "Separate Cabinet quota" : "Shares mailbox quota";
+}
+
+function storageQuotaSummary(entry) {
+  const email = quotaGB(entry.emailQuotaBytes);
+  const storage = quotaGB(entry.storageQuotaBytes);
+  if (entry.mode === "split") {
+    return `${email ? `${email} GB mail` : "User mailbox quota"} · ${storage ? `${storage} GB Cabinet` : "No Cabinet limit"}`;
+  }
+  return `${email ? `${email} GB combined` : "Each user's mailbox quota"} · Cabinet included`;
+}
+
+function storagePolicyFields(prefix, entry = {}, { showEmail = true } = {}) {
+  const mode = entry.mode || "combined";
+  return `<div class="field-row">
+    <label class="field"><span>Quota mode</span><select data-policy-field="mode">
+      <option value="combined" ${mode === "combined" ? "selected" : ""}>Combined with mailbox quota</option>
+      <option value="split" ${mode === "split" ? "selected" : ""}>Separate Cabinet quota</option>
+    </select><small class="muted">Combined is Gmail-style: Cabinet files count toward the mailbox allowance.</small></label>
+    ${showEmail ? `<label class="field"><span>Mailbox allowance <small class="muted">GB</small></span><input type="number" min="0" step="0.5" data-policy-field="emailQuotaGB" value="${quotaGB(entry.emailQuotaBytes) || ""}" placeholder="Use user quota"><small class="muted">0 uses each user's existing mailbox quota. A non-zero value also updates Dovecot's quota for affected users.</small></label>` : ""}
+    <label class="field"><span>Cabinet allowance <small class="muted">GB</small></span><input type="number" min="0" step="0.5" data-policy-field="storageQuotaGB" value="${quotaGB(entry.storageQuotaBytes) || ""}" placeholder="No separate limit" ${mode === "combined" ? "disabled" : ""}><small class="muted">Used only when the mode is “Separate”.</small></label>
+  </div>`;
+}
+
+async function renderStoragePolicy() {
+  loading("Storage policy");
+  try {
+    const data = await api("storage/policies");
+    const tenant = data.tenant || { mode: "combined" };
+    const manage = can("policies.manage");
+    const domainOverrides = data.domains || [];
+    const userOverrides = data.users || [];
+    const domains = data.availableDomains || [];
+    const domainRows = domains.map((domain) => {
+      const override = domainOverrides.find((entry) => entry.domain && entry.domain.toLowerCase() === domain.toLowerCase());
+      return `<tr>
+        <td><b>${esc(domain)}</b></td>
+        <td>${override ? `<span class="badge ${override.mode === "split" ? "warning" : "neutral"}">${esc(storageModeLabel(override.mode))}</span>` : '<span class="badge neutral">Inherits organization default</span>'}</td>
+        <td class="muted">${override ? esc(storageQuotaSummary(override)) : esc(storageQuotaSummary(tenant))}</td>
+        <td class="row-actions">${override && manage ? `<button class="btn secondary small" data-domain-edit="${esc(domain)}" data-domain-mode="${esc(override.mode)}" data-domain-email="${quotaGB(override.emailQuotaBytes)}" data-domain-storage="${quotaGB(override.storageQuotaBytes)}">Edit</button><button class="icon-button" data-domain-remove="${esc(domain)}" title="Remove override" aria-label="Remove ${esc(domain)} override">${icon("trash")}</button>` : manage ? `<button class="btn secondary small" data-domain-edit="${esc(domain)}">Override</button>` : ""}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="4"><div class="empty">${icon("globe")}<h3>No domains yet</h3><p>Add a mail domain before setting a domain-level storage policy.</p></div></td></tr>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Storage policy</h1><p>Control how Cabinet files count against mail storage for every user in ${esc(state.activeTenant?.name || "your organization")}.</p></div><div class="view-actions"><span class="badge ${tenant.mode === "split" ? "warning" : "system"}">${esc(storageModeLabel(tenant.mode))}</span></div></div>
+      <div class="storage-policy-grid">
+        <div class="card"><div class="card-head"><div><h2>Organization default</h2><p>Applies to every user without a domain or personal override.</p></div></div><div class="card-pad">
+          <form id="tenantStorageForm">${storagePolicyFields("tenant", tenant)}<div class="storage-policy-actions"><span class="muted" style="font-size:10.5px">Changes are enforced on the next Cabinet upload.</span><button class="btn primary" type="submit" ${manage ? "" : "disabled"}>${icon("check")}Save default</button></div></form>
+        </div></div>
+        <div class="card storage-policy-explainer"><div class="card-head"><div><h2>How quotas resolve</h2><p>Most specific policy wins.</p></div></div><div class="card-pad">
+          <ol class="storage-policy-steps"><li><b>User override</b><span>A single person's Cabinet allowance.</span></li><li><b>Domain override</b><span>Everyone on a mail domain.</span></li><li><b>Organization default</b><span>The fallback for all other users.</span></li></ol>
+          <div class="storage-policy-note">${icon("shield")}<span>Combined mode gives each user one Gmail-style allowance shared by mail and Cabinet. Split mode gives Cabinet a separate ceiling while mail keeps its mailbox quota.</span></div>
+        </div></div>
+      </div>
+      <div class="card" style="margin-top:14px"><div class="card-head"><div><h2>Domain overrides</h2><p>Apply one storage rule to every user on a domain.</p></div><span class="badge neutral">${domainOverrides.length} override${domainOverrides.length === 1 ? "" : "s"}</span></div><div class="card-pad">
+        ${manage ? `<form id="domainStorageForm" class="storage-policy-form"><label class="field"><span>Domain</span><select data-policy-field="domain" required><option value="">Choose a domain</option>${domains.map((domain) => `<option value="${esc(domain)}">${esc(domain)}</option>`).join("")}</select></label>${storagePolicyFields("domain", { mode: "combined" })}<div class="storage-policy-actions"><span class="muted" style="font-size:10.5px">Saving replaces an existing override.</span><button class="btn primary" type="submit">${icon("check")}Save domain policy</button></div></form>` : ""}
+        <div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Domain</th><th>Mode</th><th>Allowances</th><th></th></tr></thead><tbody>${domainRows}</tbody></table></div></div>
+      </div></div>
+      <div class="card" style="margin-top:14px"><div class="card-head"><div><h2>User overrides</h2><p>Personal rules always win over the domain and organization policy.</p></div><span class="badge neutral">${userOverrides.length} override${userOverrides.length === 1 ? "" : "s"}</span></div><div class="card-pad">
+        ${manage ? `<form id="userStorageForm" class="storage-policy-form"><label class="field"><span>User email</span><input type="email" data-policy-field="email" placeholder="person@company.com" required><small class="muted">The user must already exist in this organization.</small></label>${storagePolicyFields("user", { mode: "combined" })}<div class="storage-policy-actions"><span class="muted" style="font-size:10.5px">Cabinet files count separately from mail attachments.</span><button class="btn primary" type="submit">${icon("check")}Save user policy</button></div></form>` : ""}
+        <div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>User</th><th>Mode</th><th>Allowances</th><th></th></tr></thead><tbody>${userOverrides.length ? userOverrides.map((entry) => `<tr><td><b>${esc(entry.name || entry.email)}</b><br><small class="muted">${esc(entry.email)}</small></td><td><span class="badge ${entry.mode === "split" ? "warning" : "neutral"}">${esc(storageModeLabel(entry.mode))}</span></td><td class="muted">${esc(storageQuotaSummary(entry))}</td><td class="row-actions">${manage ? `<button class="btn secondary small" data-user-edit="${esc(entry.email)}" data-user-mode="${esc(entry.mode)}" data-user-email-quota="${quotaGB(entry.emailQuotaBytes)}" data-user-storage="${quotaGB(entry.storageQuotaBytes)}">Edit</button><button class="icon-button" data-user-policy-remove="${esc(entry.userId)}" title="Remove override" aria-label="Remove override">${icon("trash")}</button>` : ""}</td></tr>`).join("") : `<tr><td colspan="4"><div class="empty">${icon("users")}<h3>No personal overrides</h3><p>Every user follows their domain or organization policy.</p></div></td></tr>`}</tbody></table></div></div>
+      </div></div>`;
+
+    const bindMode = (form) => {
+      const select = form?.querySelector('[data-policy-field="mode"]');
+      const storage = form?.querySelector('[data-policy-field="storageQuotaGB"]');
+      if (select && storage) {
+        select.addEventListener("change", () => { storage.disabled = select.value !== "split"; if (select.value === "split" && !storage.value) storage.value = "25"; });
+      }
+    };
+    const tenantForm = $("#tenantStorageForm");
+    bindMode(tenantForm);
+    tenantForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = event.target.querySelector("button[type=submit]");
+      setBusy(button, true, "Saving…");
+      try {
+        await api("storage/policies/tenant", { method: "PUT", body: readStoragePolicy(event.target) });
+        toast("Organization storage policy saved");
+        renderStoragePolicy();
+      } catch (error) { showError(error); setBusy(button, false); }
+    });
+    const domainForm = $("#domainStorageForm");
+    bindMode(domainForm);
+    domainForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = event.target.querySelector("button[type=submit]");
+      setBusy(button, true, "Saving…");
+      try {
+        await api("storage/policies/domain", { method: "PUT", body: { ...readStoragePolicy(event.target), domain: event.target.querySelector('[data-policy-field="domain"]').value } });
+        toast("Domain storage policy saved");
+        renderStoragePolicy();
+      } catch (error) { showError(error); setBusy(button, false); }
+    });
+    const userForm = $("#userStorageForm");
+    bindMode(userForm);
+    userForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = event.target.querySelector("button[type=submit]");
+      setBusy(button, true, "Saving…");
+      try {
+        await api("storage/policies/user", { method: "PUT", body: { ...readStoragePolicy(event.target), email: event.target.querySelector('[data-policy-field="email"]').value.trim() } });
+        toast("User storage policy saved");
+        renderStoragePolicy();
+      } catch (error) { showError(error); setBusy(button, false); }
+    });
+    $$("[data-domain-remove]").forEach((button) => button.addEventListener("click", async () => {
+      if (!(await confirmDialog("Remove domain override", `${button.dataset.domainRemove} will fall back to the organization storage policy.`, "Remove override", true))) return;
+      try { await api(`storage/policies/domain/${encodeURIComponent(button.dataset.domainRemove)}`, { method: "DELETE" }); toast("Domain override removed"); renderStoragePolicy(); } catch (error) { showError(error); }
+    }));
+    $$("[data-user-policy-remove]").forEach((button) => button.addEventListener("click", async () => {
+      if (!(await confirmDialog("Remove user override", "This user will fall back to their domain or organization storage policy.", "Remove override", true))) return;
+      try { await api(`storage/policies/user/${encodeURIComponent(button.dataset.userPolicyRemove)}`, { method: "DELETE" }); toast("User override removed"); renderStoragePolicy(); } catch (error) { showError(error); }
+    }));
+    $$("[data-domain-edit]").forEach((button) => button.addEventListener("click", () => {
+      const form = $("#domainStorageForm");
+      const select = form?.querySelector('[data-policy-field="domain"]');
+      if (!form || !select) return;
+      select.value = button.dataset.domainEdit;
+      const mode = form.querySelector('[data-policy-field="mode"]');
+      const emailQuota = form.querySelector('[data-policy-field="emailQuotaGB"]');
+      const storageQuota = form.querySelector('[data-policy-field="storageQuotaGB"]');
+      if (mode) mode.value = button.dataset.domainMode || "combined";
+      if (emailQuota) emailQuota.value = button.dataset.domainEmail || "";
+      if (storageQuota) {
+        storageQuota.value = button.dataset.domainStorage || "";
+        storageQuota.disabled = (mode?.value || "combined") !== "split";
+      }
+      select.scrollIntoView({ behavior: "smooth", block: "center" });
+    }));
+    $$("[data-user-edit]").forEach((button) => button.addEventListener("click", () => {
+      const form = $("#userStorageForm");
+      const email = form?.querySelector('[data-policy-field="email"]');
+      if (!form || !email) return;
+      email.value = button.dataset.userEdit;
+      const mode = form.querySelector('[data-policy-field="mode"]');
+      const emailQuota = form.querySelector('[data-policy-field="emailQuotaGB"]');
+      const storageQuota = form.querySelector('[data-policy-field="storageQuotaGB"]');
+      if (mode) mode.value = button.dataset.userMode || "combined";
+      if (emailQuota) emailQuota.value = button.dataset.userEmailQuota || "";
+      if (storageQuota) {
+        storageQuota.value = button.dataset.userStorage || "";
+        storageQuota.disabled = (mode?.value || "combined") !== "split";
+      }
+      email.scrollIntoView({ behavior: "smooth", block: "center" });
+    }));
+  } catch (error) { viewError(error); }
+}
+
+function readStoragePolicy(form) {
+  const field = (name) => form.querySelector(`[data-policy-field="${name}"]`);
+  return {
+    mode: field("mode")?.value || "combined",
+    emailQuotaBytes: quotaBytes(field("emailQuotaGB")?.value),
+    storageQuotaBytes: quotaBytes(field("storageQuotaGB")?.value)
+  };
+}
+
+/* ------------------------------------------------------------
+   Admin self password change
+------------------------------------------------------------ */
+function openChangePasswordModal() {
+  openModal({
+    title: "Change password",
+    subtitle: "Your admin password also protects your mailbox. Other admin and webmail sessions will be signed out.",
+    body: `<form id="adminPasswordForm">
+      <label class="field"><span>Current password</span><input id="adminCurrentPassword" type="password" autocomplete="current-password" required></label>
+      <label class="field" style="margin-top:10px"><span>New password</span><input id="adminNewPassword" type="password" autocomplete="new-password" required><small class="muted">Must satisfy the organization password policy.</small></label>
+      <label class="field" style="margin-top:10px"><span>Confirm new password</span><input id="adminConfirmPassword" type="password" autocomplete="new-password" required></label>
+    </form>`,
+    footer: `<button class="btn secondary" data-modal-close>Cancel</button><button class="btn primary" data-modal-submit="adminPasswordForm">${icon("key")}Change password</button>`
+  });
+}
+
+async function submitAdminPassword() {
+  const currentPassword = $("#adminCurrentPassword").value;
+  const newPassword = $("#adminNewPassword").value;
+  const confirmPassword = $("#adminConfirmPassword").value;
+  if (newPassword.length < 8) throw new Error("Use a password of at least 8 characters");
+  if (newPassword !== confirmPassword) throw new Error("The new passwords do not match");
+  const result = await api("account/password", { method: "POST", body: { currentPassword, newPassword } });
+  closeModal();
+  toast(`Password changed${result.revokedAdminSessions ? ` · ${result.revokedAdminSessions} other session(s) signed out` : ""}`);
+  await loadBootstrap();
+}
+
 /* Boot */
 (async function boot() {
   updateChrome();
+  if (new URLSearchParams(location.search).get("signedout") === "1") {
+    history.replaceState(null, "", location.pathname);
+    showLogin();
+    return;
+  }
   try {
     const session = await api("session");
     state.csrf = session.csrf || "";

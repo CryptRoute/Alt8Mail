@@ -194,7 +194,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 			// review can turn on "Restrict Junk release to administrators".
 			RetentionDays: 0, Quarantine: false, ExternalTag: true,
 		},
-		Sharing:   adminSharingPolicy{ExternalSharing: false, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
+		Sharing:   adminSharingPolicy{ExternalSharing: true, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
 		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: true},
 		Branding:  adminBrandingPolicy{ProductName: "Alt8Mail", PrimaryColor: "#0f6cbd", SupportEmail: "", LoginMessage: ""},
 	}

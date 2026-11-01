@@ -452,7 +452,7 @@ try {
   console.log("\n[9b] Calendar and directory");
   await page.click(".rail-btn[data-task='calendar']");
   await sleep(450);
-  equal(await page.eval("document.querySelectorAll('.cal-cell').length"), 42, "calendar month renders a full six-week grid");
+  equal(await page.eval("document.querySelectorAll('.cal-month-cell').length"), 42, "calendar month renders a full six-week grid");
   check(await page.eval("document.querySelectorAll('.agenda-event, .cal-empty').length > 0"), "agenda renders selected-day events");
   await page.screenshot(path.join(artifacts, "15-calendar.png"));
   await page.click(".rail-btn[data-task='people']");

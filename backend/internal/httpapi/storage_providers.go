@@ -77,6 +77,7 @@ func (s *Server) publicStorageProviders(ctx context.Context, user userRecord) ([
 		fileRows.Close()
 	}
 	providers := []map[string]any{}
+	internalUsage := s.storageUsageFor(ctx, user)
 	for _, provider := range s.storageProviderDefsFor(ctx, user.TenantID) {
 		account, hasAccount := accounts[provider.ID]
 		connected := false
@@ -89,7 +90,12 @@ func (s *Server) publicStorageProviders(ctx context.Context, user userRecord) ([
 			connected = true
 			accountEmail = user.Email
 			status = "synced"
-			limit = 100 * 1024 * 1024 * 1024
+			used = internalUsage.CabinetUsed
+			limit = internalUsage.StorageLimit
+			if internalUsage.Combined {
+				limit = internalUsage.MailLimit
+				used = internalUsage.UsedBytes
+			}
 		} else if provider.Kind == "s3" {
 			if hasAccount && account.Status == "connected" {
 				connected = true
@@ -111,12 +117,20 @@ func (s *Server) publicStorageProviders(ctx context.Context, user userRecord) ([
 				lastSync = account.LastSyncAt.UTC().Format(time.RFC3339)
 			}
 		}
-		providers = append(providers, map[string]any{
+		entry := map[string]any{
 			"id": provider.ID, "name": provider.Name, "kind": provider.Kind,
 			"connected": connected, "account": accountEmail, "usedBytes": used, "limitBytes": limit,
 			"color": provider.Color, "status": status, "lastSyncAt": lastSync,
 			"description": provider.Description, "configured": provider.Configured,
-		})
+		}
+		if provider.ID == "a8m" {
+			entry["policy"] = internalUsage.Policy
+			entry["combined"] = internalUsage.Combined
+			entry["mailUsedBytes"] = internalUsage.MailUsedBytes
+			entry["cabinetUsedBytes"] = internalUsage.CabinetUsed
+			entry["quota"] = storageQuotaPayload(internalUsage)
+		}
+		providers = append(providers, entry)
 	}
 	return providers, nil
 }

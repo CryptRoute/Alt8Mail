@@ -39,10 +39,10 @@ func TestVerifyDomainDNSMTASTS(t *testing.T) {
 	lookup := fakeDomainLookup{
 		txt: map[string][]string{
 			"_a8m-verification.example.test": {"a8m-verify=tok_123"},
-			"example.test":                        {"v=spf1 mx -all"},
+			"example.test":                   {"v=spf1 mx -all"},
 			"a8m._domainkey.example.test":    {"v=DKIM1; k=rsa; p=REALKEY"},
-			"_dmarc.example.test":                 {"v=DMARC1; p=reject"},
-			"_mta-sts.example.test":               {"v=STSv1; id=" + policy.ID()},
+			"_dmarc.example.test":            {"v=DMARC1; p=reject"},
+			"_mta-sts.example.test":          {"v=STSv1; id=" + policy.ID()},
 		},
 		mx: map[string][]*net.MX{
 			"example.test": {{Host: "mail.example.test."}},

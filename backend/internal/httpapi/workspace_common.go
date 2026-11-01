@@ -90,7 +90,8 @@ func (s *Server) directoryPeople(ctx context.Context, sess *sessionRecord, inclu
 	// organization directory policy. Auto-saved recipients must remain available
 	// for compose autocomplete and the People page.
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT id, email::text, name, company, title, phone, location, source
+		SELECT id, email::text, name, company, title, phone, location, source,
+		       address_book_id, birthday
 		FROM contacts WHERE user_id = $1 ORDER BY name, email
 	`, sess.User.ID)
 	if err != nil {
@@ -98,8 +99,10 @@ func (s *Server) directoryPeople(ctx context.Context, sess *sessionRecord, inclu
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, email, name, company, title, phone, location, source string
-		if rows.Scan(&id, &email, &name, &company, &title, &phone, &location, &source) == nil {
+		var id, email, name, company, title, phone, location, source, bookID string
+		var birthday *time.Time
+		if rows.Scan(&id, &email, &name, &company, &title, &phone, &location, &source,
+			&bookID, &birthday) == nil {
 			email = strings.ToLower(email)
 			if seen[email] {
 				continue
@@ -112,7 +115,13 @@ func (s *Server) directoryPeople(ctx context.Context, sess *sessionRecord, inclu
 				"id": id, "name": firstNonEmpty(name, email), "email": email, "role": "Contact", "company": company,
 				"team": "", "title": title, "phone": phone, "location": location, "reportsTo": "",
 				"initials": initialsForName(firstNonEmpty(name, email)), "color": colorForString(email),
-				"source": source,
+				"source": source, "addressBookId": firstNonEmpty(bookID, "default"),
+				"birthday": func() string {
+					if birthday == nil {
+						return ""
+					}
+					return birthday.Format("2006-01-02")
+				}(),
 			})
 		}
 	}

@@ -10,12 +10,13 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.16.0">
-<link rel="stylesheet" href="/features.css?v=0.16.0">
-<link rel="stylesheet" href="/workspace.css?v=0.16.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.16.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.16.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.16.0">
+<link rel="stylesheet" href="/styles.css?v=0.17.0">
+<link rel="stylesheet" href="/features.css?v=0.17.0">
+<link rel="stylesheet" href="/workspace.css?v=0.17.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.17.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.17.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.17.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.17.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -88,7 +89,16 @@
     <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 7h16M7 12h10M10 17h4"/></symbol>
     <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M15.2 12V9.8a3.8 3.8 0 0 1 7.2 1.8c0 4.7-4.7 8.9-10.4 8.9a8.5 8.5 0 1 1 6.6-3.1"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"/></symbol>
-    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M8.2 14.8A6 6 0 1 1 15.8 14.8c-.8.6-1.3 1.5-1.5 2.2h-4.6c-.2-.7-.7-1.6-1.5-2.2Z"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 11v5m-2.5-2.5h5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="i-th-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+<symbol id="i-thumbs" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="4" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="3" y="13" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="13" y="13" width="8" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+<symbol id="i-calendar-plus" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 3v4M16 3v4M3 10h18M12 13v6m-3-3h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1.5 1.5M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1.5-1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+<symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 3l3 3-3 3M4 9V7a4 4 0 0 1 4-4h12M7 21l-3-3 3-3m13-3v2a4 4 0 0 1-4 4H4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M8.2 14.8A6 6 0 1 1 15.8 14.8c-.8.6-1.3 1.5-1.5 2.2h-4.6c-.2-.7-.7-1.6-1.5-2.2Z"/></symbol>
   </defs>
 </svg>
 
@@ -612,6 +622,10 @@
               <button class="people-filter" data-people-filter="directory" type="button" role="tab" aria-selected="false">Directory</button>
               <button class="people-filter" data-people-filter="contacts" type="button" role="tab" aria-selected="false">My contacts</button>
             </div>
+            <div class="people-books">
+              <select id="peopleBookFilter" class="pref-select" aria-label="Address book"></select>
+              <button class="link-btn" id="newAddressBookBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New book</button>
+            </div>
           </div>
           <div class="people-scroll" id="peopleList"></div>
         </aside>
@@ -656,7 +670,7 @@
       </div>
 
       <div class="files-view" id="filesView" hidden>
-        <header class="workspace-page-head">
+        <header class="workspace-page-head cabinet-head">
           <div>
             <p class="eyebrow">Alt8Mail workspace</p>
             <div class="workspace-title-row">
@@ -666,25 +680,63 @@
           </div>
           <div class="workspace-head-actions">
             <label class="default-storage-pick"><span>Default</span><select id="defaultStorageSelect" class="pref-select" aria-label="Default storage"></select></label>
-            <button class="btn-secondary" id="manageStorageCredentialsBtn" type="button">
-              <svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>Credentials
+            <button class="btn-secondary cabinet-icon-action" id="manageStorageCredentialsBtn" type="button" title="Storage credentials" aria-label="Storage credentials">
+              <svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>
             </button>
             <button class="btn-secondary" id="connectStorageBtn" type="button">
               <svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg>Connect storage
             </button>
+            <button class="btn-secondary" id="newFolderBtn" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#i-folder-plus"/></svg>New folder
+            </button>
             <button class="btn-primary" id="uploadFileBtn" type="button">
-              <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Upload file
+              <svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload
             </button>
           </div>
         </header>
-        <div class="storage-strip" id="storageStrip"></div>
+        <div class="cabinet-context">
+          <nav class="cabinet-breadcrumb" id="fileBreadcrumb" aria-label="Folder path"></nav>
+          <div class="cabinet-tools">
+            <label class="cabinet-select"><span>Sort</span><select id="fileSortSelect" class="pref-select" aria-label="Sort files">
+              <option value="name">Name</option>
+              <option value="modified">Date modified</option>
+              <option value="size">Size</option>
+              <option value="type">Type</option>
+            </select></label>
+            <label class="cabinet-select"><span>Group</span><select id="fileGroupSelect" class="pref-select" aria-label="Group files">
+              <option value="none">None</option>
+              <option value="type">Type</option>
+              <option value="date">Date modified</option>
+              <option value="provider">Storage</option>
+            </select></label>
+            <div class="cabinet-view-switch" id="fileViewSwitch" role="group" aria-label="File layout">
+              <button type="button" data-file-view="list" title="List view" aria-label="List view"><svg class="icon" aria-hidden="true"><use href="#i-th-list"/></svg></button>
+              <button type="button" data-file-view="tiles" title="Tiles view" aria-label="Tiles view"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg></button>
+              <button type="button" data-file-view="thumbs" title="Thumbnails view" aria-label="Thumbnails view"><svg class="icon" aria-hidden="true"><use href="#i-thumbs"/></svg></button>
+            </div>
+            <button class="btn-secondary cabinet-sort-direction" id="fileSortDirection" type="button" title="Toggle sort direction" aria-label="Toggle sort direction"><svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg></button>
+          </div>
+        </div>
         <div class="files-body">
+          <aside class="cabinet-sidebar" aria-label="Cabinet folders">
+            <button class="cabinet-root-folder" data-folder-root data-folder-drop="" type="button">
+              <span class="cabinet-root-icon"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg></span>
+              <span><strong>All files</strong><small id="fileRootCount">Everything in your Cabinet</small></span>
+            </button>
+            <div class="cabinet-sidebar-head"><span>Folders</span><button class="link-btn" id="sidebarNewFolder" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New</button></div>
+            <div class="cabinet-folder-tree" id="cabinetFolderTree"></div>
+            <div class="cabinet-provider-list" id="cabinetProviderList" aria-label="Storage providers"></div>
+            <div class="cabinet-quota" id="cabinetQuota"></div>
+          </aside>
           <section class="files-list-pane">
             <div class="files-toolbar">
               <div class="files-filters" id="fileFilters" role="group" aria-label="Filter files"></div>
               <select id="fileProviderFilter" class="pref-select" aria-label="Filter by storage provider"></select>
             </div>
             <div class="file-scroll" id="fileList"></div>
+            <div class="cabinet-drop-overlay" id="cabinetDropOverlay" hidden>
+              <div><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><strong>Drop to upload</strong><span>Files go into <b id="cabinetDropTarget">All files</b></span></div>
+            </div>
           </section>
           <aside class="file-detail" id="fileDetail" aria-label="File details"></aside>
         </div>
@@ -730,49 +782,77 @@
       </div>
 
       <div class="calendar-view" id="calendarView" hidden>
-        <header class="calendar-head">
-          <div class="calendar-title">
-            <p class="eyebrow">Alt8Mail workspace</p>
-            <h1>Calendar</h1>
-          </div>
-          <div class="calendar-actions">
-            <button class="btn-secondary" id="calToday" type="button">Today</button>
-            <div class="cal-nav" aria-label="Month navigation">
-              <button class="icon-btn" id="calPrev" type="button" aria-label="Previous month" title="Previous month">
-                <svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg>
+        <header class="calendar-ribbon">
+          <div class="calendar-ribbon-main">
+            <div class="cal-new-group">
+              <button class="btn-primary cal-new-btn" id="calNew" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-calendar-plus"/></svg>New event
+                <svg class="icon cal-new-caret" aria-hidden="true"><use href="#i-chevron-down"/></svg>
               </button>
-              <button class="icon-btn" id="calNext" type="button" aria-label="Next month" title="Next month">
-                <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>
-              </button>
+              <div class="cal-new-menu" id="calNewMenu" hidden>
+                <button type="button" data-cal-new="event"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg><span><strong>Event</strong><small>Schedule a meeting or appointment</small></span></button>
+                <button type="button" data-cal-new="invite"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg><span><strong>Meeting invitation</strong><small>Invite people and track RSVPs</small></span></button>
+                <button type="button" data-cal-new="holiday"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span><strong>Holiday calendar</strong><small>Add public holidays for a country</small></span></button>
+              </div>
             </div>
-            <button class="btn-primary" id="calNew" type="button">
-              <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New event
-            </button>
+            <div class="cal-view-switch" id="calViewSwitch" role="group" aria-label="Calendar view">
+              <button type="button" data-cal-view="day">Day</button>
+              <button type="button" data-cal-view="workweek">Work week</button>
+              <button type="button" data-cal-view="week">Week</button>
+              <button type="button" data-cal-view="month" class="is-active">Month</button>
+              <button type="button" data-cal-view="split">Split view</button>
+              <button type="button" data-cal-view="agenda">Agenda</button>
+            </div>
+          </div>
+          <div class="calendar-ribbon-tools">
+            <button class="cal-tool-btn" id="calToday" type="button">Today</button>
+            <div class="cal-nav" aria-label="Calendar navigation">
+              <button class="icon-btn" id="calPrev" type="button" aria-label="Previous period" title="Previous period"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
+              <button class="icon-btn" id="calNext" type="button" aria-label="Next period" title="Next period"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+            </div>
+            <h2 class="cal-range" id="calRangeLabel">Month</h2>
+            <label class="cal-search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input id="calSearch" type="search" placeholder="Search events" autocomplete="off" aria-label="Search calendar events"></label>
+            <div class="cal-menu-wrap">
+              <button class="cal-tool-btn" id="calFilterBtn" type="button" aria-haspopup="true" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-filter"/></svg>Filter</button>
+              <div class="cal-filter-popover" id="calFilterMenu" hidden></div>
+            </div>
+            <button class="cal-tool-btn" id="calShareBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Share</button>
+            <button class="cal-tool-btn" id="calPrintBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>Print</button>
+            <button class="cal-tool-btn cal-add-calendar-btn" id="calAddCalendar" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add calendar</button>
           </div>
         </header>
         <div class="calendar-body">
-          <section class="cal-month" aria-label="Month view">
-            <div class="cal-month-head">
-              <h2 id="calMonthLabel">October 2026</h2>
-              <span id="calWeekLabel">Week 44</span>
+          <aside class="cal-sidebar" aria-label="Calendars">
+            <div class="cal-mini-head"><button class="icon-btn" id="calMiniPrev" type="button" aria-label="Previous month"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><strong id="calMiniLabel">Month</strong><button class="icon-btn" id="calMiniNext" type="button" aria-label="Next month"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button></div>
+            <div class="cal-mini" id="calMini"></div>
+            <button class="cal-sidebar-add" id="calSidebarAdd" type="button"><svg class="icon" aria-hidden="true"><use href="#i-calendar-plus"/></svg>Add calendar</button>
+            <div class="cal-list-wrap">
+              <div class="cal-list-head"><span>My calendars</span><button class="icon-btn" id="calListMore" type="button" aria-label="Calendar options"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button></div>
+              <div class="cal-list" id="calMyCalendars"></div>
+              <div class="cal-list-head" id="calSharedHead" hidden><span>Shared with me</span></div>
+              <div class="cal-list" id="calSharedCalendars"></div>
+              <div class="cal-list-head"><span>Other calendars</span></div>
+              <div class="cal-list" id="calOtherCalendars"></div>
             </div>
-            <div class="cal-weekdays" aria-hidden="true">
-              <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+            <div class="cal-sidebar-foot">
+              <button class="cal-foot-link" data-cal-shortcut="holidays" type="button"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Holidays</button>
+              <button class="cal-foot-link" data-cal-shortcut="birthdays" type="button"><svg class="icon" aria-hidden="true"><use href="#i-task"/></svg>Birthdays</button>
+              <p><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Calendar data stays within Alt8Mail.</p>
             </div>
-            <div class="cal-grid" id="calGrid" role="grid" aria-label="Month"></div>
-          </section>
-          <aside class="cal-agenda" aria-label="Agenda">
+          </aside>
+          <main class="cal-main" id="calMain" aria-label="Calendar"></main>
+          <aside class="cal-agenda" id="calAgendaPane" aria-label="Agenda">
             <div class="cal-agenda-head">
               <div>
                 <span class="eyebrow">Agenda</span>
-                <h2 id="agendaDate">Tuesday, October 27</h2>
+                <h2 id="agendaDate">Today</h2>
               </div>
-              <span class="cal-agenda-count" id="agendaCount">3 events</span>
+              <span class="cal-agenda-count" id="agendaCount">0 events</span>
             </div>
             <div class="cal-agenda-list" id="agendaList"></div>
             <div class="cal-agenda-foot">
               <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
-              Calendar data stays within Alt8Mail.
+              <span>Encrypted in transit · RSVP tracked</span>
             </div>
           </aside>
         </div>
@@ -1840,6 +1920,10 @@
         <div class="form-field grow"><label for="contactPhone">Phone</label><input id="contactPhone" type="tel" autocomplete="tel"></div>
         <div class="form-field grow"><label for="contactLocation">Location</label><input id="contactLocation" type="text"></div>
       </div>
+      <div class="form-row">
+        <label class="form-field grow"><span>Address book</span><select id="contactAddressBook"></select></label>
+        <label class="form-field"><span>Birthday <small>optional</small></span><input id="contactBirthday" type="date"></label>
+      </div>
       <div class="form-field"><label for="contactNotes">Notes</label><textarea id="contactNotes" rows="3" maxlength="4000"></textarea></div>
       <div class="dialog-actions">
         <button class="btn-secondary danger-btn" id="contactDelete" type="button" hidden>Delete contact</button>
@@ -1852,45 +1936,87 @@
   </div>
 </div>
 
-<div class="overlay" id="eventOverlay" hidden>
-  <div class="dialog event-dialog" role="dialog" aria-modal="true" aria-labelledby="eventDialogTitle">
-    <div class="dialog-head">
-      <h2 id="eventDialogTitle">New event</h2>
-      <button class="icon-btn" id="eventClose" type="button" aria-label="Close">
-        <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
-      </button>
+<div class="overlay event-overlay" id="eventOverlay" hidden>
+  <div class="event-modal" role="dialog" aria-modal="true" aria-labelledby="eventDialogTitle">
+    <header class="event-modal-head">
+      <div>
+        <p class="eyebrow" id="eventDialogEyebrow">New event</p>
+        <h2 id="eventDialogTitle">Schedule an event</h2>
+      </div>
+      <div class="event-head-actions">
+        <span class="event-save-state" id="eventSaveState"></span>
+        <button class="icon-btn" id="eventClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+    </header>
+    <div class="event-modal-body">
+      <div class="event-form-pane">
+        <div class="event-title-row">
+          <span class="event-title-mark" id="eventColorMark" aria-hidden="true"></span>
+          <input id="eventName" class="event-title-input" type="text" maxlength="240" placeholder="Add title" autocomplete="off" aria-label="Event title">
+        </div>
+        <div class="event-field event-attendee-field">
+          <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>
+          <div class="event-attendee-control" id="eventAttendeeControl">
+            <div class="event-attendee-chips" id="eventAttendeeChips"></div>
+            <input id="eventAttendeeInput" type="text" placeholder="Invite required attendees" autocomplete="off" role="combobox" aria-expanded="false" aria-label="Invite attendees">
+            <div class="event-attendee-suggest" id="eventAttendeeSuggest" hidden></div>
+          </div>
+        </div>
+        <div class="event-when">
+          <div class="event-field event-when-row">
+            <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>
+            <div class="event-when-grid">
+              <label class="event-inline-field"><span class="sr-only">Date</span><input id="eventDate" type="date"></label>
+              <label class="event-inline-field event-time-field" id="eventTimeFields"><span class="sr-only">Start time</span><input id="eventStart" type="time" value="10:00"><span>–</span><input id="eventEnd" type="time" value="10:30"></label>
+              <label class="event-inline-field event-timezone-field"><span class="sr-only">Time zone</span><select id="eventTimezone"></select></label>
+            </div>
+          </div>
+          <div class="event-when-options">
+            <label class="compose-check"><input type="checkbox" id="eventAllDay">All day</label>
+            <label class="event-inline-select"><span>Repeats</span><select id="eventRecurrence"><option value="">Does not repeat</option><option value="daily">Daily</option><option value="weekdays">Every weekday</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
+            <label class="event-inline-select event-until" id="eventUntilWrap" hidden><span>Ends</span><input id="eventUntil" type="date"></label>
+            <label class="event-inline-select"><span>Reminder</span><select id="eventReminder"><option value="0">None</option><option value="5">5 minutes before</option><option value="15" selected>15 minutes before</option><option value="30">30 minutes before</option><option value="60">1 hour before</option><option value="1440">1 day before</option></select></label>
+          </div>
+        </div>
+        <div class="event-field">
+          <svg class="icon" aria-hidden="true"><use href="#i-location"/></svg>
+          <input id="eventWhere" type="text" placeholder="Add location or room" autocomplete="off" aria-label="Location">
+        </div>
+        <div class="event-field">
+          <svg class="icon" aria-hidden="true"><use href="#i-video"/></svg>
+          <input id="eventMeetingUrl" type="url" placeholder="Add a meeting link (Teams, Zoom, Meet)" autocomplete="off" aria-label="Meeting link">
+        </div>
+        <div class="event-field event-select-field">
+          <span class="event-color-dot" id="eventCalendarDot" aria-hidden="true"></span>
+          <select id="eventCalendarSelect" aria-label="Calendar"></select>
+          <select id="eventColorSelect" class="event-color-select" aria-label="Event colour">
+            <option value="#0f6cbd">Blue</option><option value="#3d6b62">Teal</option><option value="#7a4a5c">Plum</option><option value="#8a5a2b">Amber</option><option value="#476b4f">Green</option><option value="#5b4a7e">Violet</option><option value="#a23b72">Magenta</option><option value="#34557a">Slate</option>
+          </select>
+          <select id="eventTransparency" aria-label="Show as"><option value="busy">Busy</option><option value="free">Free</option></select>
+        </div>
+        <div class="event-description-wrap">
+          <svg class="icon" aria-hidden="true"><use href="#i-compose"/></svg>
+          <textarea id="eventDescription" rows="5" maxlength="5000" placeholder="Add agenda, notes or dial-in details"></textarea>
+        </div>
+        <div class="event-attachments-block">
+          <div class="event-attachments-head"><span><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg>Attachments</span><button class="link-btn" id="eventAttachBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Attach from Cabinet</button></div>
+          <div class="event-attachments" id="eventAttachments"></div>
+          <div class="event-attachment-picker" id="eventAttachmentPicker" hidden></div>
+        </div>
+        <div class="event-rsvp" id="eventRsvp" hidden></div>
+      </div>
+      <aside class="event-preview-pane">
+        <div class="event-preview-head"><strong id="eventPreviewRange">Schedule preview</strong><span id="eventPreviewZone">UTC</span></div>
+        <div class="event-preview-grid" id="eventPreview"></div>
+        <div class="event-preview-note"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span id="eventPreviewNote">Times are shown in your calendar time zone.</span></div>
+      </aside>
     </div>
-    <div class="dialog-body">
-      <div class="form-field">
-        <label for="eventName">Title</label>
-        <input id="eventName" type="text" placeholder="Event title" autocomplete="off">
-      </div>
-      <div class="form-row">
-        <div class="form-field grow">
-          <label for="eventDate">Date</label>
-          <input id="eventDate" type="date" value="2026-10-27">
-        </div>
-        <div class="form-field">
-          <label for="eventStart">Start</label>
-          <input id="eventStart" type="time" value="10:00">
-        </div>
-        <div class="form-field">
-          <label for="eventEnd">End</label>
-          <input id="eventEnd" type="time" value="10:30">
-        </div>
-      </div>
-      <div class="form-field">
-        <label for="eventWhere">Location</label>
-        <input id="eventWhere" type="text" placeholder="Room or Teams" autocomplete="off">
-      </div>
-      <div class="dialog-actions">
-        <button class="btn-secondary danger-btn" id="eventDelete" type="button" hidden>Delete event</button>
-        <button class="btn-secondary" id="eventCancel" type="button">Cancel</button>
-        <button class="btn-primary" id="eventSave" type="button">
-          <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Add event
-        </button>
-      </div>
-    </div>
+    <footer class="event-modal-foot">
+      <button class="btn-secondary danger-btn" id="eventDelete" type="button" hidden>Delete</button>
+      <span class="event-foot-spacer"></span>
+      <button class="btn-secondary" id="eventCancel" type="button">Cancel</button>
+      <button class="btn-primary" id="eventSave" type="button"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save event</button>
+    </footer>
   </div>
 </div>
 
@@ -2167,6 +2293,7 @@
         <label class="form-field"><span>Link expires</span><select id="shareExpiry"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option><option value="90">90 days</option></select></label>
       </div>
       <label class="form-field"><span>Recipient email <small class="muted">(required for domain-restricted sharing)</small></span><input id="shareRecipient" type="email" placeholder="partner@example.com"></label>
+      <div class="share-permissions" id="sharePermissions"></div>
       <div class="share-result" id="shareResult" hidden>
         <label class="form-field grow"><span>External link</span><input id="shareUrl" type="text" readonly></label>
         <button class="btn-primary" id="copyShareLink" type="button">Copy link</button>
@@ -2220,6 +2347,98 @@
     <p id="passkeyPromptText">Windows Hello is asking for your fingerprint, face or device PIN.</p>
     <div class="passkey-prompt-status" id="passkeyPromptStatus"><span class="passkey-spinner" aria-hidden="true"></span>Waiting for your device…</div>
     <button class="btn-secondary" id="passkeyCancel" type="button">Cancel</button>
+  </div>
+</div>
+
+<div class="overlay" id="addressBookOverlay" hidden>
+  <div class="dialog folder-dialog" role="dialog" aria-modal="true" aria-labelledby="addressBookTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></span>
+        <div><h2 id="addressBookTitle">New address book</h2><p>Use books to separate personal, team and vendor contacts.</p></div>
+      </div>
+      <button class="icon-btn" id="addressBookClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <label class="form-field"><span>Address book name</span><input id="addressBookName" maxlength="80" placeholder="e.g. Vendors"></label>
+      <label class="form-field"><span>Colour</span><input id="addressBookColor" type="color" value="#3d6b62"></label>
+      <div class="dialog-actions">
+        <button class="btn-secondary" id="addressBookCancel" type="button">Cancel</button>
+        <button class="btn-primary" id="addressBookSave" type="button">Create book</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="context-menu file-context-menu" id="fileContextMenu" hidden role="menu"></div>
+
+<div class="overlay" id="folderOverlay" hidden>
+  <div class="dialog folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folderDialogTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-folder-plus"/></svg></span>
+        <div><h2 id="folderDialogTitle">New folder</h2><p id="folderDialogSubtitle">Keep Cabinet files organised for your team.</p></div>
+      </div>
+      <button class="icon-btn" id="folderClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <label class="form-field"><span>Folder name</span><input id="folderName" maxlength="80" placeholder="e.g. Contracts"></label>
+      <div class="form-row">
+        <label class="form-field grow"><span>Parent folder</span><select id="folderParent"></select></label>
+        <label class="form-field"><span>Colour</span><input id="folderColor" type="color" value="#0f6cbd"></label>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-secondary" id="folderCancel" type="button">Cancel</button>
+        <button class="btn-primary" id="folderSave" type="button">Create folder</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="fileActionOverlay" hidden>
+  <div class="dialog file-action-dialog" role="dialog" aria-modal="true" aria-labelledby="fileActionTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon" id="fileActionIcon"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></span>
+        <div><h2 id="fileActionTitle">File</h2><p id="fileActionSubtitle"></p></div>
+      </div>
+      <button class="icon-btn" id="fileActionClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body" id="fileActionBody"></div>
+  </div>
+</div>
+
+<div class="overlay calendar-add-overlay" id="calendarAddOverlay" hidden>
+  <div class="calendar-add-dialog" role="dialog" aria-modal="true" aria-labelledby="calendarAddTitle">
+    <header class="calendar-add-head"><h2 id="calendarAddTitle">Add calendar</h2><button class="icon-btn" id="calendarAddClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <div class="calendar-add-layout">
+      <nav class="calendar-add-nav" id="calendarAddNav" aria-label="Add calendar options">
+        <button class="is-active" data-cal-add-tab="create" type="button"><svg class="icon" aria-hidden="true"><use href="#i-calendar-plus"/></svg>Create blank calendar</button>
+        <button data-cal-add-tab="edit" type="button"><svg class="icon" aria-hidden="true"><use href="#i-compose"/></svg>Edit my calendars</button>
+        <button data-cal-add-tab="subscribe" type="button"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Subscribe from web</button>
+        <button data-cal-add-tab="upload" type="button"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload from file</button>
+        <button data-cal-add-tab="holidays" type="button"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Holidays</button>
+        <button data-cal-add-tab="birthdays" type="button"><svg class="icon" aria-hidden="true"><use href="#i-task"/></svg>Birthdays</button>
+      </nav>
+      <section class="calendar-add-panel" id="calendarAddPanel"></section>
+    </div>
+  </div>
+</div>
+
+<div class="overlay calendar-share-overlay" id="calendarShareOverlay" hidden>
+  <div class="dialog calendar-share-dialog" role="dialog" aria-modal="true" aria-labelledby="calendarShareTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap">
+        <span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></span>
+        <div><h2 id="calendarShareTitle">Share calendar</h2><p id="calendarShareSubtitle">Work together and publish a read-only iCalendar feed.</p></div>
+      </div>
+      <button class="icon-btn" id="calendarShareClose" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="calendar-share-tabs" role="tablist">
+      <button class="is-active" data-cal-share-tab="people" type="button" role="tab">People &amp; permissions</button>
+      <button data-cal-share-tab="publish" type="button" role="tab">Publish to Google / Apple</button>
+    </div>
+    <div class="dialog-body" id="calendarShareBody"></div>
   </div>
 </div>
 
@@ -2360,7 +2579,7 @@
           <label><input type="checkbox" id="signatureDefaultForwardFlag"> Forwards</label>
         </div>
       </div>
-      <div class="signature-mode-row"><span>Format</span><div class="onboarding-segments compact" role="group" aria-label="Signature format"><button type="button" data-signature-mode="rich">Rich HTML</button><button type="button" data-signature-mode="plain">Plain text</button></div></div>
+      <div class="signature-mode-row"><span>Format</span><button type="button" class="editor-light-btn" id="signatureLightBtn" title="Light writing area" aria-label="Toggle light writing area" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-bulb"/></svg></button><div class="onboarding-segments compact" role="group" aria-label="Signature format"><button type="button" data-signature-mode="rich">Rich HTML</button><button type="button" data-signature-mode="plain">Plain text</button></div></div>
       <div class="signature-rich-wrap" id="signatureRichWrap">
         <div class="signature-editor-toolbar" role="toolbar" aria-label="Signature formatting">
           <button type="button" data-signature-cmd="undo" title="Undo">↶</button><button type="button" data-signature-cmd="redo" title="Redo">↷</button>
@@ -2506,6 +2725,6 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
-<script type="module" src="/app.js?v=0.16.0"></script>
+<script type="module" src="/app.js?v=0.17.0"></script>
 </body>
 </html>

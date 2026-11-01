@@ -113,7 +113,7 @@ input[type=file]{max-width:100%;color:var(--muted)}
 </style>
 </head>
 <body><main class="card">
-<header class="head"><span class="mark">M</span><div><b>{{.TenantName}}</b><small>Secure file share</small></div></header>
+<header class="head"><span class="mark">A8</span><div><b>{{.TenantName}}</b><small>Secure file share</small></div></header>
 <div class="body">
 <span class="eyebrow">Shared file</span>
 <h1>{{.Name}}</h1>
@@ -134,6 +134,12 @@ func (s *Server) publicSharePage(w http.ResponseWriter, r *http.Request) {
 		"Name": share.Name, "TenantName": share.TenantName, "TenantColor": share.TenantColor,
 		"SizeLabel": formatBytes(share.SizeBytes), "ExpiresLabel": share.ExpiresAt.UTC().Format("2 Jan 2006"),
 		"Recipient": share.Recipient, "OwnerName": share.OwnerName,
+		"AccessLabel": func() string {
+			if share.Access == "edit" {
+				return "Permission: can edit"
+			}
+			return "Permission: can view"
+		}(),
 		"Image": strings.HasPrefix(share.MIME, "image/"), "PDF": share.MIME == "application/pdf",
 		"Type":       strings.ToUpper(safeFileName(strings.TrimPrefix(filepath.Ext(share.Name), "."))),
 		"ContentURL": "/api/public/shares/" + r.PathValue("token") + "/content",

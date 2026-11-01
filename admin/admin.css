@@ -611,3 +611,21 @@ input[type="checkbox"] { accent-color: var(--brand); width: 14px; height: 14px; 
   .audit-detail { max-width: 160px; }
   .quick-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- storage policy ---------- */
+.storage-policy-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(290px, .85fr); gap: 14px; }
+.storage-policy-explainer .card-pad { display: flex; flex-direction: column; gap: 14px; }
+.storage-policy-steps { list-style: none; counter-reset: policy; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.storage-policy-steps li { counter-increment: policy; display: flex; flex-direction: column; gap: 1px; padding: 9px 10px 9px 34px; position: relative; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.storage-policy-steps li::before { content: counter(policy); position: absolute; left: 9px; top: 10px; width: 17px; height: 17px; display: grid; place-items: center; border-radius: 5px; background: var(--brand-soft, rgba(15,108,189,.12)); color: var(--brand); font-size: 9px; font-weight: 700; }
+.storage-policy-steps b { font-size: 11px; }
+.storage-policy-steps span { color: var(--muted); font-size: 10px; }
+.storage-policy-note { display: flex; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+.storage-policy-note svg { flex: none; width: 14px; height: 14px; color: var(--brand); margin-top: 1px; }
+.storage-policy-form { padding: 12px; margin-bottom: 14px; border: 1px dashed var(--line); border-radius: 9px; background: var(--surface-2); }
+.storage-policy-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+.storage-policy-actions .muted { margin-right: auto; }
+.row-actions { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
+@media (max-width: 980px) {
+  .storage-policy-grid { grid-template-columns: 1fr; }
+}

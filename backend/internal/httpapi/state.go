@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -117,9 +118,20 @@ func stateMap(state map[string]any, key string) map[string]any {
 }
 
 func stateSlice(state map[string]any, key string) []any {
-	value, _ := state[key].([]any)
-	if value == nil {
-		value = []any{}
+	if value, ok := state[key].([]any); ok {
+		return value
+	}
+	raw := state[key]
+	if raw == nil {
+		return []any{}
+	}
+	rv := reflect.ValueOf(raw)
+	if rv.Kind() != reflect.Slice {
+		return []any{}
+	}
+	value := make([]any, 0, rv.Len())
+	for index := 0; index < rv.Len(); index++ {
+		value = append(value, rv.Index(index).Interface())
 	}
 	return value
 }

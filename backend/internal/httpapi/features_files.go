@@ -27,12 +27,15 @@ type fileCreateBody struct {
 	SizeBytes    float64 `json:"sizeBytes"`
 	MIME         string  `json:"mime"`
 	Path         string  `json:"path"`
+	FolderID     string  `json:"folderId"`
 	Description  string  `json:"description"`
 }
 
 type filePatchBody struct {
 	Starred     *bool   `json:"starred"`
 	Description *string `json:"description"`
+	Name        *string `json:"name"`
+	FolderID    *string `json:"folderId"`
 }
 
 type fileShareBody struct {
@@ -48,13 +51,13 @@ type attachmentUploadBody struct {
 }
 
 type fileRecord struct {
-	ID, ProviderID, ExternalID, Name, MIME, Path, Description, StorageKey, AttachmentID, ExternalURL string
-	Metadata                                                                                         []byte
-	SizeBytes                                                                                        int64
-	Starred, Locked, Previewable                                                                     bool
-	Version                                                                                          int
-	Checksum                                                                                         string
-	CreatedAt, UpdatedAt                                                                             time.Time
+	ID, ProviderID, ExternalID, Name, MIME, Path, FolderID, Description, StorageKey, AttachmentID, ExternalURL string
+	Metadata                                                                                                   []byte
+	SizeBytes                                                                                                  int64
+	Starred, Locked, Previewable                                                                               bool
+	Version                                                                                                    int
+	Checksum                                                                                                   string
+	CreatedAt, UpdatedAt                                                                                       time.Time
 }
 
 func (s *Server) getStorage(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +69,7 @@ func (s *Server) getStorage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"providers": providers, "defaultProvider": s.defaultStorageProvider(r.Context(), sess.User.ID),
+		"quota": storageQuotaPayload(s.storageUsageFor(r.Context(), sess.User)),
 	})
 }
 
@@ -171,12 +175,16 @@ func (s *Server) getFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	providers, _ := s.publicStorageProviders(r.Context(), sess.User)
-	writeJSON(w, http.StatusOK, map[string]any{"count": len(files), "files": files, "providers": providers})
+	folders, _ := s.loadFileFolders(r.Context(), sess.User.ID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count": len(files), "files": files, "providers": providers, "folders": folders,
+		"quota": storageQuotaPayload(s.storageUsageFor(r.Context(), sess.User)),
+	})
 }
 
 func (s *Server) loadFiles(ctx context.Context, user userRecord, providerID string) ([]map[string]any, error) {
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT f.id, f.provider_id, f.external_id, f.name, f.mime, f.path, f.description,
+		SELECT f.id, f.provider_id, f.external_id, f.name, f.mime, f.path, COALESCE(f.folder_id,''), f.description,
 		       f.size_bytes, f.storage_key, COALESCE(f.attachment_id,''), f.external_url,
 		       f.starred, f.locked, f.version, f.previewable, f.checksum, f.metadata,
 		       f.created_at, f.updated_at,
@@ -197,7 +205,7 @@ func (s *Server) loadFiles(ctx context.Context, user userRecord, providerID stri
 		var file fileRecord
 		var sharedRaw []byte
 		if err := rows.Scan(&file.ID, &file.ProviderID, &file.ExternalID, &file.Name, &file.MIME,
-			&file.Path, &file.Description, &file.SizeBytes, &file.StorageKey, &file.AttachmentID,
+			&file.Path, &file.FolderID, &file.Description, &file.SizeBytes, &file.StorageKey, &file.AttachmentID,
 			&file.ExternalURL, &file.Starred, &file.Locked, &file.Version, &file.Previewable,
 			&file.Checksum, &file.Metadata, &file.CreatedAt, &file.UpdatedAt, &sharedRaw); err != nil {
 			continue
@@ -215,7 +223,7 @@ func (s *Server) publicFile(file fileRecord, user userRecord, sharedRaw []byte) 
 	return map[string]any{
 		"id": file.ID, "name": file.Name, "type": attachmentBadgeType(file.MIME, file.Name),
 		"mime": file.MIME, "size": formatBytes(file.SizeBytes), "sizeBytes": file.SizeBytes,
-		"providerId": file.ProviderID, "path": firstNonEmpty(file.Path, "Files"),
+		"providerId": file.ProviderID, "path": firstNonEmpty(file.Path, "Files"), "folderId": file.FolderID,
 		"owner": owner, "modifiedAt": file.UpdatedAt.UTC().Format(time.RFC3339),
 		"createdAt": file.CreatedAt.UTC().Format(time.RFC3339), "starred": file.Starred,
 		"sharedWith": shared, "locked": file.Locked, "version": fmt.Sprint(file.Version),
@@ -277,12 +285,27 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	if description == "" {
 		description = "Uploaded from the webmail compose window."
 	}
+	folderID := strings.TrimSpace(body.FolderID)
+	folderPath, _, folderErr := s.folderPathFor(r.Context(), sess.User.ID, folderID)
+	if folderErr != nil {
+		writeError(w, http.StatusBadRequest, "FILE_FOLDER", folderErr.Error())
+		return
+	}
 	path := body.Path
+	if folderPath != "" {
+		path = folderPath
+	}
 	if path == "" {
 		if provider.Kind == "internal" {
-			path = "Uploads"
+			path = "Files"
 		} else {
 			path = provider.Name
+		}
+	}
+	if provider.Kind == "internal" {
+		if err := s.enforceStorageQuota(r.Context(), sess.User, int64(len(data))); err != nil {
+			writeError(w, http.StatusInsufficientStorage, "STORAGE_QUOTA", err.Error())
+			return
 		}
 	}
 	id := newID("file")
@@ -313,11 +336,11 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	}
 	previewable := (mime == "application/pdf" || strings.HasPrefix(mime, "image/")) && mime != "image/svg+xml"
 	_, err = s.store.DB.Exec(r.Context(), `
-		INSERT INTO files (id, tenant_id, user_id, provider_id, external_id, name, mime, path, description,
+		INSERT INTO files (id, tenant_id, user_id, provider_id, external_id, name, mime, path, folder_id, description,
 		                   size_bytes, storage_key, attachment_id, external_url, previewable, metadata)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10,$11,$12,$13,$14,$15,$16)
 	`, id, sess.User.TenantID, sess.User.ID, providerID, externalID, name, mime, truncate(path, 160),
-		truncate(description, 500), len(data), storageKey, body.AttachmentID, externalURL, previewable, `{}`)
+		folderID, truncate(description, 500), len(data), storageKey, body.AttachmentID, externalURL, previewable, `{}`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "FILE", "Could not save the file record")
 		return
@@ -343,6 +366,31 @@ func (s *Server) patchFile(w http.ResponseWriter, r *http.Request) {
 	if body.Description != nil {
 		updates = append(updates, fmt.Sprintf("description=$%d", len(args)+1))
 		args = append(args, truncate(*body.Description, 500))
+	}
+	if body.Name != nil {
+		name := safeFileName(*body.Name)
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "FILE_NAME", "Give the file a name")
+			return
+		}
+		updates = append(updates, fmt.Sprintf("name=$%d", len(args)+1))
+		args = append(args, name)
+	}
+	if body.FolderID != nil {
+		folderID := strings.TrimSpace(*body.FolderID)
+		folderPath, _, err := s.folderPathFor(r.Context(), sess.User.ID, folderID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "FILE_FOLDER", err.Error())
+			return
+		}
+		path := folderPath
+		if path == "" {
+			path = "Files"
+		}
+		updates = append(updates, fmt.Sprintf("folder_id=NULLIF($%d,'')", len(args)+1))
+		args = append(args, folderID)
+		updates = append(updates, fmt.Sprintf("path=$%d", len(args)+1))
+		args = append(args, truncate(path, 160))
 	}
 	if len(updates) == 0 {
 		file, _ := s.loadFile(r.Context(), sess.User, id)
@@ -416,12 +464,13 @@ func (s *Server) shareFile(w http.ResponseWriter, r *http.Request) {
 		expiresDays = 90
 	}
 	token := randomToken(32)
+	shareID := newID("share")
 	expiresAt := time.Now().Add(time.Duration(expiresDays) * 24 * time.Hour).UTC()
 	result, err := s.store.DB.Exec(r.Context(), `
 		INSERT INTO file_shares (id, file_id, tenant_id, created_by, token_hash, access, expires_at, recipient_email, allowed_domain)
 		SELECT $1, f.id, f.tenant_id, f.user_id, $3, $4, $5, $6, $7
 		FROM files f WHERE f.id=$2 AND f.user_id=$8
-	`, newID("share"), id, hashShareToken(token), access, expiresAt, recipient, allowedDomain, sess.User.ID)
+	`, shareID, id, hashShareToken(token), access, expiresAt, recipient, allowedDomain, sess.User.ID)
 	if err != nil || result.RowsAffected() == 0 {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "File not found")
 		return
@@ -429,7 +478,7 @@ func (s *Server) shareFile(w http.ResponseWriter, r *http.Request) {
 	s.recordWorkspaceAudit(r.Context(), sess, "file.shared", id, fmt.Sprintf("External %s link · expires in %d days", access, expiresDays))
 	sharesCount, _ := s.fileShareCount(r.Context(), id)
 	share := map[string]any{
-		"url":    strings.TrimRight(s.cfg.PublicURL, "/") + "/files/s/" + token,
+		"id": shareID, "url": strings.TrimRight(s.cfg.PublicURL, "/") + "/files/s/" + token,
 		"access": access, "expiresAt": expiresAt.Format(time.RFC3339), "expiresDays": expiresDays,
 		"recipientEmail": recipient, "sharedWith": sharesCount,
 	}
@@ -470,7 +519,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) loadFile(ctx context.Context, user userRecord, id string) (map[string]any, error) {
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT f.id, f.provider_id, f.external_id, f.name, f.mime, f.path, f.description,
+		SELECT f.id, f.provider_id, f.external_id, f.name, f.mime, f.path, COALESCE(f.folder_id,''), f.description,
 		       f.size_bytes, f.storage_key, COALESCE(f.attachment_id,''), f.external_url,
 		       f.starred, f.locked, f.version, f.previewable, f.checksum, f.metadata,
 		       f.created_at, f.updated_at, '[]'::jsonb
@@ -486,7 +535,7 @@ func (s *Server) loadFile(ctx context.Context, user userRecord, id string) (map[
 	var file fileRecord
 	var sharedRaw []byte
 	if err := rows.Scan(&file.ID, &file.ProviderID, &file.ExternalID, &file.Name, &file.MIME, &file.Path,
-		&file.Description, &file.SizeBytes, &file.StorageKey, &file.AttachmentID, &file.ExternalURL,
+		&file.FolderID, &file.Description, &file.SizeBytes, &file.StorageKey, &file.AttachmentID, &file.ExternalURL,
 		&file.Starred, &file.Locked, &file.Version, &file.Previewable, &file.Checksum, &file.Metadata,
 		&file.CreatedAt, &file.UpdatedAt, &sharedRaw); err != nil {
 		return nil, err
