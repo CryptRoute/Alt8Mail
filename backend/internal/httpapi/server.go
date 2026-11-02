@@ -53,6 +53,8 @@ type Server struct {
 	activeImports   map[string]bool
 	webAuthn        *webauthn.WebAuthn
 	realtime        *realtimeHub
+	avatarMu        sync.Mutex
+	avatarCache     map[string]senderAvatarCacheEntry
 }
 
 type Options struct {
@@ -78,6 +80,7 @@ func New(opts Options) *Server {
 		activeImports:   map[string]bool{},
 		adminLimit:      newLoginLimiter(opts.Config.AdminRateLimitMax, opts.Config.AdminRateWindow),
 		realtime:        newRealtimeHub(),
+		avatarCache:     map[string]senderAvatarCacheEntry{},
 	}
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          opts.Config.WebAuthnRPID,
@@ -229,6 +232,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/attachments", s.requireUser(s.uploadAttachment))
 	mux.HandleFunc("GET /api/attachments/{id}/content", s.requireUser(s.attachmentContent))
 	mux.HandleFunc("GET /api/mail/image", s.requireUser(s.mailRemoteImage))
+	mux.HandleFunc("GET /api/mail/avatar", s.requireUser(s.mailSenderAvatar))
 	mux.HandleFunc("GET /api/profile", s.requireUser(s.getProfile))
 	mux.HandleFunc("PATCH /api/profile", s.requireUser(s.updateProfile))
 	mux.HandleFunc("GET /api/security/app-passwords", s.requireUser(s.listAppPasswords))

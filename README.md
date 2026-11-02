@@ -10,8 +10,9 @@ mailbox state, threaded conversations, indexed search, server-backed drafts,
 Outlook-style message actions with reply/forward activity, optimistic queued
 deletes, undo send and scheduled send, Sieve rules and automatic replies, sender trust,
 two-factor sign-in with passkeys, enterprise Tasks and Files workspaces,
-PDF/image attachment preview, outbound caps, live quota, an audit log, PWA
-support and a responsive mobile layout. The Go build adds a separate
+PDF/image attachment preview with a multi-file pager, BIMI/favicon sender
+icons, outbound caps, live quota, an audit log, PWA support and a responsive
+mobile layout. The Go build adds a separate
 customer/system administration console for tenants, users, groups, org units,
 custom RBAC roles, domains, policy, audit and system administrators, plus a
 separate root-level **System Control** plane for the host and mail stack.
@@ -68,6 +69,10 @@ Dutch, Italian and Arabic catalogs ship in this release; additional languages
 can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
+
+The **0.6.6** release adds complete paragraph alignment to the compose editor. The toolbar now exposes Left, Center, Right and Justify with active-state feedback, and Ctrl+L, Ctrl+E, Ctrl+R and Ctrl+J align the current paragraph while focus is inside the rich-text editor. Alignment is retained by the client and server HTML sanitizers when a message is sent.
+
+The same release bundles the recent webmail upgrade set: DMARC-gated BIMI logos with authenticated favicon fallback, previous/next paging for multi-attachment previews, AI reply attachment context for PDF/Word/Excel/CSV/images with a 100 MB selection budget, a moving writing indicator while the AI provider works, automatic-signature restoration below AI-generated reply text and above the quote, attachment selection inside the regular AI writing assistant, Ctrl+Z/Ctrl+Y across compose and signature editors, and the revised **See Alt8Mail policy** retention label.
 
 The **0.6.5** patch matches Outlook’s read/unread treatment in the conversation list. Read senders and subjects now use regular weight, while unread conversations stay bold; opening or marking a message read removes the bold styling immediately.
 
@@ -296,10 +301,21 @@ What is live:
   writing panel (8 styles, 3 lengths, creativity control, 36 languages) and the
   reading pane gains a split **AI** dropdown offering **Summarise this email**
   (recent conversation) and **Translate Email** (the user's language), plus a
-  **Reply with AI** action that opens a prefilled compose window. Reader AI is
-  strictly manual: opening or hovering a message never generates a summary.
-  Provider endpoint, model, key and generation parameters are managed in the
-  admin console; keys are AES-GCM sealed and cached results are tenant-scoped.
+  **Reply with AI** action that opens a prefilled compose window. Reply and
+  compose assistance can use PDF, Word, Excel and image attachments from the
+  conversation; the user explicitly selects up to 100 MB of files, PDF/DOCX/XLSX
+  text is extracted with size limits, and images are sent visually only when the
+  configured model supports vision. An animated writing card covers the editor
+  while the provider is working, and Reply with AI restores the automatic
+  signature below the generated text and above the quoted conversation. Reader
+  AI is strictly manual: opening or hovering a message never generates a
+  summary. Provider endpoint, model, key and generation parameters are managed
+  in the admin console; keys are AES-GCM sealed and cached results are
+  tenant-scoped.
+- Sender avatars resolve `default._bimi` records for DMARC-enforced domains,
+  proxy the published logo through the public-IP-only image fetcher, and fall
+  back to the domain favicon. The endpoint is authenticated and cached per
+  domain; messages fall back to the existing initials avatar.
 - A branded, animated envelope boot splash covers session restoration on every
   reload so the login form never flashes before an existing session resolves.
   After an interactive sign-in, "Opening your workspace" remains visible for

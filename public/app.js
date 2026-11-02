@@ -15,10 +15,34 @@ const uid = (prefix) => `${prefix}_${(crypto.randomUUID ? crypto.randomUUID() : 
 const clone = (value) => structuredClone(value);
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const avatarFailures = new Set();
+const normalizedEmailDomain = (value) => normalizeEmail(value).split("@")[1] || "";
+const senderAvatarSource = (person) => {
+  const email = normalizeEmail(person?.email);
+  const domain = normalizedEmailDomain(email);
+  if (!email || !domain || !domain.includes(".") || avatarFailures.has(domain)) return "";
+  const ownDomain = normalizedEmailDomain(state?.user?.email);
+  if (ownDomain && domain === ownDomain) return "";
+  return `/api/mail/avatar?address=${encodeURIComponent(email)}`;
+};
 const avatar = (person, size = "md") => {
   const p = person || { initials: "?", color: "#64748b" };
-  return `<span class="avatar avatar-${size}" style="--av:${esc(p.color || "#64748b")}" aria-hidden="true">${esc(p.initials || "?")}</span>`;
+  const photo = senderAvatarSource(p);
+  return `<span class="avatar avatar-${size}" style="--av:${esc(p.color || "#64748b")}" aria-hidden="true">${photo ? `<img class="avatar-photo" src="${esc(photo)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-avatar-domain="${esc(normalizedEmailDomain(p.email))}">` : ""}<span class="avatar-initials">${esc(p.initials || "?")}</span></span>`;
 };
+document.addEventListener("load", (event) => {
+  const image = event.target;
+  if (image instanceof HTMLImageElement && image.matches("img[data-avatar-domain]")) image.closest(".avatar")?.classList.add("has-photo");
+}, true);
+document.addEventListener("error", (event) => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement) || !image.matches("img[data-avatar-domain]")) return;
+  const domain = image.getAttribute("data-avatar-domain") || "";
+  if (domain) avatarFailures.add(domain);
+  const holder = image.closest(".avatar");
+  image.remove();
+  holder?.classList.remove("has-photo");
+}, true);
 
 const initialsFrom = (value) => {
   const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
@@ -386,6 +410,42 @@ function sanitizeEditorHTML(raw) {
     }
   });
   return template.innerHTML;
+}
+
+function handleEditorHistoryShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return false;
+  const key = String(event.key || "").toLowerCase();
+  const redo = key === "y" || (key === "z" && event.shiftKey);
+  const undo = key === "z" && !event.shiftKey;
+  if (!undo && !redo) return false;
+  const editor = event.target?.closest?.('[data-compose-editor], .compose-text, #signatureEditorBody, #signatureEditorPlain, #identityEditorSignature, #identityEditorSignaturePlain');
+  if (!editor) return false;
+  event.preventDefault();
+  editor.focus();
+  try { document.execCommand(redo ? "redo" : "undo", false); } catch {}
+  editor.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;
+}
+
+const COMPOSE_ALIGNMENT_SHORTCUTS = {
+  l: "justifyLeft",
+  e: "justifyCenter",
+  r: "justifyRight",
+  j: "justifyFull"
+};
+
+function handleComposeAlignmentShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return false;
+  const command = COMPOSE_ALIGNMENT_SHORTCUTS[String(event.key || "").toLowerCase()];
+  if (!command) return false;
+  const editor = event.target?.closest?.("[data-compose-editor]");
+  if (!editor) return false;
+  const section = editor.closest(".compose[data-compose-id]");
+  const session = sessionById(section?.getAttribute("data-compose-id"));
+  if (!session) return false;
+  event.preventDefault();
+  applyComposeEditorCommand(session, command);
+  return true;
 }
 
 function editorPlainText(html) {
@@ -1260,6 +1320,21 @@ const previewToolbar = document.getElementById("previewToolbar");
 const previewZoomLabel = document.getElementById("previewZoomLabel");
 const previewDimensions = document.getElementById("previewDimensions");
 const previewFootNote = document.getElementById("previewFootNote");
+const previewNav = document.getElementById("previewNav");
+const previewPrev = document.getElementById("previewPrev");
+const previewNext = document.getElementById("previewNext");
+const previewCounter = document.getElementById("previewCounter");
+const aiAttachmentOverlay = document.getElementById("aiAttachmentOverlay");
+const aiAttachmentList = document.getElementById("aiAttachmentList");
+const aiAttachmentSubject = document.getElementById("aiAttachmentSubject");
+const aiAttachmentMessage = document.getElementById("aiAttachmentMessage");
+const aiAttachSelectAll = document.getElementById("aiAttachSelectAll");
+const aiAttachmentCount = document.getElementById("aiAttachmentCount");
+const aiAttachmentBudgetLabel = document.getElementById("aiAttachmentBudgetLabel");
+const aiAttachmentMeter = document.getElementById("aiAttachmentMeter");
+const aiAttachmentBar = document.getElementById("aiAttachmentBar");
+const aiAttachmentHint = document.getElementById("aiAttachmentHint");
+const aiAttachmentConfirm = document.getElementById("aiAttachmentConfirm");
 
 const isMobile = () => window.matchMedia("(max-width: 719px)").matches;
 const isDrawer = () => window.matchMedia("(max-width: 1119px)").matches;
@@ -2158,7 +2233,9 @@ function showLogin() {
   composeSessions.slice().forEach((session) => removeComposeSessionUi(session.id));
   composeSessions = [];
   state.user = null;
+  avatarFailures.clear();
   threadIdAliases.clear();
+  if (aiAttachmentPicker) settleAiAttachmentPicker([]);
   state.pendingMailRemoval.clear();
   state.notifications = [];
   state.dismissedNotifications = new Set();
@@ -5619,6 +5696,25 @@ function closePreview() {
   previewDownload.removeAttribute("href");
   previewOpen.removeAttribute("href");
   previewToolbar.hidden = true;
+  if (previewNav) previewNav.hidden = true;
+}
+
+function updatePreviewNavigation() {
+  const files = state.preview?.files || [];
+  const index = Number(state.preview?.index) || 0;
+  if (previewNav) previewNav.hidden = files.length < 2;
+  if (previewCounter) previewCounter.textContent = `${Math.min(files.length, index + 1)} of ${files.length}`;
+  if (previewPrev) previewPrev.disabled = index <= 0;
+  if (previewNext) previewNext.disabled = index >= files.length - 1;
+}
+
+function navigatePreview(delta) {
+  const preview = state.preview;
+  if (!preview || !Array.isArray(preview.files) || preview.files.length < 2) return;
+  const nextIndex = preview.index + delta;
+  if (nextIndex < 0 || nextIndex >= preview.files.length) return;
+  openPreview(preview.files[nextIndex], { files: preview.files, index: nextIndex, focusClose: false });
+  setTimeout(() => (delta < 0 ? previewPrev : previewNext)?.focus(), 20);
 }
 
 function setPreviewZoom(zoom) {
@@ -5632,17 +5728,24 @@ function setPreviewZoom(zoom) {
   previewZoomLabel.textContent = `${Math.round(state.previewZoom * 100)}%`;
 }
 
-function openPreview(file) {
+function openPreview(file, options = {}) {
   if (!file) return;
+  const files = Array.isArray(options.files) && options.files.length ? options.files : [file];
+  let index = Number.isInteger(options.index) ? options.index : files.findIndex((item) =>
+    (file.id && item.id === file.id) || (!file.id && item.name === file.name)
+  );
+  if (index < 0) index = 0;
+  file = files[index] || file;
   const url = file.contentUrl || (file.id ? `/api/attachments/${encodeURIComponent(file.id)}/content` : "");
   const mime = file.mime || (file.type === "PDF" ? "application/pdf" : String(file.type || "").startsWith("IMG") ? "image/*" : "");
   const isImage = String(mime).startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name || "");
   const isPdf = mime === "application/pdf" || /\.pdf$/i.test(file.name || "");
-  state.preview = { ...file, image: isImage, url };
+  state.preview = { ...file, image: isImage, url, files, index };
   state.previewZoom = 1;
   previewTitle.textContent = file.name || "Attachment";
   previewMeta.textContent = `${file.type || "FILE"} · ${file.size || formatBytes(file.sizeBytes)}`;
   previewFootNote.textContent = "Scanned by Alt8Mail attachment protection";
+  updatePreviewNavigation();
   if (url) {
     previewOpen.href = url;
     previewDownload.href = url;
@@ -5675,7 +5778,7 @@ function openPreview(file) {
     previewBody.innerHTML = previewFallback(file, url ? "This file type does not have an inline preview. Download it to open in the associated application." : "No preview content is stored with this attachment in the demo.");
   }
   previewOverlay.hidden = false;
-  setTimeout(() => document.getElementById("previewClose")?.focus(), 30);
+  if (options.focusClose !== false) setTimeout(() => document.getElementById("previewClose")?.focus(), 30);
 }
 
 function previewFallback(file, message) {
@@ -5926,6 +6029,249 @@ function replyToMessage(message, all = false) {
   });
 }
 
+const AI_CONTEXT_LIMIT_BYTES = 100 * 1024 * 1024;
+let aiAttachmentPicker = null;
+
+function aiAttachmentSizeBytes(file) {
+  const known = Number(file?.sizeBytes);
+  if (Number.isFinite(known) && known > 0) return known;
+  const match = String(file?.size || "").trim().match(/^([\d.]+)\s*(B|KB|MB|GB)$/i);
+  if (!match) return 0;
+  const amount = Number(match[1]) || 0;
+  const unit = match[2].toUpperCase();
+  return Math.round(amount * (unit === "GB" ? 1024 ** 3 : unit === "MB" ? 1024 ** 2 : unit === "KB" ? 1024 : 1));
+}
+
+function aiAttachmentKind(file) {
+  const mime = String(file?.mime || "").toLowerCase().split(";")[0].trim();
+  const extension = String(file?.name || "").toLowerCase().split(".").pop();
+  if (mime === "application/pdf" || extension === "pdf") return "PDF";
+  if (mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || extension === "docx") return "DOCX";
+  if (mime === "application/msword" || extension === "doc") return "DOC";
+  if (mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" || extension === "xlsx") return "XLSX";
+  if (mime === "application/vnd.ms-excel" || extension === "xls") return "XLS";
+  if (mime === "text/csv" || extension === "csv") return "CSV";
+  if (mime.startsWith("image/") && !mime.startsWith("image/svg")) return "IMAGE";
+  if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "tif", "tiff"].includes(extension)) return "IMAGE";
+  return "";
+}
+
+function aiMessageAttachments(message) {
+  return (message?.attachments || []).filter((file) => file?.id && aiAttachmentKind(file));
+}
+
+function dedupeAiAttachments(messages) {
+  const seen = new Set();
+  const files = [];
+  for (const message of messages || []) {
+    for (const file of aiMessageAttachments(message)) {
+      if (seen.has(file.id)) continue;
+      seen.add(file.id);
+      files.push(file);
+    }
+  }
+  return files;
+}
+
+function aiThreadAttachments(threadId, fallbackMessage = null) {
+  const messages = threadId ? state.messages.filter((message) => message.threadId === threadId) : [];
+  if (fallbackMessage && !messages.some((message) => message.id === fallbackMessage.id)) messages.unshift(fallbackMessage);
+  return dedupeAiAttachments(messages);
+}
+
+function aiAttachmentTotal(files, selectedIds = null) {
+  return (files || []).reduce((sum, file) => {
+    if (selectedIds && !selectedIds.has(file.id)) return sum;
+    return sum + aiAttachmentSizeBytes(file);
+  }, 0);
+}
+
+function chooseAiAttachments(message, sessionId = "", filesOverride = null) {
+  const files = Array.isArray(filesOverride) ? filesOverride : aiMessageAttachments(message);
+  if (!files.length) return Promise.resolve([]);
+  return new Promise((resolve) => {
+    aiAttachmentPicker = {
+      message,
+      sessionId,
+      files,
+      selected: new Set(),
+      resolve
+    };
+    aiAttachmentSubject.textContent = message?.subject || "This email";
+    const supported = files.length === 1 ? "1 supported file" : `${files.length} supported files`;
+    aiAttachmentMessage.textContent = `${supported} can give the assistant useful context. Nothing is shared until you choose it.`;
+    if (aiAttachSelectAll) aiAttachSelectAll.checked = false;
+    renderAiAttachmentPicker();
+    aiAttachmentOverlay.hidden = false;
+    setTimeout(() => aiAttachmentConfirm?.focus(), 40);
+  });
+}
+
+function renderAiAttachmentPicker() {
+  const picker = aiAttachmentPicker;
+  if (!picker || !aiAttachmentList) return;
+  aiAttachmentList.innerHTML = picker.files.map((file) => {
+    const size = aiAttachmentSizeBytes(file);
+    const tooLarge = size > AI_CONTEXT_LIMIT_BYTES;
+    const selected = picker.selected.has(file.id);
+    const kind = aiAttachmentKind(file);
+    return `<label class="ai-context-file${selected ? " is-selected" : ""}${tooLarge ? " is-too-large" : ""}" data-ai-context-row="${esc(file.id)}">
+      <input type="checkbox" data-ai-context-id="${esc(file.id)}" ${selected ? "checked" : ""} ${tooLarge ? "disabled" : ""}>
+      <span class="ai-context-file-mark" data-kind="${esc(kind.toLowerCase())}" aria-hidden="true">${esc(kind)}</span>
+      <span class="ai-context-file-copy"><strong>${esc(file.name || "Attachment")}</strong><span>${esc(kind)} · ${esc(file.size || formatBytes(size))}${tooLarge ? " · exceeds 100 MB" : ""}</span></span>
+      <span class="ai-context-file-check" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
+    </label>`;
+  }).join("");
+  updateAiAttachmentPicker();
+}
+
+function updateAiAttachmentPicker() {
+  const picker = aiAttachmentPicker;
+  if (!picker) return;
+  const selected = picker.files.filter((file) => picker.selected.has(file.id));
+  const total = aiAttachmentTotal(picker.files, picker.selected);
+  const over = total > AI_CONTEXT_LIMIT_BYTES;
+  const selectable = picker.files.filter((file) => aiAttachmentSizeBytes(file) <= AI_CONTEXT_LIMIT_BYTES);
+  if (aiAttachmentCount) aiAttachmentCount.textContent = `${selected.length} selected`;
+  if (aiAttachSelectAll) {
+    aiAttachSelectAll.checked = selectable.length > 0 && selected.length === selectable.length;
+    aiAttachSelectAll.indeterminate = selected.length > 0 && selected.length < selectable.length;
+    aiAttachSelectAll.disabled = selectable.length === 0;
+  }
+  const percent = Math.min(100, Math.round((total / AI_CONTEXT_LIMIT_BYTES) * 100));
+  if (aiAttachmentBudgetLabel) aiAttachmentBudgetLabel.textContent = `${formatBytes(total)} of 100 MB`;
+  if (aiAttachmentBar) aiAttachmentBar.style.width = `${percent}%`;
+  if (aiAttachmentMeter) {
+    aiAttachmentMeter.setAttribute("aria-valuenow", String(percent));
+    aiAttachmentMeter.classList.toggle("is-over", over);
+  }
+  if (aiAttachmentHint) {
+    aiAttachmentHint.textContent = over
+      ? "The selected attachments exceed the 100 MB budget. Remove one before continuing."
+      : "Attachments stay inside Alt8Mail. Document text is read for this draft; images need a vision-capable AI model.";
+    aiAttachmentHint.classList.toggle("is-error", over);
+  }
+  if (aiAttachmentConfirm) {
+    aiAttachmentConfirm.disabled = selected.length === 0 || over;
+    aiAttachmentConfirm.textContent = selected.length ? `Use ${selected.length} attachment${selected.length === 1 ? "" : "s"}` : "Use selected";
+  }
+  aiAttachmentList?.querySelectorAll("[data-ai-context-row]").forEach((row) => {
+    const id = row.getAttribute("data-ai-context-row");
+    row.classList.toggle("is-selected", picker.selected.has(id));
+    const input = row.querySelector("[data-ai-context-id]");
+    if (input) input.checked = picker.selected.has(id);
+  });
+}
+
+function settleAiAttachmentPicker(selectedIds = []) {
+  const picker = aiAttachmentPicker;
+  if (!picker) return;
+  aiAttachmentPicker = null;
+  aiAttachmentOverlay.hidden = true;
+  picker.resolve(selectedIds);
+}
+
+function composeAiThinkingMarkup(session) {
+  const message = session.aiThinkingMessage || "AI is writing your reply…";
+  return `<div class="compose-ai-thinking" data-compose-ai-thinking ${session.aiThinking ? "" : "hidden"} role="status" aria-live="polite">
+    <div class="compose-ai-thinking-card">
+      <div class="ai-writing-animation" aria-hidden="true">
+        <svg viewBox="0 0 132 96" role="presentation">
+          <path class="ai-writing-line" d="M10 68c17-16 31-3 42-15 12-13 25-16 37-27 9-8 19-10 31-8"/>
+          <g class="ai-writing-hand">
+            <path class="ai-pen" d="m83 26 12 12-6 6-12-12z"/>
+            <path class="ai-pen-tip" d="m77 32-5 13 13-5z"/>
+            <path class="ai-hand" d="M92 38c4-3 9-2 11 2l3 6c2 4 0 9-4 11l-7 3-9-14z"/>
+            <path class="ai-finger" d="M98 35c3-1 6 1 7 4l2 6"/>
+          </g>
+        </svg>
+      </div>
+      <strong data-compose-ai-thinking-title>${esc(message)}</strong>
+      <span>Preparing a draft for you to review.</span>
+      <div class="ai-writing-pulse" aria-hidden="true"><i></i><i></i><i></i></div>
+    </div>
+  </div>`;
+}
+
+function setComposeAiThinking(session, active, message = "") {
+  if (!session) return;
+  session.aiThinking = Boolean(active);
+  if (message) session.aiThinkingMessage = message;
+  const node = session.el?.querySelector("[data-compose-ai-thinking]");
+  if (!node) return;
+  node.hidden = !active;
+  const title = node.querySelector("[data-compose-ai-thinking-title]");
+  if (title) title.textContent = session.aiThinkingMessage || "AI is writing your reply…";
+}
+
+function composeAutoSignatureHTML(session) {
+  const html = String(session?.autoSignature?.html || "").trim();
+  return html ? `<div class="a8m-signature">${html}</div>` : "";
+}
+
+function composeAutoSignatureText(session) {
+  return String(session?.autoSignature?.text || "").trim();
+}
+
+function removeTrailingComposeFragment(text, fragment) {
+  const value = String(text || "");
+  const target = String(fragment || "").trim();
+  if (!target) return value;
+  const index = value.lastIndexOf(target);
+  if (index < 0 || value.slice(index + target.length).trim() !== "") return value;
+  return value.slice(0, index).trim();
+}
+
+function composeAiUserDraft(session) {
+  const signatureText = composeAutoSignatureText(session);
+  if (session.htmlMode) {
+    const editor = session.el?.querySelector("[data-compose-editor]");
+    const template = document.createElement("template");
+    template.innerHTML = sanitizeEditorHTML(editor ? editor.innerHTML : session.bodyHtml || "");
+    template.content.querySelectorAll(".compose-quote").forEach((node) => node.remove());
+    const normalizeSignature = (value) => String(value || "").replace(/\s+/g, "");
+    for (const signature of Array.from(template.content.querySelectorAll(".a8m-signature"))) {
+      if (signatureText && normalizeSignature(editorPlainText(signature.innerHTML)) === normalizeSignature(signatureText)) signature.remove();
+    }
+    const html = sanitizeEditorHTML(template.innerHTML).trim();
+    const text = editorPlainText(html);
+    return { html: text ? html : "", text };
+  }
+  let text = String(session.body || "");
+  text = removeTrailingComposeFragment(text, session.aiReplyQuoteText || "");
+  if (signatureText && text.startsWith(signatureText)) text = text.slice(signatureText.length);
+  text = text.trim();
+  return { html: textToEditorHTML(text), text };
+}
+
+function composeAiReplyContent(session, generated, quoteData = {}) {
+  const userDraft = composeAiUserDraft(session);
+  const generatedText = String(generated || "").trim();
+  const generatedHTML = textToEditorHTML(generatedText);
+  const signatureHTML = composeAutoSignatureHTML(session);
+  const signatureText = composeAutoSignatureText(session);
+  const quoteHTML = String(quoteData.html || getComposeQuoteHTML(session) || "").replace(/^<p><br><\/p>/i, "").trim();
+  const quoteText = String(quoteData.text || "").trim();
+  const htmlParts = [generatedHTML];
+  if (userDraft.html) htmlParts.push(`<p><br></p>${userDraft.html}`);
+  if (signatureHTML) htmlParts.push(`<p><br></p>${signatureHTML}`);
+  if (quoteHTML) htmlParts.push(`<p><br></p>${quoteHTML}`);
+  const textParts = [generatedText];
+  if (userDraft.text) textParts.push(userDraft.text);
+  if (signatureText) textParts.push(signatureText);
+  if (quoteText) textParts.push(quoteText);
+  return {
+    html: htmlParts.filter(Boolean).join(""),
+    text: textParts.filter(Boolean).join("\n\n")
+  };
+}
+
+function getComposeQuoteHTML(session) {
+  const editor = session?.el?.querySelector("[data-compose-editor]");
+  const quote = editor?.querySelector(".compose-quote");
+  return quote ? quote.outerHTML : "";
+}
+
 async function replyWithAi(thread = currentThread()) {
   if (!state.ai?.enabled) return;
   const target = thread ? replyTarget(thread) : null;
@@ -5947,26 +6293,35 @@ async function replyWithAi(thread = currentThread()) {
     kind: "reply"
   });
   if (!session) return;
-  const quote = quoteData.text;
-  session.aiReplyPending = true;
+  session.aiReplyQuoteText = quoteData.text;
   const status = session.el?.querySelector("[data-compose-status]");
-  if (status) status.textContent = "AI is drafting a reply from the conversation…";
+  const eligibleAttachments = aiThreadAttachments(target.threadId, target);
+  if (eligibleAttachments.length && status) status.textContent = "Choose attachments for the AI reply…";
+  const attachmentIds = eligibleAttachments.length ? await chooseAiAttachments(target, session.id, eligibleAttachments) : [];
+  if (!sessionById(session.id)) return;
+  session.aiReplyPending = true;
+  setComposeAiThinking(session, true, "AI is writing your reply…");
+  updateComposeStatus(session);
   try {
     const language = state.preferences.language || "en-US";
-    const data = await api(`/api/ai/messages/${encodeURIComponent(target.id)}/reply`, { method: "POST", body: { language } });
+    const data = await api(`/api/ai/messages/${encodeURIComponent(target.id)}/reply`, {
+      method: "POST",
+      body: { language, attachmentIds }
+    });
     if (!sessionById(session.id)) return;
     const generated = String(data.reply || "").trim();
     if (!generated) throw new Error("The AI provider returned an empty reply");
-    const editor = session.el?.querySelector("[data-compose-editor]");
-    const textarea = session.el?.querySelector('[data-compose-field="body"]');
-    const current = String(editor ? editorPlainText(editor.innerHTML) : (textarea?.value || "")).trim();
-    const untouched = !current || current === quote.trim();
-    setComposeBodyText(session, untouched ? `${generated}\n\n${quote}` : `${generated}\n\n${current}`);
+    const content = composeAiReplyContent(session, generated, quoteData);
+    setComposeBodyMarkup(session, content.html, content.text);
     session.aiReplyPending = false;
+    setComposeAiThinking(session, false);
     updateComposeStatus(session);
-    showToast("AI reply drafted — review it before sending");
+    showToast(attachmentIds.length
+      ? `AI reply drafted with ${attachmentIds.length} attachment${attachmentIds.length === 1 ? "" : "s"} — review it before sending`
+      : "AI reply drafted — review it before sending");
   } catch (error) {
     session.aiReplyPending = false;
+    setComposeAiThinking(session, false);
     updateComposeStatus(session);
     showError(error);
   }
@@ -7861,9 +8216,13 @@ function draftMessageFromSession(session) {
 }
 
 function isComposeEmpty(session) {
+  let body = String(session.body || "").trim();
+  const signature = String(session.autoSignature?.text || "").trim();
+  const compact = (value) => String(value || "").replace(/\s+/g, "").toLowerCase();
+  if (signature && compact(body) === compact(signature)) body = "";
   return !session.to.trim() && !session.cc.trim() && !session.bcc.trim()
     && !Object.values(session.recipientInput || {}).some((value) => String(value).trim())
-    && !session.subject.trim() && !session.body.trim() && !session.files.length;
+    && !session.subject.trim() && !body && !session.files.length;
 }
 
 function aliasesForSelect() {
@@ -7909,6 +8268,9 @@ function setEditorLight(session, enabled) {
 function composeEditorToolbar(session) {
   const button = (cmd, label, title, content = label) =>
     `<button type="button" data-editor-cmd="${cmd}" title="${esc(title)}" aria-label="${esc(title)}">${content}</button>`;
+  const alignIcon = (paths) => `<svg class="align-icon" viewBox="0 0 16 16" aria-hidden="true">${paths}</svg>`;
+  const alignButton = (cmd, label, shortcut, content) =>
+    `<button type="button" class="editor-align-btn" data-editor-cmd="${cmd}" title="${esc(label)} (${esc(shortcut)})" aria-label="${esc(label)} (${esc(shortcut)})" aria-pressed="false">${content}</button>`;
   return `<div class="compose-editor-toolbar" role="toolbar" aria-label="Formatting">
     ${button("undo", "↶", "Undo")}${button("redo", "↷", "Redo")}
     <span class="editor-sep"></span>
@@ -7949,7 +8311,12 @@ function composeEditorToolbar(session) {
     ${button("insertUnorderedList", "•", "Bulleted list", "•")}${button("insertOrderedList", "1.", "Numbered list", "1.")}
     <span class="editor-sep"></span>
     ${button("createLink", "🔗", "Insert link", "🔗")}${button("unlink", "⛓", "Remove link", "⛓")}
-    ${button("justifyLeft", "⇤", "Align left", "⇤")}${button("justifyCenter", "↔", "Align center", "↔")}${button("justifyRight", "⇥", "Align right", "⇥")}
+    <span class="editor-align-group" role="group" aria-label="Text alignment">
+      ${alignButton("justifyLeft", "Align left", "Ctrl+L", alignIcon('<path d="M2 3h12M2 6h8M2 9h12M2 12h7"/>'))}
+      ${alignButton("justifyCenter", "Align center", "Ctrl+E", alignIcon('<path d="M2 3h12M4 6h8M2 9h12M5 12h6"/>'))}
+      ${alignButton("justifyRight", "Align right", "Ctrl+R", alignIcon('<path d="M2 3h12M6 6h8M2 9h12M7 12h7"/>'))}
+      ${alignButton("justifyFull", "Justify", "Ctrl+J", alignIcon('<path d="M2 3h12M2 6h12M2 9h12M2 12h12"/>'))}
+    </span>
     <span class="editor-sep"></span>
     <label class="editor-color-wrap" title="Text color"><span class="editor-color-glyph">A</span><input type="color" data-editor-color value="#172230" title="Text color" aria-label="Text color"></label>
     <label class="editor-color-wrap" title="Highlight color"><span class="editor-color-glyph editor-highlight-glyph"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><input type="color" data-editor-highlight value="#fff2a8" title="Highlight color" aria-label="Highlight color"></label>
@@ -7976,8 +8343,8 @@ function composeTemplate(session) {
   const aiButton = composeAiToolbarButton();
   const lightClass = session.editorLight ? " is-editor-light" : "";
   const bodyField = htmlMode
-    ? `<div class="compose-editor-wrap${lightClass}">${composeEditorToolbar(session)}<div class="compose-editor${session.quoteCollapsed ? " is-quote-collapsed" : ""}" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…">${editorHTML}</div></div>`
-    : `<div class="compose-editor-wrap${lightClass}"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${aiButton}${composeLightButton(session)}${modeSwitch}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea></div>`;
+    ? `<div class="compose-editor-wrap${lightClass}">${composeEditorToolbar(session)}<div class="compose-editor${session.quoteCollapsed ? " is-quote-collapsed" : ""}" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…">${editorHTML}</div>${composeAiThinkingMarkup(session)}</div>`
+    : `<div class="compose-editor-wrap${lightClass}"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${aiButton}${composeLightButton(session)}${modeSwitch}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea>${composeAiThinkingMarkup(session)}</div>`;
   return `<section class="compose${htmlMode ? " has-html-editor" : ""}" data-compose-id="${esc(session.id)}" role="dialog" aria-label="${esc(title)}">
     <div class="compose-head" data-compose-head>
       <span class="compose-grip" aria-hidden="true"></span>
@@ -8086,7 +8453,8 @@ function openCompose(prefill = {}, options = {}) {
       bodyHtml = signatureHTML;
     } else {
       bodyText = [signatureText, rawBodyText].filter((value) => value && value.trim()).join("\n\n");
-      bodyHtml = `${signatureHTML}${signatureHTML && (rawBodyHTML || rawBodyText) ? "<p><br></p>" : ""}${rawBodyHTML || textToEditorHTML(rawBodyText)}`;
+      const signatureBlock = signatureHTML ? `<div class="a8m-signature">${signatureHTML}</div>` : "";
+      bodyHtml = `${signatureBlock}${signatureBlock && (rawBodyHTML || rawBodyText) ? "<p><br></p>" : ""}${rawBodyHTML || textToEditorHTML(rawBodyText)}`;
     }
   } else if (!bodyHtml && bodyText) {
     bodyHtml = textToEditorHTML(bodyText);
@@ -8118,6 +8486,10 @@ function openCompose(prefill = {}, options = {}) {
     threadId: data.threadId || null,
     inReplyTo: data.inReplyTo || null,
     sourceMessageId: data.sourceMessageId || "",
+    sourceAttachments: aiThreadAttachments(data.threadId, data.sourceMessageId ? messageById(data.sourceMessageId) : null),
+    aiAttachmentIds: new Set(),
+    aiThinking: false,
+    aiThinkingMessage: "",
     kind: data.kind || "",
     ccOpen: Boolean(data.ccText || data.cc || data.bccText || data.bcc),
     optionsOpen: false,
@@ -8143,6 +8515,7 @@ function openCompose(prefill = {}, options = {}) {
   composeLayer.insertAdjacentHTML("beforeend", composeTemplate(session));
   session.el = composeLayer.querySelector(`[data-compose-id="${CSS.escape(id)}"]`);
   normalizeEditorImageSources(session.el.querySelector("[data-compose-editor]"));
+  updateComposeAlignmentState(session, session.el.querySelector("[data-compose-editor]"));
   updateComposeWindow(session);
   updateComposeFiles(session);
   updateComposeStatus(session);
@@ -8397,6 +8770,25 @@ function applyComposeHighlight(session, color) {
   rememberComposeEditorSelection(session, editor);
 }
 
+function updateComposeAlignmentState(session, editor = null) {
+  const target = editor || session?.el?.querySelector("[data-compose-editor]");
+  if (!session?.el || !target) return;
+  let left = false, center = false, right = false, full = false;
+  try {
+    left = document.queryCommandState("justifyLeft");
+    center = document.queryCommandState("justifyCenter");
+    right = document.queryCommandState("justifyRight");
+    full = document.queryCommandState("justifyFull");
+  } catch {}
+  if (!center && !right && !full) left = true;
+  const active = { justifyLeft: left, justifyCenter: center, justifyRight: right, justifyFull: full };
+  session.el.querySelectorAll("[data-editor-cmd^='justify']").forEach((button) => {
+    const isActive = Boolean(active[button.getAttribute("data-editor-cmd")]);
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
 function applyComposeEditorCommand(session, command, value = null, options = {}) {
   if (!session?.el) return;
   const editor = session.el.querySelector("[data-compose-editor]");
@@ -8419,6 +8811,7 @@ function applyComposeEditorCommand(session, command, value = null, options = {})
   }
   normalizeEditorFontTags(editor);
   updateComposeEditor(session, editor);
+  updateComposeAlignmentState(session, editor);
   if (!options.keepFocus) {
     editor.focus();
     rememberComposeEditorSelection(session, editor);
@@ -8459,12 +8852,75 @@ function toggleComposeAi(session) {
   if (session.aiOpen) renderComposeAiPanel(session);
 }
 
+function composeAiSelectedFiles(session) {
+  const selected = session?.aiAttachmentIds instanceof Set ? session.aiAttachmentIds : new Set();
+  return (session?.sourceAttachments || []).filter((file) => selected.has(file.id));
+}
+
+function composeAiAttachmentPanelMarkup(session) {
+  const files = session?.sourceAttachments || [];
+  if (!files.length) return "";
+  const selected = session.aiAttachmentIds instanceof Set ? session.aiAttachmentIds : new Set();
+  const total = aiAttachmentTotal(files, selected);
+  const over = total > AI_CONTEXT_LIMIT_BYTES;
+  const selectable = files.filter((file) => aiAttachmentSizeBytes(file) <= AI_CONTEXT_LIMIT_BYTES);
+  const allSelected = selectable.length > 0 && selected.size === selectable.length;
+  return `<div class="compose-ai-attachments">
+    <div class="compose-ai-attachments-head"><div><strong>Attachments from this email</strong><span>Add supporting documents to ground the draft.</span></div><label class="compose-ai-select-all"><input type="checkbox" data-ai-compose-select-all ${allSelected ? "checked" : ""}>Select all</label></div>
+    <div class="compose-ai-attachment-list">${files.map((file) => {
+      const size = aiAttachmentSizeBytes(file);
+      const tooLarge = size > AI_CONTEXT_LIMIT_BYTES;
+      const kind = aiAttachmentKind(file);
+      return `<label class="compose-ai-attachment${selected.has(file.id) ? " is-selected" : ""}${tooLarge ? " is-too-large" : ""}">
+        <input type="checkbox" data-ai-compose-attachment="${esc(file.id)}" ${selected.has(file.id) ? "checked" : ""} ${tooLarge ? "disabled" : ""}>
+        <span class="compose-ai-attachment-mark" data-kind="${esc(kind.toLowerCase())}" aria-hidden="true">${esc(kind)}</span>
+        <span class="compose-ai-attachment-copy"><strong>${esc(file.name || "Attachment")}</strong><span>${esc(kind)} · ${esc(file.size || formatBytes(size))}</span></span>
+        <span class="compose-ai-attachment-tick" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
+      </label>`;
+    }).join("")}</div>
+    <div class="compose-ai-attachment-budget${over ? " is-over" : ""}" data-ai-attachment-budget>${selected.size ? `${selected.size} selected · ${formatBytes(total)} of 100 MB` : "No attachments selected"}</div>
+  </div>`;
+}
+
+function updateComposeAiAttachmentSelection(session) {
+  const panel = session?.el?.querySelector("[data-compose-ai-panel]");
+  if (!panel) return;
+  const selected = session.aiAttachmentIds instanceof Set ? session.aiAttachmentIds : new Set();
+  const files = session.sourceAttachments || [];
+  const total = aiAttachmentTotal(files, selected);
+  const over = total > AI_CONTEXT_LIMIT_BYTES;
+  panel.querySelectorAll("[data-ai-compose-attachment]").forEach((input) => {
+    input.checked = selected.has(input.getAttribute("data-ai-compose-attachment"));
+    input.closest(".compose-ai-attachment")?.classList.toggle("is-selected", input.checked);
+  });
+  const selectable = files.filter((file) => aiAttachmentSizeBytes(file) <= AI_CONTEXT_LIMIT_BYTES);
+  const selectAll = panel.querySelector("[data-ai-compose-select-all]");
+  if (selectAll) {
+    selectAll.checked = selectable.length > 0 && selected.size === selectable.length;
+    selectAll.indeterminate = selected.size > 0 && selected.size < selectable.length;
+  }
+  const budget = panel.querySelector("[data-ai-attachment-budget]");
+  if (budget) {
+    budget.textContent = selected.size
+      ? over
+        ? `${selected.size} selected · ${formatBytes(total)} exceeds the 100 MB limit`
+        : `${selected.size} selected · ${formatBytes(total)} of 100 MB`
+      : "No attachments selected";
+    budget.classList.toggle("is-over", over);
+  }
+  const generate = panel.querySelector("[data-ai-compose-generate]");
+  if (generate) generate.disabled = Boolean(session.aiGenerating) || over;
+}
+
 function renderComposeAiPanel(session) {
   const panel = session?.el?.querySelector("[data-compose-ai-panel]");
   if (!panel || !state.ai.enabled) return;
   const languages = composeAiLanguages();
   const styles = composeAiStyles();
   const preferredLanguage = languages.some((item) => item.code === state.preferences.language) ? state.preferences.language : "en-US";
+  const selectedAttachmentCount = session.aiAttachmentIds instanceof Set ? session.aiAttachmentIds.size : 0;
+  const attachmentTotal = aiAttachmentTotal(session.sourceAttachments || [], session.aiAttachmentIds);
+  const attachmentOverLimit = attachmentTotal > AI_CONTEXT_LIMIT_BYTES;
   panel.innerHTML = `<div class="compose-ai-head"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><strong>AI writing assistant</strong><button class="icon-btn" data-ai-compose-close type="button" aria-label="Close AI assistant"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <div class="compose-ai-grid">
       <label>Style<select data-ai-style>${styles.map((item) => `<option value="${esc(item.code)}" ${item.code === "professional" ? "selected" : ""}>${esc(item.name)}</option>`).join("")}</select></label>
@@ -8473,7 +8929,8 @@ function renderComposeAiPanel(session) {
       <label>Creativity<div class="compose-ai-range"><input type="range" min="0" max="100" value="50" data-ai-creativity><span data-ai-creativity-value>50</span></div></label>
       <label class="compose-ai-prompt">Instruction <small class="muted">optional</small><textarea data-ai-prompt placeholder="e.g. Follow up on the launch timeline and ask for a decision by Friday"></textarea></label>
     </div>
-    <div class="compose-ai-actions"><button class="btn-primary small" data-ai-compose-generate type="button"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Generate draft</button><span class="settings-note" data-ai-status>${session.aiResult ? "Draft ready" : "Uses this message's current text as context."}</span></div>
+    ${composeAiAttachmentPanelMarkup(session)}
+    <div class="compose-ai-actions"><button class="btn-primary small" data-ai-compose-generate type="button" ${attachmentOverLimit ? "disabled" : ""}><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Generate draft</button><span class="settings-note" data-ai-status>${session.aiResult ? "Draft ready" : (selectedAttachmentCount ? `${selectedAttachmentCount} attachment${selectedAttachmentCount === 1 ? "" : "s"} selected as context.` : "Uses this message's current text as context.")}</span></div>
     <div class="compose-ai-result" data-ai-result ${session.aiResult ? "" : "hidden"}>${esc(session.aiResult || "")}</div>
     <div class="compose-ai-actions" data-ai-result-actions ${session.aiResult ? "" : "hidden"}><button class="btn-secondary small" data-ai-compose-insert type="button">Insert below</button><button class="btn-secondary small" data-ai-compose-replace type="button">Replace body</button></div>`;
   const range = panel.querySelector("[data-ai-creativity]");
@@ -8491,6 +8948,14 @@ async function composeAiGenerate(session) {
   const text = editor ? editorPlainText(editor.innerHTML) : (textarea?.value || session.body || "");
   const status = panel.querySelector("[data-ai-status]");
   const button = panel.querySelector("[data-ai-compose-generate]");
+  const selectedFiles = composeAiSelectedFiles(session);
+  const attachmentTotal = aiAttachmentTotal(selectedFiles);
+  if (attachmentTotal > AI_CONTEXT_LIMIT_BYTES) {
+    if (status) status.textContent = "Remove an attachment to stay within the 100 MB limit";
+    return;
+  }
+  session.aiGenerating = true;
+  setComposeAiThinking(session, true, "AI is writing your draft…");
   if (button) button.disabled = true;
   if (status) status.textContent = "Generating…";
   try {
@@ -8502,11 +8967,13 @@ async function composeAiGenerate(session) {
         style: panel.querySelector("[data-ai-style]")?.value || "professional",
         length: panel.querySelector("[data-ai-length]")?.value || "medium",
         creativity: Number(panel.querySelector("[data-ai-creativity]")?.value || 50) / 100,
-        language: panel.querySelector("[data-ai-language]")?.value || "en-US"
+        language: panel.querySelector("[data-ai-language]")?.value || "en-US",
+        attachmentIds: selectedFiles.map((file) => file.id),
+        sourceMessageId: session.sourceMessageId || ""
       }
     });
     session.aiResult = data.text || "";
-    if (status) status.textContent = `${data.style || "professional"} · ${data.length || "medium"} · ${data.language || "en-US"}`;
+    if (status) status.textContent = `${data.style || "professional"} · ${data.length || "medium"} · ${data.language || "en-US"}${selectedFiles.length ? ` · ${selectedFiles.length} attachment${selectedFiles.length === 1 ? "" : "s"}` : ""}`;
     const result = panel.querySelector("[data-ai-result]");
     if (result) { result.hidden = false; result.textContent = session.aiResult; }
     const actions = panel.querySelector("[data-ai-result-actions]");
@@ -8515,7 +8982,9 @@ async function composeAiGenerate(session) {
     if (status) status.textContent = error.message || "AI generation failed";
     showError(error);
   } finally {
-    if (button) button.disabled = false;
+    session.aiGenerating = false;
+    setComposeAiThinking(session, false);
+    if (button) button.disabled = aiAttachmentTotal(composeAiSelectedFiles(session)) > AI_CONTEXT_LIMIT_BYTES;
   }
 }
 
@@ -8912,6 +9381,7 @@ function removeComposeSessionUi(id) {
 async function closeComposeSession(id, { discard = false } = {}) {
   const session = sessionById(id);
   if (!session) return;
+  if (aiAttachmentPicker?.sessionId === id) settleAiAttachmentPicker([]);
   clearTimeout(session.saveTimer);
   if (discard) {
     try { await api(`/api/drafts/${encodeURIComponent(session.draftId)}`, { method: "DELETE" }); } catch {}
@@ -9645,19 +10115,30 @@ function updateComposeEditor(session, editor) {
   scheduleComposeSave(session);
 }
 
-function setComposeBodyText(session, text) {
+function setComposeBodyMarkup(session, html, text = "") {
   if (!session?.el) return;
-  const value = String(text || "");
-  session.body = value;
-  session.bodyHtml = textToEditorHTML(value);
+  const value = String(html || "");
+  session.bodyHtml = sanitizeEditorHTML(value);
+  session.body = text || editorPlainText(session.bodyHtml);
   session.dirty = true;
   session.error = null;
   const editor = session.el.querySelector("[data-compose-editor]");
   const textarea = session.el.querySelector('[data-compose-field="body"]');
-  if (editor) editor.innerHTML = session.bodyHtml;
-  else if (textarea) textarea.value = value;
+  if (editor) {
+    editor.innerHTML = session.bodyHtml;
+    normalizeEditorImageSources(editor);
+    editor.scrollTop = 0;
+  } else if (textarea) {
+    textarea.value = session.body;
+    textarea.scrollTop = 0;
+  }
   updateComposeStatus(session);
   scheduleComposeSave(session);
+}
+
+function setComposeBodyText(session, text) {
+  const value = String(text || "");
+  setComposeBodyMarkup(session, textToEditorHTML(value), value);
 }
 
 function refreshComposeEditorContent(session) {
@@ -10030,7 +10511,7 @@ function openDetails(messageOrId) {
     ["Sender IP", auth.ip || "—"],
     ["TLS", auth.tls || "TLS 1.3"],
     ["Signing domain", auth.signer || "—"],
-    ["Retention", "7 years · Alt8Mail policy"]
+    ["Retention", "See Alt8Mail policy"]
   ];
   const checks = [
     ["SPF", auth.spf || "none", "Authorised sending host"],
@@ -16125,6 +16606,8 @@ function handleFeatureClick(event) {
   }
 
   if (target.closest("#previewClose") || target === previewOverlay) { event.preventDefault(); closePreview(); return true; }
+  if (target.closest("#previewPrev")) { event.preventDefault(); navigatePreview(-1); return true; }
+  if (target.closest("#previewNext")) { event.preventDefault(); navigatePreview(1); return true; }
   const zoom = target.closest("[data-preview-zoom]");
   if (zoom) {
     event.preventDefault();
@@ -16420,7 +16903,7 @@ function bindEvents() {
     if (saveAttachment) { event.preventDefault(); saveAttachmentToCabinet(saveAttachment.getAttribute("data-save-attachment"), saveAttachment.getAttribute("data-save-attachment-name")); return; }
     const attachment = target.closest("[data-attachment]");
     if (attachment) {
-      openPreview({
+      const file = {
         name: attachment.getAttribute("data-attachment"),
         id: attachment.getAttribute("data-file-id"),
         type: attachment.getAttribute("data-file-type"),
@@ -16428,6 +16911,13 @@ function bindEvents() {
         mime: attachment.getAttribute("data-file-mime"),
         contentUrl: attachment.getAttribute("data-file-url"),
         previewable: attachment.getAttribute("data-file-previewable") === "true"
+      };
+      const sourceMessage = attachmentMessageId ? messageById(attachmentMessageId) : null;
+      const files = sourceMessage?.attachments || [];
+      const index = files.findIndex((item) => (file.id && item.id === file.id) || item.name === file.name);
+      openPreview(index >= 0 ? { ...files[index], ...file, contentUrl: files[index].contentUrl || file.contentUrl } : file, {
+        files: index >= 0 ? files : [file],
+        index: index >= 0 ? index : 0
       });
       return;
     }
@@ -17345,6 +17835,20 @@ function bindEvents() {
       updateComposeEditor(session, event.target);
       return;
     }
+    if (event.target.matches("[data-ai-compose-attachment]")) {
+      const id = event.target.getAttribute("data-ai-compose-attachment");
+      if (!(session.aiAttachmentIds instanceof Set)) session.aiAttachmentIds = new Set();
+      if (event.target.checked) session.aiAttachmentIds.add(id);
+      else session.aiAttachmentIds.delete(id);
+      updateComposeAiAttachmentSelection(session);
+      return;
+    }
+    if (event.target.matches("[data-ai-compose-select-all]")) {
+      const selectable = (session.sourceAttachments || []).filter((file) => aiAttachmentSizeBytes(file) <= AI_CONTEXT_LIMIT_BYTES);
+      session.aiAttachmentIds = event.target.checked ? new Set(selectable.map((file) => file.id)) : new Set();
+      updateComposeAiAttachmentSelection(session);
+      return;
+    }
     const field = event.target.closest("[data-compose-field]");
     if (field) updateComposeField(session, field);
   };
@@ -17438,7 +17942,10 @@ function bindEvents() {
     if (composeEditor) {
       const section = composeEditor.closest(".compose[data-compose-id]");
       const session = sessionById(section?.getAttribute("data-compose-id"));
-      if (session) rememberComposeEditorSelection(session, composeEditor);
+      if (session) {
+        rememberComposeEditorSelection(session, composeEditor);
+        updateComposeAlignmentState(session, composeEditor);
+      }
       return;
     }
     const richEditor = element?.closest?.('[contenteditable="true"]');
@@ -17516,6 +18023,34 @@ function bindEvents() {
       refreshAttachPickerIfOpen();
     });
   }
+
+  aiAttachmentOverlay?.addEventListener("click", (event) => {
+    if (event.target === aiAttachmentOverlay || event.target.closest("#aiAttachmentClose") || event.target.closest("#aiAttachmentSkip")) {
+      settleAiAttachmentPicker([]);
+      return;
+    }
+    if (event.target.closest("#aiAttachmentConfirm") && aiAttachmentPicker) {
+      const selected = aiAttachmentPicker.files
+        .filter((file) => aiAttachmentPicker.selected.has(file.id))
+        .map((file) => file.id);
+      settleAiAttachmentPicker(selected);
+    }
+  });
+  aiAttachmentOverlay?.addEventListener("change", (event) => {
+    if (!aiAttachmentPicker) return;
+    if (event.target.matches("#aiAttachSelectAll")) {
+      const selectable = aiAttachmentPicker.files.filter((file) => aiAttachmentSizeBytes(file) <= AI_CONTEXT_LIMIT_BYTES);
+      aiAttachmentPicker.selected = event.target.checked ? new Set(selectable.map((file) => file.id)) : new Set();
+      updateAiAttachmentPicker();
+      return;
+    }
+    if (event.target.matches("[data-ai-context-id]")) {
+      const id = event.target.getAttribute("data-ai-context-id");
+      if (event.target.checked) aiAttachmentPicker.selected.add(id);
+      else aiAttachmentPicker.selected.delete(id);
+      updateAiAttachmentPicker();
+    }
+  });
 
   /* Signature library editor, identity editor and spell-check review */
   wireHtmlSourceDialog();
@@ -17709,6 +18244,8 @@ function bindEvents() {
   document.addEventListener("keydown", (event) => {
     if (loginScreen.hidden === false) return;
     if (state.user && state.user.onboardingRequired) return;
+    if (handleEditorHistoryShortcut(event)) return;
+    if (handleComposeAlignmentShortcut(event)) return;
     if (spellcheckOverlay && !spellcheckOverlay.hidden) {
       if (event.key === "Escape") { event.preventDefault(); closeSpellcheckDialog(); }
       return;
@@ -17726,6 +18263,11 @@ function bindEvents() {
       return;
     }
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable;
+    if (!previewOverlay.hidden && !typing && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      event.preventDefault();
+      navigatePreview(event.key === "ArrowLeft" ? -1 : 1);
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       if (state.task === "settings" || state.task === "calendar") return;
       event.preventDefault();
@@ -17753,6 +18295,7 @@ function bindEvents() {
       if (!scheduledEditOverlay.hidden) { closeScheduledEdit(); return; }
       if (!reportOverlay.hidden) { closeReportDialog(); return; }
       if (!scheduleOverlay.hidden) { closeScheduleDialog(); return; }
+      if (aiAttachmentOverlay && !aiAttachmentOverlay.hidden) { settleAiAttachmentPicker([]); return; }
       if (!previewOverlay.hidden) { closePreview(); return; }
       if (!storageOverlay.hidden) { storageOverlay.hidden = true; return; }
       if (!shareOverlay.hidden) { shareOverlay.hidden = true; return; }

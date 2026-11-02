@@ -13,7 +13,7 @@ await fs.mkdir(artifacts, { recursive: true });
 
 const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "a8m-e2e-"));
 const dataFile = path.join(tempDir, "db.json");
-const app = await createApp({ dataFile, holdMs: 4000, undoTtlMs: 15000, allowDevOutbox: true });
+const app = await createApp({ dataFile, holdMs: 4000, undoTtlMs: 15000, allowDevOutbox: true, aiEnabled: true, aiDelayMs: 650 });
 const address = await app.listen(0);
 const base = `http://127.0.0.1:${address.port}`;
 let browser;
@@ -533,6 +533,9 @@ try {
   await sleep(400);
   check(await page.eval("!!document.querySelector('.external-banner.is-danger')"), "failed external authentication raises a red banner");
   check(await page.eval("document.querySelectorAll('.auth-chip.fail').length >= 2"), "SPF/DKIM/DMARC failures are visible");
+  check(await page.eval(`Boolean(document.querySelector('.thread-msg .avatar img[data-avatar-domain="a8m-security.example"]'))`), "external senders request a BIMI or domain icon avatar");
+  await page.waitFor(() => Boolean(document.querySelector('.thread-msg .avatar.has-photo img[data-avatar-domain="a8m-security.example"]')), 3000);
+  check(await page.eval(`Boolean(document.querySelector('.thread-msg .avatar.has-photo img[data-avatar-domain="a8m-security.example"]'))`), "the resolved sender icon replaces the initials fallback");
   await page.screenshot(path.join(artifacts, "10-trust.png"));
   await page.click("[data-trust-sender]");
   await sleep(900);
@@ -570,10 +573,77 @@ try {
   await sleep(400);
   check(await page.eval("!document.getElementById('previewOverlay').hidden"), "clicking an attachment opens the preview dialog");
   check(await page.eval("document.querySelector('.preview-pdf')?.getAttribute('src').includes('Q4-roadmap-v3.pdf')"), "PDF preview renders in the secure viewer iframe");
+  check(await page.eval("!document.getElementById('previewNav').hidden"), "multi-attachment preview offers previous and next controls");
+  equal(await page.eval("document.getElementById('previewCounter').textContent"), "1 of 2", "preview counter starts at the first attachment");
+  check(await page.eval("document.getElementById('previewPrev').disabled"), "the first attachment disables Previous");
   await page.screenshot(path.join(artifacts, "17-attachment-preview.png"));
+  await page.click("#previewNext");
+  await sleep(250);
+  equal(await page.eval("document.getElementById('previewTitle').textContent"), "Launch-scope.xlsx", "Next moves the preview to the second attachment");
+  equal(await page.eval("document.getElementById('previewCounter').textContent"), "2 of 2", "preview counter updates with paging");
+  check(await page.eval("document.getElementById('previewNext').disabled && !document.getElementById('previewPrev').disabled"), "navigation endpoint states update on the last attachment");
+  await page.click("#previewPrev");
+  await sleep(250);
+  equal(await page.eval("document.getElementById('previewTitle').textContent"), "Q4-roadmap-v3.pdf", "Previous returns to the first attachment");
   await page.click("#previewClose");
   await sleep(250);
   check(await page.eval("document.getElementById('previewOverlay').hidden"), "preview dialog closes cleanly");
+
+  console.log("\n[9d] AI reply, attachment context and signature");
+  await page.click("#cmdAiReply");
+  await page.waitFor(() => !document.getElementById("aiAttachmentOverlay").hidden, 5000);
+  check(await page.eval("document.querySelectorAll('#aiAttachmentList [data-ai-context-row]').length === 2"), "AI reply offers the email's PDF and spreadsheet as context");
+  check(await page.eval("document.getElementById('aiAttachmentConfirm').disabled"), "AI attachment confirmation starts disabled");
+  await page.click("#aiAttachSelectAll");
+  await sleep(120);
+  check(await page.eval("document.querySelectorAll('#aiAttachmentList .ai-context-file.is-selected').length === 2"), "Select all chooses every supported attachment");
+  check(await page.eval("document.getElementById('aiAttachmentBudgetLabel').textContent.includes('of 100 MB')"), "AI attachment budget shows the 100 MB limit");
+  await page.screenshot(path.join(artifacts, "17c-ai-attachment-context.png"));
+  await page.click("#aiAttachmentConfirm");
+  await page.waitFor(() => Boolean(document.querySelector(".compose:not([hidden]) [data-compose-ai-thinking]:not([hidden])")), 2000);
+  check(await page.eval("Boolean(document.querySelector('.compose:not([hidden]) [data-compose-ai-thinking]:not([hidden]) .ai-writing-animation'))"), "an animated writing indicator appears while AI drafts");
+  await page.screenshot(path.join(artifacts, "17d-ai-writing.png"));
+  await page.waitFor(() => [...document.querySelectorAll(".compose:not([hidden]) [data-compose-editor]")].some((editor) => editor.textContent.includes("Thank you for the update")), 10000);
+  check(await page.eval("!document.querySelector('.compose:not([hidden]) [data-compose-ai-thinking]:not([hidden])')"), "the AI writing indicator disappears when the reply arrives");
+  const aiReplyBody = await page.eval("[...document.querySelectorAll('.compose:not([hidden]) [data-compose-editor]')].map((editor) => editor.innerText).join('\\n')");
+  const generatedIndex = aiReplyBody.indexOf("Thank you for the update");
+  const signatureIndex = aiReplyBody.indexOf("VP Product · Alt8Mail");
+  const quoteIndex = aiReplyBody.indexOf("One more thing for the agenda");
+  check(generatedIndex >= 0 && signatureIndex > generatedIndex, "AI reply keeps the automatic signature below the generated text");
+  equal((aiReplyBody.match(/VP Product · Alt8Mail/g) || []).length, 1, "AI reply does not duplicate the automatic signature");
+  check(quoteIndex > signatureIndex, "the quoted conversation stays below the signature");
+
+  await page.click(".compose:not([hidden]) [data-compose-action=\"ai\"]");
+  await sleep(200);
+  check(await page.eval("document.querySelectorAll('.compose:not([hidden]) [data-ai-compose-attachment]').length === 2"), "the AI writing assistant offers this email's attachments before Generate");
+  await page.eval("document.querySelector('.compose:not([hidden]) [data-ai-compose-attachment]').click()");
+  await sleep(120);
+  check(await page.eval("document.querySelector('.compose:not([hidden]) [data-ai-attachment-budget]').textContent.includes('selected')"), "AI writing assistant tracks selected attachment context");
+  await page.click(".compose:not([hidden]) [data-ai-compose-generate]");
+  await page.waitFor(() => document.querySelector(".compose:not([hidden]) [data-compose-ai-thinking]:not([hidden])"), 2000);
+  check(await page.eval("Boolean(document.querySelector('.compose:not([hidden]) [data-compose-ai-thinking]:not([hidden])'))"), "manual AI generation also shows the writing indicator");
+  await page.waitFor(() => !document.querySelector(".compose:not([hidden]) [data-compose-ai-thinking]:not([hidden])") && !document.querySelector(".compose:not([hidden]) [data-ai-result]")?.hidden, 5000);
+  check(await page.eval("document.querySelector('.compose:not([hidden]) [data-ai-result]')?.textContent.includes('Thank you for your message')"), "manual AI generation renders its draft result");
+
+  const undoCheck = await page.eval(`(() => {
+    const editor = document.querySelector('.compose:not([hidden]) [data-compose-editor]');
+    editor.focus();
+    document.execCommand('insertText', false, ' UNDO-CHECK');
+    const inserted = editor.innerText.includes('UNDO-CHECK');
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+    const undone = !editor.innerText.includes('UNDO-CHECK');
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true, cancelable: true }));
+    const redone = editor.innerText.includes('UNDO-CHECK');
+    return { inserted, undone, redone };
+  })()`);
+  check(undoCheck.inserted && undoCheck.undone && undoCheck.redone, "Ctrl+Z and Ctrl+Y undo and redo compose edits");
+
+  await page.eval("window.__a8mAutoConfirm = false");
+  await page.click(".compose:not([hidden]) [data-compose-action=\"discard\"]");
+  await page.waitFor(() => !document.getElementById("confirmOverlay").hidden, 5000);
+  await page.click("#confirmAccept");
+  await page.eval("window.__a8mAutoConfirm = true");
+  await sleep(500);
 
   await page.eval(`(() => {
     window.__a8mOriginalOpen = window.open;
@@ -1047,6 +1117,35 @@ try {
   await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="toggle-quote"]`);
   await sleep(200);
   check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]').classList.contains('is-quote-collapsed')`), "the quote control can collapse the original HTML");
+  const alignmentSetup = await page.eval(`(() => {
+    const editor = document.querySelector('[data-compose-id="${htmlReplyId}"] [data-compose-editor]');
+    const block = document.createElement('p');
+    block.id = 'align-shortcut-probe';
+    block.textContent = 'Alignment shortcut check';
+    editor.prepend(block);
+    editor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(block);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const buttons = [...document.querySelectorAll('[data-compose-id="${htmlReplyId}"] [data-editor-cmd^="justify"]')];
+    return { count: buttons.length, titles: buttons.map((button) => button.title) };
+  })()`);
+  equal(alignmentSetup.count, 4, "compose toolbar offers Left, Center, Right and Justify alignment");
+  check(alignmentSetup.titles.some((title) => title.includes("Ctrl+L")) && alignmentSetup.titles.some((title) => title.includes("Ctrl+J")), "alignment controls advertise their keyboard shortcuts");
+  const alignmentStates = {};
+  for (const [key, vk, label] of [["r", 82, "right"], ["l", 76, "left"], ["e", 69, "center"], ["r", 82, "right"], ["j", 74, "justify"]]) {
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", modifiers: 2, key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", modifiers: 2, key, code: `Key${key.toUpperCase()}`, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
+    await sleep(100);
+    alignmentStates[label] = await page.eval(`getComputedStyle(document.querySelector('[data-compose-id="${htmlReplyId}"] #align-shortcut-probe')).textAlign`);
+  }
+  equal(alignmentStates.left, "left", "Ctrl+L aligns the current paragraph left");
+  equal(alignmentStates.center, "center", "Ctrl+E centers the current paragraph");
+  equal(alignmentStates.right, "right", "Ctrl+R aligns the current paragraph right");
+  equal(alignmentStates.justify, "justify", "Ctrl+J justifies the current paragraph");
+  check(await page.eval(`document.querySelector('[data-compose-id="${htmlReplyId}"] [data-editor-cmd="justifyFull"]')?.classList.contains('is-active')`), "the Justify toolbar state follows the keyboard command");
   await page.eval("window.__a8mAutoConfirm = false");
   await page.click(`[data-compose-id="${htmlReplyId}"] [data-compose-action="discard"]`);
   await page.waitFor(() => !document.getElementById("confirmOverlay").hidden, 5000);
@@ -1054,6 +1153,41 @@ try {
   await page.click("#confirmAccept");
   await page.eval("window.__a8mAutoConfirm = true");
   await sleep(500);
+
+  console.log("\n[11aa] Signature editor undo and redo");
+  await page.click("#settingsBtn");
+  await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+  await page.click("[data-settings-tab='mail']");
+  await sleep(350);
+  await page.click("#newSignatureBtn");
+  await page.waitFor(() => !document.getElementById("signatureEditorOverlay").hidden, 3000);
+  await sleep(150);
+  const signatureRichUndo = await page.eval(`(() => {
+    const editor = document.getElementById('signatureEditorBody');
+    editor.focus();
+    document.execCommand('insertText', false, 'RichUndoCheck');
+    const inserted = editor.innerText.includes('RichUndoCheck');
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }));
+    const undone = !editor.innerText.includes('RichUndoCheck');
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true, cancelable: true }));
+    return { inserted, undone, redone: editor.innerText.includes('RichUndoCheck') };
+  })()`);
+  check(signatureRichUndo.inserted && signatureRichUndo.undone && signatureRichUndo.redone, "Ctrl+Z and Ctrl+Y work in the rich signature editor");
+  await page.click("[data-signature-mode='plain']");
+  await sleep(120);
+  await page.eval("document.getElementById('signatureEditorPlain').focus()");
+  await page.send("Input.insertText", { text: "PlainUndoCheck" });
+  await sleep(80);
+  const plainInserted = await page.eval("document.getElementById('signatureEditorPlain').value.includes('PlainUndoCheck')");
+  await page.eval("document.getElementById('signatureEditorPlain').dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }))");
+  const plainUndone = await page.eval("!document.getElementById('signatureEditorPlain').value.includes('PlainUndoCheck')");
+  await page.eval("document.getElementById('signatureEditorPlain').dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true, cancelable: true }))");
+  const plainRedone = await page.eval("document.getElementById('signatureEditorPlain').value.includes('PlainUndoCheck')");
+  check(plainInserted && plainUndone && plainRedone, "Ctrl+Z and Ctrl+Y work in the plain signature editor");
+  await page.click("#signatureEditorCancel");
+  await sleep(200);
+  await page.click("#settingsDone");
+  await sleep(300);
 
   console.log("\n[11b] Passkey sign-in");
   await page.eval("localStorage.setItem('a8m.accent', 'rose'); document.documentElement.style.setProperty('--accent', '#b8336a')");

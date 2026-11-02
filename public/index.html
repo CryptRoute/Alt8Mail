@@ -10,13 +10,13 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.20.5">
-<link rel="stylesheet" href="/features.css?v=0.20.5">
-<link rel="stylesheet" href="/workspace.css?v=0.20.5">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.20.5">
-<link rel="stylesheet" href="/features-0.7.css?v=0.20.5">
-<link rel="stylesheet" href="/onboarding.css?v=0.20.5">
-<link rel="stylesheet" href="/email-ui.css?v=0.20.5">
+<link rel="stylesheet" href="/styles.css?v=0.20.7">
+<link rel="stylesheet" href="/features.css?v=0.20.7">
+<link rel="stylesheet" href="/workspace.css?v=0.20.7">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.20.7">
+<link rel="stylesheet" href="/features-0.7.css?v=0.20.7">
+<link rel="stylesheet" href="/onboarding.css?v=0.20.7">
+<link rel="stylesheet" href="/email-ui.css?v=0.20.7">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -2212,6 +2212,40 @@
   </div>
 </div>
 
+<div class="overlay ai-context-overlay" id="aiAttachmentOverlay" hidden>
+  <div class="dialog ai-context-dialog" role="dialog" aria-modal="true" aria-labelledby="aiAttachmentTitle">
+    <header class="ai-context-head">
+      <span class="ai-context-mark" aria-hidden="true"><svg class="icon"><use href="#i-sparkles"/></svg></span>
+      <div class="ai-context-heading">
+        <p class="eyebrow">AI writing assistant</p>
+        <h2 id="aiAttachmentTitle">Add attachment context</h2>
+        <p>Choose files from this email so the reply can use their details.</p>
+      </div>
+      <button class="icon-btn ai-context-close" id="aiAttachmentClose" type="button" aria-label="Skip attachments"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </header>
+    <div class="ai-context-body">
+      <div class="ai-context-source">
+        <span class="ai-context-source-icon" aria-hidden="true"><svg class="icon"><use href="#i-mail"/></svg></span>
+        <div><strong id="aiAttachmentSubject">This email</strong><span id="aiAttachmentMessage">Only PDF, Word, Excel and image files can be shared with the assistant.</span></div>
+      </div>
+      <div class="ai-context-toolbar">
+        <label class="ai-context-select-all"><input type="checkbox" id="aiAttachSelectAll"><span>Select all</span></label>
+        <span id="aiAttachmentCount">0 selected</span>
+      </div>
+      <div class="ai-context-list" id="aiAttachmentList"></div>
+      <div class="ai-context-budget">
+        <div class="ai-context-budget-head"><span>AI context budget</span><strong id="aiAttachmentBudgetLabel">0 B of 100 MB</strong></div>
+        <div class="ai-context-meter" id="aiAttachmentMeter" role="progressbar" aria-label="AI attachment size" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="aiAttachmentBar"></span></div>
+        <p id="aiAttachmentHint">Attachments stay inside Alt8Mail. Document text is read for this draft; images need a vision-capable AI model.</p>
+      </div>
+    </div>
+    <footer class="ai-context-foot">
+      <button class="btn-secondary" id="aiAttachmentSkip" type="button">Skip attachments</button>
+      <button class="btn-primary" id="aiAttachmentConfirm" type="button" disabled>Use selected</button>
+    </footer>
+  </div>
+</div>
+
 <div class="overlay" id="previewOverlay" hidden>
   <div class="dialog preview-dialog" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
     <div class="dialog-head preview-head">
@@ -2234,7 +2268,14 @@
       <span id="previewDimensions"></span>
     </div>
     <div class="preview-body" id="previewBody"></div>
-    <div class="preview-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span id="previewFootNote">Scanned by Alt8Mail attachment protection</span></div>
+    <div class="preview-foot">
+      <div class="preview-foot-status"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span id="previewFootNote">Scanned by Alt8Mail attachment protection</span></div>
+      <div class="preview-nav" id="previewNav" hidden>
+        <button class="preview-nav-btn" id="previewPrev" type="button" aria-label="Previous attachment" title="Previous attachment"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg><span>Previous</span></button>
+        <span class="preview-nav-count" id="previewCounter" aria-live="polite">1 of 1</span>
+        <button class="preview-nav-btn" id="previewNext" type="button" aria-label="Next attachment" title="Next attachment"><span>Next</span><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2941,6 +2982,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.20.5"></script>
+<script type="module" src="/app.js?v=0.20.7"></script>
 </body>
 </html>

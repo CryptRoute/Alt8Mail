@@ -261,6 +261,7 @@ svg.icon {
 
 /* ---------- avatars ---------- */
 .avatar {
+  position: relative;
   display: inline-grid;
   place-items: center;
   flex: none;
@@ -270,6 +271,19 @@ svg.icon {
   font-weight: 600;
   letter-spacing: .01em;
   user-select: none;
+  overflow: hidden;
+}
+.avatar.has-photo { background: var(--surface); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 65%, transparent); }
+.avatar.has-photo .avatar-initials { opacity: 0; }
+.avatar-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+  background: var(--surface);
 }
 .avatar-sm { width: 26px; height: 26px; font-size: 0.625rem; }
 .avatar-md { width: 32px; height: 32px; font-size: 0.6875rem; }

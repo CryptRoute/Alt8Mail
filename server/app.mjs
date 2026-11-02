@@ -135,6 +135,8 @@ export async function createApp(options = {}) {
   const allowDemoTwoFactorCode = options.demoTwoFactorCode !== false;
   const allowReset = options.allowReset !== false;
   const allowDevOutbox = options.allowDevOutbox === true;
+  const aiEnabled = options.aiEnabled === true;
+  const aiDelayMs = Math.max(0, Math.min(5000, Number(options.aiDelayMs) || 0));
 
   const store = new DataStore({ file: dataFile, seed: seedDatabase });
   await store.load();
@@ -144,6 +146,19 @@ export async function createApp(options = {}) {
   if (!Array.isArray(db.tasks)) db.tasks = [];
   if (!Array.isArray(db.files)) db.files = [];
   if (!Array.isArray(db.storageProviders)) db.storageProviders = [];
+  if (!Array.isArray(db.signatures)) db.signatures = [];
+  if (!db.signatures.length) {
+    db.signatures.push({
+      id: "sig_workspace_reply",
+      name: "Workspace reply",
+      bodyText: "Avery Chen\nVP Product · Alt8Mail\n+1 (415) 555-0101",
+      bodyHtml: "<p><strong>Avery Chen</strong><br>VP Product · Alt8Mail<br>+1 (415) 555-0101</p>",
+      defaultNew: true,
+      defaultReply: true,
+      defaultForward: false,
+      updatedAt: nowIso()
+    });
+  }
   if (!db.user.preferences) db.user.preferences = {};
   if (!db.user.security) db.user.security = { twoFactor: { enabled: false } };
 
@@ -995,6 +1010,8 @@ export async function createApp(options = {}) {
       quota: quotaInfo(),
       outbound: outboundInfo(),
       pendingSends: db.outbox.map(publicOutboxItem),
+      signatures: db.signatures,
+      ai: { enabled: aiEnabled, languages: [], styles: [] },
       auditCount: db.audit.length,
       capabilities: ["threads", "instant-search", "bulk-actions", "undo", "server-drafts", "undo-send", "scheduled-send", "sieve", "automatic-replies", "sender-trust", "outbound-caps", "quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files", "storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences"],
       attachmentMaxBytes: MAX_UPLOAD_BYTES,
@@ -1226,6 +1243,108 @@ export async function createApp(options = {}) {
       }
       if (pathname === "/api/bootstrap" && req.method === "GET") {
         sendJson(res, 200, bootstrapPayload(session));
+        return;
+      }
+      if (pathname === "/api/mail/avatar" && req.method === "GET") {
+        const address = normalizeEmail(new URL(req.url, "http://localhost").searchParams.get("address") || "");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) throw new ApiError(400, "AVATAR_ADDRESS", "Provide a valid sender address");
+        const initials = initialsFrom(displayNameFromEmail(address), address);
+        const color = colorForEmail(address);
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="32" fill="${color}"/><text x="32" y="39" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="700" fill="#fff">${escapeHtml(initials)}</text></svg>`;
+        res.writeHead(200, {
+          "Content-Type": "image/svg+xml",
+          "Cache-Control": "private, max-age=86400",
+          "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+          "X-Content-Type-Options": "nosniff"
+        });
+        res.end(svg);
+        return;
+      }
+      if (pathname === "/api/signatures" && req.method === "GET") {
+        sendJson(res, 200, { signatures: db.signatures });
+        return;
+      }
+      if (pathname === "/api/signatures" && req.method === "POST") {
+        const body = await readJson(req);
+        const name = String(body.name || "").trim().slice(0, 80);
+        const bodyText = String(body.bodyText || "").trim();
+        const bodyHtml = String(body.bodyHtml || "").trim();
+        if (!name) throw new ApiError(400, "SIGNATURE_NAME", "Give this signature a name");
+        if (!bodyText && !bodyHtml) throw new ApiError(400, "SIGNATURE_EMPTY", "Write something in the signature");
+        const signature = {
+          id: id("sig"), name, bodyText, bodyHtml,
+          defaultNew: !!body.defaultNew, defaultReply: !!body.defaultReply, defaultForward: !!body.defaultForward,
+          updatedAt: nowIso()
+        };
+        for (const flag of ["defaultNew", "defaultReply", "defaultForward"]) {
+          if (signature[flag]) db.signatures.forEach((item) => { item[flag] = false; });
+        }
+        db.signatures.push(signature);
+        await store.save();
+        sendJson(res, 201, { signature });
+        return;
+      }
+      const signatureMatch = pathname.match(/^\/api\/signatures\/([A-Za-z0-9_-]{1,100})$/);
+      if (signatureMatch && req.method === "PATCH") {
+        const signature = db.signatures.find((item) => item.id === signatureMatch[1]);
+        if (!signature) throw new ApiError(404, "SIGNATURE_NOT_FOUND", "Signature not found");
+        const body = await readJson(req);
+        if (body.name !== undefined) signature.name = String(body.name || "").trim().slice(0, 80) || signature.name;
+        if (body.bodyText !== undefined) signature.bodyText = String(body.bodyText || "");
+        if (body.bodyHtml !== undefined) signature.bodyHtml = String(body.bodyHtml || "");
+        for (const flag of ["defaultNew", "defaultReply", "defaultForward"]) {
+          if (body[flag] === true) db.signatures.forEach((item) => { item[flag] = item.id === signature.id; });
+          else if (body[flag] === false) signature[flag] = false;
+        }
+        signature.updatedAt = nowIso();
+        await store.save();
+        sendJson(res, 200, { signature });
+        return;
+      }
+      if (signatureMatch && req.method === "DELETE") {
+        const before = db.signatures.length;
+        db.signatures = db.signatures.filter((item) => item.id !== signatureMatch[1]);
+        if (db.signatures.length === before) throw new ApiError(404, "SIGNATURE_NOT_FOUND", "Signature not found");
+        await store.save();
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      const aiRoute = pathname.match(/^\/api\/ai\/messages\/([^/]+)\/(reply|summary|translate)$/);
+      if (aiRoute && req.method === "POST") {
+        if (!aiEnabled) throw new ApiError(403, "AI_DISABLED", "The AI assistant is disabled for this organization");
+        const body = await readJson(req);
+        const messageId = decodeURIComponent(aiRoute[1]);
+        const message = db.messages.find((item) => item.id === messageId);
+        if (!message) throw new ApiError(404, "MESSAGE_NOT_FOUND", "Message not found");
+        if (aiDelayMs) await new Promise((resolve) => setTimeout(resolve, aiDelayMs));
+        const action = aiRoute[2];
+        const attachmentCount = Array.isArray(body.attachmentIds) ? body.attachmentIds.length : 0;
+        if (action === "reply") {
+          sendJson(res, 200, {
+            reply: "Thank you for the update. I reviewed the conversation and the supporting context, and I will send the confirmed next steps by Friday.",
+            language: "en-US", threadId: message.threadId, provider: "preview", model: "alt8mail-preview",
+            attachmentCount
+          });
+          return;
+        }
+        if (action === "translate") {
+          sendJson(res, 200, { translation: "The conversation confirms the next steps are under review.", language: "en-US", cached: false, provider: "preview", model: "alt8mail-preview" });
+          return;
+        }
+        sendJson(res, 200, { summary: "The conversation confirms the next steps are under review.", language: "en-US", cached: false, provider: "preview", model: "alt8mail-preview" });
+        return;
+      }
+      if (pathname === "/api/ai/compose" && req.method === "POST") {
+        if (!aiEnabled) throw new ApiError(403, "AI_DISABLED", "The AI assistant is disabled for this organization");
+        const body = await readJson(req);
+        if (aiDelayMs) await new Promise((resolve) => setTimeout(resolve, aiDelayMs));
+        const attachmentCount = Array.isArray(body.attachmentIds) ? body.attachmentIds.length : 0;
+        sendJson(res, 200, {
+          text: "Thank you for your message. I reviewed the details and will follow up with the confirmed next steps shortly.",
+          style: body.style || "professional", length: body.length || "medium",
+          language: body.language || "en-US", creativity: body.creativity ?? 0.5,
+          provider: "preview", model: "alt8mail-preview", attachmentCount
+        });
         return;
       }
       if (pathname === "/api/contacts/auto" && req.method === "POST") {

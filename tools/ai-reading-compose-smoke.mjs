@@ -127,6 +127,11 @@ try {
   await page.click("#cmdAiReply");
   await page.waitFor(() => document.querySelectorAll(".compose").length === 1, 4000);
   await sleep(350);
+  if (await page.eval("!document.getElementById('aiAttachmentOverlay').hidden")) {
+    assert.ok(await page.eval("document.querySelectorAll('#aiAttachmentList [data-ai-context-row]').length > 0"), "AI attachment picker lists supported files from the conversation");
+    await page.click("#aiAttachmentSkip");
+  }
+  await page.waitFor(() => [...document.querySelectorAll(".compose [data-compose-editor]")].some((editor) => editor.textContent.includes(aiReplyStub)), 5000);
   const aiReply = await page.eval(`(() => {
     const compose = document.querySelector('.compose');
     return {

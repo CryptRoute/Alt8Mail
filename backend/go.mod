@@ -10,6 +10,7 @@ require (
 	github.com/emersion/go-imap v1.2.1
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/redis/go-redis/v9 v9.23.0
 	golang.org/x/crypto v0.58.0

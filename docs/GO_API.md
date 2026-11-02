@@ -66,6 +66,7 @@ in the request path and its JSON demo data is not read by the live frontend.
 | Storage OAuth | `GET /api/storage/oauth/:provider/start`, `GET /api/storage/oauth/:provider/callback` |
 | Guest shares | `GET /api/public/shares/:token`, `GET /api/public/shares/:token/content`, `POST /api/public/shares/:token/replace`, `GET /files/s/:token` |
 | Attachments | `POST /api/attachments`, `GET /api/attachments/:id/content` |
+| Sender avatar | `GET /api/mail/avatar?address=...` (DMARC-enforced BIMI logo, favicon fallback, authenticated and domain-cached) |
 | CalDAV/CardDAV | `/dav/`, `/.well-known/caldav`, `/.well-known/carddav` (PROPFIND/REPORT/GET/PUT/DELETE, Basic auth) |
 | App passwords | `GET/POST /api/security/app-passwords`, `DELETE /api/security/app-passwords/:id` (permanent or 1–730-day expiry; soft-revoked history) |
 | Identities | `GET/POST /api/identities`, `POST /api/identities/:id/resend`, `DELETE /api/identities/:id`, `GET/POST /api/identities/verify` |
@@ -265,9 +266,16 @@ message into the user's configured interface language. Reader AI is strictly
 user-triggered: no reader or hover summary is generated automatically.
 `POST /api/ai/messages/:id/reply` loads up to ten recent messages in the thread
 and returns a ready-to-send reply body for the composer, written in the user's
-language. Provider calls use a bounded timeout, no redirects, a 4 MiB response
-cap, treat quoted mail as untrusted data, and never return the API key. If the
-tenant setting is off or the request fails, the user UI is hidden/returns
+language. Both reply and compose requests accept `attachmentIds` (and compose
+also accepts `sourceMessageId`) for user-selected PDF, Word, Excel, CSV and
+image attachments from the same conversation thread. The server enforces a
+100 MB declared total, verifies each attachment belongs to the authenticated
+user's thread, extracts bounded text from PDF/DOCX/XLSX and legacy Office
+strings, and sends images to vision-capable providers only. Provider calls use
+a bounded timeout, no redirects, a 4 MiB response
+cap, treat quoted mail and attachment text as untrusted data, and never return
+the API key. If the tenant setting is off or the request fails, the user UI is
+hidden/returns
 `AI_DISABLED` or `AI_PROVIDER`.
 
 **App passwords.** Creation accepts `expiresInDays` (1–730) or `expiresAt`;
