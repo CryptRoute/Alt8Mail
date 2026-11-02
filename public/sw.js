@@ -1,21 +1,21 @@
 /* Alt8Mail — offline app shell.
    API calls are always network-only; mailbox data is never cached here. */
-const VERSION = "2026.11.02-19";
+const VERSION = "2026.11.02-20";
 const CACHE = `a8m-shell-${VERSION}`;
 const SHELL = [
   "/",
-  "/styles.css?v=0.20.12",
-  "/features.css?v=0.20.12",
-  "/workspace.css?v=0.20.12",
-  "/cabinet-calendar.css?v=0.20.12",
-  "/features-0.7.css?v=0.20.12",
-  "/onboarding.css?v=0.20.12",
-  "/email-ui.css?v=0.20.12",
+  "/styles.css?v=0.20.13",
+  "/features.css?v=0.20.13",
+  "/workspace.css?v=0.20.13",
+  "/cabinet-calendar.css?v=0.20.13",
+  "/features-0.7.css?v=0.20.13",
+  "/onboarding.css?v=0.20.13",
+  "/email-ui.css?v=0.20.13",
   "/vendor/typo.js",
   "/vendor/qrcode.min.js",
   "/vendor/en_US.aff",
   "/vendor/en_US.dic",
-  "/app.js?v=0.20.12",
+  "/app.js?v=0.20.13",
   "/search.mjs",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
@@ -67,7 +67,7 @@ self.addEventListener("push", (event) => {
   const target = payload.url || "/";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      if (clients.some((client) => client.visibilityState === "visible")) return undefined;
+      if (!payload.force && clients.some((client) => client.visibilityState === "visible")) return undefined;
       return self.registration.showNotification(title, {
         body,
         tag,
@@ -75,7 +75,7 @@ self.addEventListener("push", (event) => {
         badge: payload.badge || "/icons/icon-192.png",
         timestamp: Number(payload.timestamp) || Date.now(),
         data: { url: target },
-        renotify: false
+        renotify: Boolean(payload.force)
       }).catch(() => undefined);
     }).catch(() => undefined)
   );

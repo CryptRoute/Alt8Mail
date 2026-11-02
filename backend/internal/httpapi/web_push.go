@@ -339,6 +339,10 @@ func (s *Server) testWebPush(w http.ResponseWriter, r *http.Request) {
 		"tag":   "a8m-test-notification",
 		"url":   strings.TrimRight(s.cfg.PublicURL, "/") + "/#/Inbox",
 		"icon":  "/icons/icon-192.png", "badge": "/icons/icon-192.png",
+		// A test is explicitly requested, so show it even while a webmail
+		// window is visible. Regular mail pushes still defer to the in-app
+		// notifier when the app is on screen.
+		"force": true,
 	}
 	if len(subscriptions) == 0 {
 		writeError(w, http.StatusConflict, "PUSH_NO_SUBSCRIPTION", "This account has no registered browser. Enable background delivery on this device first.")

@@ -320,6 +320,10 @@ func (s *Server) webPushTestPayload(ctx context.Context) map[string]any {
 		"url":   webmail + "/#/Inbox",
 		"icon":  "/icons/icon-192.png",
 		"badge": "/icons/icon-192.png",
+		// A test is explicitly requested, so show it even while a webmail
+		// window is visible. Regular mail pushes still defer to the in-app
+		// notifier when the app is on screen.
+		"force": true,
 	}
 }
 
