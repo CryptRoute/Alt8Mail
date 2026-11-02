@@ -34,6 +34,7 @@ type Server struct {
 	updateJobs   map[string]*updateJob
 	termMu       sync.Mutex
 	termSessions map[string]*terminalSession
+	webNetMu     sync.Mutex
 }
 
 type Options struct {
@@ -100,10 +101,12 @@ func (s *Server) Handler() http.Handler {
 	s.registerBackupRoutes(mux)
 	s.registerCronRoutes(mux)
 	s.registerServerRoutes(mux)
+	s.registerWebNetRoutes(mux)
 	s.registerDatabaseRoutes(mux)
 	s.registerAccessRoutes(mux)
 	s.registerAPIRoutes(mux)
 	s.registerNotificationRoutes(mux)
+	s.registerWebPushRoutes(mux)
 	s.registerSecurityReportRoutes(mux)
 	s.registerUpdateRoutes(mux)
 	s.registerSystemRoutes(mux)

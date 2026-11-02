@@ -57,7 +57,10 @@ func (s *Server) tlsTargetStates(ctx context.Context) []tlsTargetState {
 		web.ConfigPath = configPath
 		web.CertPath, web.KeyPath = nginxTLSPaths(content)
 		web.Available = web.CertPath != "" && web.KeyPath != ""
-		if !web.Available {
+		if strings.Contains(content, "Managed by Alt8Mail Web Net") {
+			web.Available = false
+			web.Detail = "Web Net manages nginx certificates per hostname; choose them on the Web Net page"
+		} else if !web.Available {
 			web.Detail = "No ssl_certificate/ssl_certificate_key directives found in " + configPath
 		}
 	} else {
@@ -285,6 +288,9 @@ func (s *Server) applyWebCertificate(ctx context.Context, certPath, keyPath stri
 	configPath, content, err := s.findNginxConfig()
 	if err != nil {
 		return nil, err
+	}
+	if strings.Contains(content, "Managed by Alt8Mail Web Net") {
+		return nil, fmt.Errorf("nginx is managed by Web Net; assign webmail and admin certificates on the Web Net page")
 	}
 	updated, certCount := replaceNginxDirective(content, "ssl_certificate", certPath)
 	updated, keyCount := replaceNginxDirective(updated, "ssl_certificate_key", keyPath)

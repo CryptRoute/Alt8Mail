@@ -61,8 +61,9 @@ type Config struct {
 	DemoPassword  string
 	DemoUserEmail string
 
-	WebAuthnRPID    string
-	WebAuthnOrigins []string
+	WebAuthnRPID     string
+	WebAuthnOrigins  []string
+	PushVAPIDKeyFile string
 
 	S3Endpoint            string
 	S3Region              string
@@ -106,6 +107,7 @@ func Load() (Config, error) {
 		CookieSecure:          envBool("ALT8MAIL_COOKIE_SECURE", false),
 		StaticCacheBust:       os.Getenv("ALT8MAIL_BUILD_ID"),
 		ReadHeaderTimeout:     10 * time.Second,
+		PushVAPIDKeyFile:      env("ALT8MAIL_PUSH_VAPID_KEY_FILE", "/etc/a8m/web_push_vapid.key"),
 		SessionTTL:            12 * time.Hour,
 		RememberTTL:           30 * 24 * time.Hour,
 		IMAPAddr:              env("ALT8MAIL_IMAP_ADDR", "127.0.0.1:993"),

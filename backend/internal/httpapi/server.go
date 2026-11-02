@@ -133,6 +133,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/preferences", s.requireUser(s.getPreferences))
 	mux.HandleFunc("PATCH /api/preferences", s.requireUser(s.patchPreferencesState))
 	mux.HandleFunc("POST /api/preferences/reset", s.requireUser(s.resetPreferencesState))
+	mux.HandleFunc("GET /api/push/config", s.requireUser(s.getPushConfig))
+	mux.HandleFunc("POST /api/push/subscribe", s.requireUser(s.subscribePush))
+	mux.HandleFunc("DELETE /api/push/subscribe", s.requireUser(s.unsubscribePush))
+	mux.HandleFunc("POST /api/push/test", s.requireUser(s.testWebPush))
 
 	mux.HandleFunc("GET /api/labels", s.requireUser(s.getMailLabels))
 	mux.HandleFunc("POST /api/labels", s.requireUser(s.createMailLabel))
@@ -710,6 +714,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"auditCount":   len(stateSlice(state, "audit")),
 		"recentAudit":  recentAudit,
 		"ai":           s.aiPublicConfig(ctx, sess.User.TenantID),
+		"push":         s.pushPublicConfig(ctx, sess.User.ID),
 		"capabilities": capabilities(),
 		"mailboxMode":  stateString(state, "mailMode"),
 		"mailSync": map[string]any{
@@ -1172,6 +1177,7 @@ func capabilities() []string {
 		"quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files",
 		"storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences",
 		"labels", "message-filters", "calendar-realtime", "cabinet-folders", "storage-policy", "file-context-menu",
+		"web-push",
 	}
 }
 

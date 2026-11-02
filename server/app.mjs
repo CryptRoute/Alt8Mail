@@ -1012,6 +1012,7 @@ export async function createApp(options = {}) {
       pendingSends: db.outbox.map(publicOutboxItem),
       signatures: db.signatures,
       ai: { enabled: aiEnabled, languages: [], styles: [] },
+      push: { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true },
       auditCount: db.audit.length,
       capabilities: ["threads", "instant-search", "bulk-actions", "undo", "server-drafts", "undo-send", "scheduled-send", "sieve", "automatic-replies", "sender-trust", "outbound-caps", "quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files", "storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences"],
       attachmentMaxBytes: MAX_UPLOAD_BYTES,
@@ -1459,6 +1460,19 @@ export async function createApp(options = {}) {
       }
       if (pathname === "/api/preferences" && req.method === "GET") {
         sendJson(res, 200, { preferences: db.user.preferences });
+        return;
+      }
+      if (pathname === "/api/push/config" && req.method === "GET") {
+        sendJson(res, 200, { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true });
+        return;
+      }
+      if (pathname === "/api/push/subscribe" && (req.method === "POST" || req.method === "DELETE")) {
+        await readJson(req);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      if (pathname === "/api/push/test" && req.method === "POST") {
+        sendJson(res, 200, { ok: true, sent: 0, failed: 0 });
         return;
       }
       if (pathname === "/api/preferences" && req.method === "PATCH") {

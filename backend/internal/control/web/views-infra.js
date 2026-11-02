@@ -403,17 +403,39 @@ export async function renderLogs(ctx) {
     try {
       const row = await ctx.api(`/control/api/logs/${logId}`);
       if (!modal.root.isConnected) return;
-      modal.root.querySelector('.modal-body').innerHTML = `<div class="diagnostic-summary">${ui.statusPill(row.status)}${ui.badge(ui.humanTitle(row.direction), row.direction === 'inbound' ? 'info' : row.direction === 'outbound' ? 'accent' : 'neutral')}<span class="summary-pill">${ui.icon('clock', 12)} ${esc(fmt.dateTime(row.at))}</span><span class="summary-pill">${ui.icon('server', 12)} ${esc(row.source)}</span></div>
+      const hasSource = Boolean(row.rawMessage);
+      const sourceNote = hasSource
+        ? `<div class="notice tone-info" style="margin-bottom:14px">${ui.icon('mail', 16)}<div><strong>Message source located</strong><p>${esc(row.messageSource || 'Local message store')}${row.rawMessageTruncated ? ' · the stored copy is capped at 1 MB' : ' · headers and body are shown from the delivered message'}.</p></div></div>`
+        : `<div class="notice tone-warning" style="margin-bottom:14px">${ui.icon('alert', 16)}<div><strong>Message source unavailable</strong><p>The queue copy has been removed and no matching Maildir message could be found. The Subject is captured whenever the delivered message is still available on this server.</p></div></div>`;
+      const tabButton = (key, label, active = false) => `<button class="tab${active ? ' is-active' : ''}" type="button" role="tab" aria-selected="${active}" data-log-tab="${key}">${ui.icon(key === 'overview' ? 'info' : key === 'headers' ? 'list' : key === 'body' ? 'mail' : 'terminal', 13)} ${label}</button>`;
+      const tabs = `<div class="tabs" role="tablist">${tabButton('overview', 'Overview', true)}${hasSource ? tabButton('headers', 'Headers') + tabButton('body', 'Message body') + tabButton('source', 'Raw source') : ''}</div>`;
+      modal.root.querySelector('.modal-body').innerHTML = `${tabs}<div data-log-panel="overview">
+        <div class="diagnostic-summary">${ui.statusPill(row.status)}${ui.badge(ui.humanTitle(row.direction), row.direction === 'inbound' ? 'info' : row.direction === 'outbound' ? 'accent' : 'neutral')}<span class="summary-pill">${ui.icon('clock', 12)} ${esc(fmt.dateTime(row.at))}</span><span class="summary-pill">${ui.icon('server', 12)} ${esc(row.source)}</span></div>
+        ${sourceNote}
         <div class="kv-grid is-3">${ui.kv([
+          ['Subject', row.subject ? esc(row.subject) : '<span class="muted">Not captured</span>'],
           ['Sender', `<span class="mono break-all">${esc(row.sender || '—')}</span>`],
           ['Recipient', `<span class="mono break-all">${esc(row.recipient || '—')}</span>`],
           ['Domain', `<span class="mono">${esc(row.domain || '—')}</span>`],
           ['Queue ID', `<span class="mono">${esc(row.queueId || '—')}</span>`],
           ['Size', ui.bytes(row.sizeBytes)], ['Delay', `${ui.num(row.delaySeconds)} seconds`],
-          ['Relay', `<span class="mono break-all">${esc(row.relay || '—')}</span>`], ['Subject', esc(row.subject || '—')], ['Direction', esc(row.direction)],
+          ['Relay', `<span class="mono break-all">${esc(row.relay || '—')}</span>`], ['Direction', esc(row.direction)],
         ])}</div>
         <h4 class="form-section-title" style="margin-top:15px">Detail</h4><p class="form-note break-all">${esc(row.detail || 'No parsed detail.')}</p>
-        <h4 class="form-section-title" style="margin-top:15px">Raw log line</h4>${ui.codeBlock(row.raw || 'No raw line stored', { language: 'postfix', maxHeight: '38vh' })}`;
+        <h4 class="form-section-title" style="margin-top:15px">Postfix log line</h4>${ui.codeBlock(row.raw || 'No raw line stored', { language: 'postfix', maxHeight: '30vh' })}
+      </div>
+      <div data-log-panel="headers" hidden><h4 class="form-section-title">Message headers</h4>${ui.codeBlock(row.messageHeaders || 'No headers available.', { language: 'headers', maxHeight: '52vh' })}</div>
+      <div data-log-panel="body" hidden><h4 class="form-section-title">Message body</h4>${ui.codeBlock(row.messageBody || 'No message body available.', { language: 'message', maxHeight: '52vh' })}</div>
+      <div data-log-panel="source" hidden><h4 class="form-section-title">Raw delivered message</h4>${ui.codeBlock(row.rawMessage || 'No raw message available.', { language: 'rfc822', maxHeight: '52vh' })}</div>`;
+      modal.root.querySelectorAll('[data-log-tab]').forEach((button) => button.addEventListener('click', () => {
+        const key = button.dataset.logTab;
+        modal.root.querySelectorAll('[data-log-tab]').forEach((tab) => {
+          const active = tab === button;
+          tab.classList.toggle('is-active', active);
+          tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        modal.root.querySelectorAll('[data-log-panel]').forEach((panel) => { panel.hidden = panel.dataset.logPanel !== key; });
+      }));
     } catch (error) { modal.root.querySelector('.modal-body').innerHTML = ui.inlineNotice('critical', 'Could not load event', errorText(error)); }
   };
 

@@ -49,6 +49,7 @@ type logIngestor struct {
 	inode  uint64
 	known  map[string]logQueueContext
 	stop   chan struct{}
+	enrich chan int64
 }
 
 type logQueueContext struct {
@@ -58,11 +59,62 @@ type logQueueContext struct {
 }
 
 func newLogIngestor(s *Server) *logIngestor {
-	return &logIngestor{server: s, known: map[string]logQueueContext{}, stop: make(chan struct{})}
+	return &logIngestor{
+		server: s, known: map[string]logQueueContext{}, stop: make(chan struct{}),
+		enrich: make(chan int64, 512),
+	}
 }
 
 func (l *logIngestor) Start(ctx context.Context) {
 	go l.run(ctx)
+	go l.runEnrichment(ctx)
+	go l.backfillRecentSources(ctx)
+}
+
+func (l *logIngestor) enqueueEnrichment(id int64) {
+	if id <= 0 {
+		return
+	}
+	select {
+	case l.enrich <- id:
+	default:
+	}
+}
+
+func (l *logIngestor) runEnrichment(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case id := <-l.enrich:
+			enrichCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			err := l.server.enrichMailEventSource(enrichCtx, id)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				l.server.logger.Debug("mail event source enrichment skipped", "id", id, "err", err)
+			}
+		}
+	}
+}
+
+func (l *logIngestor) backfillRecentSources(ctx context.Context) {
+	// Opening an old event still performs a lazy lookup, but warming the recent
+	// window makes the Subject column useful immediately after an upgrade.
+	rows, err := l.server.db.Query(ctx, `
+		SELECT id FROM control.mail_events
+		WHERE raw_message='' AND event_at > now() - interval '14 days'
+		ORDER BY event_at DESC LIMIT 200
+	`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			l.enqueueEnrichment(id)
+		}
+	}
 }
 
 func (l *logIngestor) run(ctx context.Context) {
@@ -293,6 +345,7 @@ func (l *logIngestor) insert(ctx context.Context, event mailEvent) {
 		"status": event.Status, "direction": event.Direction, "sender": event.Sender,
 		"recipient": event.Recipient,
 	})
+	l.enqueueEnrichment(id)
 }
 
 func (s *Server) int64Setting(ctx context.Context, key string, fallback int64) int64 {
@@ -373,23 +426,50 @@ func (s *Server) logRetentionDays(ctx context.Context) int {
 
 func (s *Server) handleLogDetail(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	id, _ := strconv.ParseInt(pathID(r), 10, 64)
-	var at time.Time
-	var src, queueID, sender, recipient, domain, direction, status, relay, subject, detail, raw string
-	var size int64
-	var delay int
-	err := s.db.QueryRow(r.Context(), `
-		SELECT event_at,source,queue_id,sender::text,recipient::text,domain::text,direction,status,
-		       size_bytes,delay_seconds,relay,subject,detail,raw
-		FROM control.mail_events WHERE id=$1
-	`, id).Scan(&at, &src, &queueID, &sender, &recipient, &domain, &direction, &status, &size, &delay, &relay, &subject, &detail, &raw)
+	load := func(ctx context.Context) (map[string]any, error) {
+		var at time.Time
+		var src, queueID, sender, recipient, domain, direction, status, relay, subject, detail, raw string
+		var rawMessage, messageSource string
+		var rawTruncated bool
+		var enrichedAt *time.Time
+		var size int64
+		var delay int
+		err := s.db.QueryRow(ctx, `
+			SELECT event_at,source,queue_id,sender::text,recipient::text,domain::text,direction,status,
+			       size_bytes,delay_seconds,relay,subject,detail,raw,raw_message,raw_message_truncated,
+			       message_source,message_enriched_at
+			FROM control.mail_events WHERE id=$1
+		`, id).Scan(&at, &src, &queueID, &sender, &recipient, &domain, &direction, &status, &size, &delay, &relay, &subject, &detail, &raw,
+			&rawMessage, &rawTruncated, &messageSource, &enrichedAt)
+		if err != nil {
+			return nil, err
+		}
+		headers, body := splitRawMessage(rawMessage)
+		payload := map[string]any{"id": id, "at": at.UTC().Format(time.RFC3339), "source": src,
+			"queueId": queueID, "sender": sender, "recipient": recipient, "domain": domain,
+			"direction": direction, "status": status, "sizeBytes": size, "delaySeconds": delay,
+			"relay": relay, "subject": subject, "detail": detail, "raw": raw,
+			"rawMessage": rawMessage, "rawMessageTruncated": rawTruncated,
+			"messageHeaders": headers, "messageBody": body, "messageSource": messageSource}
+		if enrichedAt != nil {
+			payload["messageEnrichedAt"] = enrichedAt.UTC().Format(time.RFC3339)
+		}
+		return payload, nil
+	}
+	payload, err := load(r.Context())
 	if err != nil {
 		writeFromError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "at": at.UTC().Format(time.RFC3339), "source": src,
-		"queueId": queueID, "sender": sender, "recipient": recipient, "domain": domain,
-		"direction": direction, "status": status, "sizeBytes": size, "delaySeconds": delay,
-		"relay": relay, "subject": subject, "detail": detail, "raw": raw})
+	if payload["rawMessage"] == "" {
+		enrichCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		_ = s.enrichMailEventSource(enrichCtx, id)
+		cancel()
+		if refreshed, refreshErr := load(r.Context()); refreshErr == nil {
+			payload = refreshed
+		}
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) handleLogPrune(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {

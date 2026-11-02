@@ -1,21 +1,21 @@
 /* Alt8Mail — offline app shell.
    API calls are always network-only; mailbox data is never cached here. */
-const VERSION = "2026.11.02-14";
+const VERSION = "2026.11.02-16";
 const CACHE = `a8m-shell-${VERSION}`;
 const SHELL = [
   "/",
-  "/styles.css?v=0.20.7",
-  "/features.css?v=0.20.7",
-  "/workspace.css?v=0.20.7",
-  "/cabinet-calendar.css?v=0.20.7",
-  "/features-0.7.css?v=0.20.7",
-  "/onboarding.css?v=0.20.7",
-  "/email-ui.css?v=0.20.7",
+  "/styles.css?v=0.20.9",
+  "/features.css?v=0.20.9",
+  "/workspace.css?v=0.20.9",
+  "/cabinet-calendar.css?v=0.20.9",
+  "/features-0.7.css?v=0.20.9",
+  "/onboarding.css?v=0.20.9",
+  "/email-ui.css?v=0.20.9",
   "/vendor/typo.js",
   "/vendor/qrcode.min.js",
   "/vendor/en_US.aff",
   "/vendor/en_US.dic",
-  "/app.js?v=0.20.7",
+  "/app.js?v=0.20.9",
   "/search.mjs",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
@@ -49,6 +49,55 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
+});
+
+// Web Push. The server only sends a push when a message is new; if a visible
+// app window is already on screen the in-app notifier owns the alert so the
+// user never sees the same message twice.
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { body: event.data ? event.data.text() : "" };
+  }
+  const title = payload.title || "New Alt8Mail message";
+  const body = payload.body || "Open Alt8Mail to read the new message.";
+  const tag = payload.tag || "a8m-new-mail";
+  const target = payload.url || "/";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      if (clients.some((client) => client.visibilityState === "visible")) return undefined;
+      return self.registration.showNotification(title, {
+        body,
+        tag,
+        icon: payload.icon || "/icons/icon-192.png",
+        badge: payload.badge || "/icons/icon-192.png",
+        timestamp: Number(payload.timestamp) || Date.now(),
+        data: { url: target },
+        renotify: false
+      }).catch(() => undefined);
+    }).catch(() => undefined)
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  let target = "/";
+  try {
+    const raw = event.notification.data && event.notification.data.url;
+    if (raw) target = new URL(raw, self.location.origin).href;
+  } catch {}
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if (!client.url.startsWith(self.location.origin)) continue;
+        if ("navigate" in client) return client.navigate(target).then(() => client.focus()).catch(() => client.focus());
+        return client.focus();
+      }
+      return self.clients.openWindow(target);
+    }).catch(() => undefined)
+  );
 });
 
 self.addEventListener("fetch", (event) => {

@@ -10,13 +10,13 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.20.7">
-<link rel="stylesheet" href="/features.css?v=0.20.7">
-<link rel="stylesheet" href="/workspace.css?v=0.20.7">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.20.7">
-<link rel="stylesheet" href="/features-0.7.css?v=0.20.7">
-<link rel="stylesheet" href="/onboarding.css?v=0.20.7">
-<link rel="stylesheet" href="/email-ui.css?v=0.20.7">
+<link rel="stylesheet" href="/styles.css?v=0.20.9">
+<link rel="stylesheet" href="/features.css?v=0.20.9">
+<link rel="stylesheet" href="/workspace.css?v=0.20.9">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.20.9">
+<link rel="stylesheet" href="/features-0.7.css?v=0.20.9">
+<link rel="stylesheet" href="/onboarding.css?v=0.20.9">
+<link rel="stylesheet" href="/email-ui.css?v=0.20.9">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -1247,7 +1247,7 @@
                       <div class="pref-row">
                         <div class="pref-copy">
                           <strong>Desktop notifications</strong>
-                          <span>Show an alert when new mail arrives while Alt8Mail is open.</span>
+                          <span>Show alerts while Alt8Mail is open and enable background delivery when it is closed.</span>
                         </div>
                         <button class="switch" data-pref="notifyDesktop" type="button" role="switch" aria-checked="true" aria-label="Desktop notifications"><span></span></button>
                       </div>
@@ -1267,6 +1267,27 @@
                       </div>
                     </div>
                     <p class="settings-note">Preferences are stored in PostgreSQL. Desktop alerts require browser notification permission; sound and calendar reminders always fall back to an in-app notice.</p>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Background delivery</h3>
+                      <p>Keep receiving new-mail alerts after this Alt8Mail tab is closed.</p>
+                    </div>
+                    <div class="pref-list">
+                      <div class="pref-row">
+                        <div class="pref-copy">
+                          <strong>Browser push</strong>
+                          <span id="pushStatusText">Checking this browser…</span>
+                        </div>
+                        <span class="settings-note" id="pushStatusBadge" style="margin:0">Checking</span>
+                      </div>
+                    </div>
+                    <div class="settings-actions" style="flex-wrap:wrap;gap:8px">
+                      <button class="btn-secondary" id="pushEnableBtn" type="button" disabled>Enable on this device</button>
+                      <button class="btn-secondary" id="pushTestBtn" type="button" hidden disabled>Send test</button>
+                      <button class="btn-secondary" id="pushDisableBtn" type="button" hidden disabled>Disable on this device</button>
+                    </div>
+                    <p class="settings-note" id="pushHint">Alerts arrive through your operating system, so they still appear when the Alt8Mail tab is closed.</p>
                   </div>
                 </section>
 
@@ -2982,6 +3003,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.20.7"></script>
+<script type="module" src="/app.js?v=0.20.9"></script>
 </body>
 </html>

@@ -11,13 +11,15 @@ import {
   renderTLS, renderAccess, renderAPIKeys, renderWebhooks, renderNotifications,
 } from './views-security.js';
 import { renderSecurityReports } from './views-security-reports.js';
+import { renderWebPush } from './views-push.js';
+import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '0.6.6';
+const APP_VERSION = '0.7.0';
 
 const state = {
   csrf: '',
@@ -69,6 +71,7 @@ const NAV_GROUPS = [
     { key: 'api', label: 'API keys', icon: 'key', href: '#/api', perm: 'api.read', desc: 'Scoped keys for the public REST API' },
     { key: 'webhooks', label: 'Webhooks', icon: 'webhook', href: '#/webhooks', perm: 'notifications.read', desc: 'Signed outbound event delivery' },
     { key: 'notifications', label: 'Notifications', icon: 'bell', href: '#/notifications', perm: 'notifications.read', desc: 'Slack, Discord, Telegram and email alerts' },
+    { key: 'web-push', label: 'Web push', icon: 'bell', href: '#/web-push', perm: 'notifications.read', desc: 'Browser push notifications for webmail users' },
   ] },
   { label: 'Infrastructure', items: [
     { key: 'system', label: 'System', icon: 'power', href: '#/system', perm: 'server.read', desc: 'Release updates, version history and host reboot' },
@@ -81,6 +84,7 @@ const NAV_GROUPS = [
     { key: 'backups', label: 'Backups', icon: 'archive', href: '#/backups', perm: 'backups.read', desc: 'Archives, download and restore' },
     { key: 'cron', label: 'Scheduled tasks', icon: 'calendar', href: '#/cron', perm: 'cron.read', desc: 'Cron jobs, run-now and execution logs' },
     { key: 'server', label: 'Server & network', icon: 'network', href: '#/server', perm: 'server.read', desc: 'Identity, DNS resolver, interfaces and time' },
+    { key: 'webnet', label: 'Web Net', icon: 'globe', href: '#/webnet', perm: 'server.read', desc: 'Webmail and admin hostnames, edge policy and traffic' },
     { key: 'firewall', label: 'Firewall', icon: 'flame', href: '#/firewall', perm: 'server.read', desc: 'UFW rules and firewall state' },
     { key: 'database', label: 'Database', icon: 'database', href: '#/database', perm: 'database.read', desc: 'PostgreSQL health, provisioning and copies' },
     { key: 'sync', label: 'Config sync', icon: 'layers', href: '#/sync', perm: 'dashboard.read', desc: 'Reconcile mail resources and inspect drift' },
@@ -106,6 +110,7 @@ const ROUTE_DEFS = {
   api: { title: 'API keys', crumb: 'Security', nav: 'api', perm: 'api.read', render: renderAPIKeys },
   webhooks: { title: 'Webhooks', crumb: 'Security', nav: 'webhooks', perm: 'notifications.read', render: renderWebhooks },
   notifications: { title: 'Notifications', crumb: 'Security', nav: 'notifications', perm: 'notifications.read', render: renderNotifications },
+  'web-push': { title: 'Web push', crumb: 'Security', nav: 'web-push', perm: 'notifications.read', render: renderWebPush },
   services: { title: 'Services', crumb: 'Infrastructure', nav: 'services', perm: 'services.read', render: renderServices },
   system: { title: 'System', crumb: 'Infrastructure', nav: 'system', perm: 'server.read', render: renderSystem },
   updates: { title: 'Software updates', crumb: 'Infrastructure', nav: 'updates', perm: 'server.read', render: renderUpdates },
@@ -116,6 +121,7 @@ const ROUTE_DEFS = {
   backups: { title: 'Backups', crumb: 'Infrastructure', nav: 'backups', perm: 'backups.read', render: renderBackups },
   cron: { title: 'Scheduled tasks', crumb: 'Infrastructure', nav: 'cron', perm: 'cron.read', render: renderCron },
   server: { title: 'Server & network', crumb: 'Infrastructure', nav: 'server', perm: 'server.read', render: renderServer },
+  webnet: { title: 'Web Net', crumb: 'Infrastructure', nav: 'webnet', perm: 'server.read', render: renderWebNet },
   firewall: { title: 'Firewall', crumb: 'Infrastructure', nav: 'firewall', perm: 'server.read', render: renderFirewall },
   database: { title: 'Database', crumb: 'Infrastructure', nav: 'database', perm: 'database.read', render: renderDatabase },
   sync: { title: 'Config sync', crumb: 'Infrastructure', nav: 'sync', perm: 'dashboard.read', render: renderSync },

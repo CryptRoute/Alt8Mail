@@ -841,6 +841,9 @@ const state = {
   signatures: [],
   labels: [],
   ai: { enabled: false, languages: [], styles: [] },
+  push: { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true },
+  pushBusy: false,
+  pushAutoChecked: false,
   recentAudit: [],
   aiReader: null,
   notifications: [],
@@ -1882,8 +1885,18 @@ function setPreference(key, value, save = true) {
   });
   if (save) {
     prefs.set(key, state[key] ? "1" : "0");
-    if (key === "notifyDesktop" && value && "Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission().catch(() => {});
+    if (key === "notifyDesktop") {
+      if (value) {
+        if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission().then((permission) => {
+            if (permission === "granted" && state.notifyDesktop) registerPushSubscription({ quiet: true }).catch(() => {});
+          }).catch(() => {});
+        } else if ("Notification" in window && Notification.permission === "granted") {
+          registerPushSubscription({ quiet: true }).catch(() => {});
+        }
+      } else {
+        unregisterPushSubscription({ silent: true }).catch(() => {});
+      }
     }
     if (state.user && state.csrf) patchPreferences({ [key]: state[key] }, "Preference saved");
   }
@@ -3497,6 +3510,7 @@ async function logout() {
     // Persist the open/minimized compose state before the session is revoked so
     // the next sign-in, on this or another computer, restores it exactly.
     try { await persistComposeSessions(); } catch {}
+    try { await unregisterPushSubscription({ silent: true }); } catch {}
     try { await api("/api/session", { method: "DELETE" }); } catch {}
   } finally {
     state.user = null;
@@ -3507,6 +3521,10 @@ async function logout() {
     state.folderUnread = {};
     state.knownInboxIds = null;
     state.knownSnoozeDueIds = new Set();
+    state.push = { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true };
+    state.pushLocal = false;
+    state.pushBusy = false;
+    state.pushAutoChecked = false;
     try { state.calendarRealtime?.close(); } catch {}
     state.calendarRealtime = null;
     state.people = [];
@@ -3550,6 +3568,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.signatures = data.signatures || state.signatures || [];
   state.labels = data.labels || state.labels || [];
   state.ai = data.ai || { enabled: false };
+  state.push = data.push || state.push || { enabled: false, publicKey: "", subscribed: false };
   state.mailClient = data.mailClient || state.mailClient || null;
   state.recentAudit = data.recentAudit || [];
   renderMailClientSetup();
@@ -3640,6 +3659,8 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
     inboxIds.forEach((id) => state.knownInboxIds.add(id));
   }
   startMailMonitor();
+  syncPushUi();
+  if (firstUserLoad) maybeAutoRegisterPush();
   const dataAction = document.getElementById("resetData");
   const dataNote = document.querySelector(".about-actions .about-note");
   if (dataAction && state.mailboxMode === "imap") {
@@ -3744,6 +3765,221 @@ function showNewMailNotification(message, count) {
   if (!showBrowserNotification(t("notify.newMail"), body, "a8m-new-mail")) {
     showToast(`New mail from ${sender}: ${subject}`, "Open", () => { setTask("mail"); setFolder("inbox"); });
   }
+}
+
+/* ============================================================
+   background push notifications
+   ============================================================ */
+function pushSupported() {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+function pushKeyBytes(base64String) {
+  const value = String(base64String || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = value + "=".repeat((4 - (value.length % 4)) % 4);
+  const raw = atob(padded);
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
+
+async function pushServiceWorker() {
+  if (!pushSupported()) return null;
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("The service worker is not ready")), 8000))
+  ]);
+}
+
+function pushSubscriptionMatchesKey(subscription) {
+  try {
+    const existing = subscription.options && subscription.options.applicationServerKey;
+    if (!existing) return false;
+    const current = pushKeyBytes(state.push && state.push.publicKey);
+    const installed = new Uint8Array(existing);
+    if (installed.length !== current.length) return false;
+    return installed.every((byte, index) => byte === current[index]);
+  } catch {
+    return false;
+  }
+}
+
+async function refreshPushLocalState() {
+  let local = false;
+  if (pushSupported() && state.push && state.push.enabled) {
+    try {
+      const registration = await pushServiceWorker();
+      const subscription = registration ? await registration.pushManager.getSubscription() : null;
+      local = Boolean(subscription && pushSubscriptionMatchesKey(subscription));
+    } catch {}
+  }
+  state.pushLocal = local;
+  syncPushUi();
+  return local;
+}
+
+function syncPushUi() {
+  const enableButton = document.getElementById("pushEnableBtn");
+  if (!enableButton) return;
+  const testButton = document.getElementById("pushTestBtn");
+  const disableButton = document.getElementById("pushDisableBtn");
+  const statusText = document.getElementById("pushStatusText");
+  const statusBadge = document.getElementById("pushStatusBadge");
+  const hint = document.getElementById("pushHint");
+  const config = state.push || {};
+  const supported = pushSupported();
+  const configured = supported && Boolean(config.enabled && config.publicKey);
+  const permission = "Notification" in window ? Notification.permission : "denied";
+  const active = configured && Boolean(state.pushLocal);
+  let status = "Checking this browser…";
+  let badge = "Checking";
+  let note = "Alerts arrive through your operating system, so they still appear when the Alt8Mail tab is closed.";
+  if (!supported) {
+    status = "This browser does not support background push notifications.";
+    badge = "Unsupported";
+    note = "Install Alt8Mail as an app or use a browser with Service Worker and Push API support.";
+  } else if (!configured) {
+    status = "Browser push is not enabled by your organization.";
+    badge = "Off";
+    note = "In-app notifications and sounds continue to work while Alt8Mail is open.";
+  } else if (permission === "denied") {
+    status = "Notifications are blocked for this site in your browser settings.";
+    badge = "Blocked";
+    note = "Allow notifications for this site, then reload Alt8Mail to enable background delivery.";
+  } else if (active) {
+    status = "Active on this browser. Alerts arrive even when the tab is closed.";
+    badge = "Active";
+    note = config.includeSender !== false || config.includeSubject !== false
+      ? "Notifications can include the sender and subject, according to your organization’s push settings."
+      : "Your organization hides sender and subject details in push notifications.";
+  } else {
+    status = "Available. Enable background delivery on this device.";
+    badge = "Available";
+  }
+  if (statusText) statusText.textContent = status;
+  if (statusBadge) statusBadge.textContent = badge;
+  if (hint) hint.textContent = note;
+  enableButton.hidden = active;
+  enableButton.disabled = !configured || permission === "denied" || state.pushBusy;
+  enableButton.textContent = state.pushBusy ? "Enabling…" : "Enable on this device";
+  if (testButton) {
+    testButton.hidden = !active;
+    testButton.disabled = state.pushBusy;
+  }
+  if (disableButton) {
+    disableButton.hidden = !active;
+    disableButton.disabled = state.pushBusy;
+  }
+}
+
+async function maybeAutoRegisterPush() {
+  if (state.pushAutoChecked) return;
+  state.pushAutoChecked = true;
+  if (!pushSupported() || !state.notifyDesktop) return;
+  if (!state.push || !state.push.enabled || !state.push.publicKey) return;
+  if (Notification.permission !== "granted") return;
+  await registerPushSubscription({ quiet: true });
+}
+
+async function registerPushSubscription({ prompt = false, quiet = false } = {}) {
+  if (!pushSupported()) {
+    if (!quiet) showToast("This browser does not support background push notifications");
+    syncPushUi();
+    return false;
+  }
+  const config = state.push || {};
+  if (!config.enabled || !config.publicKey) {
+    if (!quiet) showToast("Browser push is not enabled by your organization");
+    syncPushUi();
+    return false;
+  }
+  if (state.pushBusy) return false;
+  state.pushBusy = true;
+  syncPushUi();
+  try {
+    let permission = Notification.permission;
+    if (permission === "default" && prompt) permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      if (!quiet) showToast("Allow notifications in your browser to enable background alerts");
+      return false;
+    }
+    const registration = await pushServiceWorker();
+    if (!registration) throw new Error("The service worker is not ready");
+    let subscription = await registration.pushManager.getSubscription();
+    if (subscription && !pushSubscriptionMatchesKey(subscription)) {
+      try { await subscription.unsubscribe(); } catch {}
+      subscription = null;
+    }
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: pushKeyBytes(config.publicKey)
+      });
+    }
+    await api("/api/push/subscribe", { method: "POST", body: subscription.toJSON() });
+    state.pushLocal = true;
+    state.push = { ...config, subscribed: true };
+    if (!quiet) showToast("Background notifications enabled on this device");
+    return true;
+  } catch (error) {
+    if (!quiet) showError(error);
+    return false;
+  } finally {
+    state.pushBusy = false;
+    syncPushUi();
+  }
+}
+
+async function unregisterPushSubscription({ silent = false } = {}) {
+  if (!pushSupported()) {
+    state.pushLocal = false;
+    syncPushUi();
+    return false;
+  }
+  try {
+    const registration = await pushServiceWorker();
+    const subscription = registration ? await registration.pushManager.getSubscription() : null;
+    if (subscription) {
+      await api("/api/push/subscribe", { method: "DELETE", body: { endpoint: subscription.endpoint } }).catch(() => {});
+      await subscription.unsubscribe().catch(() => {});
+    }
+    state.pushLocal = false;
+    if (state.push) state.push = { ...state.push, subscribed: false };
+    if (!silent) showToast("Background notifications disabled on this device");
+    return true;
+  } catch (error) {
+    if (!silent) showError(error);
+    return false;
+  } finally {
+    syncPushUi();
+  }
+}
+
+async function sendPushTestNotification() {
+  if (state.pushBusy) return;
+  state.pushBusy = true;
+  syncPushUi();
+  try {
+    const result = await api("/api/push/test", { method: "POST" });
+    const sent = Number(result && result.sent) || 0;
+    if (sent > 0) showToast(`Test notification sent to ${sent} browser${sent === 1 ? "" : "s"}`);
+    else showToast("No subscribed browser was available for the test");
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.pushBusy = false;
+    syncPushUi();
+  }
+}
+
+async function refreshPushConfig() {
+  if (!state.user) return;
+  try {
+    const data = await api("/api/push/config");
+    if (data) state.push = { ...(state.push || {}), ...data };
+    await refreshPushLocalState();
+    if (data && data.enabled && state.notifyDesktop && pushSupported() && !data.subscribed && Notification.permission === "granted") {
+      registerPushSubscription({ quiet: true }).catch(() => {});
+    }
+  } catch {}
 }
 
 async function checkCalendarReminders() {
@@ -10707,7 +10943,8 @@ function renderSettingsDynamic() {
   if (state.task !== "settings" && !["rules", "audit", "account", "security", "regional", "autoreply", "identities"].includes(state.settingsTab)) return;
   if (state.settingsTab === "rules") renderRules();
   else if (state.settingsTab === "mail") { syncPreferencesUi(); renderSignatureLibrary(); renderLabelSettings(); loadSignatures(); }
-  else if (["appearance", "compose", "notifications"].includes(state.settingsTab)) syncPreferencesUi();
+  else if (["appearance", "compose"].includes(state.settingsTab)) syncPreferencesUi();
+  else if (state.settingsTab === "notifications") { syncPreferencesUi(); syncPushUi(); refreshPushConfig(); }
   else if (state.settingsTab === "storage") renderStorageSettings();
   else if (state.settingsTab === "identities") { renderIdentities(); refreshIdentities(); loadForwardingSettings(); }
   else if (state.settingsTab === "autoreply") renderAutoReply();
@@ -16326,6 +16563,9 @@ function handleFeatureClick(event) {
     patchPreferences({ timeZone: zone }, `Using ${zone}`);
     return true;
   }
+  if (target.closest("#pushEnableBtn")) { event.preventDefault(); registerPushSubscription({ prompt: true }); return true; }
+  if (target.closest("#pushDisableBtn")) { event.preventDefault(); unregisterPushSubscription(); return true; }
+  if (target.closest("#pushTestBtn")) { event.preventDefault(); sendPushTestNotification(); return true; }
   const timeFormat = target.closest("[data-time-format]");
   if (timeFormat) {
     event.preventDefault();

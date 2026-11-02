@@ -655,6 +655,7 @@ func (s *Server) StartWorkers(ctx context.Context) {
 	go s.userImportRecoveryWorker(ctx)
 	go s.mailImportRecoveryWorker(ctx)
 	go s.orphanAttachmentSweepWorker(ctx)
+	go s.webPushWorker(ctx)
 	if s.mailSyncConfigured() {
 		go func() {
 			ticker := time.NewTicker(15 * time.Second)

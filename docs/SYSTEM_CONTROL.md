@@ -517,6 +517,40 @@ nginx serves the webmail and customer admin on 443. System Control is not
 proxied through nginx; it terminates TLS on 8808 directly. This is deliberate:
 a fault in nginx remains observable from a plane that does not depend on nginx.
 
+### Web Net
+
+**Infrastructure → Web Net** owns the webmail and administration hostnames,
+independent of the mail/MX hostname. The control plane on 8808 never changes.
+
+- Each service has a primary hostname and optional aliases. A hostname must be
+  a valid public DNS name, must not duplicate the mail/MX, server or control
+  hostname, and its A/AAAA record must resolve to an address assigned to this
+  server. Verification is required before **Apply edge config** succeeds.
+- Every hostname selects a certificate from the TLS inventory (or automatic SAN
+  matching). The generated nginx block uses that certificate directly. Once Web
+  Net has been applied, the TLS page marks the web target as managed by Web Net
+  so a single-certificate assignment cannot overwrite per-host certificates.
+- Binding can be **shared** (all addresses not reserved by the other service) or
+  **dedicated** (one address assigned to this server). The generated listeners
+  are explicit per address, and the catch-all blocks return the configured
+  default page or close the connection with HTTP 444 for the mail host.
+- Maintenance returns HTTP 503 through a local page; allow/deny CIDR rules are
+  applied at the server block for each service. `Clear-Site-Data` on the blocked
+  page removes a previous webmail origin's service worker and cache.
+- Applying writes `/etc/nginx/sites-available/a8m`, validates with `nginx -t`,
+  reloads nginx, writes `ALT8MAIL_PUBLIC_URL`, WebAuthn origins and
+  `ALT8MAIL_ADMIN_URL` to `/etc/a8m/app.env`, restarts `a8m-server` and
+  `a8m-admin`, and health-checks both. Any failure rolls the files and services
+  back. Changing the webmail origin also clears Web Push registrations, because
+  those endpoints are origin-scoped.
+- Web Net also writes `/etc/nginx/conf.d/a8m-webnet-log.conf` and per-service
+  access logs under `/var/log/nginx/`. The page reports request volume, 5xx
+  count, unique clients, average/p95 response time and top paths for the last
+  60 minutes. Paths that contain opaque IDs or share tokens are redacted.
+- Re-running `install.sh` detects the managed Web Net marker and preserves the
+  nginx site plus the identity values in `app.env`/`control.env` instead of
+  reverting webmail to the mail host.
+
 ## Configuration sync
 
 Config sync reconciles control-database resources into live mail files. It is
@@ -616,6 +650,29 @@ Compute the HMAC with the webhook secret over the raw bytes, compare with a
 constant-time function, and reject stale timestamps according to your replay
 policy. Redirects are not followed by the control plane, and delivery results
 are recorded for review.
+
+### Browser push (Web Push)
+
+**Security → Web push** controls the organization-wide Web Push service for the
+webmail. The control plane generates the VAPID key pair; the private key is
+written to `/etc/a8m/web_push_vapid.key` with mode 0640 and group `a8m` and is
+never returned by the API. The public key is safe to expose in webmail
+bootstrap.
+
+- Enable or disable push, set the VAPID `mailto:`/HTTPS subject, choose whether
+  notifications include the sender and subject, and define quiet hours in
+  server time.
+- **Send test** targets one webmail account's registered browsers (enter the
+  address on the page; blank uses the control-plane admin email). **Rotate keys**
+  replaces the pair and clears every subscription; users must opt in again.
+- The webmail worker polls new unread Inbox messages every 10 seconds, groups
+  messages per user, signs each payload with VAPID, and removes endpoints that
+  return HTTP 404/410. Endpoints must be HTTPS on port 443 and are resolved to
+  public addresses only; redirects and private targets are rejected.
+- Webmail users opt in per browser under **Settings → Notifications**.
+  Notifications are suppressed while a visible Alt8Mail window is open so the
+  in-app alert is not duplicated. Changing the Web Net webmail origin clears
+  old origin-scoped subscriptions.
 
 ## Security model
 

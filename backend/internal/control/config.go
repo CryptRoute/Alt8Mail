@@ -20,6 +20,7 @@ type Config struct {
 	PublicURL         string
 	MailHostname      string
 	WebmailURL        string
+	WebPushKeyFile    string
 	DNSResolver       string
 	MailLogPath       string
 	VmailRoot         string
@@ -33,6 +34,17 @@ type Config struct {
 	CronFile          string
 	CertbotDir        string
 	CertbotWebroot    string
+	NginxSitePath     string
+	NginxEnabledPath  string
+	NginxLogFormat    string
+	NginxLogDir       string
+	WebRoot           string
+	WebNetRoot        string
+	AppEnvFile        string
+	WebUpstream       string
+	AdminUpstream     string
+	WebHealthURL      string
+	AdminHealthURL    string
 	SMTPAddr          string
 	PolicyListen      string
 	RedisPasswordFile string
@@ -54,6 +66,7 @@ func LoadConfig() (Config, error) {
 		PublicURL:         strings.TrimRight(env("CONTROL_PUBLIC_URL", "https://130.94.46.22:8808"), "/"),
 		MailHostname:      env("CONTROL_MAIL_HOSTNAME", "mail.a8m.test"),
 		WebmailURL:        strings.TrimRight(env("CONTROL_WEBMAIL_URL", ""), "/"),
+		WebPushKeyFile:    env("CONTROL_WEB_PUSH_KEY_FILE", "/etc/a8m/web_push_vapid.key"),
 		DNSResolver:       env("CONTROL_DNS_RESOLVER", "1.1.1.1:53"),
 		MailLogPath:       env("CONTROL_MAIL_LOG", "/var/log/mail.log"),
 		VmailRoot:         env("CONTROL_VMAIL_ROOT", "/var/vmail"),
@@ -67,6 +80,17 @@ func LoadConfig() (Config, error) {
 		CronFile:          env("CONTROL_CRON_FILE", "/etc/cron.d/alt8mail"),
 		CertbotDir:        env("CONTROL_CERTBOT_DIR", "/etc/letsencrypt/live"),
 		CertbotWebroot:    env("CONTROL_CERTBOT_WEBROOT", "/var/www/certbot"),
+		NginxSitePath:     env("CONTROL_NGINX_SITE", "/etc/nginx/sites-available/a8m"),
+		NginxEnabledPath:  env("CONTROL_NGINX_ENABLED", "/etc/nginx/sites-enabled/a8m"),
+		NginxLogFormat:    env("CONTROL_NGINX_LOG_FORMAT", "/etc/nginx/conf.d/a8m-webnet-log.conf"),
+		NginxLogDir:       env("CONTROL_NGINX_LOG_DIR", "/var/log/nginx"),
+		WebRoot:           env("CONTROL_WEB_ROOT", "/var/www/a8m"),
+		WebNetRoot:        env("CONTROL_WEB_NET_ROOT", "/var/www/a8m-webnet"),
+		AppEnvFile:        env("CONTROL_APP_ENV", "/etc/a8m/app.env"),
+		WebUpstream:       env("CONTROL_WEB_UPSTREAM", "127.0.0.1:8080"),
+		AdminUpstream:     env("CONTROL_ADMIN_UPSTREAM", "127.0.0.1:8081"),
+		WebHealthURL:      env("CONTROL_WEB_HEALTH_URL", "http://127.0.0.1:8080/api/health"),
+		AdminHealthURL:    env("CONTROL_ADMIN_HEALTH_URL", "http://127.0.0.1:8081/api/health"),
 		SMTPAddr:          env("CONTROL_SMTP_ADDR", "127.0.0.1:25"),
 		PolicyListen:      env("CONTROL_POLICY_LISTEN", "127.0.0.1:10040"),
 		RedisPasswordFile: env("CONTROL_REDIS_PASSWORD_FILE", "/opt/a8m/secrets/redis_password"),

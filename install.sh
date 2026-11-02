@@ -37,6 +37,13 @@ LOG_FILE=/var/log/a8m-install.log
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 warn() { printf '[%s] WARNING: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 die() { printf '[%s] ERROR: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
+env_file_value() { grep -E "^${1}=" "$CONFIG_ROOT/app.env" 2>/dev/null | tail -n1 | cut -d= -f2- || true; }
+restore_env_file_value() {
+  local key="$1" value="$2"
+  [[ -n "$value" ]] || return 0
+  sed -i "/^${key}=/d" "$CONFIG_ROOT/app.env"
+  printf '%s=%s\n' "$key" "$value" >> "$CONFIG_ROOT/app.env"
+}
 usage() {
   cat <<'USAGE'
 Usage: sudo bash install.sh [options]
@@ -459,6 +466,21 @@ EOF
 chmod 0640 "$CONFIG_ROOT/update.conf"
 chown root:$SERVICE_USER "$CONFIG_ROOT/update.conf"
 
+WEB_NET_MANAGED=0
+if grep -q 'Managed by Alt8Mail Web Net' /etc/nginx/sites-available/a8m 2>/dev/null; then
+  WEB_NET_MANAGED=1
+fi
+PRESERVE_PUBLIC_URL=""
+PRESERVE_WEBAUTHN_RPID=""
+PRESERVE_WEBAUTHN_ORIGINS=""
+PRESERVE_ADMIN_URL=""
+if [[ "$WEB_NET_MANAGED" -eq 1 && -f "$CONFIG_ROOT/app.env" ]]; then
+  PRESERVE_PUBLIC_URL="$(env_file_value ALT8MAIL_PUBLIC_URL)"
+  PRESERVE_WEBAUTHN_RPID="$(env_file_value ALT8MAIL_WEBAUTHN_RPID)"
+  PRESERVE_WEBAUTHN_ORIGINS="$(env_file_value ALT8MAIL_WEBAUTHN_ORIGINS)"
+  PRESERVE_ADMIN_URL="$(env_file_value ALT8MAIL_ADMIN_URL)"
+fi
+
 cat > "$CONFIG_ROOT/app.env" <<EOF
 ALT8MAIL_ENV=production
 ALT8MAIL_LISTEN=127.0.0.1:8080
@@ -506,8 +528,20 @@ ALT8MAIL_ORPHAN_SWEEP_SECONDS=3600
 ALT8MAIL_ORPHAN_GRACE_SECONDS=300
 ALT8MAIL_DEMO_MODE=false
 EOF
+if [[ "$WEB_NET_MANAGED" -eq 1 ]]; then
+  restore_env_file_value ALT8MAIL_PUBLIC_URL "$PRESERVE_PUBLIC_URL"
+  restore_env_file_value ALT8MAIL_WEBAUTHN_RPID "$PRESERVE_WEBAUTHN_RPID"
+  restore_env_file_value ALT8MAIL_WEBAUTHN_ORIGINS "$PRESERVE_WEBAUTHN_ORIGINS"
+  restore_env_file_value ALT8MAIL_ADMIN_URL "$PRESERVE_ADMIN_URL"
+  log "preserving Web Net webmail and admin origins in app.env"
+fi
 chown root:$SERVICE_USER "$CONFIG_ROOT/app.env"
 chmod 0640 "$CONFIG_ROOT/app.env"
+
+PRESERVE_CONTROL_WEBMAIL_URL=""
+if [[ "$WEB_NET_MANAGED" -eq 1 ]]; then
+  PRESERVE_CONTROL_WEBMAIL_URL="$PRESERVE_PUBLIC_URL"
+fi
 
 cat > "$CONFIG_ROOT/control.env" <<EOF
 CONTROL_ENV=production
@@ -538,6 +572,12 @@ CONTROL_REDIS_PASSWORD_FILE=$SECRETS_DIR/redis_password
 CONTROL_RETENTION_DAYS=365
 CONTROL_TRUSTED_PROXY=false
 EOF
+if [[ "$WEB_NET_MANAGED" -eq 1 && -n "$PRESERVE_CONTROL_WEBMAIL_URL" ]]; then
+  # Keep the control plane's notification and link target aligned with the
+  # Web Net-managed webmail origin.
+  sed -i '/^CONTROL_WEBMAIL_URL=/d' "$CONFIG_ROOT/control.env"
+  printf 'CONTROL_WEBMAIL_URL=%s\n' "$PRESERVE_CONTROL_WEBMAIL_URL" >> "$CONFIG_ROOT/control.env"
+fi
 chown root:root "$CONFIG_ROOT/control.env"
 chmod 0600 "$CONFIG_ROOT/control.env"
 
@@ -589,7 +629,12 @@ EOF
   fi
   nginx -t
 }
-write_http_nginx
+if [[ "$WEB_NET_MANAGED" -eq 1 ]]; then
+  log "preserving the Web Net managed nginx site"
+  nginx -t
+else
+  write_http_nginx
+fi
 systemctl enable --now nginx >/dev/null
 systemctl reload nginx
 
@@ -628,13 +673,17 @@ install -d -m 0755 /etc/dovecot/private
 install -m 0640 -o root -g dovecot /etc/ssl/a8m/mail.crt /etc/dovecot/private/a8m-mail.crt
 install -m 0640 -o root -g dovecot /etc/ssl/a8m/mail.key /etc/dovecot/private/a8m-mail.key
 
-sed -e "s|@MAIL_HOSTNAME@|$MAIL_HOSTNAME|g" \
-    -e "s|@DOMAIN@|$DOMAIN|g" \
-    -e "s|@SERVER_IP@|$PUBLIC_IP|g" \
-    -e "s|@WEB_ROOT@|$WEB_ROOT|g" \
-    -e "s|@TLS_CERT@|/etc/ssl/a8m/mail.crt|g" \
-    -e "s|@TLS_KEY@|/etc/ssl/a8m/mail.key|g" \
-    "$SOURCE_DIR/deploy/nginx/a8m-site.conf" > /etc/nginx/sites-available/a8m
+if [[ "$WEB_NET_MANAGED" -eq 0 ]]; then
+  sed -e "s|@MAIL_HOSTNAME@|$MAIL_HOSTNAME|g" \
+      -e "s|@DOMAIN@|$DOMAIN|g" \
+      -e "s|@SERVER_IP@|$PUBLIC_IP|g" \
+      -e "s|@WEB_ROOT@|$WEB_ROOT|g" \
+      -e "s|@TLS_CERT@|/etc/ssl/a8m/mail.crt|g" \
+      -e "s|@TLS_KEY@|/etc/ssl/a8m/mail.key|g" \
+      "$SOURCE_DIR/deploy/nginx/a8m-site.conf" > /etc/nginx/sites-available/a8m
+else
+  log "keeping the Web Net hostname, certificate and access policy configuration"
+fi
 nginx -t
 systemctl reload nginx
 
