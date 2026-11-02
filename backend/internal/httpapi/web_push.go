@@ -265,6 +265,7 @@ func (s *Server) sendWebPushBatch(ctx context.Context, client *http.Client, sett
 	for _, subscription := range subscriptions {
 		if _, err := validPushEndpoint(subscription.Endpoint); err != nil {
 			failed++
+			_, _ = s.store.DB.Exec(ctx, `UPDATE public.web_push_subscriptions SET last_error=$2, failure_count=failure_count+1 WHERE id=$1`, subscription.ID, truncate(err.Error(), 300))
 			continue
 		}
 		response, sendErr := webpush.SendNotificationWithContext(ctx, raw, &webpush.Subscription{
@@ -308,6 +309,14 @@ func (s *Server) testWebPush(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "PUSH_DISABLED", "Browser push is not enabled by your organization")
 		return
 	}
+	if strings.TrimSpace(settings.PublicKey) == "" {
+		writeError(w, http.StatusBadRequest, "PUSH_KEY", "Browser push has no VAPID public key. Ask an administrator to save the Web push settings.")
+		return
+	}
+	if privateKey, keyErr := os.ReadFile(s.cfg.PushVAPIDKeyFile); keyErr != nil || strings.TrimSpace(string(privateKey)) == "" {
+		writeError(w, http.StatusInternalServerError, "PUSH_KEY", "The webmail service cannot read the VAPID private key. Check /etc/a8m/web_push_vapid.key permissions and the a8m group.")
+		return
+	}
 	rows, err := s.store.DB.Query(r.Context(), `
 		SELECT id::text,user_id::text,endpoint,p256dh,auth
 		FROM public.web_push_subscriptions WHERE user_id=$1 ORDER BY created_at DESC
@@ -331,8 +340,31 @@ func (s *Server) testWebPush(w http.ResponseWriter, r *http.Request) {
 		"url":   strings.TrimRight(s.cfg.PublicURL, "/") + "/#/Inbox",
 		"icon":  "/icons/icon-192.png", "badge": "/icons/icon-192.png",
 	}
+	if len(subscriptions) == 0 {
+		writeError(w, http.StatusConflict, "PUSH_NO_SUBSCRIPTION", "This account has no registered browser. Enable background delivery on this device first.")
+		return
+	}
+	total := len(subscriptions)
 	sent, failed := s.sendWebPushBatch(r.Context(), s.pushHTTPClient(), settings, subscriptions, payload)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": sent, "failed": failed})
+	var lastError string
+	_ = s.store.DB.QueryRow(r.Context(), `
+		SELECT COALESCE(MAX(last_error),'') FROM public.web_push_subscriptions WHERE user_id=$1
+	`, sess.User.ID).Scan(&lastError)
+	if sent == 0 {
+		message := "The browser push gateway rejected the test notification."
+		if strings.TrimSpace(lastError) != "" {
+			message += " " + truncate(lastError, 300)
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{
+			"code": "PUSH_DELIVERY", "message": message,
+			"details": map[string]any{"total": total, "failed": failed, "lastError": truncate(lastError, 300)},
+		}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "total": total, "sent": sent, "failed": failed,
+		"lastError": truncate(lastError, 300),
+	})
 }
 
 type webPushMessage struct {

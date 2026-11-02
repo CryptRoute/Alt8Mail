@@ -844,6 +844,8 @@ const state = {
   push: { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true },
   pushBusy: false,
   pushAutoChecked: false,
+  pushError: "",
+  pushLocal: false,
   recentAudit: [],
   aiReader: null,
   notifications: [],
@@ -3525,6 +3527,7 @@ async function logout() {
     state.pushLocal = false;
     state.pushBusy = false;
     state.pushAutoChecked = false;
+    state.pushError = "";
     try { state.calendarRealtime?.close(); } catch {}
     state.calendarRealtime = null;
     state.people = [];
@@ -3771,7 +3774,7 @@ function showNewMailNotification(message, count) {
    background push notifications
    ============================================================ */
 function pushSupported() {
-  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  return Boolean(window.isSecureContext) && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 
 function pushKeyBytes(base64String) {
@@ -3833,9 +3836,13 @@ function syncPushUi() {
   let badge = "Checking";
   let note = "Alerts arrive through your operating system, so they still appear when the Alt8Mail tab is closed.";
   if (!supported) {
-    status = "This browser does not support background push notifications.";
+    status = window.isSecureContext
+      ? "This browser does not support background push notifications."
+      : "Background push requires HTTPS with a valid certificate.";
     badge = "Unsupported";
-    note = "Install Alt8Mail as an app or use a browser with Service Worker and Push API support.";
+    note = window.isSecureContext
+      ? "Install Alt8Mail as an app or use a browser with Service Worker and Push API support."
+      : "Open Alt8Mail over HTTPS, then reload this page.";
   } else if (!configured) {
     status = "Browser push is not enabled by your organization.";
     badge = "Off";
@@ -3853,6 +3860,11 @@ function syncPushUi() {
   } else {
     status = "Available. Enable background delivery on this device.";
     badge = "Available";
+  }
+  if (state.pushError) {
+    status = state.pushError;
+    badge = "Issue";
+    note = "Fix the browser or server condition above, then try again.";
   }
   if (statusText) statusText.textContent = status;
   if (statusBadge) statusBadge.textContent = badge;
@@ -3879,7 +3891,19 @@ async function maybeAutoRegisterPush() {
   await registerPushSubscription({ quiet: true });
 }
 
-async function registerPushSubscription({ prompt = false, quiet = false } = {}) {
+function pushErrorMessage(error) {
+  const code = error && error.code;
+  if (code === "PUSH_OWNED") return "This browser is already registered to another Alt8Mail account. Disable push in that account, then try again.";
+  if (code === "PUSH_DISABLED") return "Browser push is no longer enabled by your organization.";
+  if (code === "PUSH_KEY") return "The server’s push signing key is unavailable. Ask an administrator to check Web push in System Control.";
+  if (code === "PUSH_NO_SUBSCRIPTION") return "The server has no subscription for this browser yet. Enable background delivery again.";
+  if (code === "PUSH_DELIVERY") return error.message || "The browser push gateway rejected the notification.";
+  if (error && error.name === "NotAllowedError") return "Notifications are blocked for this site in your browser settings.";
+  if (error && error.message) return error.message;
+  return "Background notifications could not be enabled on this device.";
+}
+
+async function registerPushSubscription({ prompt = false, quiet = false, manageBusy = true } = {}) {
   if (!pushSupported()) {
     if (!quiet) showToast("This browser does not support background push notifications");
     syncPushUi();
@@ -3887,17 +3911,21 @@ async function registerPushSubscription({ prompt = false, quiet = false } = {}) 
   }
   const config = state.push || {};
   if (!config.enabled || !config.publicKey) {
+    state.pushError = "Browser push is not enabled by your organization.";
     if (!quiet) showToast("Browser push is not enabled by your organization");
     syncPushUi();
     return false;
   }
-  if (state.pushBusy) return false;
-  state.pushBusy = true;
-  syncPushUi();
+  if (manageBusy) {
+    if (state.pushBusy) return false;
+    state.pushBusy = true;
+    syncPushUi();
+  }
   try {
     let permission = Notification.permission;
     if (permission === "default" && prompt) permission = await Notification.requestPermission();
     if (permission !== "granted") {
+      state.pushError = "Notifications are blocked for this site in your browser settings.";
       if (!quiet) showToast("Allow notifications in your browser to enable background alerts");
       return false;
     }
@@ -3914,17 +3942,35 @@ async function registerPushSubscription({ prompt = false, quiet = false } = {}) 
         applicationServerKey: pushKeyBytes(config.publicKey)
       });
     }
-    await api("/api/push/subscribe", { method: "POST", body: subscription.toJSON() });
+    const submit = () => api("/api/push/subscribe", { method: "POST", body: subscription.toJSON() });
+    try {
+      await submit();
+    } catch (error) {
+      if (!error || error.code !== "PUSH_OWNED") throw error;
+      // The push service endpoint is still tied to a previous Alt8Mail account.
+      // Drop it and obtain a fresh endpoint before retrying once.
+      try { await subscription.unsubscribe(); } catch {}
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: pushKeyBytes(config.publicKey)
+      });
+      await submit();
+    }
+    state.pushError = "";
     state.pushLocal = true;
     state.push = { ...config, subscribed: true };
     if (!quiet) showToast("Background notifications enabled on this device");
     return true;
   } catch (error) {
+    state.pushLocal = false;
+    state.pushError = pushErrorMessage(error);
     if (!quiet) showError(error);
     return false;
   } finally {
-    state.pushBusy = false;
-    syncPushUi();
+    if (manageBusy) {
+      state.pushBusy = false;
+      syncPushUi();
+    }
   }
 }
 
@@ -3942,6 +3988,7 @@ async function unregisterPushSubscription({ silent = false } = {}) {
       await subscription.unsubscribe().catch(() => {});
     }
     state.pushLocal = false;
+    state.pushError = "";
     if (state.push) state.push = { ...state.push, subscribed: false };
     if (!silent) showToast("Background notifications disabled on this device");
     return true;
@@ -3956,13 +4003,33 @@ async function unregisterPushSubscription({ silent = false } = {}) {
 async function sendPushTestNotification() {
   if (state.pushBusy) return;
   state.pushBusy = true;
+  state.pushError = "";
   syncPushUi();
   try {
+    // Make sure the server still has this browser's current endpoint. The
+    // subscription can be rotated or removed while the page stays open.
+    if (state.pushLocal) {
+      const registered = await registerPushSubscription({ quiet: true, manageBusy: false });
+      if (!registered) {
+        showToast(state.pushError || "This browser is no longer registered for push");
+        return;
+      }
+    }
     const result = await api("/api/push/test", { method: "POST" });
     const sent = Number(result && result.sent) || 0;
-    if (sent > 0) showToast(`Test notification sent to ${sent} browser${sent === 1 ? "" : "s"}`);
-    else showToast("No subscribed browser was available for the test");
+    const failed = Number(result && result.failed) || 0;
+    const lastError = result && result.lastError ? String(result.lastError) : "";
+    if (sent > 0) {
+      const extra = failed > 0 ? ` ${failed} other browser${failed === 1 ? "" : "s"} failed.` : "";
+      showToast(`Test notification sent to ${sent} browser${sent === 1 ? "" : "s"}.${extra}`);
+    } else {
+      state.pushError = lastError
+        ? `The push gateway rejected the test: ${lastError}`
+        : "No subscribed browser was available for the test";
+      showToast(state.pushError);
+    }
   } catch (error) {
+    state.pushError = pushErrorMessage(error);
     showError(error);
   } finally {
     state.pushBusy = false;
