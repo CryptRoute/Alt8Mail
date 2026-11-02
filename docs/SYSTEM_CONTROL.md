@@ -530,6 +530,13 @@ independent of the mail/MX hostname. The control plane on 8808 never changes.
   matching). The generated nginx block uses that certificate directly. Once Web
   Net has been applied, the TLS page marks the web target as managed by Web Net
   so a single-certificate assignment cannot overwrite per-host certificates.
+- When a hostname remains on **Auto** and no valid covering certificate exists,
+  **Verify / issue TLS** and **Apply edge config** request one with certbot using
+  the nginx ACME webroot. Issuance requires the hostname's DNS record to point at
+  this server and a valid Let's Encrypt account email; the certificate is added
+  to the TLS inventory and pinned to that service. Certbot output is returned on
+  failure. The installer seeds `ssl.admin_email`, and the Web Net page can change
+  it.
 - Binding can be **shared** (all addresses not reserved by the other service) or
   **dedicated** (one address assigned to this server). The generated listeners
   are explicit per address, and the catch-all blocks return the configured

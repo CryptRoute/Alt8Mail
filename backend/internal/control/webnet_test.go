@@ -68,6 +68,38 @@ func TestValidWebHostnameLabels(t *testing.T) {
 	}
 }
 
+func TestWebNetMissingAutoServices(t *testing.T) {
+	routes := []webNetRoute{
+		{Service: "webmail", Hostname: "webmail.example.com", Certificate: "", Primary: true, Enabled: true},
+		{Service: "admin", Hostname: "admin.example.com", Certificate: "pinned-cert", Primary: true, Enabled: true},
+	}
+	checks := []webNetHostCheck{
+		{Service: "webmail", Hostname: "webmail.example.com", DNSOK: true, CertOK: false},
+		{Service: "admin", Hostname: "admin.example.com", DNSOK: true, CertOK: false},
+	}
+	services := webNetMissingAutoServices(routes, checks)
+	if strings.Join(services, ",") != "webmail" {
+		t.Fatalf("services = %#v", services)
+	}
+	checks[0].DNSOK = false
+	if services := webNetMissingAutoServices(routes, checks); len(services) != 0 {
+		t.Fatalf("DNS-failed host triggered issuance: %#v", services)
+	}
+	if domains := webNetAutoDomains(routes, "webmail"); strings.Join(domains, ",") != "webmail.example.com" {
+		t.Fatalf("auto domains = %#v", domains)
+	}
+}
+
+func TestWebNetCertificateName(t *testing.T) {
+	if got := webNetCertificateName("webmail.example.com"); got != "webnet-webmail.example.com" {
+		t.Fatalf("certificate name = %q", got)
+	}
+	long := webNetCertificateName(strings.Repeat("a", 250) + ".example.com")
+	if len(long) > 180 || !strings.HasPrefix(long, "webnet-") {
+		t.Fatalf("long certificate name = %q", long)
+	}
+}
+
 func TestWebNetRouteAddresses(t *testing.T) {
 	server := testWebNetServer(t)
 	local := []webNetIP{

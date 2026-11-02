@@ -402,7 +402,7 @@
 .thread-chevron { width: 15px; height: 15px; color: var(--text-3); flex: none; }
 .thread-body { padding: 0 16px 14px; border-top: 1px solid var(--border); }
 .thread-body .trust-line { margin: 12px 0 16px; }
-.thread-body .email-body { max-width: 74ch; padding-bottom: 4px; }
+.thread-body .email-body { max-width: 90ch; padding-bottom: 4px; }
 .thread-message-actions {
   display: flex;
   align-items: center;

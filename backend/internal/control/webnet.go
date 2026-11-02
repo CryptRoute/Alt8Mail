@@ -3,10 +3,12 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"os"
 	"os/user"
@@ -91,6 +93,25 @@ type webNetHostCheck struct {
 	OK           bool     `json:"ok"`
 }
 
+type webNetIssuedCertificate struct {
+	Service     string   `json:"service"`
+	Certificate string   `json:"certificate"`
+	Domains     []string `json:"domains"`
+}
+
+type webNetIssuanceError struct {
+	Service string
+	Domains []string
+	Output  string
+}
+
+func (e *webNetIssuanceError) Error() string {
+	if strings.TrimSpace(e.Output) != "" {
+		return "automatic Let's Encrypt issuance failed for " + strings.Join(e.Domains, ", ") + ": " + truncateText(e.Output, 1200)
+	}
+	return "automatic Let's Encrypt issuance failed for " + strings.Join(e.Domains, ", ")
+}
+
 type webNetSaveRequest struct {
 	MailHostMode       *string       `json:"mailHostMode"`
 	WebmailMaintenance *bool         `json:"webmailMaintenance"`
@@ -99,6 +120,7 @@ type webNetSaveRequest struct {
 	MaintenanceMessage *string       `json:"maintenanceMessage"`
 	BlockedTitle       *string       `json:"blockedTitle"`
 	BlockedMessage     *string       `json:"blockedMessage"`
+	LetsEncryptEmail   *string       `json:"letsencryptEmail"`
 	WebmailAllow       []string      `json:"webmailAllow"`
 	WebmailDeny        []string      `json:"webmailDeny"`
 	AdminAllow         []string      `json:"adminAllow"`
@@ -186,10 +208,11 @@ func (s *Server) handleWebNetGet(w http.ResponseWriter, r *http.Request, sess *s
 	payload := map[string]any{
 		"settings": settings, "routes": routes,
 		"mailHostname": s.mailHostname(r.Context()), "serverHostname": s.serverHostname(r.Context()),
-		"controlHostname": webNetURLHostname(s.cfg.PublicURL),
-		"webmailUrl":      s.settingString(r.Context(), "server.webmail_url", s.cfg.WebmailURL),
-		"adminUrl":        s.settingString(r.Context(), "server.admin_url", ""),
-		"ips":             local, "certificates": certs,
+		"controlHostname":  webNetURLHostname(s.cfg.PublicURL),
+		"webmailUrl":       s.settingString(r.Context(), "server.webmail_url", s.cfg.WebmailURL),
+		"adminUrl":         s.settingString(r.Context(), "server.admin_url", ""),
+		"letsencryptEmail": s.settingString(r.Context(), "ssl.admin_email", ""),
+		"ips":              local, "certificates": certs,
 		"paths": map[string]string{
 			"site": s.cfg.NginxSitePath, "enabled": s.cfg.NginxEnabledPath,
 			"webRoot": s.cfg.WebRoot, "maintenanceRoot": s.cfg.WebNetRoot,
@@ -248,6 +271,18 @@ func (s *Server) handleWebNetSave(w http.ResponseWriter, r *http.Request, sess *
 	if body.AdminDeny != nil {
 		settings.AdminDeny = body.AdminDeny
 	}
+	var letsEncryptEmail *string
+	if body.LetsEncryptEmail != nil {
+		value := strings.TrimSpace(*body.LetsEncryptEmail)
+		if value != "" {
+			address, parseErr := mail.ParseAddress(value)
+			if parseErr != nil || !strings.EqualFold(strings.TrimSpace(address.Address), value) {
+				writeError(w, http.StatusBadRequest, "LETSENCRYPT_EMAIL", "Enter a valid Let's Encrypt account email address")
+				return
+			}
+		}
+		letsEncryptEmail = &value
+	}
 	settings, routes, err := s.validateWebNetConfig(r.Context(), settings, body.Routes, false)
 	if err != nil {
 		webNetFailure(w, http.StatusBadRequest, err)
@@ -256,6 +291,12 @@ func (s *Server) handleWebNetSave(w http.ResponseWriter, r *http.Request, sess *
 	if err := s.saveWebNetConfig(r.Context(), sess, settings, routes); err != nil {
 		writeFromError(w, err)
 		return
+	}
+	if letsEncryptEmail != nil {
+		if err := s.setSetting(r.Context(), "ssl.admin_email", *letsEncryptEmail, sess.User.ID); err != nil {
+			writeFromError(w, err)
+			return
+		}
 	}
 	s.actorAudit(r, sess, "webnet.settings_saved", "Web Net", "Saved webmail and administration hostname policy",
 		map[string]any{"routes": len(routes), "mailHostMode": settings.MailHostMode})
@@ -277,10 +318,11 @@ func (s *Server) webNetPublicPayload(ctx context.Context) (map[string]any, error
 	return map[string]any{
 		"settings": settings, "routes": routes,
 		"mailHostname": s.mailHostname(ctx), "serverHostname": s.serverHostname(ctx),
-		"controlHostname": webNetURLHostname(s.cfg.PublicURL),
-		"webmailUrl":      s.settingString(ctx, "server.webmail_url", s.cfg.WebmailURL),
-		"adminUrl":        s.settingString(ctx, "server.admin_url", ""),
-		"ips":             local, "certificates": certs,
+		"controlHostname":  webNetURLHostname(s.cfg.PublicURL),
+		"webmailUrl":       s.settingString(ctx, "server.webmail_url", s.cfg.WebmailURL),
+		"adminUrl":         s.settingString(ctx, "server.admin_url", ""),
+		"letsencryptEmail": s.settingString(ctx, "ssl.admin_email", ""),
+		"ips":              local, "certificates": certs,
 		"paths": map[string]string{
 			"site": s.cfg.NginxSitePath, "enabled": s.cfg.NginxEnabledPath,
 			"webRoot": s.cfg.WebRoot, "maintenanceRoot": s.cfg.WebNetRoot,
@@ -862,14 +904,191 @@ func (s *Server) handleWebNetVerify(w http.ResponseWriter, r *http.Request, sess
 		webNetFailure(w, http.StatusBadGateway, localErr)
 		return
 	}
-	checks, ok := s.webNetVerifyRoutes(r.Context(), routes, certs, local)
+	routes, certs, checks, ok, issued, err := s.ensureWebNetCertificates(r.Context(), r, sess, routes, certs, local)
+	if err != nil {
+		webNetCertificateFailure(w, http.StatusBadGateway, err)
+		return
+	}
 	if len(checks) == 0 {
 		ok = false
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": ok, "checks": checks, "checkedAt": nowRFC3339(),
+		"ok": ok, "checks": checks, "issued": issued, "checkedAt": nowRFC3339(),
 		"mailHostname": s.mailHostname(r.Context()),
 	})
+}
+
+func webNetCheckForHost(checks []webNetHostCheck, hostname string) (webNetHostCheck, bool) {
+	for _, check := range checks {
+		if check.Hostname == hostname {
+			return check, true
+		}
+	}
+	return webNetHostCheck{}, false
+}
+
+func webNetRouteForHost(routes []webNetRoute, hostname string) (webNetRoute, bool) {
+	for _, route := range routes {
+		if route.Hostname == hostname {
+			return route, true
+		}
+	}
+	return webNetRoute{}, false
+}
+
+// webNetMissingAutoServices returns the services that have at least one
+// enabled Auto hostname whose DNS is ready but whose certificate check failed.
+// Explicit certificate choices are never replaced automatically.
+func webNetMissingAutoServices(routes []webNetRoute, checks []webNetHostCheck) []string {
+	needed := map[string]bool{}
+	for _, check := range checks {
+		if check.CertOK || !check.DNSOK {
+			continue
+		}
+		route, ok := webNetRouteForHost(routes, check.Hostname)
+		if !ok || !route.Enabled || route.Certificate != "" {
+			continue
+		}
+		needed[route.Service] = true
+	}
+	services := []string{}
+	for _, service := range []string{"webmail", "admin"} {
+		if needed[service] {
+			services = append(services, service)
+		}
+	}
+	return services
+}
+
+func webNetAutoDomains(routes []webNetRoute, service string) []string {
+	domains := []string{}
+	for _, route := range routes {
+		if route.Enabled && route.Service == service && route.Certificate == "" {
+			domains = append(domains, route.Hostname)
+		}
+	}
+	return domains
+}
+
+func webNetCertificateName(primary string) string {
+	name := "webnet-" + normalizeDomain(primary)
+	if len(name) > 180 {
+		name = name[:180]
+	}
+	return name
+}
+
+func (s *Server) issueWebNetCertificate(ctx context.Context, service string, domains []string, email string) (string, string, error) {
+	certName := webNetCertificateName(domains[0])
+	args := []string{
+		"certonly", "--webroot", "-w", s.cfg.CertbotWebroot,
+		"--non-interactive", "--agree-tos", "--no-eff-email",
+		"--expand", "--force-renewal", "--cert-name", certName, "--email", email,
+	}
+	for _, domain := range domains {
+		args = append(args, "-d", domain)
+	}
+	result, err := runCommand(ctx, 240*time.Second, "certbot", args...)
+	output := strings.TrimSpace(result.Stdout + "\n" + result.Stderr)
+	if err != nil {
+		return certName, output, &webNetIssuanceError{Service: service, Domains: domains, Output: output}
+	}
+	return certName, output, nil
+}
+
+func (s *Server) pinWebNetServiceCertificate(ctx context.Context, service, certName string, routes []webNetRoute) ([]webNetRoute, error) {
+	_, err := s.db.Exec(ctx, `
+		UPDATE control.webnet_routes SET certificate_name=$1, updated_at=now()
+		WHERE service=$2 AND certificate_name='' AND enabled
+	`, certName, service)
+	if err != nil {
+		return routes, err
+	}
+	_, _ = s.db.Exec(ctx, `UPDATE control.webnet_settings SET updated_at=now() WHERE id=true`)
+	for index := range routes {
+		if routes[index].Service == service && routes[index].Enabled && routes[index].Certificate == "" {
+			routes[index].Certificate = certName
+		}
+	}
+	return routes, nil
+}
+
+func (s *Server) ensureWebNetCertificates(ctx context.Context, r *http.Request, sess *sessionRecord, routes []webNetRoute, certs []webNetCertificate, local []webNetIP) ([]webNetRoute, []webNetCertificate, []webNetHostCheck, bool, []webNetIssuedCertificate, error) {
+	checks, ok := s.webNetVerifyRoutes(ctx, routes, certs, local)
+	if ok {
+		return routes, certs, checks, true, nil, nil
+	}
+	issued := []webNetIssuedCertificate{}
+	for _, service := range webNetMissingAutoServices(routes, checks) {
+		domains := webNetAutoDomains(routes, service)
+		if len(domains) == 0 {
+			continue
+		}
+		dnsReady := true
+		for _, domain := range domains {
+			check, found := webNetCheckForHost(checks, domain)
+			if !found || !check.DNSOK {
+				dnsReady = false
+				break
+			}
+		}
+		if !dnsReady {
+			continue
+		}
+		email := strings.TrimSpace(s.settingString(ctx, "ssl.admin_email", ""))
+		if email == "" {
+			return routes, certs, checks, false, issued, fmt.Errorf("automatic certificate issuance for %s needs a Let's Encrypt account email; set it on the Web Net page or TLS settings", strings.Join(domains, ", "))
+		}
+		certName, output, err := s.issueWebNetCertificate(ctx, service, domains, email)
+		if err != nil {
+			return routes, certs, checks, false, issued, err
+		}
+		routes, err = s.pinWebNetServiceCertificate(ctx, service, certName, routes)
+		if err != nil {
+			return routes, certs, checks, false, issued, err
+		}
+		issued = append(issued, webNetIssuedCertificate{Service: service, Certificate: certName, Domains: domains})
+		s.actorAudit(r, sess, "webnet.certificate_issued", strings.Join(domains, ", "),
+			"Issued a Let's Encrypt certificate automatically for Web Net",
+			map[string]any{"certificate": certName, "service": service, "output": truncateText(output, 2000)})
+		s.notifyEvent(ctx, "ssl.renewed", map[string]any{
+			"domains": domains, "certificate": certName, "action": "issued", "source": "webnet",
+		})
+	}
+	if len(issued) == 0 {
+		return routes, certs, checks, false, issued, nil
+	}
+	if _, err := s.scanCertificates(ctx); err != nil {
+		return routes, certs, checks, false, issued, fmt.Errorf("certificate was issued but the TLS inventory scan failed: %w", err)
+	}
+	certs, _ = s.webNetCertificates(ctx)
+	for _, item := range issued {
+		found := false
+		for _, cert := range certs {
+			if cert.Name == item.Certificate {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return routes, certs, checks, false, issued, fmt.Errorf("certificate %s was issued but is not visible in the TLS inventory", item.Certificate)
+		}
+	}
+	checks, ok = s.webNetVerifyRoutes(ctx, routes, certs, local)
+	return routes, certs, checks, ok, issued, nil
+}
+
+func webNetCertificateFailure(w http.ResponseWriter, status int, err error) {
+	details := map[string]any{}
+	var issuance *webNetIssuanceError
+	if errors.As(err, &issuance) {
+		details["certbot"] = truncateText(issuance.Output, 16000)
+		details["domains"] = issuance.Domains
+		details["service"] = issuance.Service
+	}
+	writeJSON(w, status, map[string]any{"error": map[string]any{
+		"code": "WEB_NET_CERT", "message": err.Error(), "details": details,
+	}})
 }
 
 func webNetFailure(w http.ResponseWriter, status int, err error) {
@@ -919,7 +1138,12 @@ func (s *Server) handleWebNetApply(w http.ResponseWriter, r *http.Request, sess 
 		webNetFailure(w, http.StatusBadGateway, err)
 		return
 	}
-	checks, ok := s.webNetVerifyRoutes(r.Context(), routes, certs, local)
+	routes, certs, checks, ok, issued, err := s.ensureWebNetCertificates(r.Context(), r, sess, routes, certs, local)
+	if err != nil {
+		s.webNetMarkError(r.Context(), err)
+		webNetCertificateFailure(w, http.StatusBadGateway, err)
+		return
+	}
 	if !ok {
 		s.webNetMarkError(r.Context(), fmt.Errorf("DNS or certificate verification failed"))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{
@@ -1052,7 +1276,7 @@ func (s *Server) handleWebNetApply(w http.ResponseWriter, r *http.Request, sess 
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "revision": revision, "appliedAt": nowRFC3339(),
-		"webmailUrl": webmailURL, "adminUrl": adminURL, "checks": checks,
+		"webmailUrl": webmailURL, "adminUrl": adminURL, "checks": checks, "issued": issued,
 		"message": "Web Net configuration applied and nginx reloaded.",
 	})
 }

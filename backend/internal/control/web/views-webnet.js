@@ -59,7 +59,7 @@ function serviceCard(service, title, description, route, certificates, ips, canM
     <div class="card-body"><div class="form-grid">
       ${ui.field({ label: 'Primary hostname', name: `${service}Primary`, value: route.primary, placeholder: service === 'webmail' ? 'mail.example.com' : 'admin.example.com', required: true, disabled: !canManage, help: 'A public A/AAAA record must point at this server before Web Net can be applied.' })}
       ${ui.field({ label: 'Additional hostnames', name: `${service}Aliases`, type: 'textarea', value: route.aliases, rows: 3, disabled: !canManage, placeholder: service === 'webmail' ? 'webmail.example.com, mail.example.net' : 'admin.example.com, admin.example.net', help: service === 'webmail' ? 'One per line or comma-separated. Every name must have its own DNS record and a matching certificate. Passkeys use the primary hostname as their RP ID, so aliases outside its subtree cannot use the same passkeys.' : 'One per line or comma-separated. Every name must have its own DNS record and a matching certificate.' })}
-      ${ui.field({ label: 'TLS certificate', name: `${service}Certificate`, type: 'select', value: route.certificate, options: certOptions, disabled: !canManage, help: 'Select a certificate already issued or imported under TLS certificates. Auto matches the hostname against its SAN list. The choice applies to every hostname for this service.' })}
+      ${ui.field({ label: 'TLS certificate', name: `${service}Certificate`, type: 'select', value: route.certificate, options: certOptions, disabled: !canManage, help: 'Select a certificate already issued or imported under TLS certificates. Auto reuses a covering certificate; if none exists, Verify or Apply requests one through Let’s Encrypt using the account email below. The choice applies to every hostname for this service.' })}
       ${ui.field({ label: 'IP binding', name: `${service}IpMode`, type: 'select', value: route.ipMode, disabled: !canManage, options: [{ value: 'shared', label: 'Shared — every address not reserved by the other service' }, { value: 'dedicated', label: 'Dedicated — one assigned address only' }], extra: `data-webnet-ipmode="${service}"`, help: 'The binding applies to every hostname for this service.' })}
       ${ui.field({ label: 'Dedicated address', name: `${service}IpAddress`, type: 'select', value: route.ipAddress, disabled: !canManage || route.ipMode !== 'dedicated', options: [{ value: '', label: 'Choose an assigned address' }].concat(ipOptions), extra: `data-webnet-ipaddress="${service}"`, help: 'Only addresses assigned to this server can be bound. Add addresses under Server & network first.' })}
       ${ui.field({ label: 'Allow list', name: `${service}Allow`, type: 'textarea', value: route.allow || '', rows: 3, disabled: !canManage, placeholder: '203.0.113.0/24, 198.51.100.10', help: 'Optional CIDRs. When set, only these networks can reach this service. Deny entries always win.' })}
@@ -115,8 +115,8 @@ export async function renderWebNet(ctx) {
       : ui.badge('Not applied', 'warning');
   ctx.root.innerHTML = `${ui.pageHeader({
     eyebrow: 'Infrastructure', title: 'Web Net',
-    description: 'Give webmail and administration separate hostnames from the mail/MX host, bind them to shared or dedicated addresses, choose issued certificates, and control maintenance and network access at the edge.',
-    actions: `<button class="btn btn-secondary" type="button" id="webnet-refresh">${ui.icon('refresh', 15)} Refresh</button>${canManage ? `<button class="btn btn-secondary" type="button" id="webnet-verify">${ui.icon('shield', 15)} Verify DNS &amp; TLS</button><button class="btn btn-secondary" type="button" id="webnet-save">${ui.icon('check', 15)} Save draft</button><button class="btn btn-primary" type="button" id="webnet-apply">${ui.icon('send', 15)} Apply edge config</button>` : ''}`,
+    description: 'Give webmail and administration separate hostnames from the mail/MX host, bind them to shared or dedicated addresses, use issued certificates or request missing Let’s Encrypt certificates automatically, and control maintenance and network access at the edge.',
+    actions: `<button class="btn btn-secondary" type="button" id="webnet-refresh">${ui.icon('refresh', 15)} Refresh</button>${canManage ? `<button class="btn btn-secondary" type="button" id="webnet-verify">${ui.icon('shield', 15)} Verify / issue TLS</button><button class="btn btn-secondary" type="button" id="webnet-save">${ui.icon('check', 15)} Save draft</button><button class="btn btn-primary" type="button" id="webnet-apply">${ui.icon('send', 15)} Apply edge config</button>` : ''}`,
   })}
   ${lastError ? ui.inlineNotice('critical', 'Last apply failed', lastError) : ''}
   <div class="grid grid-main">
@@ -135,6 +135,13 @@ export async function renderWebNet(ctx) {
       <form id="webnet-form">
         ${serviceCard('webmail', 'Webmail hostnames', 'The user-facing inbox, calendar, contacts, files and API.', webmail, certificates, ips, canManage)}
         ${serviceCard('admin', 'Administration hostnames', 'The customer administration portal on its own origin.', admin, certificates, ips, canManage)}
+        <section class="card">
+          <header class="card-head"><div><h3>Automatic certificates</h3><p>Let Web Net request a missing certificate for Auto hostnames.</p></div><span class="badge">${ui.icon('key', 14)} Let’s Encrypt</span></header>
+          <div class="card-body"><div class="form-grid">
+            ${ui.field({ label: 'Let’s Encrypt account email', name: 'letsencryptEmail', type: 'email', value: payload.letsencryptEmail || '', disabled: !canManage, placeholder: 'hostmaster@example.com', help: 'Required when Auto issuance runs. This is the same email shown on the TLS certificates page.' })}
+          </div>
+          <p class="form-note">Verify DNS &amp; TLS and Apply edge config both request certificates for Auto hostnames that have no valid covering certificate. Certbot uses the nginx ACME webroot, so every hostname must already resolve to this server. The issued certificate is added to the TLS inventory and pinned to that service.</p></div>
+        </section>
         <section class="card">
           <header class="card-head"><div><h3>Mail/MX hostname policy</h3><p>What a browser sees at the mail host that receives SMTP.</p></div><span class="badge">${ui.icon('lock', 14)} Edge only</span></header>
           <div class="card-body"><div class="form-grid">
@@ -194,15 +201,26 @@ export async function renderWebNet(ctx) {
     const host = document.getElementById('webnet-checks');
     if (host) host.innerHTML = checksTable(checks);
   };
-  const resultModal = (title, tone, message, checks) => {
+  const issuedNotice = (issued) => {
+    const list = Array.isArray(issued) ? issued : [];
+    if (!list.length) return '';
+    return `<div class="notice tone-good" style="margin-bottom:14px">${ui.icon('check-circle', 16)}<div><strong>${list.length} certificate${list.length === 1 ? '' : 's'} issued automatically</strong><p>${list.map((item) => `${esc(ui.humanTitle(item.service))}: <span class="mono">${esc(item.certificate)}</span> for ${esc((item.domains || []).join(', '))}`).join('<br>')}</p></div></div>`;
+  };
+  const resultModal = (title, tone, message, checks, issued = []) => {
     const modal = ctx.modal({
       title,
       size: 'large',
-      body: `<div class="notice tone-${tone}">${ui.icon(tone === 'critical' ? 'alert' : 'check-circle', 16)}<div><strong>${esc(title)}</strong><p>${esc(message || '')}</p></div></div><div class="divider"></div>${checksTable(checks)}`,
+      body: `${issuedNotice(issued)}<div class="notice tone-${tone}">${ui.icon(tone === 'critical' ? 'alert' : 'check-circle', 16)}<div><strong>${esc(title)}</strong><p>${esc(message || '')}</p></div></div><div class="divider"></div>${checksTable(checks)}`,
       footer: `<button class="btn btn-secondary" type="button" data-modal-close>Close</button>`,
     });
     return modal;
   };
+  const certificateErrorModal = (message, output) => ctx.modal({
+    title: 'Automatic certificate issuance failed',
+    size: 'large',
+    body: `<div class="notice tone-critical">${ui.icon('alert-circle', 16)}<div><strong>Let’s Encrypt could not issue the certificate</strong><p>${esc(message || '')}</p></div></div><div class="divider"></div>${ui.codeBlock(output || 'No certbot output was returned.', { language: 'certbot', maxHeight: '46vh' })}`,
+    footer: `<button class="btn btn-secondary" type="button" data-modal-close>Close</button>`,
+  });
   const collect = () => {
     const values = ui.formValues(form);
     const routesPayload = [];
@@ -231,6 +249,7 @@ export async function renderWebNet(ctx) {
       maintenanceMessage: values.maintenanceMessage || '',
       blockedTitle: values.blockedTitle || '',
       blockedMessage: values.blockedMessage || '',
+      letsencryptEmail: values.letsencryptEmail || '',
       webmailAllow: splitHostnames(values.webmailAllow),
       webmailDeny: splitHostnames(values.webmailDeny),
       adminAllow: splitHostnames(values.adminAllow),
@@ -275,9 +294,15 @@ export async function renderWebNet(ctx) {
       await save({ quiet: true });
       const result = await ctx.api('/control/api/webnet/verify', { method: 'POST' });
       showChecks(result.checks);
-      resultModal(result.ok ? 'DNS and certificates are ready' : 'Verification needs attention', result.ok ? 'good' : 'warning', result.ok ? 'Every hostname resolves to this server and has a matching certificate.' : 'Fix the rows marked Needs attention before applying.', result.checks);
+      const issuedText = Array.isArray(result.issued) && result.issued.length ? ` ${result.issued.length} certificate${result.issued.length === 1 ? '' : 's'} issued automatically and pinned to the service. Apply edge config to activate them.` : '';
+      resultModal(result.ok ? 'DNS and certificates are ready' : 'Verification needs attention', result.ok ? 'good' : 'warning', (result.ok ? 'Every hostname resolves to this server and has a matching certificate.' : 'Fix the rows marked Needs attention before applying.') + issuedText, result.checks, result.issued);
+      if (Array.isArray(result.issued) && result.issued.length) {
+        setTimeout(() => { if (location.hash === '#/webnet') renderWebNet(ctx); }, 900);
+      }
     } catch (error) {
-      ui.toast(error.message || 'Could not verify Web Net.', 'critical', { title: 'Verification failed' });
+      const certOutput = error.details && error.details.certbot;
+      if (certOutput) certificateErrorModal(error.message, certOutput);
+      else ui.toast(error.message || 'Could not verify Web Net.', 'critical', { title: 'Verification failed' });
     } finally { button.classList.remove('is-loading'); button.disabled = false; }
   });
   document.getElementById('webnet-apply')?.addEventListener('click', async (event) => {
@@ -295,9 +320,15 @@ export async function renderWebNet(ctx) {
       if (!confirmed) return;
       const result = await ctx.api('/control/api/webnet/apply', { method: 'POST' });
       showChecks(result.checks);
-      resultModal('Web Net applied', 'good', `Revision ${result.revision} is live. Webmail: ${result.webmailUrl} · Admin: ${result.adminUrl}`, result.checks);
+      const issuedText = Array.isArray(result.issued) && result.issued.length ? ` ${result.issued.length} certificate${result.issued.length === 1 ? '' : 's'} issued automatically.` : '';
+      resultModal('Web Net applied', 'good', `Revision ${result.revision} is live. Webmail: ${result.webmailUrl} · Admin: ${result.adminUrl}${issuedText}`, result.checks, result.issued);
       setTimeout(() => { if (location.hash === '#/webnet') renderWebNet(ctx); }, 900);
     } catch (error) {
+      const certOutput = error.details && error.details.certbot;
+      if (certOutput) {
+        certificateErrorModal(error.message, certOutput);
+        return;
+      }
       const checks = error.details && error.details.checks ? error.details.checks : null;
       if (checks) showChecks(checks);
       if (checks) resultModal('Apply blocked', 'critical', error.message || 'Verification failed.', checks);

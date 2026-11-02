@@ -798,13 +798,15 @@ fi
 log "seeding System Control server identity"
 runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q \
   -v host="$MAIL_HOSTNAME" -v webmail="https://$MAIL_HOSTNAME" \
-  -v public_ip="$PUBLIC_IP" -v mail_from="postmaster@$DOMAIN" <<'SQL'
+  -v public_ip="$PUBLIC_IP" -v mail_from="postmaster@$DOMAIN" \
+  -v ssl_email="$TLS_EMAIL" <<'SQL'
 INSERT INTO control.settings (key, value) VALUES
   ('server.hostname', to_jsonb(:'host'::text)),
   ('server.mail_hostname', to_jsonb(:'host'::text)),
   ('server.webmail_url', to_jsonb(:'webmail'::text)),
   ('server.public_ipv4', to_jsonb(:'public_ip'::text)),
-  ('server.mail_from', to_jsonb(:'mail_from'::text))
+  ('server.mail_from', to_jsonb(:'mail_from'::text)),
+  ('ssl.admin_email', to_jsonb(:'ssl_email'::text))
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
 WHERE control.settings.value IS NULL
    OR control.settings.value = 'null'::jsonb
