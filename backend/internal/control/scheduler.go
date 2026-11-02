@@ -15,6 +15,7 @@ func (s *Server) Start(ctx context.Context) {
 	s.seedServerIdentity(ctx)
 	s.reconcileRebootState(ctx)
 	s.reconcileAppUpdateJobs(ctx)
+	go s.reconcileWebNetAtStartup(ctx)
 
 	logIngestor := newLogIngestor(s)
 	logIngestor.Start(ctx)

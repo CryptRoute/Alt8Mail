@@ -118,7 +118,7 @@ export async function renderWebNet(ctx) {
     description: 'Give webmail and administration separate hostnames from the mail/MX host, bind them to shared or dedicated addresses, use issued certificates or request missing Let’s Encrypt certificates automatically, and control maintenance and network access at the edge.',
     actions: `<button class="btn btn-secondary" type="button" id="webnet-refresh">${ui.icon('refresh', 15)} Refresh</button>${canManage ? `<button class="btn btn-secondary" type="button" id="webnet-verify">${ui.icon('shield', 15)} Verify / issue TLS</button><button class="btn btn-secondary" type="button" id="webnet-save">${ui.icon('check', 15)} Save draft</button><button class="btn btn-primary" type="button" id="webnet-apply">${ui.icon('send', 15)} Apply edge config</button>` : ''}`,
   })}
-  ${lastError ? ui.inlineNotice('critical', 'Last apply failed', lastError) : ''}
+  ${lastError ? ui.inlineNotice('critical', 'Web Net reports an error', lastError) : ''}
   <div class="grid grid-main">
     <div class="stack">
       <section class="card">
@@ -149,7 +149,7 @@ export async function renderWebNet(ctx) {
             ${ui.field({ label: 'Blocked page title', name: 'blockedTitle', value: settings.blockedTitle || 'This address is not a webmail host', disabled: !canManage })}
             <div class="span-2">${ui.field({ label: 'Blocked page message', name: 'blockedMessage', type: 'textarea', rows: 3, value: settings.blockedMessage || '', disabled: !canManage })}</div>
           </div>
-          <p class="form-note">The default page clears the old webmail origin's cache and service worker through <span class="mono">Clear-Site-Data</span>. Drop mode closes the connection without a response, so a previously installed PWA may keep an offline shell until its site data is cleared.</p></div>
+          <p class="form-note">The edge serves a retirement <span class="mono">/sw.js</span> on the mail host, so an old installed webmail PWA unregisters and clears its cached shell on its next update check. The default page also sends <span class="mono">Clear-Site-Data</span>; Drop mode closes normal HTTP connections with 444 while keeping only that service-worker retirement path available.</p></div>
         </section>
         <section class="card">
           <header class="card-head"><div><h3>Maintenance</h3><p>Serve a 503 maintenance page without touching the mail listeners.</p></div><span class="badge">Per service</span></header>

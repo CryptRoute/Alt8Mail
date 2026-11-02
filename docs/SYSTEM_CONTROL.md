@@ -543,7 +543,15 @@ independent of the mail/MX hostname. The control plane on 8808 never changes.
   default page or close the connection with HTTP 444 for the mail host.
 - Maintenance returns HTTP 503 through a local page; allow/deny CIDR rules are
   applied at the server block for each service. `Clear-Site-Data` on the blocked
-  page removes a previous webmail origin's service worker and cache.
+  page removes a previous webmail origin's service worker and cache. The mail
+  host also serves a retirement `/sw.js` that unregisters an old installed PWA
+  and clears its cache, including in Drop mode where normal HTTP requests still
+  return 444.
+- On control startup, Web Net restores panel-managed runtime IP addresses,
+  regenerates the managed nginx configuration from the applied database state,
+  starts nginx if a boot-time bind failure left it inactive, and probes each
+  hostname over local TLS/SNI to confirm nginx serves the expected certificate.
+  This keeps Web Net active across reboots and installer/update restorations.
 - Applying writes `/etc/nginx/sites-available/a8m`, validates with `nginx -t`,
   reloads nginx, writes `ALT8MAIL_PUBLIC_URL`, WebAuthn origins and
   `ALT8MAIL_ADMIN_URL` to `/etc/a8m/app.env`, restarts `a8m-server` and

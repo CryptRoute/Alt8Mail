@@ -18655,7 +18655,7 @@ async function boot() {
       showLogin();
       loginError.textContent = !navigator.onLine
         ? "You’re offline. The app shell is installed; sign in again when your connection returns."
-        : "The mail server is not reachable yet. Start it on port 8001 and refresh.";
+        : "The mail service is not responding. Check a8m-server and the Web Net edge configuration, then refresh.";
       loginError.hidden = false;
       return;
     }

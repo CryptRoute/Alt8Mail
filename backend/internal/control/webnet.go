@@ -1199,7 +1199,7 @@ func (s *Server) handleWebNetApply(w http.ResponseWriter, r *http.Request, sess 
 		webNetFailure(w, http.StatusBadRequest, err)
 		return
 	}
-	pages := s.renderWebNetPages(settings)
+	pages := s.renderWebNetPages(settings, "https://"+webmail.Hostname)
 	oldConfig, configExists := s.readOptionalFile(s.cfg.NginxSitePath)
 	oldLogFormat, logFormatExists := s.readOptionalFile(s.cfg.NginxLogFormat)
 	oldPages := map[string]*string{}
@@ -1214,6 +1214,13 @@ func (s *Server) handleWebNetApply(w http.ResponseWriter, r *http.Request, sess 
 	}
 	restoreNginx, err := s.applyNginxWebNet(config, oldConfig, configExists, oldLogFormat, logFormatExists, pages, oldPages)
 	if err != nil {
+		s.webNetMarkError(r.Context(), err)
+		webNetFailure(w, http.StatusBadGateway, err)
+		return
+	}
+	if err := s.verifyServedCertificatesWithRetry(r.Context(), routes, certByRoute, local); err != nil {
+		_ = restoreNginx()
+		err = fmt.Errorf("nginx is serving an unexpected certificate: %w", err)
 		s.webNetMarkError(r.Context(), err)
 		webNetFailure(w, http.StatusBadGateway, err)
 		return
@@ -1345,16 +1352,16 @@ func (s *Server) applyNginxWebNet(config, oldConfig string, configExists bool, o
 	restore := func() error {
 		_ = restoreLink()
 		restoreFiles()
-		_, _ = runCommand(context.Background(), 30*time.Second, "systemctl", "reload", "nginx")
+		_ = s.reloadOrStartNginx(context.Background())
 		return nil
 	}
 	if result, err := runCommand(context.Background(), 30*time.Second, "nginx", "-t"); err != nil {
 		_ = restore()
 		return nil, fmt.Errorf("nginx -t rejected the Web Net configuration: %s", strings.TrimSpace(result.Stderr+" "+result.Stdout))
 	}
-	if result, err := runCommand(context.Background(), 30*time.Second, "systemctl", "reload", "nginx"); err != nil {
+	if err := s.reloadOrStartNginx(context.Background()); err != nil {
 		_ = restore()
-		return nil, fmt.Errorf("nginx reload failed: %s", strings.TrimSpace(result.Stderr))
+		return nil, err
 	}
 	return restore, nil
 }
@@ -1543,10 +1550,38 @@ func webNetPage(title, message, eyebrow string) string {
 `
 }
 
-func (s *Server) renderWebNetPages(settings webNetSettings) map[string]string {
+func (s *Server) renderWebNetPages(settings webNetSettings, webmailURL string) map[string]string {
 	return map[string]string{
 		"maintenance-webmail.html": webNetPage(settings.MaintenanceTitle, settings.MaintenanceMessage, "Scheduled maintenance"),
 		"maintenance-admin.html":   webNetPage(settings.MaintenanceTitle, settings.MaintenanceMessage, "Administration unavailable"),
 		"blocked.html":             webNetPage(settings.BlockedTitle, settings.BlockedMessage, "Web access restricted"),
+		"mailhost-sw.js":           webNetRetireServiceWorker(webmailURL),
 	}
+}
+
+// webNetRetireServiceWorker replaces the old mail-host service worker with a
+// short-lived cleanup worker. Browsers that installed the previous webmail PWA
+// can still serve its cached shell without this even when nginx returns 444.
+func webNetRetireServiceWorker(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		target = "/"
+	}
+	return `/* Retire the previous Alt8Mail webmail origin. */
+const target = ` + strconv.Quote(target) + `;
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => {
+  event.waitUntil((async () => {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    } catch {}
+    try { await self.registration.unregister(); } catch {}
+    try {
+      const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      await Promise.all(clients.map((client) => client.navigate(target).catch(() => undefined)));
+    } catch {}
+  })());
+});
+`
 }

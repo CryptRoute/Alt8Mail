@@ -186,6 +186,8 @@ func TestRenderWebNetNginx(t *testing.T) {
 		"allow 203.0.113.0/24;",
 		"deny 192.0.2.0/24;",
 		"Clear-Site-Data",
+		"location = /sw.js {",
+		"mailhost-sw.js",
 		"ssl_certificate \"/etc/ssl/a8m/mail.crt\";",
 	} {
 		if !strings.Contains(config, expected) {
@@ -222,6 +224,15 @@ func TestRenderWebNetMaintenance(t *testing.T) {
 	} {
 		if !strings.Contains(config, expected) {
 			t.Fatalf("maintenance config is missing %q\n%s", expected, config)
+		}
+	}
+}
+
+func TestWebNetRetireServiceWorker(t *testing.T) {
+	script := webNetRetireServiceWorker("https://webmail.example.com/")
+	for _, expected := range []string{"self.registration.unregister()", "caches.delete", "https://webmail.example.com/"} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("retire script is missing %q", expected)
 		}
 	}
 }

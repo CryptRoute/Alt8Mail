@@ -213,14 +213,25 @@ func nginxBlockedLocation(webroot string) string {
 	// origin. Without this, an installed PWA could keep an offline app shell on
 	// the mail hostname after it has been blocked at the edge.
 	return "    add_header Clear-Site-Data '\"cache\", \"storage\"' always;\n" +
+		nginxRetireServiceWorkerLocation(webroot) +
 		"    error_page 403 /blocked.html;\n" +
 		"    location = /blocked.html { internal; root " + nginxQuote(webroot) + "; }\n" +
 		"    location / { return 403; }\n"
 }
 
+func nginxRetireServiceWorkerLocation(webroot string) string {
+	return "    location = /sw.js {\n" +
+		"        default_type application/javascript;\n" +
+		"        add_header Cache-Control \"no-cache\" always;\n" +
+		"        alias " + nginxQuote(strings.TrimRight(webroot, "/")+"/mailhost-sw.js") + ";\n" +
+		"    }\n"
+}
+
 func nginxBlockedAction(settings webNetSettings, webroot string) string {
 	if settings.MailHostMode == "drop" {
-		return "    location / { return 444; }\n"
+		// A 444 has no response body, but the service-worker update check still
+		// needs a network response to replace an old cached webmail shell.
+		return nginxRetireServiceWorkerLocation(webroot) + "    location / { return 444; }\n"
 	}
 	return nginxBlockedLocation(webroot)
 }
