@@ -144,6 +144,14 @@ try {
   check(await page.eval("document.title.includes('Inbox · Q4 roadmap review — Thursday 10:00') && document.title.endsWith('— Alt8Mail')"), "open thread title shows the folder and subject");
   equal(await page.eval("document.querySelectorAll('.thread-msg.is-expanded').length"), 1, "latest message is expanded by default");
   check(await page.eval("document.querySelector('.reader-subject h2')?.textContent.includes('Q4 roadmap')"), "thread subject is shown without Re: noise");
+  check(await page.eval(`(() => {
+    const body = document.querySelector('.thread-msg.is-expanded .email-body');
+    const message = document.querySelector('.thread-msg.is-expanded');
+    const doc = document.querySelector('.reader-doc');
+    if (!body || !message || !doc) return false;
+    return body.getBoundingClientRect().width >= message.getBoundingClientRect().width - 40
+      && getComputedStyle(doc).maxWidth === '2000px';
+  })()`), "message body fills the reading column up to the 2000px widescreen cap");
   await page.click("#readerCollapseAll");
   await sleep(200);
   equal(await page.eval("document.querySelectorAll('.thread-msg.is-expanded').length"), 0, "Collapse all collapses every message");

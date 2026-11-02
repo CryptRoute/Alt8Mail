@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,32 @@ func TestValidPushEndpoint(t *testing.T) {
 		if _, err := validPushEndpoint(value); err == nil {
 			t.Fatalf("unsafe endpoint %q accepted", value)
 		}
+	}
+}
+
+func TestPushSubscriptionJSONAcceptsExpirationTime(t *testing.T) {
+	payload := `{"endpoint":"https://fcm.googleapis.com/fcm/send/abc123","expirationTime":null,"keys":{"p256dh":"cF9rZXk=","auth":"YXV0aA=="}}`
+	decoder := json.NewDecoder(strings.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	var input webPushSubscriptionInput
+	if err := decoder.Decode(&input); err != nil {
+		t.Fatalf("browser subscription payload rejected: %v", err)
+	}
+	if input.Endpoint == "" || input.Keys.P256dh == "" || input.Keys.Auth == "" {
+		t.Fatalf("browser subscription fields were not decoded: %+v", input)
+	}
+	if input.ExpirationTime != nil {
+		t.Fatalf("null expirationTime should decode as nil, got %v", *input.ExpirationTime)
+	}
+
+	payload = `{"endpoint":"https://fcm.googleapis.com/fcm/send/abc123","expirationTime":1767225600000,"keys":{"p256dh":"cF9rZXk=","auth":"YXV0aA=="}}`
+	decoder = json.NewDecoder(strings.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		t.Fatalf("browser subscription with an expiration rejected: %v", err)
+	}
+	if input.ExpirationTime == nil || *input.ExpirationTime != 1767225600000 {
+		t.Fatalf("expirationTime was not decoded: %+v", input.ExpirationTime)
 	}
 }
 

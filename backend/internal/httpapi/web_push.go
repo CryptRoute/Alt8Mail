@@ -42,7 +42,10 @@ type webPushSubscription struct {
 
 type webPushSubscriptionInput struct {
 	Endpoint string `json:"endpoint"`
-	Keys     struct {
+	// Browsers include expirationTime in PushSubscription.toJSON(). It is
+	// normally null, but may be a timestamp when the push service sets one.
+	ExpirationTime *int64 `json:"expirationTime"`
+	Keys           struct {
 		P256dh string `json:"p256dh"`
 		Auth   string `json:"auth"`
 	} `json:"keys"`

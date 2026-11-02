@@ -126,7 +126,7 @@ func (s *Server) writeWebPushPrivateKey(privateKey string) error {
 	return err
 }
 
-func (s *Server) generateWebPushKeys(ctx context.Context, clearSubscriptions bool) (string, error) {
+func (s *Server) generateWebPushKeys() (string, error) {
 	privateKey, publicKey, err := webpush.GenerateVAPIDKeys()
 	if err != nil {
 		return "", err
@@ -134,10 +134,19 @@ func (s *Server) generateWebPushKeys(ctx context.Context, clearSubscriptions boo
 	if err := s.writeWebPushPrivateKey(privateKey); err != nil {
 		return "", err
 	}
-	if clearSubscriptions {
-		_, _ = s.db.Exec(ctx, `DELETE FROM public.web_push_subscriptions`)
-	}
 	return publicKey, nil
+}
+
+func (s *Server) restoreWebPushPrivateKey(previous []byte, existed bool) {
+	var err error
+	if existed {
+		err = s.writeWebPushPrivateKey(string(previous))
+	} else {
+		err = removeManagedFile(s.cfg.WebPushKeyFile)
+	}
+	if err != nil && s.logger != nil {
+		s.logger.Warn("could not restore the previous VAPID private key", "err", err)
+	}
 }
 
 func (s *Server) handleWebPushSave(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
@@ -200,14 +209,15 @@ func (s *Server) handleWebPushSave(w http.ResponseWriter, r *http.Request, sess 
 	}
 	publicKey := current.PublicKey
 	keyFileMissing := !pathExists(s.cfg.WebPushKeyFile)
-	clearSubscriptions := false
+	previousKey, previousKeyErr := os.ReadFile(s.cfg.WebPushKeyFile)
+	generatedKey := false
 	if enabled && (publicKey == "" || keyFileMissing) {
-		publicKey, err = s.generateWebPushKeys(r.Context(), publicKey != "")
+		publicKey, err = s.generateWebPushKeys()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "PUSH_KEY", "Could not create the VAPID key pair: "+err.Error())
 			return
 		}
-		clearSubscriptions = true
+		generatedKey = true
 	}
 	_, err = s.db.Exec(r.Context(), `
 		UPDATE public.web_push_settings SET
@@ -219,10 +229,13 @@ func (s *Server) handleWebPushSave(w http.ResponseWriter, r *http.Request, sess 
 		WHERE id=true
 	`, enabled, publicKey, subject, includeSender, includeSubject, quietEnabled, quietStart, quietEnd, sess.User.Email)
 	if err != nil {
-		writeFromError(w, err)
+		if generatedKey {
+			s.restoreWebPushPrivateKey(previousKey, previousKeyErr == nil)
+		}
+		writeError(w, http.StatusInternalServerError, "PUSH_KEY", "Could not save the browser push settings: "+err.Error())
 		return
 	}
-	if clearSubscriptions {
+	if generatedKey {
 		_, _ = s.db.Exec(r.Context(), `DELETE FROM public.web_push_subscriptions`)
 	}
 	s.actorAudit(r, sess, "webpush.settings_updated", "Webmail browser push", "Updated browser push settings",
@@ -429,17 +442,40 @@ func (s *Server) handleWebPushTest(w http.ResponseWriter, r *http.Request, sess 
 }
 
 func (s *Server) handleWebPushRotate(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
-	publicKey, err := s.generateWebPushKeys(r.Context(), true)
+	previousKey, previousKeyErr := os.ReadFile(s.cfg.WebPushKeyFile)
+	publicKey, err := s.generateWebPushKeys()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "PUSH_KEY", "Could not rotate the VAPID key pair: "+err.Error())
 		return
 	}
-	_, err = s.db.Exec(r.Context(), `
-		UPDATE public.web_push_settings SET public_key=$2, cursor_at=now(), cursor_id='', updated_at=now()
+	fail := func(message string) {
+		s.restoreWebPushPrivateKey(previousKey, previousKeyErr == nil)
+		writeError(w, http.StatusInternalServerError, "PUSH_KEY", message)
+	}
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		fail("Could not start the key rotation transaction: " + err.Error())
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	tag, err := tx.Exec(r.Context(), `
+		UPDATE public.web_push_settings SET public_key=$1, cursor_at=now(), cursor_id='', updated_at=now()
 		WHERE id=true
 	`, publicKey)
 	if err != nil {
-		writeFromError(w, err)
+		fail("Could not store the new VAPID public key: " + err.Error())
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		fail("Could not store the new VAPID public key: the browser push settings row is missing")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `DELETE FROM public.web_push_subscriptions`); err != nil {
+		fail("Could not reset browser subscriptions for the new VAPID key: " + err.Error())
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		fail("Could not commit the VAPID key rotation: " + err.Error())
 		return
 	}
 	s.actorAudit(r, sess, "webpush.keys_rotated", "Webmail browser push", "Rotated VAPID keys and reset browser subscriptions", nil)

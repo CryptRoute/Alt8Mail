@@ -400,11 +400,16 @@
 .thread-msg-star { margin-top: 9px; opacity: .35; }
 .thread-msg:hover .thread-msg-star, .thread-msg-star.is-starred { opacity: 1; }
 .thread-chevron { width: 15px; height: 15px; color: var(--text-3); flex: none; }
+/* Let the message fill the reading pane like Outlook, but keep the whole
+   reading column centred and capped on ultra-wide displays instead of
+   stretching text across the full screen. */
+.reader-doc { max-width: 2000px; margin-left: auto; margin-right: auto; }
 .thread-body { padding: 0 16px 14px; border-top: 1px solid var(--border); }
 .thread-body .trust-line { margin: 12px 0 16px; }
-.thread-body .email-body { max-width: 90ch; padding-bottom: 4px; }
+.thread-body .email-body { max-width: 100%; padding-bottom: 4px; }
 .thread-message-actions {
   display: flex;
+  justify-content: flex-start;
   align-items: center;
   gap: 5px;
   flex-wrap: wrap;
