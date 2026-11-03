@@ -485,7 +485,13 @@ func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[s
 		SELECT folder,
 		       count(*) FILTER (WHERE NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())),
 		       count(*) FILTER (WHERE unread AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now()))
-		FROM mail_messages WHERE user_id=$1 GROUP BY folder
+		FROM mail_messages
+		WHERE user_id=$1 AND NOT EXISTS (
+			SELECT 1 FROM public.mail_thread_meta mt
+			WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id
+			  AND mt.closed_at IS NOT NULL
+		)
+		GROUP BY folder
 	`, userID)
 	if err != nil {
 		return counts, unread, err
@@ -507,6 +513,11 @@ func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[s
 		SELECT count(*), count(*) FILTER (WHERE unread)
 		FROM mail_messages
 		WHERE user_id=$1 AND NOT ignored AND snoozed_until > now()
+		  AND NOT EXISTS (
+			SELECT 1 FROM public.mail_thread_meta mt
+			WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id
+			  AND mt.closed_at IS NOT NULL
+		  )
 	`, userID).Scan(&snoozed, &snoozedUnread)
 	counts["snoozed"] = snoozed
 	unread["snoozed"] = snoozedUnread
@@ -516,6 +527,11 @@ func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[s
 		FROM mail_messages
 		WHERE user_id=$1 AND (starred OR flagged) AND folder NOT IN ('spam', 'trash')
 		  AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())
+		  AND NOT EXISTS (
+			SELECT 1 FROM public.mail_thread_meta mt
+			WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id
+			  AND mt.closed_at IS NOT NULL
+		  )
 	`, userID).Scan(&starred, &starredUnread)
 	counts["starred"] = starred
 	unread["starred"] = starredUnread

@@ -5803,13 +5803,32 @@ function threadCollabMarkup(thread) {
     <div class="thread-notes-panel" data-thread-notes-panel data-owner-id="${esc(ownerId)}" data-thread-id="${esc(thread.id)}" hidden></div>`;
 }
 
+function adjustClosedThreadCounts(thread, closing) {
+  const delta = closing ? -1 : 1;
+  for (const message of thread.messages || []) {
+    const folderId = message.delegateOwnerId ? "delegate_" + message.delegateOwnerId : message.folder;
+    if (!folderId) continue;
+    adjustFolderCount(folderId, delta, message.unread ? delta : 0);
+    const folder = state.folders.find((item) => item.id === folderId);
+    if (folder) {
+      if (Number.isFinite(Number(folder.total))) folder.total = Math.max(0, Number(folder.total) + delta);
+      if (Number.isFinite(Number(folder.unread))) folder.unread = Math.max(0, Number(folder.unread) + (message.unread ? delta : 0));
+    }
+  }
+  updateDocumentTitle();
+  renderFolders();
+}
+
 async function patchThreadCollaboration(thread, ownerId, patch) {
   if (!thread) return;
+  const wasClosed = threadMetaForThread(thread)?.closed === true;
   try {
     const data = await api(`/api/threads/${encodeURIComponent(thread.id)}/meta`, {
       method: "PATCH", body: { ownerId, ...patch }
     });
+    const nowClosed = data?.meta?.closed === true;
     if (data?.meta) state.threadMeta.set(threadMetaKey(ownerId, thread.id), data.meta);
+    if (data?.meta && wasClosed !== nowClosed) adjustClosedThreadCounts(thread, nowClosed);
     renderList({ preserveScroll: true });
     renderReader({ preserveScroll: true });
     showToast("Conversation handling updated.");
