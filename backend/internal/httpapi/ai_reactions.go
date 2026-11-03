@@ -64,12 +64,11 @@ func (s *Server) aiReactionSuggestions(w http.ResponseWriter, r *http.Request) {
 	if messageID == "" {
 		messageID = strings.TrimSpace(r.URL.Query().Get("messageId"))
 	}
-	owner, _, message, err := s.resolveReactionMessage(r.Context(), sess.User, messageID)
+	_, cacheMessageID, message, err := s.resolveReactionMessage(r.Context(), sess.User, messageID)
 	if err != nil {
 		writeFromError(w, err)
 		return
 	}
-	_ = owner
 	fallback := heuristicReactionSuggestions(message)
 	settings, aiErr := s.aiReady(r.Context(), sess.User.TenantID)
 	if aiErr != nil {
@@ -78,7 +77,7 @@ func (s *Server) aiReactionSuggestions(w http.ResponseWriter, r *http.Request) {
 	}
 	language := s.aiUserLanguage(r.Context(), sess.User)
 	cacheKey := "reactions-v1:" + language
-	if cached, ok := s.aiCacheGet(r.Context(), messageID, sess.User.ID, "reactions", cacheKey); ok {
+	if cached, ok := s.aiCacheGet(r.Context(), cacheMessageID, sess.User.ID, "reactions", cacheKey); ok {
 		if suggestions := parseReactionSuggestions(cached); len(suggestions) > 0 {
 			writeJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions, "quick": quickReactionEmojis, "ai": true, "cached": true})
 			return
@@ -100,7 +99,7 @@ func (s *Server) aiReactionSuggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if encoded, err := json.Marshal(suggestions); err == nil {
-		s.aiCachePut(r.Context(), messageID, sess.User.ID, "reactions", cacheKey, string(encoded), settings.Provider, settings.Model)
+		s.aiCachePut(r.Context(), cacheMessageID, sess.User.ID, "reactions", cacheKey, string(encoded), settings.Provider, settings.Model)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions, "quick": quickReactionEmojis, "ai": true})
 }

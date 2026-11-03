@@ -73,6 +73,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.11.3** patch lets AI reaction suggestions use the existing AI cache with their own cached kind, and keeps the Subscriptions folder focused on the signed-in user's own mailbox.
+
 The **0.11.2** patch keeps the virtual Subscriptions folder available after folder create, rename, reorder or delete operations and prevents folder-management actions from targeting it.
 
 The **0.11.1** patch keeps the Subscriptions badge in sync when a newsletter is read or marked unread, and stops empty months from drawing misleading bars in the Year in review chart.

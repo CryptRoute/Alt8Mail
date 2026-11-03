@@ -3614,7 +3614,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
     const key = mailPageKey(state.folder, "all");
     const total = state.messages.filter((message) => state.folder === "starred"
       ? message.starred && message.folder !== "spam" && message.folder !== "trash"
-      : state.folder === "subscriptions" ? Boolean(message.unsubscribe)
+      : state.folder === "subscriptions" ? Boolean(message.unsubscribe) && !message.delegateOwnerId
       : message.folder === state.folder).length;
     state.mailPages[key] = {
       folder: state.folder, filter: "all", offset: 0, limit: Math.max(total, 50),
@@ -4581,7 +4581,7 @@ function scopeMessages() {
     } else if (state.folder === "snoozed") {
       messages = state.messages.filter((message) => !message.ignored && snoozeActive(message));
     } else if (state.folder === "subscriptions") {
-      messages = state.messages.filter((message) => !message.ignored && !snoozeActive(message) && message.unsubscribe);
+      messages = state.messages.filter((message) => !message.ignored && !snoozeActive(message) && message.unsubscribe && !message.delegateOwnerId);
     } else {
       messages = state.messages.filter((message) => message.folder === state.folder && !message.ignored && !snoozeActive(message));
     }
