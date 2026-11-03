@@ -10,13 +10,13 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.20.17">
-<link rel="stylesheet" href="/features.css?v=0.20.17">
-<link rel="stylesheet" href="/workspace.css?v=0.20.17">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.20.17">
-<link rel="stylesheet" href="/features-0.7.css?v=0.20.17">
-<link rel="stylesheet" href="/onboarding.css?v=0.20.17">
-<link rel="stylesheet" href="/email-ui.css?v=0.20.17">
+<link rel="stylesheet" href="/styles.css?v=0.20.18">
+<link rel="stylesheet" href="/features.css?v=0.20.18">
+<link rel="stylesheet" href="/workspace.css?v=0.20.18">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.20.18">
+<link rel="stylesheet" href="/features-0.7.css?v=0.20.18">
+<link rel="stylesheet" href="/onboarding.css?v=0.20.18">
+<link rel="stylesheet" href="/email-ui.css?v=0.20.18">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -415,6 +415,7 @@
             </button>
             <div class="ai-reader-menu" id="cmdAiMenu" data-ai-menu role="menu" aria-label="AI email actions" hidden>
               <button type="button" role="menuitem" data-ai-action="summary"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><span><strong>Summarise this email</strong><small>Recent conversation, in your language</small></span></button>
+              <button type="button" role="menuitem" data-ai-action="commitments"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg></span><span><strong>What did I commit to?</strong><small>Promises, deadlines and requests</small></span></button>
               <button type="button" role="menuitem" data-ai-action="translate"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-translate"/></svg></span><span><strong>Translate Email</strong><small>Read the latest message in your language</small></span></button>
             </div>
           </div>
@@ -527,6 +528,7 @@
               <button type="button" data-bulk-move-folder="trash"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Trash</button>
             </div>
           </div>
+          <div class="catchup-host" id="catchUpHost"></div>
           <div class="list-scroll" id="messageList" role="listbox" aria-label="Conversations" aria-multiselectable="true"></div>
         </section>
 
@@ -579,6 +581,7 @@
               </button>
               <div class="ai-reader-menu" id="readerAiMenu" data-ai-menu role="menu" aria-label="AI email actions" hidden>
                 <button type="button" role="menuitem" data-ai-action="summary"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><span><strong>Summarise this email</strong><small>Recent conversation, in your language</small></span></button>
+                <button type="button" role="menuitem" data-ai-action="commitments"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg></span><span><strong>What did I commit to?</strong><small>Promises, deadlines and requests</small></span></button>
                 <button type="button" role="menuitem" data-ai-action="translate"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-translate"/></svg></span><span><strong>Translate Email</strong><small>Read the latest message in your language</small></span></button>
               </div>
             </div>
@@ -3003,6 +3006,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.20.17"></script>
+<script type="module" src="/app.js?v=0.20.18"></script>
 </body>
 </html>

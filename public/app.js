@@ -848,6 +848,7 @@ const state = {
   pushLocal: false,
   recentAudit: [],
   aiReader: null,
+  catchUp: null,
   notifications: [],
   dismissedNotifications: new Set(),
   noticeFilter: "all",
@@ -2324,6 +2325,7 @@ async function finishSignIn(data, { holdSplashMs = 0 } = {}) {
   hidePasskeyPrompt();
   resetLoginButtons();
   await loadBootstrap({ restoreDrafts: true });
+  loadCatchUp().catch(() => {});
   restoreNavigationFromLocation();
   requestAnimationFrame(layoutComposeSessions);
   if (holdSplashMs > 0) {
@@ -5307,6 +5309,54 @@ function threadRowMarkup(thread) {
       </div>`;
 }
 
+function catchUpStorageKey(since) {
+  return `a8m.catchup.${normalizeEmail(state.user?.email || "guest")}.${since || ""}`;
+}
+
+function catchUpDismissed(since) {
+  try { return localStorage.getItem(catchUpStorageKey(since)) === "1"; } catch { return false; }
+}
+
+function catchUpMarkup() {
+  const data = state.catchUp;
+  if (!data?.available || catchUpDismissed(data.since)) return "";
+  const changed = Number(data.changed) || 0;
+  if (changed <= 0) return "";
+  const needReply = Number(data.needReply) || 0;
+  const unread = Number(data.unread) || 0;
+  const today = dateKeyInZone(new Date());
+  const weekEnd = addDaysToKey(today, 7);
+  const dueSoon = (state.tasks || []).filter((task) => task.status !== "done" && task.due && task.due >= today && task.due <= weekEnd).length;
+  const details = [`${needReply} ${needReply === 1 ? "needs" : "need"} a reply`];
+  if (unread) details.push(`${unread} unread`);
+  if (dueSoon) details.push(`${dueSoon} ${dueSoon === 1 ? "task" : "tasks"} due this week`);
+  return `<div class="catchup-card" role="status">
+    <span class="catchup-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span>
+    <div class="catchup-copy">
+      <span class="catchup-kicker">While you were away</span>
+      <strong>${changed} conversation${changed === 1 ? "" : "s"} changed</strong>
+      <p>Since ${esc(formatDateOnly(data.since))} · ${esc(details.join(" · "))}.</p>
+    </div>
+    <div class="catchup-actions">
+      ${unread ? '<button class="btn-secondary small" type="button" data-catchup-unread>Show unread</button>' : ""}
+      <button class="icon-btn" type="button" data-catchup-dismiss aria-label="Dismiss catch-up card" title="Dismiss"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+  </div>`;
+}
+
+async function loadCatchUp() {
+  if (!state.user) return;
+  try {
+    const data = await api("/api/catch-up");
+    if (!data?.available || catchUpDismissed(data.since)) {
+      state.catchUp = null;
+      return;
+    }
+    state.catchUp = data;
+    if (state.folder === "inbox" && !state.query && state.filter === "all") renderList({ preserveScroll: true });
+  } catch {}
+}
+
 function renderList({ preserveScroll = false, appendOnly = false } = {}) {
   const previousScroll = preserveScroll ? messageList.scrollTop : 0;
   const threads = computeView();
@@ -5388,6 +5438,11 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
     // append re-renders the grouped list while preserving the scroll offset.
     state.renderedThreadIds = new Set(threads.map((thread) => thread.id));
     messageList.innerHTML = mailThreadRowsMarkup(threads) + mailLoadMoreMarkup(page);
+  }
+
+  const catchUpHost = document.getElementById("catchUpHost");
+  if (catchUpHost) {
+    catchUpHost.innerHTML = state.folder === "inbox" && !state.query && state.filter === "all" ? catchUpMarkup() : "";
   }
 
   const totalForStatus = state.query ? threads.length : (page?.total || threads.length);
@@ -5731,9 +5786,33 @@ function updateAiReaderUi() {
   });
 }
 
+function commitmentKindLabel(kind) {
+  return kind === "deadline" ? "Deadline" : kind === "request" ? "Request" : "Promise";
+}
+
 function readerAiCardMarkup(thread) {
   const result = state.aiReader;
   if (!state.ai?.enabled || !result || result.threadId !== thread.id) return "";
+  if (result.kind === "commitments") {
+    const items = Array.isArray(result.items) ? result.items : [];
+    const body = result.loading
+      ? "Reading the thread for your promises, deadlines and requests…"
+      : result.error
+        ? esc(result.error)
+        : items.length
+          ? `<div class="ai-commitment-list">${items.map((item) => `<button class="ai-commitment-item" type="button" data-ai-commitment="${esc(item.messageId)}" data-ai-commitment-quote="${esc(item.quote || "")}">
+              <span class="ai-commitment-kind is-${esc(item.kind || "promise")}">${esc(commitmentKindLabel(item.kind))}</span>
+              <strong>${esc(item.text || "")}</strong>
+              <span class="ai-commitment-quote">“${esc(item.quote || "")}”</span>
+              <small>${esc(item.messageSubject || "Message")}${item.messageDate ? ` · ${esc(formatListWhen(item.messageDate))}` : ""}${item.due ? ` · due ${esc(item.due)}` : ""}</small>
+            </button>`).join("")}</div>`
+          : `<p class="ai-commitment-empty">No clear commitments were found in this conversation.</p>`;
+    return `<div class="ai-summary-card ai-commitments-card" id="readerAiCard">
+      <div class="ai-summary-card-head"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg><strong>What you committed to</strong><button class="icon-btn ai-summary-close" data-ai-reader-close type="button" aria-label="Close AI result"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="ai-summary-body${result.loading ? " ai-summary-loading" : ""}">${body}</div>
+      <div class="ai-summary-note">${result.loading ? "Working with your organization's AI provider." : "Click an item to jump to the exact message. AI can make mistakes — verify important details."}</div>
+    </div>`;
+  }
   const label = result.kind === "translation" ? "AI translation" : "AI summary";
   return `<div class="ai-summary-card" id="readerAiCard">
     <div class="ai-summary-card-head"><svg class="icon" aria-hidden="true"><use href="#${result.kind === "translation" ? "i-translate" : "i-sparkles"}"/></svg><strong>${label}</strong><button class="icon-btn ai-summary-close" data-ai-reader-close type="button" aria-label="Close AI result"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
@@ -5805,10 +5884,26 @@ function toggleReaderAiMenu(wrap) {
 async function runReaderAi(kind) {
   const thread = currentThread();
   if (!thread || !state.ai?.enabled) return;
-  const message = thread.latest;
-  if (!message?.id) return;
   closeReaderAiMenus();
   const language = state.preferences.language || "en-US";
+  if (kind === "commitments") {
+    state.aiReader = { threadId: thread.id, kind, language, items: [], loading: true };
+    updateReaderAiCard();
+    try {
+      const data = await api(`/api/ai/threads/${encodeURIComponent(thread.id)}/commitments`, { method: "POST", body: { language } });
+      if (state.aiReader?.threadId !== thread.id) return;
+      state.aiReader = { threadId: thread.id, kind, language: data.language || language, items: Array.isArray(data.items) ? data.items : [], loading: false };
+      updateReaderAiCard();
+    } catch (error) {
+      if (state.aiReader?.threadId !== thread.id) return;
+      state.aiReader = { threadId: thread.id, kind, language, items: [], loading: false, error: error.message || "AI request failed." };
+      updateReaderAiCard();
+      showError(error);
+    }
+    return;
+  }
+  const message = thread.latest;
+  if (!message?.id) return;
   state.aiReader = { threadId: thread.id, kind, language, content: "", loading: true };
   updateReaderAiCard();
   try {
@@ -5823,6 +5918,51 @@ async function runReaderAi(kind) {
     state.aiReader = { threadId: thread.id, kind, language, content: error.message || "AI request failed.", loading: false };
     updateReaderAiCard();
     showError(error);
+  }
+}
+
+function focusCommitment(messageId, quote) {
+  if (!messageId) return;
+  const find = () => [...document.querySelectorAll(".thread-msg")].find((node) => node.getAttribute("data-message-id") === messageId);
+  let article = find();
+  if (!article) return;
+  if (!article.classList.contains("is-expanded")) {
+    article.querySelector("[data-toggle-message]")?.click();
+  }
+  setTimeout(() => {
+    article = find();
+    if (!article) return;
+    article.scrollIntoView({ behavior: "smooth", block: "center" });
+    article.classList.add("is-ai-commitment-target");
+    const body = article.querySelector(".email-body");
+    if (body && quote) highlightCommitmentQuote(body, quote);
+    setTimeout(() => article.classList.remove("is-ai-commitment-target"), 2800);
+  }, 220);
+}
+
+function highlightCommitmentQuote(root, quote) {
+  const needle = String(quote || "").replace(/\s+/g, " ").trim();
+  if (!root || needle.length < 6) return;
+  const probes = [needle, needle.split(/[.!?]/)[0].trim()].filter((value) => value.length >= 6);
+  for (const probe of probes) {
+    const lower = probe.toLowerCase();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const value = node.nodeValue || "";
+      const index = value.toLowerCase().indexOf(lower);
+      if (index < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, index);
+      range.setEnd(node, index + probe.length);
+      const mark = document.createElement("mark");
+      mark.className = "ai-commitment-highlight";
+      try {
+        range.surroundContents(mark);
+        mark.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      } catch {}
+    }
   }
 }
 
@@ -8416,8 +8556,65 @@ function addRecipientEntry(session, field, entry, { focus = true } = {}) {
   closeRecipientSuggestions(session, field);
   autoSaveRecipient(entry);
   scheduleComposeSave(session);
+  scheduleToneSuggestion(session);
   if (focus) session.el?.querySelector(`[data-recipient-input="${field}"]`)?.focus();
   return true;
+}
+
+function renderComposeToneChip(session) {
+  const chip = session.el?.querySelector("[data-compose-tone-chip]");
+  if (!chip) return;
+  const suggestion = session.toneSuggestion;
+  const available = Boolean(state.ai?.enabled && suggestion?.available && suggestion.style);
+  chip.hidden = !available;
+  if (!available) {
+    chip.innerHTML = "";
+    return;
+  }
+  chip.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span>${esc(suggestion.label || suggestion.style)}</span>`;
+  chip.title = suggestion.reason || `Suggested tone: ${suggestion.label || suggestion.style}`;
+  chip.setAttribute("data-tone-style", suggestion.style);
+  chip.setAttribute("data-tone-label", suggestion.label || suggestion.style);
+  chip.setAttribute("data-tone-reason", suggestion.reason || "");
+}
+
+function scheduleToneSuggestion(session) {
+  if (!session) return;
+  clearTimeout(session.toneTimer);
+  session.toneTimer = null;
+  if (!state.ai?.enabled) {
+    session.toneSuggestion = null;
+    renderComposeToneChip(session);
+    return;
+  }
+  const recipient = recipientEntriesFor(session, "to")[0]?.email;
+  if (!recipient) {
+    session.toneSuggestion = null;
+    renderComposeToneChip(session);
+    return;
+  }
+  session.toneTimer = setTimeout(async () => {
+    const currentRecipient = recipientEntriesFor(session, "to")[0]?.email;
+    if (!currentRecipient || normalizeEmail(currentRecipient) !== normalizeEmail(recipient)) return;
+    try {
+      const data = await api("/api/ai/tone", {
+        method: "POST",
+        body: {
+          recipient,
+          subject: session.subject || "",
+          draft: session.body || stripHtml(session.bodyHtml || ""),
+          language: state.preferences.language || "en-US"
+        }
+      });
+      if (!composeSessions.includes(session)) return;
+      session.toneSuggestion = data?.available ? data : null;
+      renderComposeToneChip(session);
+    } catch {
+      if (!composeSessions.includes(session)) return;
+      session.toneSuggestion = null;
+      renderComposeToneChip(session);
+    }
+  }, 650);
 }
 
 function commitRecipientInput(session, field, { focus = true } = {}) {
@@ -8653,6 +8850,7 @@ function composeTemplate(session) {
       <span class="compose-grip" aria-hidden="true"></span>
       <h2 data-compose-title>${esc(title)}</h2>
       <span class="compose-identity" data-compose-identity title="Sending as ${esc(session.fromEmail)}">${esc(aliasDisplay(session.fromEmail))}</span>
+      <button class="compose-tone-chip" data-compose-tone-chip type="button" hidden></button>
       <div class="compose-head-actions">
         <button class="compose-head-btn" data-compose-action="minimize" type="button" aria-label="Minimize to dock" title="Minimize to dock"><svg class="icon" aria-hidden="true"><use href="#i-minimize"/></svg></button>
         <button class="compose-head-btn compose-expand" data-compose-action="expand" type="button" aria-label="Expand into reading pane" title="Expand into reading pane">
@@ -8793,6 +8991,9 @@ function openCompose(prefill = {}, options = {}) {
     aiAttachmentIds: new Set(),
     aiThinking: false,
     aiThinkingMessage: "",
+    toneSuggestion: null,
+    toneTimer: null,
+    toneStyle: "",
     kind: data.kind || "",
     ccOpen: Boolean(data.ccText || data.cc || data.bccText || data.bcc),
     optionsOpen: false,
@@ -8822,6 +9023,8 @@ function openCompose(prefill = {}, options = {}) {
   updateComposeWindow(session);
   updateComposeFiles(session);
   updateComposeStatus(session);
+  renderComposeToneChip(session);
+  setTimeout(() => scheduleToneSuggestion(session), 300);
   document.body.classList.add("composing");
   setActiveCompose(id);
   updateComposeDock();
@@ -9226,7 +9429,7 @@ function renderComposeAiPanel(session) {
   const attachmentOverLimit = attachmentTotal > AI_CONTEXT_LIMIT_BYTES;
   panel.innerHTML = `<div class="compose-ai-head"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><strong>AI writing assistant</strong><button class="icon-btn" data-ai-compose-close type="button" aria-label="Close AI assistant"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <div class="compose-ai-grid">
-      <label>Style<select data-ai-style>${styles.map((item) => `<option value="${esc(item.code)}" ${item.code === "professional" ? "selected" : ""}>${esc(item.name)}</option>`).join("")}</select></label>
+      <label>Style<select data-ai-style>${styles.map((item) => `<option value="${esc(item.code)}" ${item.code === (session.toneStyle || "professional") ? "selected" : ""}>${esc(item.name)}</option>`).join("")}</select></label>
       <label>Length<select data-ai-length><option value="short">Short</option><option value="medium" selected>Medium</option><option value="long">Long</option></select></label>
       <label>Language<select data-ai-language>${languages.map((item) => `<option value="${esc(item.code)}" ${item.code === preferredLanguage ? "selected" : ""}>${esc(item.name)}</option>`).join("")}</select></label>
       <label>Creativity<div class="compose-ai-range"><input type="range" min="0" max="100" value="50" data-ai-creativity><span data-ai-creativity-value>50</span></div></label>
@@ -9977,6 +10180,55 @@ function applySpellcheckChoices() {
   renderComposeDockTabs();
 }
 
+function composeIntentBodyText(session) {
+  const editor = session.el?.querySelector("[data-compose-editor]");
+  if (editor) {
+    const clone = editor.cloneNode(true);
+    clone.querySelectorAll(".compose-quote, [data-compose-quote]").forEach((node) => node.remove());
+    return clone.textContent || "";
+  }
+  return session.body || "";
+}
+
+function composeIntentWarnings(session, scheduledFor) {
+  const text = composeIntentBodyText(session);
+  if (!text.trim()) return [];
+  const warnings = [];
+  const attachments = Array.isArray(session.files) ? session.files.length : 0;
+  if (attachments === 0 && /\b(attached|attachment|attachments|enclosed|enclosure)\b/i.test(text)) {
+    warnings.push("You mention an attachment, but no file is attached.");
+  }
+  const target = scheduledFor ? new Date(scheduledFor) : new Date();
+  if (Number.isNaN(target.getTime())) return warnings;
+  const targetKey = dateKeyInZone(target);
+  const todayKey = dateKeyInZone(new Date());
+  if (/\btomorrow\b/i.test(text) && targetKey !== addDaysToKey(todayKey, 1)) {
+    warnings.push(`You wrote “tomorrow”, but this will send ${scheduledFor ? "on " + formatDateOnly(target) : "today"}.`);
+  }
+  if (/\b(today|tonight|end of day|eod)\b/i.test(text) && targetKey !== todayKey) {
+    warnings.push(`You wrote about today, but this will send on ${formatDateOnly(target)}.`);
+  }
+  const weekdays = { monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 7 };
+  const match = text.match(/\b(?:on|by|this|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+  if (match && weekdayOfKey(targetKey) !== weekdays[match[1].toLowerCase()]) {
+    warnings.push(`You wrote “${match[1]}”, but this will send on ${formatDateOnly(target)}.`);
+  }
+  return warnings.slice(0, 3);
+}
+
+async function confirmSendIntent(session, scheduledFor) {
+  const warnings = composeIntentWarnings(session, scheduledFor);
+  if (!warnings.length) return true;
+  return appConfirm({
+    title: "Check before sending",
+    message: warnings.join(" "),
+    confirmLabel: "Send anyway",
+    cancelLabel: "Review",
+    tone: "warning",
+    icon: "i-alert"
+  });
+}
+
 async function sendComposeSession(id) {
   const session = sessionById(id);
   if (!session || !session.el) return;
@@ -9986,6 +10238,10 @@ async function sendComposeSession(id) {
   try {
     const spellingOK = await runSpellCheckBeforeSend(session);
     if (!spellingOK) {
+      if (sendButton) sendButton.disabled = false;
+      return;
+    }
+    if (!(await confirmSendIntent(session, null))) {
       if (sendButton) sendButton.disabled = false;
       return;
     }
@@ -10302,6 +10558,7 @@ async function confirmScheduledSend() {
   try {
     const spellingOK = await runSpellCheckBeforeSend(session, "schedule");
     if (!spellingOK) return;
+    if (!(await confirmSendIntent(session, stamp))) return;
     await flushDraft(session);
     const data = await api("/api/send", {
       method: "POST",
@@ -10841,6 +11098,7 @@ function openDetails(messageOrId) {
       ${(auth.warnings || []).length ? `<ul class="details-warnings">${auth.warnings.map((warning) => `<li>${esc(warning)}</li>`).join("")}</ul>` : ""}
       ${message.external && showExternalTag ? `<div class="details-trust-actions"><button class="btn-secondary" data-trust-toggle="${esc(message.id)}" data-trust-value="${message.trusted ? "false" : "true"}" type="button">${message.trusted ? "Remove sender trust" : "Mark sender as trusted"}</button><span>Trusting a sender suppresses the external warning for this address.</span></div>` : ""}
     </div>
+    <div class="trust-explanation" data-trust-explanation><span class="muted">Building a plain-English explanation…</span></div>
     <div class="details-grid">${rows.map(([key, value]) => `<div class="details-row"><dt>${esc(key)}</dt><dd>${esc(value)}</dd></div>`).join("")}</div>
     <p class="details-note">Transport results come from the receiving MTA. Open <strong>Raw source</strong> for the complete RFC 822 header block, including every Received hop and originating IP.</p>
     </div>
@@ -10850,7 +11108,26 @@ function openDetails(messageOrId) {
       <pre class="source-view" data-source-view>Select Raw source to load the full message headers.</pre>
     </div>`;
   detailsOverlay.hidden = false;
+  loadTrustExplanation(message.id);
   setTimeout(() => document.getElementById("detailsClose").focus(), 30);
+}
+
+async function loadTrustExplanation(id) {
+  const host = detailsBody.querySelector("[data-trust-explanation]");
+  if (!host) return;
+  try {
+    const data = await api(`/api/messages/${encodeURIComponent(id)}/trust-explanation`);
+    if (detailsCurrentId !== id) return;
+    const explanation = Array.isArray(data.explanation) ? data.explanation : [];
+    host.innerHTML = `<div class="trust-explanation-head">
+        <span class="trust-explanation-icon"><svg class="icon" aria-hidden="true"><use href="#${data.junk ? "i-alert" : "i-shield-check"}"/></svg></span>
+        <div><strong>${esc(data.title || (data.junk ? "Why is this junk?" : "Why this is safe"))}</strong><span>${data.trusted ? "You have marked this sender as trusted" : "Based on transport checks and your mailbox history"}</span></div>
+      </div>
+      <ul>${explanation.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>`;
+  } catch (error) {
+    if (detailsCurrentId !== id) return;
+    host.innerHTML = `<span class="muted">${esc(error.message || "The explanation could not be loaded.")}</span>`;
+  }
 }
 
 function closeDetails() {
@@ -17752,11 +18029,33 @@ function bindEvents() {
   });
   window.addEventListener("resize", closeReaderAiMenus);
   document.addEventListener("click", (event) => {
+    const catchUpDismiss = event.target.closest("[data-catchup-dismiss]");
+    if (catchUpDismiss) {
+      const since = state.catchUp?.since;
+      if (since) {
+        try { localStorage.setItem(catchUpStorageKey(since), "1"); } catch {}
+      }
+      state.catchUp = null;
+      renderList({ preserveScroll: true });
+      return;
+    }
+    if (event.target.closest("[data-catchup-unread]")) {
+      state.catchUp = null;
+      setFilter("unread");
+      return;
+    }
     if (event.target.closest("[data-ai-reader-close]")) { closeReaderAi(); return; }
+    const commitment = event.target.closest("[data-ai-commitment]");
+    if (commitment) {
+      event.preventDefault();
+      focusCommitment(commitment.getAttribute("data-ai-commitment"), commitment.getAttribute("data-ai-commitment-quote"));
+      return;
+    }
     const aiAction = event.target.closest("[data-ai-action]");
     if (aiAction) {
       event.preventDefault();
-      runReaderAi(aiAction.getAttribute("data-ai-action") === "translate" ? "translation" : "summary");
+      const action = aiAction.getAttribute("data-ai-action");
+      runReaderAi(action === "translate" ? "translation" : action === "commitments" ? "commitments" : "summary");
       return;
     }
     if (aiReaderMenus.some((menu) => !menu.hidden) && !event.target.closest("[data-ai-wrap]")) closeReaderAiMenus();
@@ -18041,6 +18340,7 @@ function bindEvents() {
         session.dirty = true;
         updateRecipientField(session, field);
         scheduleComposeSave(session);
+        scheduleToneSuggestion(session);
         session.el.querySelector(`[data-recipient-input="${field}"]`)?.focus();
       }
       return;
@@ -18078,6 +18378,17 @@ function bindEvents() {
     if (event.target.closest("[data-ai-compose-generate]")) { composeAiGenerate(session); return; }
     if (event.target.closest("[data-ai-compose-insert]")) { applyComposeAiResult(session, false); return; }
     if (event.target.closest("[data-ai-compose-replace]")) { applyComposeAiResult(session, true); return; }
+    const toneChip = event.target.closest("[data-compose-tone-chip]");
+    if (toneChip) {
+      const style = toneChip.getAttribute("data-tone-style") || "";
+      const label = toneChip.getAttribute("data-tone-label") || style;
+      const reason = toneChip.getAttribute("data-tone-reason") || "";
+      session.toneStyle = style;
+      const styleSelect = session.el?.querySelector("[data-ai-style]");
+      if (styleSelect && style) styleSelect.value = style;
+      showToast(reason ? `${label}: ${reason}` : `Tone suggestion: ${label}`);
+      return;
+    }
     const priority = event.target.closest("[data-compose-priority]");
     if (priority) {
       session.priority = priority.getAttribute("data-compose-priority");

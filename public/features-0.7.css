@@ -571,3 +571,130 @@
 @media (max-width: 860px) {
   .about-highlights, .mail-client-grid { grid-template-columns: 1fr; }
 }
+
+/* Ambient intelligence: catch-up, thread memory, tone and trust */
+.catchup-card {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0 0 6px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, #8b5cf6 28%, var(--border));
+  border-radius: 12px;
+  background: linear-gradient(135deg, color-mix(in srgb, #8b5cf6 8%, var(--surface)), var(--surface) 68%);
+}
+.catchup-icon {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, #8b5cf6 14%, var(--surface));
+  color: #7c3aed;
+}
+.catchup-icon svg { width: 16px; height: 16px; }
+.catchup-copy { flex: 1; min-width: 0; }
+.catchup-kicker {
+  display: block;
+  font-size: .52rem;
+  font-weight: 750;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: #7c3aed;
+}
+.catchup-copy strong { display: block; margin-top: 1px; font-size: .76rem; color: var(--text); }
+.catchup-copy p { margin: 2px 0 0; font-size: .65rem; line-height: 1.45; color: var(--text-2); }
+.catchup-actions { display: flex; align-items: center; gap: 5px; flex: none; }
+.ai-commitment-list { display: flex; flex-direction: column; gap: 7px; }
+.ai-commitment-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.ai-commitment-item:hover { border-color: color-mix(in srgb, #8b5cf6 45%, var(--border)); background: color-mix(in srgb, #8b5cf6 5%, var(--surface)); }
+.ai-commitment-kind {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: .5rem;
+  font-weight: 750;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.ai-commitment-kind.is-deadline { color: #9a6700; background: color-mix(in srgb, #f59e0b 16%, transparent); }
+.ai-commitment-kind.is-request { color: #1d4ed8; background: color-mix(in srgb, #3b82f6 14%, transparent); }
+.ai-commitment-kind.is-promise { color: #6d28d9; background: color-mix(in srgb, #8b5cf6 14%, transparent); }
+.ai-commitment-item strong { font-size: .76rem; line-height: 1.4; }
+.ai-commitment-quote { font-size: .68rem; line-height: 1.45; color: var(--text-2); font-style: italic; }
+.ai-commitment-item small { font-size: .58rem; color: var(--text-3); }
+.ai-commitment-empty { margin: 0; font-size: .74rem; color: var(--text-2); }
+.ai-commitment-highlight {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: color-mix(in srgb, #facc15 42%, transparent);
+  color: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.thread-msg.is-ai-commitment-target { box-shadow: 0 0 0 2px color-mix(in srgb, #8b5cf6 48%, transparent); }
+.compose-tone-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, #8b5cf6 34%, var(--header-line));
+  border-radius: 999px;
+  background: var(--header-field);
+  color: #c4b5fd;
+  font-size: .55rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.compose-tone-chip svg { width: 11px; height: 11px; flex: none; }
+.compose-tone-chip[hidden] { display: none !important; }
+.trust-explanation {
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.trust-explanation-head { display: flex; align-items: flex-start; gap: 9px; }
+.trust-explanation-icon {
+  width: 27px;
+  height: 27px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--accent-ink);
+}
+.trust-explanation-icon svg { width: 15px; height: 15px; }
+.trust-explanation-head strong { display: block; font-size: .72rem; color: var(--text); }
+.trust-explanation-head span { display: block; margin-top: 1px; font-size: .6rem; color: var(--text-3); }
+.trust-explanation ul { margin: 8px 0 0; padding-left: 17px; display: grid; gap: 3px; font-size: .66rem; line-height: 1.5; color: var(--text-2); }
+@media (max-width: 719px) {
+  .catchup-card { flex-wrap: wrap; margin: 0 0 5px; }
+  .catchup-actions { width: 100%; justify-content: flex-end; }
+  .compose-tone-chip { display: none; }
+}
+.catchup-host:empty { display: none; }
+.catchup-host { padding: 8px 8px 0; }

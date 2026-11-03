@@ -135,6 +135,9 @@ try {
   equal(await page.eval("[...document.querySelectorAll('.msg-thread-count')].map(e=>e.textContent).join(',')"), "3,3,3,3,2", "threaded conversations show message counts");
   check(await page.eval("document.querySelectorAll('.compose-tab').length === 1"), "the server-restored seed draft is in the compose dock");
   check(await page.eval("document.querySelector('.compose-tab')?.textContent.includes('Offsite logistics')"), "restored draft keeps its subject");
+  await page.waitFor(() => Boolean(document.querySelector(".catchup-card")), 5000);
+  check(await page.eval("document.querySelector('.catchup-card')?.textContent.includes('While you were away')"), "inbox shows a dismissible catch-up card after time away");
+  check(await page.eval("document.querySelector('.catchup-card')?.textContent.includes('conversations changed')"), "catch-up card reports changed conversations");
   await page.screenshot(path.join(artifacts, "01-inbox.png"));
 
   console.log("\n[2] Threaded reader collapse/expand");
@@ -144,6 +147,16 @@ try {
   check(await page.eval("document.title.includes('Inbox · Q4 roadmap review — Thursday 10:00') && document.title.endsWith('— Alt8Mail')"), "open thread title shows the folder and subject");
   equal(await page.eval("document.querySelectorAll('.thread-msg.is-expanded').length"), 1, "latest message is expanded by default");
   check(await page.eval("document.querySelector('.reader-subject h2')?.textContent.includes('Q4 roadmap')"), "thread subject is shown without Re: noise");
+  await page.click("#readerAiBtn");
+  await sleep(120);
+  await page.click("#readerAiMenu [data-ai-action='commitments']");
+  await page.waitFor(() => Boolean(document.querySelector("#readerAiCard .ai-commitment-item")), 5000);
+  check(await page.eval("document.querySelector('#readerAiCard')?.textContent.includes('What you committed to')"), "AI commitments card summarises the owner's promises");
+  check(await page.eval("document.querySelectorAll('#readerAiCard .ai-commitment-item').length === 1"), "commitments are linked to their source message");
+  await page.click("#readerAiCard .ai-commitment-item");
+  await sleep(700);
+  check(await page.eval("Boolean(document.querySelector('.thread-msg.is-ai-commitment-target'))"), "clicking a commitment jumps to the source message");
+  await page.click("[data-ai-reader-close]");
   check(await page.eval(`(() => {
     const body = document.querySelector('.thread-msg.is-expanded .email-body');
     const message = document.querySelector('.thread-msg.is-expanded');
@@ -316,6 +329,11 @@ try {
   check(await page.eval(`Boolean(document.querySelector('${chipComposeSel} .recipient-chip[title="external.person@example.com"]'))`), "comma commits a typed external recipient as a chip");
   const savedContact = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>d.people.find(p=>p.email==='external.person@example.com'))");
   check(savedContact && savedContact.source === "auto", "composed external recipient is auto-saved to contacts");
+  await page.waitFor(() => {
+    const chip = document.querySelector('.compose [data-compose-tone-chip]');
+    return Boolean(chip && !chip.hidden);
+  }, 5000);
+  check(await page.eval(`document.querySelector('${chipComposeSel} [data-compose-tone-chip]')?.textContent.includes('Formal')`), "compose shows a relationship-aware tone suggestion chip");
   await page.click('button[data-task="people"]');
   await sleep(450);
   check(await page.eval("document.getElementById('peopleList').textContent.includes('External Person')"), "People page lists the auto-saved external contact");
@@ -372,6 +390,26 @@ try {
   await sleep(600);
   check(await page.eval("[...document.querySelectorAll('.msg-subject')].some(e=>e.textContent.includes('E2E draft'))"), "sent message appears in the Sent folder after commit");
   await page.click("[data-folder='inbox']");
+  await sleep(500);
+
+  console.log("\n[7b] Send-time intent check");
+  await page.eval("window.__a8mAutoConfirm = false");
+  await page.click("#cmdCompose");
+  await sleep(350);
+  const intentComposeId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
+  const intentComposeSel = `[data-compose-id="${intentComposeId}"]`;
+  await page.setValue(`${intentComposeSel} [data-compose-field="to"]`, "elena.vasquez@a8m.example");
+  await page.setValue(`${intentComposeSel} [data-compose-field="subject"]`, "Intent check");
+  await setComposeBody(intentComposeSel, "I have attached the final report. I will call you tomorrow.");
+  await page.click(`${intentComposeSel} [data-compose-action="send"]`);
+  await page.waitFor(() => !document.getElementById("confirmOverlay").hidden, 5000);
+  check(await page.eval("document.getElementById('confirmTitle').textContent.includes('Check before sending')"), "send-time intent check opens before sending");
+  check(await page.eval("document.getElementById('confirmMessage').textContent.includes('no file is attached')"), "intent check catches an attachment promise with no file");
+  await page.click("#confirmCancel");
+  await sleep(200);
+  check(await page.eval("[...document.querySelectorAll('.compose [data-compose-field=\"subject\"]')].some((input) => input.value === 'Intent check')"), "reviewing the warning keeps the compose window open");
+  await page.eval("window.__a8mAutoConfirm = true");
+  await page.click(`${intentComposeSel} [data-compose-action="discard"]`);
   await sleep(500);
 
   console.log("\n[8] Sieve rules, vacation and audit log");
@@ -1089,6 +1127,8 @@ try {
   await page.waitFor(() => Boolean(document.querySelector(".reader [data-details]")), 5000);
   await page.click(".reader [data-details]");
   await page.waitFor(() => !document.getElementById("detailsOverlay").hidden, 5000);
+  await page.waitFor(() => Boolean(document.querySelector("[data-trust-explanation] .trust-explanation-head")), 5000);
+  check(await page.eval("document.querySelector('[data-trust-explanation]')?.textContent.includes('Why this is safe')"), "security details include a plain-English safety explanation");
   await page.click('[data-details-tab="source"]');
   await sleep(450);
   check(await page.eval("document.querySelector('[data-source-view]').textContent.includes('Subject: HTML reply fixture')"), "raw source shows the complete header block");

@@ -1348,6 +1348,60 @@ export async function createApp(options = {}) {
         });
         return;
       }
+      const aiCommitmentRoute = pathname.match(/^\/api\/ai\/threads\/([^/]+)\/commitments$/);
+      if (aiCommitmentRoute && req.method === "POST") {
+        if (!aiEnabled) throw new ApiError(403, "AI_DISABLED", "The AI assistant is disabled for this organization");
+        const threadId = decodeURIComponent(aiCommitmentRoute[1]);
+        const threadMessages = db.messages.filter((message) => message.threadId === threadId && !message.draft)
+          .sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+        if (!threadMessages.length) throw new ApiError(404, "THREAD_NOT_FOUND", "Conversation not found");
+        if (aiDelayMs) await new Promise((resolve) => setTimeout(resolve, aiDelayMs));
+        const message = threadMessages[0];
+        const sentence = String(message.bodyText || "").split(/(?<=[.!?])\s/)[0] || "I will follow up with the confirmed next steps.";
+        sendJson(res, 200, {
+          language: "en-US",
+          items: [{
+            kind: "promise", text: "Follow up with the confirmed next steps",
+            quote: sentence, messageId: message.id, due: "",
+            messageSubject: message.subject, messageDate: message.date,
+            from: message.from?.email || ""
+          }]
+        });
+        return;
+      }
+      if (pathname === "/api/ai/tone" && req.method === "POST") {
+        if (!aiEnabled) throw new ApiError(403, "AI_DISABLED", "The AI assistant is disabled for this organization");
+        const body = await readJson(req);
+        if (!String(body.recipient || "").includes("@")) throw new ApiError(400, "RECIPIENT", "Enter a valid recipient address");
+        sendJson(res, 200, {
+          available: true, style: "professional", label: "Formal",
+          reason: "You usually write formally to this client.",
+          history: { sent: 14, received: 9, firstContact: "2024-02-01", lastContact: nowIso().slice(0, 10) },
+          language: "en-US"
+        });
+        return;
+      }
+      if (pathname === "/api/catch-up" && req.method === "GET") {
+        sendJson(res, 200, {
+          available: true, since: new Date(Date.now() - 3 * 86400000).toISOString(),
+          changed: 4, needReply: 2, unread: 3
+        });
+        return;
+      }
+      const trustExplanationMatch = pathname.match(/^\/api\/messages\/([^/]+)\/trust-explanation$/);
+      if (trustExplanationMatch && req.method === "GET") {
+        const message = findMessage(decodeURIComponent(trustExplanationMatch[1]));
+        if (!message) throw new ApiError(404, "MESSAGE_NOT_FOUND", "Message not found");
+        const junk = message.folder === "spam";
+        sendJson(res, 200, {
+          junk, trusted: !!message.trusted, auth: message.auth || {},
+          explanation: junk
+            ? ["This is the first message from this sender address.", "The message was placed in Junk because it did not have enough trusted history."]
+            : ["The sending server is authorised by this domain (SPF passed).", "The message carries a valid digital signature (DKIM passed).", "You have exchanged 14 messages with this sender since February 1, 2024."],
+          stats: { messages: 14, inbound: 9, domainMessages: 22, firstContact: "2024-02-01", lastContact: nowIso().slice(0, 10) }
+        });
+        return;
+      }
       if (pathname === "/api/contacts/auto" && req.method === "POST") {
         const body = await readJson(req);
         const email = normalizeEmail(body.email);
