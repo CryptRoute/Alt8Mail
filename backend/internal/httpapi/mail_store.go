@@ -19,61 +19,63 @@ const mailMessageColumns = `id, folder, imap_folder, uid, uid_validity,
 	size_bytes, unread, starred, flagged, pinned, draft, external, classification, categories,
 	auth, spam_report, event, priority, receipt, delivery, save_copy, via_api, window_mode,
 	replied_at, forwarded_at, reply_count, forward_count, snoozed_until, ignored, ignored_at,
-	compose_kind, source_message_id`
+	compose_kind, source_message_id, unsubscribe, sender_utc_offset_minutes`
 
 type mailRow struct {
-	ID              string
-	Folder          string
-	IMAPFolder      string
-	UID             int64
-	UIDValidity     int64
-	MessageID       string
-	ThreadID        string
-	InReplyTo       string
-	ReferencesJSON  []byte
-	Subject         string
-	FromName        string
-	FromEmail       string
-	ToJSON          []byte
-	CCJSON          []byte
-	BCCJSON         []byte
-	ToText          string
-	CCText          string
-	BCCText         string
-	Snippet         string
-	BodyText        string
-	BodyHTML        string
-	SentAt          time.Time
-	ReceivedAt      time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	SizeBytes       int64
-	Unread          bool
-	Starred         bool
-	Flagged         bool
-	Pinned          bool
-	Draft           bool
-	External        bool
-	Classification  string
-	Categories      []string
-	AuthJSON        []byte
-	SpamReportJSON  []byte
-	EventJSON       []byte
-	Priority        string
-	Receipt         bool
-	Delivery        bool
-	SaveCopy        bool
-	ViaAPI          bool
-	WindowMode      string
-	RepliedAt       *time.Time
-	ForwardedAt     *time.Time
-	ReplyCount      int
-	ForwardCount    int
-	SnoozedUntil    *time.Time
-	Ignored         bool
-	IgnoredAt       *time.Time
-	ComposeKind     string
-	SourceMessageID string
+	ID                     string
+	Folder                 string
+	IMAPFolder             string
+	UID                    int64
+	UIDValidity            int64
+	MessageID              string
+	ThreadID               string
+	InReplyTo              string
+	ReferencesJSON         []byte
+	Subject                string
+	FromName               string
+	FromEmail              string
+	ToJSON                 []byte
+	CCJSON                 []byte
+	BCCJSON                []byte
+	ToText                 string
+	CCText                 string
+	BCCText                string
+	Snippet                string
+	BodyText               string
+	BodyHTML               string
+	SentAt                 time.Time
+	ReceivedAt             time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	SizeBytes              int64
+	Unread                 bool
+	Starred                bool
+	Flagged                bool
+	Pinned                 bool
+	Draft                  bool
+	External               bool
+	Classification         string
+	Categories             []string
+	AuthJSON               []byte
+	SpamReportJSON         []byte
+	EventJSON              []byte
+	Priority               string
+	Receipt                bool
+	Delivery               bool
+	SaveCopy               bool
+	ViaAPI                 bool
+	WindowMode             string
+	RepliedAt              *time.Time
+	ForwardedAt            *time.Time
+	ReplyCount             int
+	ForwardCount           int
+	SnoozedUntil           *time.Time
+	Ignored                bool
+	IgnoredAt              *time.Time
+	ComposeKind            string
+	SourceMessageID        string
+	UnsubscribeJSON        []byte
+	SenderUTCOffsetMinutes *int
 }
 
 type rowScanner interface {
@@ -92,7 +94,7 @@ func scanMailRow(scanner rowScanner) (mailRow, error) {
 		&row.EventJSON, &row.Priority, &row.Receipt, &row.Delivery, &row.SaveCopy,
 		&row.ViaAPI, &row.WindowMode, &row.RepliedAt, &row.ForwardedAt, &row.ReplyCount,
 		&row.ForwardCount, &row.SnoozedUntil, &row.Ignored, &row.IgnoredAt,
-		&row.ComposeKind, &row.SourceMessageID)
+		&row.ComposeKind, &row.SourceMessageID, &row.UnsubscribeJSON, &row.SenderUTCOffsetMinutes)
 	return row, err
 }
 
@@ -208,6 +210,15 @@ func (row mailRow) stateMap(state map[string]any, attachments []map[string]any) 
 	if spamReport := decodeJSONAny(row.SpamReportJSON, nil); spamReport != nil {
 		out["spamReport"] = spamReport
 	}
+	if unsubscribe := decodeJSONAny(row.UnsubscribeJSON, nil); unsubscribe != nil {
+		out["unsubscribe"] = unsubscribe
+	}
+	if row.SenderUTCOffsetMinutes != nil {
+		out["senderUtcOffsetMinutes"] = *row.SenderUTCOffsetMinutes
+	}
+	words, minutes := readingTimeForText(row.BodyText)
+	out["wordCount"] = words
+	out["readingMinutes"] = minutes
 	return out
 }
 
@@ -374,6 +385,8 @@ func mailFolderCondition(userID, folder, filter string) (string, []any) {
 		conditions = append(conditions, `(starred OR flagged) AND folder NOT IN ('spam', 'trash')`, `(snoozed_until IS NULL OR snoozed_until <= now())`)
 	case "snoozed":
 		conditions = append(conditions, `snoozed_until IS NOT NULL AND snoozed_until > now()`)
+	case "subscriptions":
+		conditions = append(conditions, `unsubscribe IS NOT NULL AND unsubscribe <> '{}'::jsonb`, `(snoozed_until IS NULL OR snoozed_until <= now())`)
 	case "", "all":
 		conditions = append(conditions, `(snoozed_until IS NULL OR snoozed_until <= now())`)
 	default:
@@ -535,6 +548,15 @@ func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[s
 	`, userID).Scan(&starred, &starredUnread)
 	counts["starred"] = starred
 	unread["starred"] = starredUnread
+	var subscriptions, subscriptionsUnread int
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE unread)
+		FROM mail_messages
+		WHERE user_id=$1 AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())
+		  AND unsubscribe IS NOT NULL AND unsubscribe <> '{}'::jsonb
+	`, userID).Scan(&subscriptions, &subscriptionsUnread)
+	counts["subscriptions"] = subscriptions
+	unread["subscriptions"] = subscriptionsUnread
 	return counts, unread, nil
 }
 
@@ -1046,6 +1068,14 @@ func (s *Server) persistMailMessageMetadataTx(ctx context.Context, tx pgx.Tx, us
 	folder := firstNonEmpty(sanitizeMailText(stateString(message, "folder")), "inbox")
 	imapFolder := firstNonEmpty(sanitizeMailText(stateString(message, "imapFolder")), folder)
 	threadID := firstNonEmpty(sanitizeMailText(stateString(message, "threadId")), id)
+	unsubscribeJSON := []byte(nil)
+	if unsubscribe, ok := message["unsubscribe"].(map[string]any); ok && unsubscribe != nil {
+		unsubscribeJSON, _ = json.Marshal(unsubscribe)
+	}
+	senderOffset := any(nil)
+	if raw, ok := message["senderUtcOffsetMinutes"]; ok && raw != nil {
+		senderOffset = stateInt(message, "senderUtcOffsetMinutes")
+	}
 	_, err := tx.Exec(ctx, `
 		UPDATE mail_messages SET
 			folder=$3, imap_folder=$4, uid=$5, uid_validity=$6,
@@ -1058,7 +1088,8 @@ func (s *Server) persistMailMessageMetadataTx(ctx context.Context, tx pgx.Tx, us
 			receipt=$34, delivery=$35, save_copy=$36, via_api=$37, window_mode=$38,
 			replied_at=$39, forwarded_at=$40, reply_count=$41, forward_count=$42,
 			snoozed_until=$43, ignored=$44, ignored_at=$45, compose_kind=$46,
-			source_message_id=$47, updated_at=now()
+			source_message_id=$47, unsubscribe=COALESCE($48, unsubscribe),
+			sender_utc_offset_minutes=COALESCE($49, sender_utc_offset_minutes), updated_at=now()
 		WHERE id=$1 AND user_id=$2
 	`, id, user.ID, folder, imapFolder, stateInt(message, "imapUid"),
 		stateInt(message, "imapUidValidity"), sanitizeMailText(stateString(message, "messageId")),
@@ -1078,7 +1109,8 @@ func (s *Server) persistMailMessageMetadataTx(ctx context.Context, tx pgx.Tx, us
 		repliedAt, forwardedAt, max(int(stateInt(message, "replyCount")), 0), max(int(stateInt(message, "forwardCount")), 0),
 		snoozedUntil, stateBool(message, "ignored"), ignoredAt,
 		truncate(sanitizeMailText(stateString(message, "composeKind")), 24),
-		truncate(sanitizeMailText(stateString(message, "sourceMessageId")), 120))
+		truncate(sanitizeMailText(stateString(message, "sourceMessageId")), 120),
+		unsubscribeJSON, senderOffset)
 	return err
 }
 
@@ -1145,6 +1177,14 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 	forwardedAt := parseOptionalTime(stateString(message, "forwardedAt"))
 	snoozedUntil := parseOptionalTime(stateString(message, "snoozedUntil"))
 	ignoredAt := parseOptionalTime(stateString(message, "ignoredAt"))
+	unsubscribeJSON := []byte(nil)
+	if unsubscribe, ok := message["unsubscribe"].(map[string]any); ok && unsubscribe != nil {
+		unsubscribeJSON, _ = json.Marshal(unsubscribe)
+	}
+	var senderOffset any
+	if raw, ok := message["senderUtcOffsetMinutes"]; ok && raw != nil {
+		senderOffset = stateInt(message, "senderUtcOffsetMinutes")
+	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO mail_messages (
 			id, tenant_id, user_id, mailbox_id, folder, imap_folder, uid, uid_validity,
@@ -1154,12 +1194,12 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 			pinned, draft, external, classification, categories, auth, spam_report, event, priority,
 			receipt, delivery, save_copy, via_api, window_mode, replied_at, forwarded_at,
 			reply_count, forward_count, snoozed_until, ignored, ignored_at, compose_kind,
-			source_message_id
+			source_message_id, unsubscribe, sender_utc_offset_minutes
 		) VALUES (
 			$1,$2,$3,(SELECT id FROM mailboxes WHERE user_id=$3 LIMIT 1),$4,$5,$6,$7,
 			$8,$9,NULLIF($10,''),$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
 			$24,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
-			$45,$46,$47,$48,$49,$50,$51,$52,$53
+			$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			folder=EXCLUDED.folder, imap_folder=EXCLUDED.imap_folder, uid=EXCLUDED.uid,
@@ -1181,7 +1221,9 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 			reply_count=EXCLUDED.reply_count, forward_count=EXCLUDED.forward_count,
 			snoozed_until=EXCLUDED.snoozed_until, ignored=EXCLUDED.ignored,
 			ignored_at=EXCLUDED.ignored_at, compose_kind=EXCLUDED.compose_kind,
-			source_message_id=EXCLUDED.source_message_id
+			source_message_id=EXCLUDED.source_message_id,
+			unsubscribe=COALESCE(EXCLUDED.unsubscribe, mail_messages.unsubscribe),
+			sender_utc_offset_minutes=COALESCE(EXCLUDED.sender_utc_offset_minutes, mail_messages.sender_utc_offset_minutes)
 	`, id, user.TenantID, user.ID, folder, imapFolder,
 		stateInt(message, "imapUid"), stateInt(message, "imapUidValidity"),
 		messageID, threadID, inReplyTo,
@@ -1199,7 +1241,8 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 		repliedAt, forwardedAt, max(int(stateInt(message, "replyCount")), 0), max(int(stateInt(message, "forwardCount")), 0),
 		snoozedUntil, stateBool(message, "ignored"), ignoredAt,
 		truncate(sanitizeMailText(stateString(message, "composeKind")), 24),
-		truncate(sanitizeMailText(stateString(message, "sourceMessageId")), 120))
+		truncate(sanitizeMailText(stateString(message, "sourceMessageId")), 120),
+		unsubscribeJSON, senderOffset)
 	if err != nil {
 		return err
 	}
@@ -1439,4 +1482,16 @@ func (s *Server) mailQuotaForUser(ctx context.Context, userID string) map[string
 		state = map[string]any{}
 	}
 	return s.mailQuota(ctx, userID, state)
+}
+
+func readingTimeForText(text string) (words int, minutes int) {
+	words = len(strings.Fields(text))
+	if words == 0 {
+		return 0, 0
+	}
+	minutes = (words + 219) / 220
+	if minutes < 1 {
+		minutes = 1
+	}
+	return words, minutes
 }

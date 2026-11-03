@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/textproto"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -47,26 +48,28 @@ const (
 var standardIMAPFolders = []string{"INBOX", "Sent", "Drafts", "Archive", "Junk", "Trash"}
 
 type fetchedMail struct {
-	UID          uint32
-	UIDValidity  uint32
-	Folder       string
-	Flags        []string
-	Size         uint32
-	InternalDate time.Time
-	Date         time.Time
-	Subject      string
-	MessageID    string
-	InReplyTo    string
-	References   []string
-	From         []map[string]any
-	To           []map[string]any
-	CC           []map[string]any
-	BCC          []map[string]any
-	BodyText     string
-	BodyHTML     string
-	Attachments  []parsedMailAttachment
-	Auth         map[string]any
-	External     bool
+	UID                    uint32
+	UIDValidity            uint32
+	Folder                 string
+	Flags                  []string
+	Size                   uint32
+	InternalDate           time.Time
+	Date                   time.Time
+	Subject                string
+	MessageID              string
+	InReplyTo              string
+	References             []string
+	From                   []map[string]any
+	To                     []map[string]any
+	CC                     []map[string]any
+	BCC                    []map[string]any
+	BodyText               string
+	BodyHTML               string
+	Attachments            []parsedMailAttachment
+	Auth                   map[string]any
+	External               bool
+	Unsubscribe            map[string]any
+	SenderUTCOffsetMinutes *int
 }
 
 type parsedMailAttachment struct {
@@ -736,6 +739,12 @@ func parseIMAPMessage(message *imap.Message, raw []byte, folder string) fetchedM
 		fetched.BodyHTML = sanitizeMailText(parsedBody.html.String())
 		fetched.Attachments = parsedBody.attachments
 		applyAuthenticationResults(&fetched, parsed.Header.Get("Authentication-Results"))
+		fetched.Unsubscribe = parseListUnsubscribe(parsed.Header.Get("List-Unsubscribe"), parsed.Header.Get("List-Unsubscribe-Post"))
+		if parsedDate, err := mail.ParseDate(parsed.Header.Get("Date")); err == nil {
+			_, offset := parsedDate.Zone()
+			minutes := offset / 60
+			fetched.SenderUTCOffsetMinutes = &minutes
+		}
 	}
 	if fetched.Date.IsZero() {
 		fetched.Date = message.InternalDate
@@ -1032,6 +1041,12 @@ func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []f
 			if item.Subject != "" && stateString(existing, "subject") != item.Subject {
 				existing["subject"] = item.Subject
 			}
+			if item.Unsubscribe != nil {
+				existing["unsubscribe"] = item.Unsubscribe
+			}
+			if item.SenderUTCOffsetMinutes != nil {
+				existing["senderUtcOffsetMinutes"] = *item.SenderUTCOffsetMinutes
+			}
 			existingByFolderMessageID[folderMessageKey] = existing
 			updated++
 			continue
@@ -1095,6 +1110,12 @@ func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []f
 			"priority": "normal", "receipt": false, "delivery": false, "saveCopy": true,
 			"viaApi": true, "windowMode": "floating",
 			"imapUid": item.UID, "imapFolder": item.Folder, "imapUidValidity": item.UIDValidity,
+		}
+		if item.Unsubscribe != nil {
+			message["unsubscribe"] = item.Unsubscribe
+		}
+		if item.SenderUTCOffsetMinutes != nil {
+			message["senderUtcOffsetMinutes"] = *item.SenderUTCOffsetMinutes
 		}
 		if ignoredThreadIn(state, threadID) {
 			message["ignored"] = true
@@ -1344,4 +1365,62 @@ func stripHTMLToText(value string) string {
 		return entity
 	})
 	return strings.Join(strings.Fields(text), " ")
+}
+
+// parseListUnsubscribe extracts the machine-readable unsubscribe endpoints from
+// RFC 2369 / RFC 8058 headers. Only public HTTP(S) URLs and plain mailto
+// addresses are retained; the actual one-click POST is separately constrained
+// to public addresses at delivery time.
+func parseListUnsubscribe(header, post string) map[string]any {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return nil
+	}
+	values := []string{}
+	for _, match := range regexp.MustCompile(`<([^>]+)>`).FindAllStringSubmatch(header, -1) {
+		values = append(values, strings.TrimSpace(match[1]))
+	}
+	if len(values) == 0 {
+		for _, part := range strings.Split(header, ",") {
+			if value := strings.TrimSpace(strings.Trim(part, "<> ")); value != "" {
+				values = append(values, value)
+			}
+		}
+	}
+	unsubscribeURL, unsubscribeMailto := "", ""
+	for _, value := range values {
+		if len(value) > 2048 {
+			continue
+		}
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.User != nil {
+			continue
+		}
+		switch strings.ToLower(parsed.Scheme) {
+		case "https", "http":
+			if unsubscribeURL == "" && parsed.Host != "" {
+				unsubscribeURL = parsed.String()
+			}
+		case "mailto":
+			address := strings.TrimSpace(parsed.Opaque)
+			if address == "" {
+				address = strings.TrimSpace(parsed.Path)
+			}
+			if parsed.RawQuery != "" {
+				address = strings.Split(address, "?")[0]
+			}
+			address = strings.ToLower(strings.TrimSpace(address))
+			if unsubscribeMailto == "" && looksLikeEmail(address) {
+				unsubscribeMailto = address
+			}
+		}
+	}
+	if unsubscribeURL == "" && unsubscribeMailto == "" {
+		return nil
+	}
+	return map[string]any{
+		"url": unsubscribeURL, "mailto": unsubscribeMailto,
+		"oneClick":   unsubscribeURL != "" && strings.Contains(strings.ToLower(post), "list-unsubscribe=one-click"),
+		"detectedAt": nowISO(),
+	}
 }

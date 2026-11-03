@@ -168,6 +168,9 @@ export async function createApp(options = {}) {
     if (!Array.isArray(db.threadMeta)) db.threadMeta = [];
     if (!Array.isArray(db.threadNotes)) db.threadNotes = [];
     if (!Array.isArray(db.notifications)) db.notifications = [];
+    if (!Array.isArray(db.reactions)) db.reactions = [];
+    if (!Array.isArray(db.reactionRules)) db.reactionRules = [];
+    if (!Array.isArray(db.unsubscribeActions)) db.unsubscribeActions = [];
     if (db.threadMeta.length || db.threadNotes.length || db.notifications.length) return;
     db.threadMeta.push({
       ownerId: db.user.id, threadId: "N2Acmhe6TzJMY7c6L5yRfg", status: "in_progress",
@@ -178,6 +181,11 @@ export async function createApp(options = {}) {
       ownerId: db.user.id, threadId: "2z5Ft5gFLRaxGO7OORpmcw", status: "done",
       assignedTo: { id: "user_priya", name: "Priya Shah", email: "priya.shah@a8m.example" },
       closed: true, closedAt: nowIso(), updatedAt: nowIso()
+    });
+    db.reactions.push({
+      id: "rct_demo_sent", ownerId: db.user.id, userId: "user_elena", userName: "Elena Vasquez",
+      messageId: "m3", threadId: "N2Acmhe6TzJMY7c6L5yRfg", emoji: "👍", semantic: "acknowledgement",
+      visibility: "sent", status: "sent", sentAt: nowIso(), createdAt: nowIso()
     });
     db.notifications.push({
       id: "ntf_demo_mention", kind: "mention", title: "Elena Vasquez mentioned you",
@@ -210,7 +218,13 @@ export async function createApp(options = {}) {
   }
 
   function publicMessage(message) {
-    return { ...message, trusted: isTrusted(message) };
+    const words = String(message.bodyText || "").trim().match(/\S+/g)?.length || 0;
+    return {
+      ...message,
+      trusted: isTrusted(message),
+      readingMinutes: words ? Math.max(1, Math.ceil(words / 220)) : 0,
+      wordCount: words
+    };
   }
 
   function quotaInfo() {
@@ -1055,6 +1069,7 @@ export async function createApp(options = {}) {
       pendingSends: db.outbox.map(publicOutboxItem),
       threadMeta: db.threadMeta.slice(),
       serverNotifications: db.notifications.slice().sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 50),
+      unsubscribeActions: db.unsubscribeActions.slice(),
       signatures: db.signatures,
       ai: { enabled: aiEnabled, languages: [], styles: [] },
       push: { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true },
@@ -1878,6 +1893,7 @@ export async function createApp(options = {}) {
         let messages;
         if (query) messages = getIndex().search(query).messages;
         else if (folder === "starred") messages = db.messages.filter((message) => message.starred);
+        else if (folder === "subscriptions") messages = db.messages.filter((message) => message.unsubscribe);
         else messages = db.messages.filter((message) => message.folder === folder);
         if (!query) {
           const closedThreads = new Set(db.threadMeta.filter((item) => item.ownerId === db.user.id && item.closed).map((item) => item.threadId));
@@ -2241,6 +2257,277 @@ export async function createApp(options = {}) {
           await store.save();
         }
         sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (pathname === "/api/unsubscribe-actions" && req.method === "GET") {
+        const actions = db.unsubscribeActions.filter((item) => item.userId === db.user.id);
+        sendJson(res, 200, { actions });
+        return;
+      }
+
+      const unsubscribeMatch = pathname.match(/^\/api\/messages\/([^/]{1,160})\/unsubscribe$/);
+      if (unsubscribeMatch && req.method === "POST") {
+        const message = findMessage(decodeURIComponent(unsubscribeMatch[1]));
+        if (!message) throw new ApiError(404, "MESSAGE_NOT_FOUND", "Message not found");
+        const metadata = message.unsubscribe;
+        if (!metadata || typeof metadata !== "object") throw new ApiError(400, "UNSUBSCRIBE_UNAVAILABLE", "This message does not offer an unsubscribe link");
+        const sender = normalizeEmail(message.from?.email || "");
+        const action = metadata.oneClick ? "sent" : metadata.url ? "manual" : "manual";
+        const record = {
+          id: db.unsubscribeActions.find((item) => item.userId === db.user.id && normalizeEmail(item.senderEmail) === sender)?.id || id("unsub"),
+          userId: db.user.id, messageId: message.id, senderEmail: sender,
+          method: metadata.oneClick ? "one-click" : metadata.url ? "link" : "mailto",
+          target: metadata.oneClick || metadata.url ? metadata.url : metadata.mailto,
+          status: action, error: "", updatedAt: nowIso()
+        };
+        db.unsubscribeActions = db.unsubscribeActions.filter((item) => !(item.userId === db.user.id && normalizeEmail(item.senderEmail) === sender));
+        db.unsubscribeActions.push(record);
+        addAudit(req, metadata.oneClick ? "unsubscribe.sent" : "unsubscribe.manual", message.subject || "(no subject)", `Unsubscribe requested for ${sender}`);
+        await store.save();
+        sendJson(res, 200, {
+          ok: true,
+          action: metadata.oneClick ? "sent" : metadata.url ? "open" : "mailto",
+          url: metadata.url || "", email: metadata.mailto || "",
+          actionRecord: record
+        });
+        return;
+      }
+
+      if (pathname === "/api/reactions" && req.method === "GET") {
+        const threadId = String(url.searchParams.get("threadId") || "");
+        const ownerId = String(url.searchParams.get("ownerId") || db.user.id);
+        if (ownerId !== db.user.id) throw new ApiError(403, "THREAD_FORBIDDEN", "You do not have access to this shared mailbox");
+        const reactions = db.reactions
+          .filter((item) => item.ownerId === ownerId && item.threadId === threadId && !item.dismissedAt && (item.visibility === "sent" || item.userId === db.user.id))
+          .map((item) => ({ ...item, own: item.userId === db.user.id }))
+          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+        sendJson(res, 200, { reactions, quick: ["👍", "❤️", "😂", "🎉", "👀", "✅"] });
+        return;
+      }
+
+      const reactionMatch = pathname.match(/^\/api\/messages\/([^/]{1,160})\/reaction$/);
+      if (reactionMatch && (req.method === "POST" || req.method === "DELETE")) {
+        const messageId = decodeURIComponent(reactionMatch[1]);
+        const message = findMessage(messageId);
+        if (!message) throw new ApiError(404, "MESSAGE_NOT_FOUND", "Message not found");
+        const existing = db.reactions.find((item) => item.ownerId === db.user.id && item.messageId === message.id && item.userId === db.user.id && !item.dismissedAt);
+        if (req.method === "DELETE") {
+          if (!existing) throw new ApiError(404, "REACTION_NOT_FOUND", "Reaction not found");
+          const wasSent = existing.status === "sent";
+          const pending = existing.status === "pending";
+          existing.dismissedAt = nowIso();
+          await store.save();
+          sendJson(res, 200, { ok: true, wasSent, pending });
+          return;
+        }
+        const body = await readJson(req);
+        const emoji = String(body.emoji || "");
+        const allowed = new Set(["👍", "❤️", "😂", "🎉", "👀", "✅", "🙏", "🤔", "🚀", "💯"]);
+        if (!allowed.has(emoji)) throw new ApiError(400, "REACTION_EMOJI", "Choose one of the available reactions");
+        const visibility = body.visibility === "sent" ? "sent" : "private";
+        if (visibility === "sent" && normalizeEmail(message.from?.email || "") === normalizeEmail(db.user.email)) {
+          throw new ApiError(400, "REACTION_SELF", "Send a reaction to a message from someone else, or keep it private");
+        }
+        const reaction = existing || {
+          id: id("reaction"), ownerId: db.user.id, userId: db.user.id,
+          messageId: message.id, threadId: message.threadId || message.id,
+          createdAt: nowIso()
+        };
+        Object.assign(reaction, {
+          emoji, semantic: String(body.semantic || ""), visibility,
+          status: visibility === "sent" ? "sent" : "private",
+          sentAt: visibility === "sent" ? nowIso() : null, dismissedAt: null,
+          updatedAt: nowIso()
+        });
+        if (!existing) db.reactions.push(reaction);
+        invalidateIndex();
+        await store.save();
+        sendJson(res, 200, { ok: true, reaction: { ...reaction, own: true } });
+        return;
+      }
+
+      if (pathname === "/api/ai/reactions" && req.method === "POST") {
+        const body = await readJson(req);
+        const message = findMessage(String(body.messageId || "").replace(/^dlg:[^:]+:/, ""));
+        if (!message) throw new ApiError(404, "MESSAGE_NOT_FOUND", "Message not found");
+        const text = `${message.subject || ""} ${message.bodyText || ""}`.toLowerCase();
+        const picks = [];
+        const addPick = (emoji, label, reason) => {
+          if (!picks.some((item) => item.emoji === emoji)) picks.push({ emoji, label, reason, semantic: emoji === "👍" ? "acknowledgement" : emoji === "✅" ? "approval" : emoji === "🎉" ? "celebration" : "acknowledgement" });
+        };
+        if (text.includes("thank")) addPick("🙏", "Thank them", "The message contains gratitude");
+        else if (text.includes("congrat")) addPick("🎉", "Celebrate", "The message shares good news");
+        else if (text.includes("approv") || text.includes("lgtm") || text.includes("signed")) addPick("✅", "Approve", "The message mentions approval");
+        else if (text.includes("urgent") || text.includes("asap") || text.includes("action required")) addPick("👀", "Acknowledge urgency", "The message signals urgency");
+        else if (text.includes("great") || text.includes("excellent")) addPick("❤️", "Appreciate", "The message is positive");
+        addPick("👍", "Acknowledge", "A quick acknowledgement fits");
+        addPick("✅", "Confirm", "A clear confirmation fits");
+        sendJson(res, 200, { suggestions: picks.slice(0, 3), quick: ["👍", "❤️", "😂", "🎉", "👀", "✅"], ai: false });
+        return;
+      }
+
+      if (pathname === "/api/reaction-rules" && req.method === "GET") {
+        sendJson(res, 200, { rules: db.reactionRules.filter((item) => item.userId === db.user.id), quick: ["👍", "❤️", "😂", "🎉", "👀", "✅"] });
+        return;
+      }
+      if (pathname === "/api/reaction-rules" && req.method === "POST") {
+        const body = await readJson(req);
+        const senderContains = String(body.senderContains || "").trim().toLowerCase();
+        const subjectContains = String(body.subjectContains || "").trim().toLowerCase();
+        if (!senderContains && !subjectContains) throw new ApiError(400, "REACTION_RULE_MATCH", "Add a sender or subject condition");
+        const rule = {
+          id: id("rrule"), userId: db.user.id, name: String(body.name || "Reaction rule").trim().slice(0, 120),
+          senderContains, subjectContains, emoji: String(body.emoji || "👍"),
+          enabled: body.enabled !== false, createdAt: nowIso(), updatedAt: nowIso()
+        };
+        db.reactionRules.push(rule);
+        addAudit(req, "reaction_rule.created", rule.id, `Created reaction rule ${rule.name}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, id: rule.id, rule });
+        return;
+      }
+      const reactionRuleMatch = pathname.match(/^\/api\/reaction-rules\/([A-Za-z0-9_-]{1,100})$/);
+      if (reactionRuleMatch && (req.method === "PATCH" || req.method === "DELETE")) {
+        const rule = db.reactionRules.find((item) => item.id === reactionRuleMatch[1] && item.userId === db.user.id);
+        if (!rule) throw new ApiError(404, "REACTION_RULE_NOT_FOUND", "Reaction rule not found");
+        if (req.method === "DELETE") {
+          db.reactionRules = db.reactionRules.filter((item) => item !== rule);
+          addAudit(req, "reaction_rule.deleted", rule.id, `Deleted reaction rule ${rule.name}`);
+          await store.save();
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+        const body = await readJson(req);
+        if (body.name !== undefined) rule.name = String(body.name || "Reaction rule").trim().slice(0, 120);
+        if (body.senderContains !== undefined) rule.senderContains = String(body.senderContains || "").trim().toLowerCase();
+        if (body.subjectContains !== undefined) rule.subjectContains = String(body.subjectContains || "").trim().toLowerCase();
+        if (body.emoji !== undefined) rule.emoji = String(body.emoji || "👍");
+        if (body.enabled !== undefined) rule.enabled = body.enabled !== false;
+        if (!rule.senderContains && !rule.subjectContains) throw new ApiError(400, "REACTION_RULE_MATCH", "Add a sender or subject condition");
+        rule.updatedAt = nowIso();
+        await store.save();
+        sendJson(res, 200, { ok: true, rule });
+        return;
+      }
+
+      if (pathname === "/api/send-time-suggestions" && req.method === "POST") {
+        const body = await readJson(req);
+        const emails = Array.isArray(body.to) ? body.to.map((value) => normalizeEmail(value)).filter(Boolean).slice(0, 20) : [];
+        const suggestions = [];
+        const seenTimes = new Set();
+        for (const email of emails) {
+          const inbound = db.messages.filter((message) => normalizeEmail(message.from?.email) === email);
+          const known = inbound.find((message) => Number.isFinite(Number(message.senderUtcOffsetMinutes)));
+          const offset = known ? Number(known.senderUtcOffsetMinutes) : null;
+          const name = inbound[0]?.from?.name || "";
+          if (offset == null) continue;
+          const now = new Date();
+          for (let day = 0; day < 8; day += 1) {
+            const local = new Date(now.getTime() + (offset * 60000) + day * 86400000);
+            const weekday = local.getUTCDay();
+            if (weekday === 0 || weekday === 6) continue;
+            const candidate = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), 9, 30) - offset * 60000);
+            if (candidate.getTime() <= Date.now() + 600000) continue;
+            if (!seenTimes.has(candidate.getTime())) {
+              seenTimes.add(candidate.getTime());
+              const localDate = new Date(candidate.getTime() + offset * 60000);
+              const localLabel = localDate.toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: "UTC" });
+              suggestions.push({
+                sendAt: candidate.toISOString(), recipient: email, recipientName: name,
+                known: true, offsetMinutes: offset,
+                recipientLocal: localLabel,
+                reason: "Usually active around this time"
+              });
+            }
+            break;
+          }
+        }
+        if (!suggestions.length) {
+          const now = new Date();
+          for (let day = 1; day <= 3 && suggestions.length < 2; day += 1) {
+            const local = new Date(now.getTime() + day * 86400000);
+            const weekday = local.getUTCDay();
+            if (weekday === 0 || weekday === 6) continue;
+            const candidate = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), 9, 30));
+            if (candidate.getTime() <= Date.now() + 600000) continue;
+            suggestions.push({
+              sendAt: candidate.toISOString(), recipient: "", recipientName: "",
+              known: false, offsetMinutes: 0, recipientLocal: "", reason: "Based on your working hours"
+            });
+          }
+        }
+        sendJson(res, 200, { suggestions, recipients: emails.map((email) => ({ email, known: db.messages.some((message) => normalizeEmail(message.from?.email) === email && Number.isFinite(Number(message.senderUtcOffsetMinutes))) })) });
+        return;
+      }
+
+      if (pathname === "/api/yearly-review" && req.method === "GET") {
+        const requested = Number(url.searchParams.get("year"));
+        const now = new Date();
+        const year = Number.isFinite(requested) && requested >= 2000 ? requested : now.getUTCFullYear();
+        const start = Date.UTC(year, 0, 1);
+        const end = Date.UTC(year + 1, 0, 1);
+        const inYear = db.messages.filter((message) => {
+          const stamp = Date.parse(message.date);
+          return stamp >= start && stamp < end && !message.draft;
+        });
+        const sent = inYear.filter((message) => message.folder === "sent");
+        const received = inYear.filter((message) => message.folder !== "sent");
+        const monthly = Array.from({ length: 12 }, (_, index) => ({ month: index + 1, label: new Date(Date.UTC(year, index, 1)).toLocaleString("en-US", { month: "long" }), count: 0 }));
+        for (const message of inYear) {
+          const month = new Date(Date.parse(message.date)).getUTCMonth();
+          if (monthly[month]) monthly[month].count += 1;
+        }
+        const senderCounts = new Map();
+        for (const message of received) {
+          const key = normalizeEmail(message.from?.email);
+          if (!key) continue;
+          const current = senderCounts.get(key) || { name: message.from?.name || key, email: key, count: 0 };
+          current.count += 1;
+          senderCounts.set(key, current);
+        }
+        const recipientCounts = new Map();
+        for (const message of sent) {
+          for (const person of Array.isArray(message.to) ? message.to : []) {
+            const key = normalizeEmail(person.email);
+            if (!key) continue;
+            const current = recipientCounts.get(key) || { name: person.name || key, email: key, count: 0 };
+            current.count += 1;
+            recipientCounts.set(key, current);
+          }
+        }
+        const topSenders = Array.from(senderCounts.values()).sort((a, b) => b.count - a.count).slice(0, 5);
+        const topRecipients = Array.from(recipientCounts.values()).sort((a, b) => b.count - a.count).slice(0, 5);
+        const reactions = db.reactions.filter((item) => item.userId === db.user.id && !item.dismissedAt && Date.parse(item.createdAt) >= start && Date.parse(item.createdAt) < end);
+        const topMap = new Map();
+        for (const reaction of reactions) topMap.set(reaction.emoji, (topMap.get(reaction.emoji) || 0) + 1);
+        const topReactions = Array.from(topMap.entries()).map(([emoji, count]) => ({ emoji, count, semantic: "" })).sort((a, b) => b.count - a.count).slice(0, 5);
+        const readingMinutes = inYear.reduce((sum, message) => sum + (Number(message.readingMinutes) || Math.max(1, Math.ceil(String(message.bodyText || "").split(/\s+/).filter(Boolean).length / 220))), 0);
+        const busiestMonth = monthly.slice().sort((a, b) => b.count - a.count)[0] || { month: 0, label: "", count: 0 };
+        const busiestDayMap = new Map();
+        for (const message of inYear) {
+          const key = new Date(Date.parse(message.date)).toISOString().slice(0, 10);
+          busiestDayMap.set(key, (busiestDayMap.get(key) || 0) + 1);
+        }
+        const busiestDay = Array.from(busiestDayMap.entries()).sort((a, b) => b[1] - a[1])[0] || ["", 0];
+        const years = Array.from(new Set(db.messages.map((message) => new Date(Date.parse(message.date)).getUTCFullYear()))).sort((a, b) => b - a);
+        const highlights = [];
+        highlights.push(`You handled ${inYear.length} messages across ${new Set(inYear.map((message) => message.threadId)).size} conversations.`);
+        highlights.push(`You sent ${sent.length} and received ${received.length}.`);
+        if (busiestMonth.count) highlights.push(`${busiestMonth.label} was your busiest month with ${busiestMonth.count} messages.`);
+        if (topSenders[0]) highlights.push(`${topSenders[0].name} was your most frequent correspondent.`);
+        if (readingMinutes) highlights.push(`You spent about ${readingMinutes} minutes reading email.`);
+        if (reactions.length) highlights.push(`You shared ${reactions.length} reactions.`);
+        sendJson(res, 200, {
+          year, years: years.length ? years : [year], timeZone: "UTC",
+          totals: { messages: inYear.length, sent: sent.length, received: received.length, threads: new Set(inYear.map((message) => message.threadId)).size, unread: inYear.filter((message) => message.unread).length, newsletters: inYear.filter((message) => message.unsubscribe).length, readingMinutes, readingHours: readingMinutes / 60 },
+          topSenders, topRecipients, monthly,
+          busiestMonth: { month: busiestMonth.month, label: busiestMonth.label, count: busiestMonth.count },
+          busiestDay: { date: busiestDay[0], count: busiestDay[1] },
+          busiestHour: { hour: 10, count: Math.max(1, Math.round(inYear.length / 8)) },
+          reactions: { given: reactions.length, received: 0, top: topReactions },
+          unsubscribed: db.unsubscribeActions.length, highlights
+        });
         return;
       }
 

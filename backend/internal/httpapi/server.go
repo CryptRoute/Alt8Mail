@@ -282,6 +282,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/catch-up", s.requireUser(s.catchUpSummary))
 	mux.HandleFunc("GET /api/messages/{id}/trust-explanation", s.requireUser(s.messageTrustExplanation))
 	s.registerCollaborationRoutes(mux)
+	s.registerReactionRoutes(mux)
+	s.registerSubscriptionRoutes(mux)
+	s.registerYearReviewRoutes(mux)
+	s.registerSendTimeRoutes(mux)
 	mux.HandleFunc("GET /api/audit", s.requireUser(s.getAudit))
 	mux.HandleFunc("GET /api/audit.csv", s.requireUser(s.getAuditCSV))
 	mux.HandleFunc("/api/", s.apiNotFound)
@@ -671,6 +675,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	threadMeta := s.collaborationThreadMeta(ctx, sess.User)
 	serverNotifications := s.loadMailNotifications(ctx, sess.User.ID, 50)
+	unsubscribeActions := s.loadUnsubscribeActions(ctx, sess.User.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":       user,
 		"aliases":    aliases,
@@ -722,6 +727,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"recentAudit":         recentAudit,
 		"threadMeta":          threadMeta,
 		"serverNotifications": serverNotifications,
+		"unsubscribeActions":  unsubscribeActions,
 		"ai":                  s.aiPublicConfig(ctx, sess.User.TenantID),
 		"push":                s.pushPublicConfig(ctx, sess.User.ID),
 		"capabilities":        capabilities(),

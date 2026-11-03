@@ -110,13 +110,13 @@ const PEOPLE = [
 ];
 
 const FOLDERS = [
-  { id: "inbox", label: "Inbox", icon: "i-inbox", section: "favorites" },
-  { id: "starred", label: "Starred", icon: "i-star", section: "favorites", virtual: true },
-  { id: "sent", label: "Sent", icon: "i-send", section: "folders" },
-  { id: "drafts", label: "Drafts", icon: "i-file", section: "folders" },
-  { id: "archive", label: "Archive", icon: "i-archive", section: "folders" },
-  { id: "spam", label: "Spam", icon: "i-alert", section: "folders" },
-  { id: "trash", label: "Trash", icon: "i-trash", section: "folders" }
+  { id: "inbox", label: "Inbox", icon: "i-inbox", section: "favorites", order: 0 },
+  { id: "starred", label: "Starred", icon: "i-star", section: "favorites", virtual: true, order: 1 },
+  { id: "sent", label: "Sent", icon: "i-send", section: "folders", order: 2 },
+  { id: "drafts", label: "Drafts", icon: "i-file", section: "folders", order: 3 },
+  { id: "archive", label: "Archive", icon: "i-archive", section: "folders", order: 4 },
+  { id: "spam", label: "Spam", icon: "i-alert", section: "folders", order: 5 },
+  { id: "trash", label: "Trash", icon: "i-trash", section: "folders", order: 6 }
 ];
 
 function authInternal(overrides = {}) {
@@ -178,6 +178,8 @@ function message(input) {
     auth: input.auth || (external ? authExternal() : authInternal()),
     event: input.event || null,
     sizeBytes,
+    senderUtcOffsetMinutes: input.senderUtcOffsetMinutes != null ? input.senderUtcOffsetMinutes : -480,
+    unsubscribe: input.unsubscribe || null,
     messageId: `<${input.id || "m" + messageCounter}@a8m.example>`,
     inReplyTo: input.inReplyTo || null,
     priority: input.priority || "normal",
@@ -418,6 +420,7 @@ export function seedDatabase() {
     id: "sp1", threadId: "vYrBabBz5dzKejJCKsSlnw", folder: "spam", from: PARCEL, to: ME,
     subject: "Your parcel is waiting",
     date: iso(7 * HOUR), unread: true, external: true,
+    unsubscribe: { url: "https://parcel-alert.example/unsubscribe", mailto: "unsubscribe@parcel-alert.example", oneClick: false, detectedAt: new Date(NOW).toISOString() },
     snippet: "Confirm your details within 24 hours to arrange delivery.",
     auth: authExternal({ spf: "softfail", dkim: "none", dmarc: "fail", signer: "", ip: "203.0.113.77", warnings: ["Sender domain does not match the visible name", "First contact from this sender"] }),
     bodyHtml: bodyParagraphs(["Your parcel is being held. Confirm your details within 24 hours to arrange delivery."])
@@ -426,6 +429,7 @@ export function seedDatabase() {
     id: "sp2", threadId: "VoAGBOWHVtBGvR4rh2tCfQ", folder: "spam", from: OFFERS, to: ME,
     subject: "Exclusive offer: 70% off",
     date: iso(2 * DAY), unread: true, external: true,
+    unsubscribe: { url: "https://offers-daily.example/unsubscribe?u=demo", mailto: "unsubscribe@offers-daily.example", oneClick: true, detectedAt: new Date(NOW).toISOString() },
     snippet: "Today only — a selection of deals chosen for you.",
     auth: authExternal({ ip: "203.0.113.19", dmarc: "pass" }),
     bodyHtml: bodyParagraphs(["Today only: a selection of deals chosen for you. Unsubscribe at any time."])
@@ -444,6 +448,7 @@ export function seedDatabase() {
     id: "tr1", threadId: "gEBUYWhKzb6ujzYugD21TA", folder: "trash", from: DESIGNFILE, to: ME,
     subject: "This week in product design",
     date: iso(4 * DAY + 5 * HOUR), unread: false, external: true,
+    unsubscribe: { url: "https://designweekly.example/unsubscribe", mailto: "unsubscribe@designweekly.example", oneClick: true, detectedAt: new Date(NOW).toISOString() },
     snippet: "Five reads on onboarding, pricing pages and design systems.",
     auth: authExternal({ signer: "designweekly.example", ip: "198.51.100.8", dmarc: "pass" }),
     bodyHtml: bodyParagraphs(["Five reads on onboarding, pricing pages and design systems, selected by the Design Weekly editors."])

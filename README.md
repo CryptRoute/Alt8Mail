@@ -12,8 +12,10 @@ deletes, undo send and scheduled send, Sieve rules and automatic replies, sender
 two-factor sign-in with passkeys, enterprise Tasks and Files workspaces,
 PDF/image attachment preview with a multi-file pager, BIMI/favicon sender
 icons, outbound caps, live quota, shared-mailbox collaboration with assignment,
-internal notes and @mentions, an audit log, PWA support and a responsive
-mobile layout. The Go build adds a separate
+internal notes and @mentions, newsletter subscriptions with unsubscribe
+management, quick, semantic and sent reactions, recipient-time scheduling
+suggestions, reading-time estimates, a personal yearly review, an audit log,
+PWA support and a responsive mobile layout. The Go build adds a separate
 customer/system administration console for tenants, users, groups, org units,
 custom RBAC roles, domains, policy, audit and system administrators, plus a
 separate root-level **System Control** plane for the host and mail stack.
@@ -70,6 +72,8 @@ Dutch, Italian and Arabic catalogs ship in this release; additional languages
 can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
+
+The **0.11.0** release adds the everyday-use layer. A **Subscriptions** folder collects mail with `List-Unsubscribe` headers and offers a safe server-side one-click unsubscribe, with a sender page or compose handoff when one-click is unavailable. Every message and conversation now shows a reading-time estimate. **Send later** suggests recipient-aware times based on when each person usually writes, and **Settings → Account → Year in review** builds a private recap with monthly volume, busiest day and hour, top contacts, reading time, unsubscribes and reactions. Messages support quick and AI-assisted semantic emoji reactions. Reactions can stay private or be sent to the sender as a small threaded email, with an eight-second undo window for outbound reactions and local undo after delivery. **Reaction rules** automatically add private reactions to new matching mail, and AI conversation summaries now include visible reaction signals. The release includes migration `0034_phase3`.
 
 The **0.10.2** patch refines the conversation list: handling status and assignee chips now sit on the preview line instead of compressing the sender name and subject, and compact density hides those row chips while keeping the reader controls.
 

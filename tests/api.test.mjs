@@ -1140,6 +1140,70 @@ test("thread collaboration: handling, assignment, closure, notes and notificatio
   assert.ok(afterRead.every((item) => item.readAt));
 });
 
+test("phase 3: subscriptions, reactions, rules and yearly review", async () => {
+  const subscriptions = (await client.request("/api/messages?folder=subscriptions")).body;
+  assert.ok(subscriptions.messages.length >= 2);
+  const newsletter = subscriptions.messages.find((message) => message.unsubscribe?.oneClick) || subscriptions.messages[0];
+  assert.ok(newsletter?.unsubscribe);
+  const unsubscribe = await client.request(`/api/messages/${encodeURIComponent(newsletter.id)}/unsubscribe`, { method: "POST", body: {} });
+  assert.equal(unsubscribe.status, 200);
+  assert.ok(["sent", "open", "mailto"].includes(unsubscribe.body.action));
+  const actions = (await client.request("/api/unsubscribe-actions")).body.actions;
+  assert.ok(actions.some((action) => action.senderEmail === newsletter.from.email));
+
+  const suggestions = await client.request("/api/ai/reactions", { method: "POST", body: { messageId: "m16" } });
+  assert.equal(suggestions.status, 200);
+  assert.ok(Array.isArray(suggestions.body.suggestions) && suggestions.body.suggestions.length > 0);
+
+  const privateReaction = await client.request("/api/messages/m16/reaction", {
+    method: "POST", body: { emoji: "👍", visibility: "private", semantic: "acknowledgement" }
+  });
+  assert.equal(privateReaction.status, 200);
+  assert.equal(privateReaction.body.reaction.visibility, "private");
+  let reactions = (await client.request("/api/reactions?threadId=5bOrgjx7zBQqXYkmwHzkTQ")).body.reactions;
+  assert.ok(reactions.some((reaction) => reaction.own && reaction.visibility === "private"));
+  const removed = await client.request("/api/messages/m16/reaction", { method: "DELETE", body: {} });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.body.wasSent, false);
+
+  const sentReaction = await client.request("/api/messages/m16/reaction", {
+    method: "POST", body: { emoji: "✅", visibility: "sent", semantic: "approval" }
+  });
+  assert.equal(sentReaction.status, 200);
+  assert.equal(sentReaction.body.reaction.visibility, "sent");
+  reactions = (await client.request("/api/reactions?threadId=5bOrgjx7zBQqXYkmwHzkTQ")).body.reactions;
+  assert.ok(reactions.some((reaction) => reaction.own && reaction.visibility === "sent"));
+  await client.request("/api/messages/m16/reaction", { method: "DELETE", body: {} });
+
+  const rule = await client.request("/api/reaction-rules", {
+    method: "POST", body: { name: "Thank the customer team", senderContains: "tomas.ribeiro", emoji: "🙏" }
+  });
+  assert.equal(rule.status, 200);
+  let rules = (await client.request("/api/reaction-rules")).body.rules;
+  assert.equal(rules.length, 1);
+  const patchedRule = await client.request(`/api/reaction-rules/${encodeURIComponent(rule.body.id)}`, {
+    method: "PATCH", body: { enabled: false }
+  });
+  assert.equal(patchedRule.status, 200);
+  rules = (await client.request("/api/reaction-rules")).body.rules;
+  assert.equal(rules[0].enabled, false);
+  const deletedRule = await client.request(`/api/reaction-rules/${encodeURIComponent(rule.body.id)}`, { method: "DELETE", body: {} });
+  assert.equal(deletedRule.status, 200);
+
+  const sendTimes = await client.request("/api/send-time-suggestions", {
+    method: "POST", body: { to: ["elena.vasquez@a8m.example"] }
+  });
+  assert.equal(sendTimes.status, 200);
+  assert.ok(sendTimes.body.suggestions.length > 0);
+  assert.equal(sendTimes.body.suggestions[0].known, true);
+
+  const review = await client.request("/api/yearly-review");
+  assert.equal(review.status, 200);
+  assert.equal(review.body.monthly.length, 12);
+  assert.ok(review.body.totals.messages > 0);
+  assert.ok(Array.isArray(review.body.highlights) && review.body.highlights.length > 0);
+});
+
 test("data persists across an application restart", async () => {
   const dataFile = path.join(tempDir, "persist.json");
   const first = await createApp({ dataFile });

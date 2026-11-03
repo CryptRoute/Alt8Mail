@@ -851,6 +851,12 @@ const state = {
   catchUp: null,
   threadMeta: new Map(),
   serverNotifications: [],
+  reactionCache: new Map(),
+  unsubscribeActions: new Map(),
+  reactionRules: [],
+  reactionRuleEditing: null,
+  yearReview: null,
+  yearReviewYear: null,
   notifications: [],
   dismissedNotifications: new Set(),
   noticeFilter: "all",
@@ -3577,6 +3583,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.ai = data.ai || { enabled: false };
   applyThreadMeta(data.threadMeta || []);
   state.serverNotifications = data.serverNotifications || [];
+  applyUnsubscribeActions(data.unsubscribeActions || []);
   startNotificationRefresh();
   state.push = data.push || state.push || { enabled: false, publicKey: "", subscribed: false };
   state.mailClient = data.mailClient || state.mailClient || null;
@@ -3584,6 +3591,8 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   renderMailClientSetup();
   if (firstUserLoad) loadDismissedNotifications();
   state.folders = data.folders || [];
+  ensureSubscriptionsFolder();
+  ensurePhase3SettingsUi();
   state.people = data.people || [];
   state.messages = data.messages || [];
   state.mailPages = {};
@@ -3605,6 +3614,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
     const key = mailPageKey(state.folder, "all");
     const total = state.messages.filter((message) => state.folder === "starred"
       ? message.starred && message.folder !== "spam" && message.folder !== "trash"
+      : state.folder === "subscriptions" ? Boolean(message.unsubscribe)
       : message.folder === state.folder).length;
     state.mailPages[key] = {
       folder: state.folder, filter: "all", offset: 0, limit: Math.max(total, 50),
@@ -4255,6 +4265,269 @@ function folderDef(folderId) {
   return state.folders.find((folder) => folder.id === folderId) || { id: folderId, label: FOLDER_LABELS[folderId] || folderId, icon: "i-folder" };
 }
 
+function ensureSubscriptionsFolder() {
+  if (!Array.isArray(state.folders)) state.folders = [];
+  if (state.folders.some((folder) => folder.id === "subscriptions")) return;
+  state.folders.push({
+    id: "subscriptions", label: "Subscriptions", icon: "i-mail", section: "favorites",
+    order: 2, badgeMode: "unread", system: false, virtual: false,
+    description: "Newsletters and mailing lists with a one-click unsubscribe option."
+  });
+}
+
+function applyUnsubscribeActions(list) {
+  state.unsubscribeActions = new Map();
+  for (const action of Array.isArray(list) ? list : []) {
+    const sender = normalizeEmail(action?.senderEmail);
+    if (sender) state.unsubscribeActions.set(sender, action);
+  }
+}
+
+function unsubscribeActionFor(message) {
+  return state.unsubscribeActions.get(normalizeEmail(message?.from?.email || message?.fromEmail)) || null;
+}
+
+function readingTimeForMessage(message) {
+  const fromServer = Number(message?.readingMinutes);
+  if (Number.isFinite(fromServer) && fromServer >= 0) return Math.round(fromServer);
+  const text = message?.bodyText || stripHtml(message?.bodyHtml || "");
+  const words = (String(text).trim().match(/\S+/g) || []).length;
+  return words ? Math.max(1, Math.ceil(words / 220)) : 0;
+}
+
+function readingTimeLabel(minutes) {
+  const value = Number(minutes) || 0;
+  if (value <= 0) return "";
+  return value === 1 ? "1 min read" : `${value} min read`;
+}
+
+function threadReadingMinutes(thread) {
+  return (thread?.messages || []).reduce((sum, message) => sum + readingTimeForMessage(message), 0);
+}
+
+const REACTION_QUICK = ["👍", "❤️", "😂", "🎉", "👀", "✅"];
+const REACTION_SEMANTIC = {
+  "👍": "acknowledgement", "❤️": "appreciation", "😂": "humour", "🎉": "celebration",
+  "👀": "attention", "✅": "approval", "🙏": "gratitude", "🤔": "needs thought",
+  "🚀": "excitement", "💯": "strong agreement"
+};
+let reactionMenu = null;
+let reactionMenuMessage = null;
+
+function rawMessageId(messageId) {
+  const value = String(messageId || "");
+  if (!value.startsWith("dlg:")) return value;
+  const parts = value.split(":");
+  return parts.slice(2).join(":");
+}
+
+function reactionCacheKey(ownerId, threadId) {
+  return `${ownerId || ""}:${threadId || ""}`;
+}
+
+function reactionEntryForThread(thread) {
+  const latest = thread?.latest || thread?.messages?.[0];
+  if (!latest) return { key: "", entry: null };
+  const key = reactionCacheKey(messageOwnerId(latest), thread.id);
+  return { key, entry: state.reactionCache.get(key) || null };
+}
+
+function threadReactionList(thread) {
+  return reactionEntryForThread(thread).entry?.list || [];
+}
+
+function reactionsForMessage(message) {
+  if (!message) return [];
+  const thread = { id: message.threadId || message.id, messages: [message], latest: message };
+  return threadReactionList(thread).filter((reaction) => reaction.messageId === rawMessageId(message.id));
+}
+
+function reactionHintMarkup(message) {
+  const reactions = reactionsForMessage(message);
+  if (!reactions.length) return "";
+  const counts = new Map();
+  for (const reaction of reactions) counts.set(reaction.emoji, (counts.get(reaction.emoji) || 0) + 1);
+  const summary = Array.from(counts.entries()).slice(0, 2).map(([emoji, count]) => `${emoji}${count > 1 ? count : ""}`).join(" ");
+  return `<span class="meta-dot" aria-hidden="true"></span><span class="thread-reaction-hint" title="Reactions on this message">${esc(summary)}</span>`;
+}
+
+function reactionBarMarkup(message) {
+  const reactions = reactionsForMessage(message);
+  const groups = new Map();
+  for (const reaction of reactions) {
+    const group = groups.get(reaction.emoji) || { emoji: reaction.emoji, count: 0, own: false, status: "" };
+    group.count += 1;
+    if (reaction.own) {
+      group.own = true;
+      group.status = reaction.status;
+      group.reactionId = reaction.id;
+    }
+    groups.set(reaction.emoji, group);
+  }
+  const chips = Array.from(groups.values()).map((group) => {
+    const own = group.own;
+    const statusIcon = group.status === "sent" ? '<svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>'
+      : group.status === "private" ? '<svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>'
+      : group.status === "pending" ? '<svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>'
+      : "";
+    const title = own
+      ? group.status === "sent" ? "Your reaction was sent to the sender" : group.status === "pending" ? "Sending your reaction" : "Your private reaction"
+      : "Reaction in this conversation";
+    return `<span class="reaction-chip${own ? " is-own" : ""}${group.status === "failed" ? " is-failed" : ""}" title="${esc(title)}">
+      <span class="reaction-emoji">${group.emoji}</span>${group.count > 1 ? `<b>${group.count}</b>` : ""}${statusIcon}
+      ${own ? `<button class="reaction-remove" type="button" data-reaction-remove="${esc(message.id)}" aria-label="Remove your reaction" title="Remove your reaction">×</button>` : ""}
+    </span>`;
+  }).join("");
+  const own = reactions.find((reaction) => reaction.own);
+  let statusLine = "";
+  if (own?.status === "pending") {
+    statusLine = `<span class="reaction-status is-pending"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>Sending to sender · <button type="button" data-reaction-remove="${esc(message.id)}">Undo</button></span>`;
+  } else if (own?.status === "failed") {
+    statusLine = `<span class="reaction-status is-failed">${esc(own.error || "Could not send")} · <button type="button" data-reaction-remove="${esc(message.id)}">Undo</button></span>`;
+  }
+  return `<div class="reaction-bar" data-reaction-bar="${esc(message.id)}">
+    ${chips}
+    <button class="reaction-add" type="button" data-reaction-open="${esc(message.id)}" aria-label="Add a reaction" title="Add a reaction"><span class="reaction-smile" aria-hidden="true">☺</span><span>React</span></button>
+    ${statusLine}
+  </div>`;
+}
+
+function threadReactionSummaryMarkup(thread) {
+  const reactions = threadReactionList(thread);
+  if (!reactions.length) return "";
+  const counts = new Map();
+  for (const reaction of reactions) counts.set(reaction.emoji, (counts.get(reaction.emoji) || 0) + 1);
+  const summary = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([emoji, count]) => `${emoji}${count > 1 ? ` ${count}` : ""}`).join(" · ");
+  return `<span class="thread-meta-chip reaction-summary" title="Visible reactions in this conversation">${esc(summary)}</span>`;
+}
+
+function ensureThreadReactions(thread, { force = false } = {}) {
+  if (!thread || thread.latest?.draft) return;
+  const latest = thread.latest || thread.messages?.[0];
+  if (!latest) return;
+  const ownerId = messageOwnerId(latest);
+  const key = reactionCacheKey(ownerId, thread.id);
+  const existing = state.reactionCache.get(key);
+  if (existing?.loading) return;
+  if (!force && existing && Date.now() - (existing.loadedAt || 0) < 15000) return;
+  state.reactionCache.set(key, { ...(existing || {}), loading: true });
+  api(`/api/reactions?threadId=${encodeURIComponent(thread.id)}&ownerId=${encodeURIComponent(ownerId)}`)
+    .then((data) => {
+      state.reactionCache.set(key, { list: Array.isArray(data.reactions) ? data.reactions : [], loadedAt: Date.now(), loading: false });
+      const current = currentThread();
+      if (current && current.id === thread.id) renderReader({ preserveScroll: true });
+    })
+    .catch(() => {
+      state.reactionCache.delete(key);
+    });
+}
+
+function reactionCachePut(message, reaction) {
+  const ownerId = messageOwnerId(message);
+  const threadId = message.threadId || message.id;
+  const key = reactionCacheKey(ownerId, threadId);
+  const entry = state.reactionCache.get(key) || { list: [], loadedAt: Date.now(), loading: false };
+  const list = (entry.list || []).filter((item) => !(item.own && item.messageId === rawMessageId(message.id)));
+  if (reaction) list.push(reaction);
+  state.reactionCache.set(key, { list, loadedAt: Date.now(), loading: false });
+}
+
+function reactionCacheRemove(message) {
+  const ownerId = messageOwnerId(message);
+  const threadId = message.threadId || message.id;
+  const key = reactionCacheKey(ownerId, threadId);
+  const entry = state.reactionCache.get(key);
+  if (!entry) return;
+  state.reactionCache.set(key, {
+    ...entry,
+    list: (entry.list || []).filter((item) => !(item.own && item.messageId === rawMessageId(message.id))),
+    loadedAt: Date.now()
+  });
+}
+
+async function applyReaction(message, emoji, visibility, semantic = "") {
+  const data = await api(`/api/messages/${encodeURIComponent(message.id)}/reaction`, {
+    method: "POST",
+    body: { emoji, visibility, semantic: semantic || REACTION_SEMANTIC[emoji] || "" }
+  });
+  if (data.reaction) reactionCachePut(message, data.reaction);
+  renderReader({ preserveScroll: true });
+  if (visibility === "sent") {
+    showToast("Reaction will be sent to the sender.", "Undo", () => removeReaction(message, { silent: false }));
+    const thread = { id: message.threadId || message.id, messages: [message], latest: message };
+    setTimeout(() => {
+      const entry = reactionEntryForThread(thread).entry;
+      if (entry) entry.loadedAt = 0;
+      if (currentThread()?.id === thread.id) ensureThreadReactions(thread, { force: true });
+    }, 11000);
+  } else {
+    showToast("Private reaction added.");
+  }
+}
+
+async function removeReaction(message, { silent = false } = {}) {
+  const data = await api(`/api/messages/${encodeURIComponent(message.id)}/reaction`, { method: "DELETE", body: {} });
+  reactionCacheRemove(message);
+  renderReader({ preserveScroll: true });
+  if (!silent) {
+    if (data.wasSent) showToast("Reaction removed. The sender already received the email.");
+    else if (data.pending) showToast("Reaction cancelled before it was sent.");
+    else showToast("Reaction removed.");
+  }
+}
+
+function closeReactionMenu() {
+  reactionMenu?.remove();
+  reactionMenu = null;
+  reactionMenuMessage = null;
+}
+
+function positionReactionMenu(menu, rect) {
+  const width = Math.min(328, window.innerWidth - 24);
+  const left = Math.min(window.innerWidth - width - 12, Math.max(12, rect.left || 12));
+  let top = (rect.bottom || rect.top || 12) + 6;
+  if (top + menu.offsetHeight > window.innerHeight - 12) top = Math.max(12, (rect.top || 12) - menu.offsetHeight - 6);
+  menu.style.width = `${width}px`;
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function openReactionMenu(button, message) {
+  closeReactionMenu();
+  const outgoing = isSentLike(message);
+  const readOnlyDelegate = Boolean(message.delegateOwnerId) && message.delegateCanSend !== true;
+  const senderName = message.from?.name || message.from?.email || "the sender";
+  const menu = document.createElement("div");
+  menu.className = "reaction-menu";
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-label", "React to this message");
+  menu.innerHTML = `<div class="reaction-menu-head"><strong>React</strong><button class="icon-btn" type="button" data-reaction-close aria-label="Close reactions"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="reaction-quick" role="group" aria-label="Quick reactions">${REACTION_QUICK.map((emoji) => `<button type="button" data-reaction-emoji="${emoji}" title="React ${emoji}">${emoji}</button>`).join("")}</div>
+    <div class="reaction-suggestions" data-reaction-suggestions><span class="reaction-suggestions-loading">Finding the right response…</span></div>
+    ${outgoing || readOnlyDelegate ? "" : `<label class="reaction-visibility"><input type="checkbox" data-reaction-sent> <span><strong>Send to ${esc(senderName)}</strong><small>Also emails this reaction to the sender. You can undo for 8 seconds.</small></span></label>`}`;
+  document.body.appendChild(menu);
+  reactionMenu = menu;
+  reactionMenuMessage = message;
+  positionReactionMenu(menu, button.getBoundingClientRect());
+  menu.querySelector("[data-reaction-close]")?.focus();
+  api("/api/ai/reactions", { method: "POST", body: { messageId: message.id } })
+    .then((data) => {
+      if (reactionMenu !== menu) return;
+      const container = menu.querySelector("[data-reaction-suggestions]");
+      const suggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
+      if (!container) return;
+      if (!suggestions.length) {
+        container.innerHTML = `<span class="reaction-suggestions-empty">Quick reactions are ready above.</span>`;
+        return;
+      }
+      container.innerHTML = `<span class="reaction-suggestions-label">${data.ai ? "Suggested by AI" : "Semantic suggestions"}</span><div class="reaction-suggestions-row">${suggestions.map((item) => `<button type="button" data-reaction-emoji="${esc(item.emoji)}" data-reaction-semantic="${esc(item.semantic || "")}" title="${esc(item.reason || item.label || "")}"><span>${item.emoji}</span><span>${esc(item.label || item.semantic || item.emoji)}</span></button>`).join("")}</div>`;
+    })
+    .catch(() => {
+      const container = menu.querySelector("[data-reaction-suggestions]");
+      if (container) container.innerHTML = `<span class="reaction-suggestions-empty">Quick reactions are ready above.</span>`;
+    });
+}
+
 function threadMetaKey(ownerId, threadId) {
   return `${ownerId || ""}:${threadId || ""}`;
 }
@@ -4302,6 +4575,8 @@ function scopeMessages() {
       messages = state.messages.filter((message) => message.starred && message.folder !== "spam" && message.folder !== "trash" && !message.ignored && !snoozeActive(message));
     } else if (state.folder === "snoozed") {
       messages = state.messages.filter((message) => !message.ignored && snoozeActive(message));
+    } else if (state.folder === "subscriptions") {
+      messages = state.messages.filter((message) => !message.ignored && !snoozeActive(message) && message.unsubscribe);
     } else {
       messages = state.messages.filter((message) => message.folder === state.folder && !message.ignored && !snoozeActive(message));
     }
@@ -4488,6 +4763,247 @@ function selectedThreads() {
 /* ============================================================
    account chrome
    ============================================================ */
+
+function ensurePhase3SettingsUi() {
+  const accountPanel = document.querySelector('[data-settings-panel="account"]');
+  if (accountPanel && !document.getElementById("yearReviewBlock")) {
+    accountPanel.insertAdjacentHTML("beforeend", `<div class="settings-block" id="yearReviewBlock">
+      <div class="settings-block-head"><h3>Year in review</h3><p>Your personal email story: volume, contacts, focus time and reactions.</p></div>
+      <div class="year-review-teaser"><span class="year-review-mark" aria-hidden="true">Aa</span><div><strong>See your year in email</strong><span>A private, personal recap built from your mailbox.</span></div><button class="btn-secondary" id="openYearReview" type="button">Open year in review</button></div>
+    </div>`);
+    document.getElementById("openYearReview")?.addEventListener("click", () => openYearReview());
+  }
+  const rulesPanel = document.querySelector('[data-settings-panel="rules"]');
+  if (rulesPanel && !document.getElementById("reactionRulesBlock")) {
+    rulesPanel.insertAdjacentHTML("beforeend", `<div class="settings-block" id="reactionRulesBlock">
+      <div class="settings-block-head"><h3>Reaction rules</h3><p>Automatically add a private reaction when new mail matches a sender or subject. Rules never send email.</p></div>
+      <div class="reaction-rule-list" id="reactionRuleList"><div class="settings-note">Loading reaction rules…</div></div>
+      <div class="settings-actions"><button class="btn-secondary" id="addReactionRuleBtn" type="button">New reaction rule</button><span class="settings-note">Private reactions are visible only to you.</span></div>
+    </div>`);
+    document.getElementById("addReactionRuleBtn")?.addEventListener("click", () => openReactionRuleEditor());
+    loadReactionRules().catch(() => {});
+  }
+  ensureYearReviewOverlay();
+  ensureReactionRuleOverlay();
+}
+
+function ensureYearReviewOverlay() {
+  if (document.getElementById("yearReviewOverlay")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay year-review-overlay" id="yearReviewOverlay" hidden>
+    <div class="dialog year-review-dialog" role="dialog" aria-modal="true" aria-labelledby="yearReviewTitle">
+      <div class="dialog-head">
+        <div class="dialog-title-wrap"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span>
+          <div><h2 id="yearReviewTitle">Your year in email</h2><p>Private to you · based on messages in this mailbox</p></div></div>
+        <button class="icon-btn" type="button" data-year-review-close aria-label="Close year in review"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="dialog-body" id="yearReviewBody"></div>
+    </div>
+  </div>`);
+}
+
+function ensureReactionRuleOverlay() {
+  if (document.getElementById("reactionRuleOverlay")) return;
+  const options = ["👍", "❤️", "😂", "🎉", "👀", "✅", "🙏", "🤔", "🚀", "💯"]
+    .map((emoji) => `<option value="${emoji}">${emoji} ${REACTION_SEMANTIC[emoji] || ""}</option>`).join("");
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="reactionRuleOverlay" hidden>
+    <div class="dialog reaction-rule-dialog" role="dialog" aria-modal="true" aria-labelledby="reactionRuleTitle">
+      <div class="dialog-head">
+        <div class="dialog-title-wrap"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span>
+          <div><h2 id="reactionRuleTitle">New reaction rule</h2><p>React privately when new mail matches.</p></div></div>
+        <button class="icon-btn" type="button" data-reaction-rule-close aria-label="Close rule editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="dialog-body">
+        <label class="form-field"><span>Rule name</span><input id="reactionRuleName" type="text" maxlength="120" placeholder="Thank the customer success team"></label>
+        <div class="reaction-rule-grid">
+          <label class="form-field"><span>Sender contains</span><input id="reactionRuleSender" type="text" maxlength="160" placeholder="alerts@example.com"></label>
+          <label class="form-field"><span>Subject contains</span><input id="reactionRuleSubject" type="text" maxlength="160" placeholder="weekly report"></label>
+        </div>
+        <div class="reaction-rule-grid">
+          <label class="form-field"><span>Reaction</span><select id="reactionRuleEmoji">${options}</select></label>
+          <label class="form-field reaction-rule-enabled"><span>Apply automatically</span><input id="reactionRuleEnabled" type="checkbox" checked></label>
+        </div>
+        <p class="settings-note">At least one condition is required. Rules apply to new mail that arrives after the rule is created, and only add private reactions.</p>
+      </div>
+      <div class="dialog-actions"><button class="btn-secondary" type="button" data-reaction-rule-close>Cancel</button><button class="btn-primary" id="reactionRuleSave" type="button">Save rule</button></div>
+    </div>
+  </div>`);
+  document.getElementById("reactionRuleSave")?.addEventListener("click", saveReactionRule);
+}
+
+async function loadReactionRules() {
+  const data = await api("/api/reaction-rules");
+  state.reactionRules = Array.isArray(data.rules) ? data.rules : [];
+  renderReactionRules();
+}
+
+function renderReactionRules() {
+  const list = document.getElementById("reactionRuleList");
+  if (!list) return;
+  if (!state.reactionRules.length) {
+    list.innerHTML = `<div class="settings-note">No reaction rules yet. Create one to add a private reaction when matching mail arrives.</div>`;
+    return;
+  }
+  list.innerHTML = state.reactionRules.map((rule) => {
+    const conditions = [];
+    if (rule.senderContains) conditions.push(`from ${rule.senderContains}`);
+    if (rule.subjectContains) conditions.push(`subject ${rule.subjectContains}`);
+    return `<div class="reaction-rule-row">
+      <span class="reaction-rule-emoji" aria-hidden="true">${esc(rule.emoji)}</span>
+      <div class="reaction-rule-copy"><strong>${esc(rule.name || "Reaction rule")}</strong><span>${esc(conditions.join(" · ") || "Any new message")}</span></div>
+      <button class="reaction-rule-toggle${rule.enabled ? " is-on" : ""}" type="button" role="switch" aria-checked="${rule.enabled ? "true" : "false"}" data-reaction-rule-toggle="${esc(rule.id)}">${rule.enabled ? "On" : "Off"}</button>
+      <button class="icon-btn" type="button" data-reaction-rule-edit="${esc(rule.id)}" aria-label="Edit reaction rule" title="Edit"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg></button>
+      <button class="icon-btn" type="button" data-reaction-rule-delete="${esc(rule.id)}" aria-label="Delete reaction rule" title="Delete"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>
+    </div>`;
+  }).join("");
+}
+
+function openReactionRuleEditor(ruleId = "") {
+  ensureReactionRuleOverlay();
+  const rule = state.reactionRules.find((item) => item.id === ruleId) || null;
+  state.reactionRuleEditing = rule;
+  document.getElementById("reactionRuleTitle").textContent = rule ? "Edit reaction rule" : "New reaction rule";
+  document.getElementById("reactionRuleName").value = rule?.name || "";
+  document.getElementById("reactionRuleSender").value = rule?.senderContains || "";
+  document.getElementById("reactionRuleSubject").value = rule?.subjectContains || "";
+  document.getElementById("reactionRuleEmoji").value = rule?.emoji || "👍";
+  document.getElementById("reactionRuleEnabled").checked = rule ? rule.enabled !== false : true;
+  document.getElementById("reactionRuleOverlay").hidden = false;
+  setTimeout(() => document.getElementById("reactionRuleName")?.focus(), 40);
+}
+
+function closeReactionRuleEditor() {
+  const overlay = document.getElementById("reactionRuleOverlay");
+  if (overlay) overlay.hidden = true;
+  state.reactionRuleEditing = null;
+}
+
+async function saveReactionRule() {
+  const name = document.getElementById("reactionRuleName")?.value.trim() || "";
+  const senderContains = document.getElementById("reactionRuleSender")?.value.trim() || "";
+  const subjectContains = document.getElementById("reactionRuleSubject")?.value.trim() || "";
+  const emoji = document.getElementById("reactionRuleEmoji")?.value || "👍";
+  const enabled = Boolean(document.getElementById("reactionRuleEnabled")?.checked);
+  if (!senderContains && !subjectContains) {
+    showToast("Add a sender or subject condition.");
+    return;
+  }
+  const button = document.getElementById("reactionRuleSave");
+  if (button) button.disabled = true;
+  try {
+    const rule = state.reactionRuleEditing;
+    if (rule) {
+      await api(`/api/reaction-rules/${encodeURIComponent(rule.id)}`, { method: "PATCH", body: { name, senderContains, subjectContains, emoji, enabled } });
+    } else {
+      await api("/api/reaction-rules", { method: "POST", body: { name, senderContains, subjectContains, emoji, enabled } });
+    }
+    closeReactionRuleEditor();
+    await loadReactionRules();
+    showToast("Reaction rule saved.");
+  } catch (error) {
+    showError(error);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function toggleReactionRule(ruleId) {
+  const rule = state.reactionRules.find((item) => item.id === ruleId);
+  if (!rule) return;
+  try {
+    await api(`/api/reaction-rules/${encodeURIComponent(ruleId)}`, { method: "PATCH", body: { enabled: !rule.enabled } });
+    await loadReactionRules();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function deleteReactionRule(ruleId) {
+  const rule = state.reactionRules.find((item) => item.id === ruleId);
+  if (!rule) return;
+  const ok = await appConfirm({
+    title: "Delete reaction rule?",
+    message: `“${rule.name || "Reaction rule"}” will stop adding reactions to new mail. Existing reactions stay in place.`,
+    confirmLabel: "Delete rule",
+    tone: "danger",
+    icon: "i-trash"
+  });
+  if (!ok) return;
+  try {
+    await api(`/api/reaction-rules/${encodeURIComponent(ruleId)}`, { method: "DELETE", body: {} });
+    await loadReactionRules();
+    showToast("Reaction rule deleted.");
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function openYearReview(year = null) {
+  ensureYearReviewOverlay();
+  const overlay = document.getElementById("yearReviewOverlay");
+  const body = document.getElementById("yearReviewBody");
+  overlay.hidden = false;
+  body.innerHTML = `<div class="year-review-loading">Building your year…</div>`;
+  const target = year || state.yearReviewYear || new Date().getFullYear();
+  try {
+    const data = await api(`/api/yearly-review?year=${encodeURIComponent(target)}`);
+    state.yearReview = data;
+    state.yearReviewYear = data.year;
+    renderYearReview(data);
+  } catch (error) {
+    body.innerHTML = `<div class="year-review-loading">${esc(error.message || "Could not build your year in review.")}</div>`;
+  }
+}
+
+function yearNumber(value) {
+  return new Intl.NumberFormat(currentLocale()).format(Number(value) || 0);
+}
+
+function yearReadingLabel(minutes) {
+  const value = Number(minutes) || 0;
+  if (value < 60) return `${value} min`;
+  return `${(value / 60).toFixed(1)} hours`;
+}
+
+function renderYearReview(data) {
+  const body = document.getElementById("yearReviewBody");
+  if (!body) return;
+  const totals = data.totals || {};
+  const maxMonth = Math.max(1, ...(data.monthly || []).map((item) => Number(item.count) || 0));
+  const years = Array.isArray(data.years) ? data.years : [data.year];
+  const monthBars = (data.monthly || []).map((item) => {
+    const count = Number(item.count) || 0;
+    const percent = Math.max(count ? 4 : 1, Math.round((count / maxMonth) * 100));
+    return `<div class="year-month" title="${esc(item.label)}: ${yearNumber(count)} messages" aria-label="${esc(item.label)}: ${yearNumber(count)} messages"><span class="year-month-bar" style="height:${percent}%"></span><small>${esc(String(item.label || "").slice(0, 3))}</small></div>`;
+  }).join("");
+  const contacts = (items, empty) => items?.length
+    ? items.map((item, index) => `<div class="year-contact"><span class="year-contact-rank">${index + 1}</span><div><strong>${esc(item.name || item.email)}</strong><span>${esc(item.email)}</span></div><b>${yearNumber(item.count)}</b></div>`).join("")
+    : `<div class="year-review-empty">${esc(empty)}</div>`;
+  const reactionTop = (data.reactions?.top || []).map((item) => `<span class="year-reaction"><span>${esc(item.emoji)}</span><b>${yearNumber(item.count)}</b><small>${esc(item.semantic || "")}</small></span>`).join("");
+  body.innerHTML = `<div class="year-review-top">
+      <div><span class="year-review-kicker">Alt8Mail personal recap</span><h3>${esc(data.year)} in your inbox</h3><p>${esc((data.highlights || [])[0] || "Your year in email.")}</p></div>
+      <label class="year-review-year"><span>Year</span><select data-year-review-year>${years.map((value) => `<option value="${value}"${Number(value) === Number(data.year) ? " selected" : ""}>${value}</option>`).join("")}</select></label>
+    </div>
+    <div class="year-review-stats">
+      <div class="year-stat"><span>Messages</span><strong>${yearNumber(totals.messages)}</strong><small>${yearNumber(totals.threads)} conversations</small></div>
+      <div class="year-stat"><span>Sent</span><strong>${yearNumber(totals.sent)}</strong><small>${yearNumber(totals.received)} received</small></div>
+      <div class="year-stat"><span>Reading time</span><strong>${esc(yearReadingLabel(totals.readingMinutes))}</strong><small>about ${yearNumber(totals.newsletters)} newsletters</small></div>
+      <div class="year-stat"><span>Reactions</span><strong>${yearNumber(data.reactions?.given || 0)}</strong><small>${yearNumber(data.reactions?.received || 0)} received</small></div>
+    </div>
+    <div class="year-review-chart"><div class="year-review-section-head"><div><h3>When your mailbox moved</h3><p>Messages by month</p></div><span>Busiest: ${esc(data.busiestMonth?.label || "—")} · ${yearNumber(data.busiestMonth?.count || 0)}</span></div>
+      <div class="year-months" role="img" aria-label="Monthly message volume">${monthBars}</div>
+      <div class="year-review-foot"><span>Busiest day: ${esc(data.busiestDay?.date ? formatDateOnly(data.busiestDay.date) : "—")}</span><span>Busiest hour: ${esc(Number.isFinite(Number(data.busiestHour?.hour)) ? `${data.busiestHour.hour}:00` : "—")}</span><span>${yearNumber(totals.newsletters)} newsletters</span>${data.unsubscribed ? `<span>${yearNumber(data.unsubscribed)} ${Number(data.unsubscribed) === 1 ? "unsubscribe" : "unsubscribes"}</span>` : ""}</div>
+    </div>
+    <div class="year-review-columns">
+      <section><div class="year-review-section-head"><div><h3>People who shaped your year</h3><p>Most frequent senders</p></div></div><div class="year-contacts">${contacts(data.topSenders, "No incoming mail in this year.")}</div></section>
+      <section><div class="year-review-section-head"><div><h3>Your loudest recipients</h3><p>Most emailed contacts</p></div></div><div class="year-contacts">${contacts(data.topRecipients, "No sent mail in this year.")}</div></section>
+    </div>
+    <div class="year-review-columns">
+      <section><div class="year-review-section-head"><div><h3>Reactions you shared</h3><p>Private and sent reactions</p></div></div><div class="year-reactions">${reactionTop || '<div class="year-review-empty">No reactions yet.</div>'}</div></section>
+      <section><div class="year-review-section-head"><div><h3>Moments to remember</h3><p>Highlights from your mailbox</p></div></div><ul class="year-highlights">${(data.highlights || []).slice(1).map((item) => `<li>${esc(item)}</li>`).join("") || "<li>Your year is still taking shape.</li>"}</ul></section>
+    </div>`;
+  body.querySelector("[data-year-review-year]")?.addEventListener("change", (event) => openYearReview(event.target.value));
+}
+
 function renderAccountChrome() {
   const user = state.user;
   if (!user) return;
@@ -5667,6 +6183,63 @@ function delegationBanner(message) {
   </div>`;
 }
 
+function unsubscribeMarkup(message) {
+  const metadata = message.unsubscribe;
+  if (!metadata || typeof metadata !== "object") return "";
+  const action = unsubscribeActionFor(message);
+  const status = String(action?.status || "");
+  const done = status === "sent" || status === "manual";
+  const failed = status === "failed";
+  const detail = failed
+    ? (action?.error || "The unsubscribe request failed. Try again or use the sender's link.")
+    : metadata.oneClick
+      ? "One-click unsubscribe available · no page to fill in."
+      : metadata.url
+        ? "Opens the sender's unsubscribe page in a new tab."
+        : "Opens a short email to the sender's unsubscribe address.";
+  const label = failed ? "Retry unsubscribe" : done ? (status === "sent" ? "Unsubscribed" : "Unsubscribe opened") : "Unsubscribe";
+  return `<div class="subscription-line${done ? " is-done" : ""}${failed ? " is-failed" : ""}">
+    <span class="subscription-icon"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg></span>
+    <div class="subscription-copy"><strong>Mailing list</strong><span>${esc(detail)}</span></div>
+    <button class="btn-secondary small" type="button" data-unsubscribe="${esc(message.id)}"${done ? " disabled" : ""}>${esc(label)}</button>
+  </div>`;
+}
+
+async function requestUnsubscribe(message, button) {
+  if (!message) return;
+  if (button) button.disabled = true;
+  const metadata = message.unsubscribe || {};
+  const popup = metadata.url && !metadata.oneClick ? window.open("about:blank", "_blank") : null;
+  try {
+    const data = await api(`/api/messages/${encodeURIComponent(message.id)}/unsubscribe`, { method: "POST", body: {} });
+    const sender = normalizeEmail(message.from?.email || message.fromEmail);
+    if (data.actionRecord && sender) state.unsubscribeActions.set(sender, data.actionRecord);
+    if (data.action === "open" && data.url) {
+      if (popup) {
+        try { popup.opener = null; popup.location.replace(data.url); } catch { popup.close(); window.open(data.url, "_blank"); }
+      } else {
+        window.open(data.url, "_blank");
+      }
+      showToast("Opened the sender's unsubscribe page.");
+    } else if (data.action === "mailto" && data.email) {
+      openCompose({
+        toText: data.email,
+        subject: "unsubscribe",
+        bodyText: "Please unsubscribe this address from the mailing list.\n\nThank you."
+      });
+      showToast("A short unsubscribe email is ready to send.");
+    } else {
+      if (popup) popup.close();
+      showToast("Unsubscribed from " + (message.from?.name || sender || "this sender") + ".");
+    }
+    renderReader({ preserveScroll: true });
+  } catch (error) {
+    if (popup) popup.close();
+    if (button) button.disabled = false;
+    showError(error);
+  }
+}
+
 function delegatedThreadReadOnly(thread) {
   if (!thread || !thread.messages.some((message) => message.delegateOwnerId)) return false;
   return !thread.messages.some((message) => message.delegateCanSend === true);
@@ -5730,10 +6303,12 @@ function threadMessageMarkup(message, expanded) {
         <button class="trust-details" data-trust-explain="${esc(message.id)}" type="button">${spamMessage ? "Why is this junk?" : "Why is this safe?"}</button>
         <button class="trust-details" data-details="${esc(message.id)}" type="button">Message details</button>
       </div>
+      ${unsubscribeMarkup(message)}
       ${activityBits.length ? `<div class="thread-activity-line">${activityBits.join("")}</div>` : ""}
       <div class="email-body${imagesAllowed ? "" : " images-blocked"}">${safeEmailHtml(message.bodyHtml || `<p>${esc(message.snippet || "")}</p>`, { message, allowImages: imagesAllowed })}</div>
       ${meetingMarkup(message)}
       ${attachmentMarkup(message.attachments, message)}
+      ${reactionBarMarkup(message)}
       <div class="thread-message-actions">
         <button type="button" data-reply-message="${esc(message.id)}"><svg class="icon" aria-hidden="true"><use href="#i-reply"/></svg>Reply</button>
         <button type="button" data-forward-message="${esc(message.id)}"><svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg>Forward</button>
@@ -5748,7 +6323,7 @@ function threadMessageMarkup(message, expanded) {
         ${avatar(sender, "md")}
         <span class="thread-msg-id">
           <span class="thread-msg-name">${esc(sender.name)}${outgoing ? '<span class="thread-msg-self">You</span>' : ""}</span>
-          <span class="thread-msg-meta">${esc(peerLabel)}<span class="meta-dot" aria-hidden="true"></span>${esc(formatFullWhen(message.date))}</span>
+          <span class="thread-msg-meta">${esc(peerLabel)}<span class="meta-dot" aria-hidden="true"></span>${esc(formatFullWhen(message.date))}${readingTimeForMessage(message) ? `<span class="meta-dot" aria-hidden="true"></span>${esc(readingTimeLabel(readingTimeForMessage(message)))}` : ""}${reactionHintMarkup(message)}</span>
         </span>
         ${expanded ? "" : `<span class="thread-msg-snippet">${esc(message.snippet || htmlToText(message.bodyHtml).slice(0, 120))}</span>`}
         <svg class="icon thread-chevron" aria-hidden="true"><use href="#i-chevron-${expanded ? "down" : "right"}"/></svg>
@@ -5918,6 +6493,7 @@ function renderReader({ preserveScroll = false } = {}) {
     ? `${participantNames.slice(0, 3).join(", ")} +${participantNames.length - 3}`
     : participantNames.join(", ");
   const unread = thread.unreadCount;
+  const threadReadMinutes = threadReadingMinutes(thread);
   const individualView = inboxViewIndividual();
   const first = thread.messages[0];
   const last = thread.latest;
@@ -5942,6 +6518,8 @@ function renderReader({ preserveScroll = false } = {}) {
           ${tagExternal ? '<span class="chip-class external">External</span>' : external ? "" : `<span class="chip-class ${esc(classification.toLowerCase())}">${esc(classification)}</span>`}
           ${categories}
           <span class="thread-meta-chip">${thread.count} message${thread.count === 1 ? "" : "s"}</span>
+          ${threadReadMinutes ? `<span class="thread-meta-chip"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>${esc(readingTimeLabel(threadReadMinutes))}</span>` : ""}
+          ${threadReactionSummaryMarkup(thread)}
           ${unread ? `<span class="thread-meta-chip is-unread">${unread} unread</span>` : ""}
           ${thread.flagged ? '<span class="thread-meta-chip is-flagged"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>Follow-up</span>' : ""}
           ${thread.pinned ? '<span class="thread-meta-chip is-pinned"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>Pinned</span>' : ""}
@@ -5969,6 +6547,7 @@ function renderReader({ preserveScroll = false } = {}) {
       <button class="btn-secondary" data-forward-thread="1" type="button"><svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg>Forward</button>`}
       <span class="thread-footer-note"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>${thread.messages.some((message) => message.external) ? "Transport checks recorded" : "Internal conversation · protected"}</span>
     </div>`;
+  ensureThreadReactions(thread);
   lastReaderId = thread.id;
   syncReaderToolbar(true);
   syncCommandBar();
@@ -10855,7 +11434,74 @@ function openScheduleDialog(session) {
   scheduleWarning.hidden = true;
   scheduleOverlay.hidden = false;
   selectSchedulePreset(scheduleChoice);
+  loadRecipientTimeSuggestions(session);
   setTimeout(() => document.querySelector(`[data-schedule-preset="${scheduleChoice}"]`)?.focus(), 40);
+}
+
+
+function ensureScheduleSuggestionUi() {
+  const presets = document.getElementById("schedulePresets");
+  if (presets && !document.getElementById("scheduleRecipientSuggestions")) {
+    presets.insertAdjacentHTML("beforebegin", `<div class="schedule-recipient-suggestions" id="scheduleRecipientSuggestions" hidden></div>`);
+  }
+  return document.getElementById("scheduleRecipientSuggestions");
+}
+
+function timeValueInZone(value) {
+  const parts = timeZoneParts(value);
+  if (!parts) return "";
+  return `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
+}
+
+async function loadRecipientTimeSuggestions(session) {
+  const container = ensureScheduleSuggestionUi();
+  if (!container || !session) return;
+  const emails = parseRecipientList(session.to || "")
+    .map((entry) => normalizeEmail(entry.email))
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!emails.length) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+  container.hidden = false;
+  container.innerHTML = `<div class="schedule-suggestion-head"><span>Best time for recipients</span><small>Checking recent activity…</small></div>`;
+  try {
+    const data = await api("/api/send-time-suggestions", { method: "POST", body: { to: emails } });
+    if (scheduleSession?.id !== session.id || scheduleOverlay.hidden) return;
+    const suggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
+    if (!suggestions.length) {
+      container.hidden = true;
+      container.innerHTML = "";
+      return;
+    }
+    container.innerHTML = `<div class="schedule-suggestion-head"><span>Best time for recipients</span><small>${suggestions.some((item) => item.known) ? "Based on when they usually write" : "Based on your working hours"}</small></div>
+      <div class="schedule-suggestion-list">${suggestions.map((item) => {
+        const stamp = new Date(item.sendAt);
+        const who = item.recipientName || item.recipient || "";
+        const local = item.known && item.recipientLocal ? `${who} · ${item.recipientLocal} their time` : "Your working hours";
+        return `<button class="schedule-suggestion" type="button" data-schedule-suggestion="${esc(item.sendAt)}"><strong>${esc(formatClock(stamp))}</strong><span>${esc(local)}</span><small>${esc(item.reason || "")}</small></button>`;
+      }).join("")}</div>`;
+  } catch {
+    if (scheduleSession?.id === session.id) {
+      container.hidden = true;
+      container.innerHTML = "";
+    }
+  }
+}
+
+function applyScheduleSuggestion(value) {
+  const stamp = new Date(value);
+  if (!scheduleDate || !scheduleTime || Number.isNaN(stamp.getTime())) return;
+  scheduleChoice = "custom";
+  scheduleDate.value = dateKeyInZone(stamp);
+  scheduleTime.value = timeValueInZone(stamp);
+  updateSchedulePreview();
+  $$("[data-schedule-preset]", schedulePresets).forEach((button) => {
+    button.classList.remove("is-selected");
+    button.setAttribute("aria-checked", "false");
+  });
 }
 
 function selectSchedulePreset(id) {
@@ -18494,6 +19140,67 @@ function bindEvents() {
       setFilter("unread");
       return;
     }
+    const scheduleSuggestion = event.target.closest("[data-schedule-suggestion]");
+    if (scheduleSuggestion) {
+      applyScheduleSuggestion(scheduleSuggestion.getAttribute("data-schedule-suggestion"));
+      return;
+    }
+    if (event.target.closest("[data-year-review-close]") || event.target.id === "yearReviewOverlay") {
+      const overlay = document.getElementById("yearReviewOverlay");
+      if (overlay) overlay.hidden = true;
+      return;
+    }
+    if (event.target.closest("[data-reaction-rule-close]") || event.target.id === "reactionRuleOverlay") {
+      closeReactionRuleEditor();
+      return;
+    }
+    const reactionRuleToggle = event.target.closest("[data-reaction-rule-toggle]");
+    if (reactionRuleToggle) {
+      toggleReactionRule(reactionRuleToggle.getAttribute("data-reaction-rule-toggle")).catch(showError);
+      return;
+    }
+    const reactionRuleEdit = event.target.closest("[data-reaction-rule-edit]");
+    if (reactionRuleEdit) {
+      openReactionRuleEditor(reactionRuleEdit.getAttribute("data-reaction-rule-edit"));
+      return;
+    }
+    const reactionRuleDelete = event.target.closest("[data-reaction-rule-delete]");
+    if (reactionRuleDelete) {
+      deleteReactionRule(reactionRuleDelete.getAttribute("data-reaction-rule-delete")).catch(showError);
+      return;
+    }
+    const reactionOpen = event.target.closest("[data-reaction-open]");
+    if (reactionOpen) {
+      const message = messageById(reactionOpen.getAttribute("data-reaction-open"));
+      if (message) openReactionMenu(reactionOpen, message);
+      return;
+    }
+    const reactionEmoji = event.target.closest(".reaction-menu [data-reaction-emoji]");
+    if (reactionEmoji && reactionMenuMessage) {
+      const message = reactionMenuMessage;
+      const visibility = reactionMenu?.querySelector("[data-reaction-sent]")?.checked ? "sent" : "private";
+      const semantic = reactionEmoji.getAttribute("data-reaction-semantic") || "";
+      closeReactionMenu();
+      applyReaction(message, reactionEmoji.getAttribute("data-reaction-emoji"), visibility, semantic).catch(showError);
+      return;
+    }
+    if (event.target.closest("[data-reaction-close]")) {
+      closeReactionMenu();
+      return;
+    }
+    const reactionRemove = event.target.closest("[data-reaction-remove]");
+    if (reactionRemove) {
+      const message = messageById(reactionRemove.getAttribute("data-reaction-remove"));
+      if (message) removeReaction(message).catch(showError);
+      return;
+    }
+    if (reactionMenu && !event.target.closest(".reaction-menu")) closeReactionMenu();
+    const unsubscribeButton = event.target.closest("[data-unsubscribe]");
+    if (unsubscribeButton) {
+      const message = messageById(unsubscribeButton.getAttribute("data-unsubscribe"));
+      if (message) requestUnsubscribe(message, unsubscribeButton);
+      return;
+    }
     const threadCloseButton = event.target.closest("[data-thread-close]");
     if (threadCloseButton) {
       const bar = threadCloseButton.closest(".thread-collab-bar");
@@ -19390,6 +20097,9 @@ function bindEvents() {
 
   window.addEventListener("online", () => { setOffline(false); });
   window.addEventListener("offline", () => { setOffline(true); });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && reactionMenu) closeReactionMenu();
+  });
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
