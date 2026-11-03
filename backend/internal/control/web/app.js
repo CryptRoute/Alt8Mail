@@ -19,7 +19,7 @@ import {
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.8.1';
 
 const state = {
   csrf: '',
@@ -717,6 +717,7 @@ function handleLiveEvent(payload) {
     'user.created': ['A mailbox account was created', 'info'],
     'security.report': ['A user reported a suspicious email', 'critical'],
     'security.report_reviewed': ['A security report was reviewed', 'info'],
+    'security.threat_intelligence_updated': ['Threat intelligence sharing changed', 'info'],
   }[event];
   if (significant) {
     const detail = payload?.data?.unit || payload?.data?.domain || payload?.data?.message || payload?.data?.certificate || '';

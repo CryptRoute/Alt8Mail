@@ -84,7 +84,8 @@ Useful checks:
 
 ```bash
 rspamadm configtest
-redis-cli ... HLEN a8m_reported_urls
+sudo REDISCLI_AUTH="$(cat /opt/a8m/secrets/redis_password)" \
+  redis-cli HLEN a8m_reported_urls
 journalctl -u alt8mail-control -n 100 --no-pager
 journalctl -u rspamd -n 100 --no-pager
 ```

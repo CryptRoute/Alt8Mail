@@ -270,7 +270,7 @@ export async function renderSecurityReports(ctx) {
     return modal;
   };
 
-  ctx.listen(document.getElementById('security-reports-refresh'), 'click', load);
+  ctx.listen(document.getElementById('security-reports-refresh'), 'click', () => Promise.all([load(), loadThreatIntel()]));
   ctx.listen(document.getElementById('security-report-status'), 'change', load);
   ctx.listen(document.getElementById('security-report-search'), 'input', () => {
     clearTimeout(ctx.state.securitySearchTimer);

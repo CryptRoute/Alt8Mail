@@ -249,7 +249,7 @@ func (s *Server) handleSecurityReportReview(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer tx.Rollback(r.Context())
-	_, err = tx.Exec(r.Context(), `
+	tag, err := tx.Exec(r.Context(), `
 		UPDATE public.security_reports
 		SET status=$2, block_scope=$3, resolution=$4, reviewed_by=$5,
 		    reviewed_at=CASE WHEN $2='pending' THEN NULL ELSE now() END, updated_at=now()
@@ -257,6 +257,10 @@ func (s *Server) handleSecurityReportReview(w http.ResponseWriter, r *http.Reque
 	`, id, status, scope, resolution, sess.User.Email)
 	if err != nil {
 		writeFromError(w, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "REPORT_NOT_FOUND", "Security report not found")
 		return
 	}
 	if status == "confirmed" && body.URLHosts != nil {
