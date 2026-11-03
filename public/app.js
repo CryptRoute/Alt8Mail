@@ -5342,7 +5342,6 @@ function threadRowMarkup(thread) {
           <div class="msg-top">
             <span class="msg-from">${esc(label)}</span>
             ${threadCount}
-            ${threadCollabChips(thread)}
             ${hasFiles ? `<span class="msg-tag" title="Has attachments"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></span>` : ""}
             ${thread.flagged ? '<span class="msg-flag" title="Flagged for follow-up" aria-label="Flagged for follow-up"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg></span>' : ""}
             ${thread.snoozeReturned ? `<span class="msg-snooze" title="Snoozed · returned ${esc(formatDateTimeFull(thread.snoozeReturnAt))}" aria-label="Snoozed message"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></span>` : ""}
@@ -5358,7 +5357,10 @@ function threadRowMarkup(thread) {
             <span class="msg-time">${esc(formatListWhen(rep.date))}</span>
           </div>
           <div class="msg-subject">${rep.draft ? '<span class="msg-draft-tag">Draft</span>' : ""}${categoryBadges(rep.categories)}${esc(threadSubject(thread))}</div>
-          <div class="msg-snippet">${esc(rep.snippet || htmlToText(rep.bodyHtml).slice(0, 150))}</div>
+          <div class="msg-snippet-row">
+            <div class="msg-snippet">${esc(rep.snippet || htmlToText(rep.bodyHtml).slice(0, 150))}</div>
+            ${threadCollabChips(thread)}
+          </div>
         </div>
       </div>`;
 }

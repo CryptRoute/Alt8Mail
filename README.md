@@ -71,6 +71,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.10.2** patch refines the conversation list: handling status and assignee chips now sit on the preview line instead of compressing the sender name and subject, and compact density hides those row chips while keeping the reader controls.
+
 The **0.10.1** patch keeps folder and unread badges in sync with closed conversations. Closing or reopening a thread updates sidebar totals immediately, and the server-side Inbox, Sent, starred and snoozed counts now exclude closed threads so a closed conversation no longer inflates unread badges after a reload.
 
 The **0.10.0** release adds collaboration inside conversations. Mailbox owners and delegates can set a handling status, assign a conversation to a coworker, close and reopen threads, and keep audited internal team notes; closed conversations move to a dedicated **Closed conversations** view. The composer now supports **@mentions** for active coworkers, and mention and assignment alerts are stored per user, merged into the notification center with mail, calendar and security activity, and refreshed while Alt8Mail is open. Customer administrators also get a **Blocklist health** card on the overview showing confirmed threats, blocks fired in the last seven days and dismissed reports. The release includes migration `0033_collaboration`.

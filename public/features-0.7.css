@@ -804,7 +804,10 @@
 .thread-notes-empty, .thread-notes-loading { padding: 12px; margin: 0; font-size: .65rem; color: var(--text-3); }
 .thread-note-form { display: flex; align-items: flex-end; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); }
 .thread-note-form textarea { flex: 1; min-height: 32px; max-height: 120px; resize: vertical; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; font-size: .66rem; }
-.msg-collab-chips { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
+.msg-snippet-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.msg-snippet-row .msg-snippet { flex: 1; min-width: 0; }
+.msg-collab-chips { display: inline-flex; align-items: center; gap: 3px; min-width: 0; flex: none; }
+.app[data-density="compact"] .msg-collab-chips { display: none; }
 .msg-collab-assignee { width: 17px; height: 17px; display: inline-grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, #3b82f6 16%, var(--surface-3)); color: #1d4ed8; font-size: .45rem; font-weight: 750; }
 .msg-collab-status { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px; border-radius: 3px; font-size: .48rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; background: var(--surface-3); color: var(--text-3); }
 .msg-collab-status.is-progress { color: #9a6700; background: color-mix(in srgb, #f59e0b 14%, transparent); }
