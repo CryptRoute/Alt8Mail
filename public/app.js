@@ -4188,6 +4188,11 @@ function adjustFolderUnread(folderId, delta) {
   updateDocumentTitle();
 }
 
+function adjustSubscriptionUnread(message, delta) {
+  if (!message?.unsubscribe) return;
+  adjustFolderUnread("subscriptions", delta);
+}
+
 function messageById(messageId) {
   return state.messages.find((message) => message.id === messageId) || null;
 }
@@ -4973,7 +4978,7 @@ function renderYearReview(data) {
   const monthBars = (data.monthly || []).map((item) => {
     const count = Number(item.count) || 0;
     const percent = Math.max(count ? 4 : 1, Math.round((count / maxMonth) * 100));
-    return `<div class="year-month" title="${esc(item.label)}: ${yearNumber(count)} messages" aria-label="${esc(item.label)}: ${yearNumber(count)} messages"><span class="year-month-bar" style="height:${percent}%"></span><small>${esc(String(item.label || "").slice(0, 3))}</small></div>`;
+    return `<div class="year-month${count ? "" : " is-empty"}" title="${esc(item.label)}: ${yearNumber(count)} messages" aria-label="${esc(item.label)}: ${yearNumber(count)} messages"><span class="year-month-bar" style="height:${percent}%"></span><small>${esc(String(item.label || "").slice(0, 3))}</small></div>`;
   }).join("");
   const contacts = (items, empty) => items?.length
     ? items.map((item, index) => `<div class="year-contact"><span class="year-contact-rank">${index + 1}</span><div><strong>${esc(item.name || item.email)}</strong><span>${esc(item.email)}</span></div><b>${yearNumber(item.count)}</b></div>`).join("")
@@ -7108,6 +7113,7 @@ function selectThread(threadId, options = {}) {
     thread.messages.forEach((message) => {
       if (!message.unread) return;
       adjustFolderUnread(message.folder, -1);
+      adjustSubscriptionUnread(message, -1);
       message.unread = false;
       clearReturnedSnoozeLocal(message);
     });
@@ -8893,7 +8899,10 @@ function markThreadUnread(thread) {
   if (!thread) return;
   const ids = thread.messages.filter((message) => !message.draft).map((message) => message.id);
   thread.messages.forEach((message) => {
-    if (!message.unread) adjustFolderUnread(message.folder, 1);
+    if (!message.unread) {
+      adjustFolderUnread(message.folder, 1);
+      adjustSubscriptionUnread(message, 1);
+    }
     message.unread = true;
   });
   rebuildIndex();
