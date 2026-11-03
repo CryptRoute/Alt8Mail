@@ -73,6 +73,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.11.4** patch moves Year in review higher in the account overview and opens external unsubscribe pages without giving the page access to the Alt8Mail window.
+
 The **0.11.3** patch lets AI reaction suggestions use the existing AI cache with their own cached kind, and keeps the Subscriptions folder focused on the signed-in user's own mailbox.
 
 The **0.11.2** patch keeps the virtual Subscriptions folder available after folder create, rename, reorder or delete operations and prevents folder-management actions from targeting it.

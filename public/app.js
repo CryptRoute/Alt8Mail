@@ -4772,10 +4772,13 @@ function selectedThreads() {
 function ensurePhase3SettingsUi() {
   const accountPanel = document.querySelector('[data-settings-panel="account"]');
   if (accountPanel && !document.getElementById("yearReviewBlock")) {
-    accountPanel.insertAdjacentHTML("beforeend", `<div class="settings-block" id="yearReviewBlock">
+    const markup = `<div class="settings-block" id="yearReviewBlock">
       <div class="settings-block-head"><h3>Year in review</h3><p>Your personal email story: volume, contacts, focus time and reactions.</p></div>
       <div class="year-review-teaser"><span class="year-review-mark" aria-hidden="true">Aa</span><div><strong>See your year in email</strong><span>A private, personal recap built from your mailbox.</span></div><button class="btn-secondary" id="openYearReview" type="button">Open year in review</button></div>
-    </div>`);
+    </div>`;
+    const firstBlock = accountPanel.querySelector(".settings-block");
+    if (firstBlock) firstBlock.insertAdjacentHTML("afterend", markup);
+    else accountPanel.insertAdjacentHTML("beforeend", markup);
     document.getElementById("openYearReview")?.addEventListener("click", () => openYearReview());
   }
   const rulesPanel = document.querySelector('[data-settings-panel="rules"]');
@@ -6222,9 +6225,9 @@ async function requestUnsubscribe(message, button) {
     if (data.actionRecord && sender) state.unsubscribeActions.set(sender, data.actionRecord);
     if (data.action === "open" && data.url) {
       if (popup) {
-        try { popup.opener = null; popup.location.replace(data.url); } catch { popup.close(); window.open(data.url, "_blank"); }
+        try { popup.opener = null; popup.location.replace(data.url); } catch { popup.close(); window.open(data.url, "_blank", "noopener,noreferrer"); }
       } else {
-        window.open(data.url, "_blank");
+        window.open(data.url, "_blank", "noopener,noreferrer");
       }
       showToast("Opened the sender's unsubscribe page.");
     } else if (data.action === "mailto" && data.email) {
