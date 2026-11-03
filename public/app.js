@@ -4275,7 +4275,7 @@ function ensureSubscriptionsFolder() {
   if (state.folders.some((folder) => folder.id === "subscriptions")) return;
   state.folders.push({
     id: "subscriptions", label: "Subscriptions", icon: "i-mail", section: "favorites",
-    order: 2, badgeMode: "unread", system: false, virtual: false,
+    order: 2, badgeMode: "unread", system: true, virtual: true,
     description: "Newsletters and mailing lists with a one-click unsubscribe option."
   });
 }
@@ -5150,7 +5150,7 @@ function unreadCount(folderId) {
 }
 
 function folderBadge(folder) {
-  if (folder.id === "starred" || folder.virtual) return null;
+  if (folder.id === "starred" || (folder.virtual && folder.id !== "subscriptions")) return null;
   const mode = folder.badgeMode || "unread";
   if (mode === "none") return null;
   const count = mode === "total"
@@ -5242,7 +5242,7 @@ function folderRowMarkup(folder, depth, folders, visited) {
       <span class="folder-name">${esc(folder.label)}</span>
       ${badge ? `<span class="folder-badge${badge.neutral ? " neutral" : ""}" data-folder-badge="${esc(folder.id)}">${badge.count > 999 ? "999+" : badge.count}</span>` : ""}
     </button>
-    <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"${folder.delegated ? " hidden" : ""}><span aria-hidden="true">⋯</span></button>
+    <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"${folder.delegated || folder.id === "subscriptions" ? " hidden" : ""}><span aria-hidden="true">⋯</span></button>
   </div>`;
   if (!hasChildren || collapsed) return row;
   return row + children.map((child) => folderRowMarkup(child, depth + 1, folders, visited)).join("");
@@ -5468,7 +5468,7 @@ function folderMenuHTML(folder) {
 
 function openFolderMenu(folderId, event) {
   const folder = (state.folders || []).find((item) => item.id === folderId);
-  if (!folder || !folderMenu || folder.delegated) return;
+  if (!folder || !folderMenu || folder.delegated || folder.id === "subscriptions") return;
   state.folderMenuTarget = folderId;
   folderMenu.innerHTML = folderMenuHTML(folder);
   folderMenu.hidden = false;
@@ -5520,6 +5520,7 @@ async function loadFolders() {
   try {
     const data = await api("/api/folders");
     state.folders = data.folders || [];
+    ensureSubscriptionsFolder();
     renderFolders();
   } catch (error) { showError(error); }
 }
@@ -5676,7 +5677,7 @@ async function folderMenuAction(action) {
     const swap = sorted.findIndex((item) => item.id === target.id);
     [sorted[index], sorted[swap]] = [sorted[swap], sorted[index]];
     try {
-      await api("/api/folders/order", { method: "PUT", body: { ids: sorted.map((item) => item.id) } });
+      await api("/api/folders/order", { method: "PUT", body: { ids: sorted.filter((item) => item.id !== "subscriptions").map((item) => item.id) } });
       state.folders = sorted.map((item, order) => ({ ...item, order }));
       renderFolders();
       showToast("Folder order saved");

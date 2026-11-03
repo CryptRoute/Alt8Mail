@@ -73,6 +73,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.11.2** patch keeps the virtual Subscriptions folder available after folder create, rename, reorder or delete operations and prevents folder-management actions from targeting it.
+
 The **0.11.1** patch keeps the Subscriptions badge in sync when a newsletter is read or marked unread, and stops empty months from drawing misleading bars in the Year in review chart.
 
 The **0.11.0** release adds the everyday-use layer. A **Subscriptions** folder collects mail with `List-Unsubscribe` headers and offers a safe server-side one-click unsubscribe, with a sender page or compose handoff when one-click is unavailable. Every message and conversation now shows a reading-time estimate. **Send later** suggests recipient-aware times based on when each person usually writes, and **Settings → Account → Year in review** builds a private recap with monthly volume, busiest day and hour, top contacts, reading time, unsubscribes and reactions. Messages support quick and AI-assisted semantic emoji reactions. Reactions can stay private or be sent to the sender as a small threaded email, with an eight-second undo window for outbound reactions and local undo after delivery. **Reaction rules** automatically add private reactions to new matching mail, and AI conversation summaries now include visible reaction signals. The release includes migration `0034_phase3`.
