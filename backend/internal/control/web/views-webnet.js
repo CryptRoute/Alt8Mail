@@ -313,7 +313,7 @@ export async function renderWebNet(ctx) {
       await save({ quiet: true });
       const confirmed = await ctx.confirm({
         title: 'Apply Web Net configuration',
-        message: 'nginx will be rewritten and validated, then the webmail and admin Go services restart with the new public URLs. Existing browser sessions on the old hostnames end. Continue?',
+        message: 'nginx will be rewritten, validated and restarted, then the webmail and admin Go services restart with the new public URLs. Existing browser sessions on the old hostnames end. Continue?',
         confirmLabel: 'Apply configuration',
         tone: 'danger',
       });

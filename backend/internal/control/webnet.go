@@ -1352,16 +1352,21 @@ func (s *Server) applyNginxWebNet(config, oldConfig string, configExists bool, o
 	restore := func() error {
 		_ = restoreLink()
 		restoreFiles()
-		_ = s.reloadOrStartNginx(context.Background())
+		_ = s.restartNginx(context.Background())
 		return nil
 	}
 	if result, err := runCommand(context.Background(), 30*time.Second, "nginx", "-t"); err != nil {
 		_ = restore()
 		return nil, fmt.Errorf("nginx -t rejected the Web Net configuration: %s", strings.TrimSpace(result.Stderr+" "+result.Stdout))
 	}
-	if err := s.reloadOrStartNginx(context.Background()); err != nil {
+	if err := s.restartNginx(context.Background()); err != nil {
 		_ = restore()
 		return nil, err
+	}
+	applied, checkErr := runCommand(context.Background(), 20*time.Second, "nginx", "-T")
+	if checkErr != nil || !strings.Contains(applied.Stdout+applied.Stderr, "Managed by Alt8Mail Web Net") {
+		_ = restore()
+		return nil, fmt.Errorf("nginx restarted but did not load the managed Web Net site; check that /etc/nginx/nginx.conf includes %s", s.cfg.NginxEnabledPath)
 	}
 	return restore, nil
 }

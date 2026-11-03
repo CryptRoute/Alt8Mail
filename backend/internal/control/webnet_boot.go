@@ -116,24 +116,24 @@ func (s *Server) restoreManagedNetworkAddresses(ctx context.Context) {
 	}
 }
 
-func (s *Server) reloadOrStartNginx(ctx context.Context) error {
-	if _, err := runCommand(ctx, 20*time.Second, "systemctl", "is-active", "--quiet", "nginx"); err == nil {
-		result, err := runCommand(ctx, 30*time.Second, "systemctl", "reload", "nginx")
-		if err != nil {
-			return fmt.Errorf("nginx reload failed: %s", strings.TrimSpace(result.Stderr+" "+result.Stdout))
-		}
-		return nil
-	}
-	result, err := runCommand(ctx, 30*time.Second, "systemctl", "restart", "nginx")
+func (s *Server) restartNginx(ctx context.Context) error {
+	// Use a full restart rather than a reload. Web Net may change the listen
+	// set (for example from a wildcard listener installed by an older release
+	// to per-address listeners). During a reload nginx tries to bind the new
+	// addresses while the old wildcard sockets are still open; the bind fails
+	// with EADDRINUSE, nginx keeps serving the old configuration, and
+	// systemctl reload can still report success. A restart closes the old
+	// sockets before opening the new set and guarantees the new config is live.
+	result, err := runCommand(ctx, 45*time.Second, "systemctl", "restart", "nginx")
 	if err != nil {
-		return fmt.Errorf("nginx start failed: %s", strings.TrimSpace(result.Stderr+" "+result.Stdout))
+		return fmt.Errorf("nginx restart failed: %s", strings.TrimSpace(result.Stderr+" "+result.Stdout))
 	}
 	return nil
 }
 
 func (s *Server) verifyServedCertificatesWithRetry(ctx context.Context, routes []webNetRoute, certByRoute map[string]webNetCertificate, local []webNetIP) error {
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < 5; attempt++ {
 		lastErr = s.verifyWebNetServedCertificates(ctx, routes, certByRoute, local)
 		if lastErr == nil {
 			return nil
@@ -141,7 +141,7 @@ func (s *Server) verifyServedCertificatesWithRetry(ctx context.Context, routes [
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(600 * time.Millisecond):
 		}
 	}
 	return lastErr
@@ -187,7 +187,8 @@ func (s *Server) verifyWebNetServedCertificates(ctx context.Context, routes []we
 				return fmt.Errorf("nginx served no certificate for %s on %s", route.Hostname, address)
 			}
 			if !bytes.Equal(state.PeerCertificates[0].Raw, expected.Raw) {
-				return fmt.Errorf("nginx served the wrong certificate for %s on %s (expected %s)", route.Hostname, address, cert.Name)
+				return fmt.Errorf("nginx served the wrong certificate for %s on %s: served %s, expected %s (%s)",
+					route.Hostname, address, certificateDescription(state.PeerCertificates[0]), cert.Name, certificateDescription(expected))
 			}
 			matched = true
 		}
@@ -199,6 +200,23 @@ func (s *Server) verifyWebNetServedCertificates(ctx context.Context, routes []we
 		}
 	}
 	return nil
+}
+
+func certificateDescription(cert *x509.Certificate) string {
+	if cert == nil {
+		return "unknown certificate"
+	}
+	if len(cert.DNSNames) > 0 {
+		names := cert.DNSNames
+		if len(names) > 3 {
+			names = names[:3]
+		}
+		return strings.Join(names, ", ")
+	}
+	if name := strings.TrimSpace(cert.Subject.CommonName); name != "" {
+		return name
+	}
+	return "certificate without a DNS name"
 }
 
 func readLeafCertificate(path string) (*x509.Certificate, error) {
