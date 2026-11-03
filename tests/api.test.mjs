@@ -1076,6 +1076,70 @@ test("audit log filters and CSV export", async () => {
   assert.match(text, /message\.archive/);
 });
 
+test("thread collaboration: handling, assignment, closure, notes and notifications", async () => {
+  const threadId = "Us9qmXz-Z5GUl_r5gJobEQ";
+  const initial = await client.request(`/api/thread-meta?threadId=${encodeURIComponent(threadId)}`);
+  assert.equal(initial.status, 200);
+  assert.equal(initial.body.meta.status, "new");
+
+  const patched = await client.request(`/api/threads/${encodeURIComponent(threadId)}/meta`, {
+    method: "PATCH",
+    body: { status: "in_progress", assignedTo: "elena.vasquez@a8m.example", closed: false }
+  });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.meta.status, "in_progress");
+  assert.equal(patched.body.meta.assignedTo.email, "elena.vasquez@a8m.example");
+  assert.equal(patched.body.meta.closed, false);
+
+  const bootstrap = (await client.request("/api/bootstrap")).body;
+  const bootstrapMeta = bootstrap.threadMeta.find((item) => item.threadId === threadId);
+  assert.equal(bootstrapMeta?.status, "in_progress");
+  assert.equal(bootstrapMeta?.assignedTo?.email, "elena.vasquez@a8m.example");
+  assert.ok(bootstrap.serverNotifications.some((item) => item.kind === "mention"));
+
+  const closed = await client.request(`/api/threads/${encodeURIComponent(threadId)}/meta`, {
+    method: "PATCH",
+    body: { closed: true }
+  });
+  assert.equal(closed.body.meta.closed, true);
+  assert.equal(closed.body.meta.status, "in_progress");
+  assert.equal(closed.body.meta.assignedTo.email, "elena.vasquez@a8m.example");
+  const active = (await client.request("/api/messages?folder=inbox")).body;
+  assert.ok(!active.messages.some((message) => message.threadId === threadId));
+  const closedView = (await client.request("/api/messages?folder=inbox&filter=closed")).body;
+  assert.ok(closedView.messages.some((message) => message.threadId === threadId));
+
+  const note = await client.request(`/api/threads/${encodeURIComponent(threadId)}/notes`, {
+    method: "POST",
+    body: { body: "Internal handoff complete for the renewal." }
+  });
+  assert.equal(note.status, 200);
+  assert.equal(note.body.note.body, "Internal handoff complete for the renewal.");
+  const notes = (await client.request(`/api/thread-notes?threadId=${encodeURIComponent(threadId)}`)).body;
+  assert.equal(notes.notes.length, 1);
+  assert.equal(notes.notes[0].authorEmail, DEMO_EMAIL);
+  const removed = await client.request(`/api/threads/${encodeURIComponent(threadId)}/notes/${encodeURIComponent(note.body.note.id)}`, {
+    method: "DELETE",
+    body: {}
+  });
+  assert.equal(removed.status, 200);
+  const notesAfter = (await client.request(`/api/thread-notes?threadId=${encodeURIComponent(threadId)}`)).body;
+  assert.equal(notesAfter.notes.length, 0);
+
+  const notifications = (await client.request("/api/notifications")).body.notifications;
+  const mention = notifications.find((item) => item.kind === "mention");
+  assert.ok(mention);
+  const read = await client.request(`/api/notifications/${encodeURIComponent(mention.id)}/read`, {
+    method: "POST",
+    body: {}
+  });
+  assert.equal(read.status, 200);
+  const readAll = await client.request("/api/notifications/read-all", { method: "POST", body: {} });
+  assert.equal(readAll.status, 200);
+  const afterRead = (await client.request("/api/notifications")).body.notifications;
+  assert.ok(afterRead.every((item) => item.readAt));
+});
+
 test("data persists across an application restart", async () => {
   const dataFile = path.join(tempDir, "persist.json");
   const first = await createApp({ dataFile });

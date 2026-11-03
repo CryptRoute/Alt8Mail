@@ -11,7 +11,8 @@ Outlook-style message actions with reply/forward activity, optimistic queued
 deletes, undo send and scheduled send, Sieve rules and automatic replies, sender trust,
 two-factor sign-in with passkeys, enterprise Tasks and Files workspaces,
 PDF/image attachment preview with a multi-file pager, BIMI/favicon sender
-icons, outbound caps, live quota, an audit log, PWA support and a responsive
+icons, outbound caps, live quota, shared-mailbox collaboration with assignment,
+internal notes and @mentions, an audit log, PWA support and a responsive
 mobile layout. The Go build adds a separate
 customer/system administration console for tenants, users, groups, org units,
 custom RBAC roles, domains, policy, audit and system administrators, plus a
@@ -69,6 +70,8 @@ Dutch, Italian and Arabic catalogs ship in this release; additional languages
 can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
+
+The **0.10.0** release adds collaboration inside conversations. Mailbox owners and delegates can set a handling status, assign a conversation to a coworker, close and reopen threads, and keep audited internal team notes; closed conversations move to a dedicated **Closed conversations** view. The composer now supports **@mentions** for active coworkers, and mention and assignment alerts are stored per user, merged into the notification center with mail, calendar and security activity, and refreshed while Alt8Mail is open. Customer administrators also get a **Blocklist health** card on the overview showing confirmed threats, blocks fired in the last seven days and dismissed reports. The release includes migration `0033_collaboration`.
 
 The **0.9.1** patch makes the ambient-intelligence features discoverable and fixes stale webmail shells. The reader now shows a visible **What did I commit to?** chip, each trust line exposes **Why is this safe? / Why is this junk?**, compose shows a **Send check** control, and Inbox exposes a manual **Catch me up** action that works even without a long absence. Tone suggestions now always provide a safe professional fallback for new recipients instead of disappearing. The webmail HTML entry point is revalidated instead of being cached, and the service worker fetches navigations with `no-store` so an older app shell cannot hide a new release. The service worker also adds any missing ambient controls when an older cached shell loads a newer app bundle.
 

@@ -849,6 +849,8 @@ const state = {
   recentAudit: [],
   aiReader: null,
   catchUp: null,
+  threadMeta: new Map(),
+  serverNotifications: [],
   notifications: [],
   dismissedNotifications: new Set(),
   noticeFilter: "all",
@@ -3573,6 +3575,9 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.signatures = data.signatures || state.signatures || [];
   state.labels = data.labels || state.labels || [];
   state.ai = data.ai || { enabled: false };
+  applyThreadMeta(data.threadMeta || []);
+  state.serverNotifications = data.serverNotifications || [];
+  startNotificationRefresh();
   state.push = data.push || state.push || { enabled: false, publicKey: "", subscribed: false };
   state.mailClient = data.mailClient || state.mailClient || null;
   state.recentAudit = data.recentAudit || [];
@@ -4250,6 +4255,36 @@ function folderDef(folderId) {
   return state.folders.find((folder) => folder.id === folderId) || { id: folderId, label: FOLDER_LABELS[folderId] || folderId, icon: "i-folder" };
 }
 
+function threadMetaKey(ownerId, threadId) {
+  return `${ownerId || ""}:${threadId || ""}`;
+}
+
+function messageOwnerId(message) {
+  return message?.delegateOwnerId || state.user?.id || "";
+}
+
+function threadMetaForMessage(message) {
+  if (!message) return null;
+  const threadId = message.threadId || message.id || "";
+  return state.threadMeta.get(threadMetaKey(messageOwnerId(message), threadId)) || null;
+}
+
+function threadMetaForThread(thread) {
+  return thread ? threadMetaForMessage(thread.latest || thread.messages?.[0]) : null;
+}
+
+function applyThreadMeta(list) {
+  state.threadMeta = new Map();
+  for (const item of Array.isArray(list) ? list : []) {
+    if (!item?.ownerId || !item?.threadId) continue;
+    state.threadMeta.set(threadMetaKey(item.ownerId, item.threadId), item);
+  }
+}
+
+function threadIsClosed(message) {
+  return threadMetaForMessage(message)?.closed === true;
+}
+
 function scopeMessages() {
   let messages;
   if (state.query) {
@@ -4270,6 +4305,10 @@ function scopeMessages() {
     } else {
       messages = state.messages.filter((message) => message.folder === state.folder && !message.ignored && !snoozeActive(message));
     }
+  }
+  if (!state.query) {
+    const closedView = state.filter === "closed";
+    messages = messages.filter((message) => threadIsClosed(message) === closedView);
   }
   if (state.filter === "unread") messages = messages.filter((message) => message.unread);
   if (state.filter === "starred") messages = messages.filter((message) => message.starred);
@@ -5271,6 +5310,20 @@ function mailThreadRowsMarkup(threads) {
   }).join("");
 }
 
+function threadCollabChips(thread) {
+  const meta = threadMetaForThread(thread);
+  if (!meta) return "";
+  const chips = [];
+  if (meta.assignedTo?.name) {
+    const initials = String(meta.assignedTo.name).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+    chips.push(`<span class="msg-collab-assignee" title="Assigned to ${esc(meta.assignedTo.name)}">${esc(initials || meta.assignedTo.name.slice(0, 2))}</span>`);
+  }
+  if (meta.status === "in_progress") chips.push('<span class="msg-collab-status is-progress" title="In progress">In progress</span>');
+  else if (meta.status === "done") chips.push('<span class="msg-collab-status is-done" title="Done"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Done</span>');
+  if (meta.closed) chips.push('<span class="msg-collab-status is-closed" title="Closed"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Closed</span>');
+  return chips.length ? `<span class="msg-collab-chips">${chips.join("")}</span>` : "";
+}
+
 function threadRowMarkup(thread) {
   const { rep, person, label } = threadRowDisplay(thread);
   const selected = thread.id === state.selectedThreadId;
@@ -5289,6 +5342,7 @@ function threadRowMarkup(thread) {
           <div class="msg-top">
             <span class="msg-from">${esc(label)}</span>
             ${threadCount}
+            ${threadCollabChips(thread)}
             ${hasFiles ? `<span class="msg-tag" title="Has attachments"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></span>` : ""}
             ${thread.flagged ? '<span class="msg-flag" title="Flagged for follow-up" aria-label="Flagged for follow-up"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg></span>' : ""}
             ${thread.snoozeReturned ? `<span class="msg-snooze" title="Snoozed · returned ${esc(formatDateTimeFull(thread.snoozeReturnAt))}" aria-label="Snoozed message"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></span>` : ""}
@@ -5705,6 +5759,89 @@ function threadMessageMarkup(message, expanded) {
   </article>`;
 }
 
+function collabStatusLabel(status) {
+  return status === "in_progress" ? "In progress" : status === "done" ? "Done" : "New";
+}
+
+function collabAssigneeOptions(meta) {
+  const assignedEmail = normalizeEmail(meta?.assignedTo?.email || "");
+  const seen = new Set();
+  const options = [`<option value=""${assignedEmail ? "" : " selected"}>Unassigned</option>`];
+  if (state.user) {
+    const email = normalizeEmail(state.user.email);
+    seen.add(email);
+    options.push(`<option value="${esc(email)}"${assignedEmail === email ? " selected" : ""}>Me · ${esc(state.user.name || email)}</option>`);
+  }
+  for (const person of state.people || []) {
+    if (person.source !== "directory") continue;
+    const email = normalizeEmail(person.email);
+    if (!email || seen.has(email)) continue;
+    seen.add(email);
+    options.push(`<option value="${esc(email)}"${assignedEmail === email ? " selected" : ""}>${esc(person.name || email)} · ${esc(email)}</option>`);
+  }
+  if (assignedEmail && !seen.has(assignedEmail)) {
+    options.push(`<option value="${esc(assignedEmail)}" selected>${esc(meta.assignedTo.name || assignedEmail)} · ${esc(assignedEmail)}</option>`);
+  }
+  return options.join("");
+}
+
+function threadCollabMarkup(thread) {
+  const latest = thread.latest || thread.messages[0];
+  const ownerId = messageOwnerId(latest);
+  const meta = threadMetaForThread(thread) || { status: "new", closed: false };
+  const status = meta.status || "new";
+  const closed = meta.closed === true;
+  return `<div class="thread-collab-bar" data-collab-owner="${esc(ownerId)}" data-collab-thread="${esc(thread.id)}">
+      <div class="collab-field"><span>Handling</span><select data-thread-status aria-label="Conversation handling status">
+        ${["new", "in_progress", "done"].map((value) => `<option value="${value}"${status === value ? " selected" : ""}>${esc(collabStatusLabel(value))}</option>`).join("")}
+      </select></div>
+      <div class="collab-field"><span>Assigned</span><select data-thread-assignee aria-label="Assign conversation">${collabAssigneeOptions(meta)}</select></div>
+      <button class="collab-action${closed ? " is-reopen" : ""}" data-thread-close type="button">${closed ? "Reopen conversation" : "Close conversation"}</button>
+      <button class="collab-action" data-thread-notes-toggle type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Team notes</button>
+      ${closed ? '<span class="collab-chip is-closed"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Closed</span>' : ""}
+    </div>
+    <div class="thread-notes-panel" data-thread-notes-panel data-owner-id="${esc(ownerId)}" data-thread-id="${esc(thread.id)}" hidden></div>`;
+}
+
+async function patchThreadCollaboration(thread, ownerId, patch) {
+  if (!thread) return;
+  try {
+    const data = await api(`/api/threads/${encodeURIComponent(thread.id)}/meta`, {
+      method: "PATCH", body: { ownerId, ...patch }
+    });
+    if (data?.meta) state.threadMeta.set(threadMetaKey(ownerId, thread.id), data.meta);
+    renderList({ preserveScroll: true });
+    renderReader({ preserveScroll: true });
+    showToast("Conversation handling updated.");
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function threadNoteMarkup(note, canModerate = false) {
+  const canDelete = canModerate || note.authorId === state.user?.id;
+  return `<div class="thread-note" data-thread-note="${esc(note.id)}">
+    <div class="thread-note-head"><strong>${esc(note.authorName || note.authorEmail)}</strong><time>${esc(formatListWhen(note.createdAt))}</time>
+      ${canDelete ? `<button class="icon-btn thread-note-delete" type="button" data-thread-note-delete="${esc(note.id)}" title="Remove note" aria-label="Remove note"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>` : ""}
+    </div>
+    <p>${esc(note.body)}</p>
+  </div>`;
+}
+
+async function renderThreadNotesPanel(thread, ownerId, panel) {
+  if (!panel) return;
+  panel.innerHTML = `<div class="thread-notes-loading">Loading team notes…</div>`;
+  try {
+    const data = await api(`/api/thread-notes?threadId=${encodeURIComponent(thread.id)}&ownerId=${encodeURIComponent(ownerId)}`);
+    const notes = Array.isArray(data.notes) ? data.notes : [];
+    panel.innerHTML = `<div class="thread-notes-head"><div><strong>Team notes</strong><span>Internal only · visible to mailbox delegates · audited</span></div><button class="icon-btn" type="button" data-thread-notes-close aria-label="Close team notes"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="thread-notes-list">${notes.length ? notes.map((note) => threadNoteMarkup(note, ownerId === state.user?.id)).join("") : '<p class="thread-notes-empty">No internal notes yet.</p>'}</div>
+      <form class="thread-note-form" data-thread-note-form><textarea rows="2" maxlength="2000" placeholder="Add a note for the team…" data-thread-note-input></textarea><button class="btn-secondary small" type="submit">Add note</button></form>`;
+  } catch (error) {
+    panel.innerHTML = `<div class="thread-notes-loading">${esc(error.message || "Could not load team notes.")}</div>`;
+  }
+}
+
 function renderReader({ preserveScroll = false } = {}) {
   const thread = currentThread();
   if (!thread) {
@@ -5799,6 +5936,7 @@ function renderReader({ preserveScroll = false } = {}) {
         <button class="reader-subject-nav" data-reader-next type="button" aria-label="Next conversation" title="Next conversation"${canNext ? "" : " disabled"}><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
       </div>
     </div>
+    ${threadCollabMarkup(thread)}
     ${readerAiCardMarkup(thread)}
     ${commitmentsChip}
     ${externalBannerMarkup(thread)}
@@ -8610,6 +8748,16 @@ function addRecipientEntry(session, field, entry, { focus = true } = {}) {
   return true;
 }
 
+function mentionMapFrom(values) {
+  const map = new Map();
+  for (const raw of Array.isArray(values) ? values : []) {
+    const email = normalizeEmail(typeof raw === "string" ? raw : raw?.email);
+    if (!email || map.has(email)) continue;
+    map.set(email, { email, name: String(typeof raw === "string" ? "" : raw?.name || email) });
+  }
+  return map;
+}
+
 function renderComposeToneChip(session) {
   const chip = session.el?.querySelector("[data-compose-tone-chip]");
   if (!chip) return;
@@ -8664,6 +8812,132 @@ function scheduleToneSuggestion(session) {
       renderComposeToneChip(session);
     }
   }, 650);
+}
+
+function composeMentionCandidates(query) {
+  const needle = String(query || "").toLowerCase();
+  const me = normalizeEmail(state.user?.email);
+  return (state.people || [])
+    .filter((person) => person.source === "directory" && normalizeEmail(person.email) !== me)
+    .filter((person) => !needle || String(person.name || "").toLowerCase().includes(needle) || String(person.email || "").toLowerCase().includes(needle))
+    .slice(0, 6);
+}
+
+function composeMentionContext(session) {
+  const editor = session.el?.querySelector("[data-compose-editor]");
+  if (editor) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    const node = selection.anchorNode;
+    if (!node || node.nodeType !== Node.TEXT_NODE || !editor.contains(node)) return null;
+    const before = String(node.nodeValue || "").slice(0, selection.anchorOffset);
+    const match = before.match(/(?:^|[\s(])@([\p{L}\p{N}._-]{0,40})$/u);
+    if (!match) return null;
+    const start = selection.anchorOffset - match[1].length - 1;
+    const range = selection.getRangeAt(0).cloneRange();
+    range.collapse(true);
+    return {
+      field: "html", node, start, end: selection.anchorOffset, query: match[1],
+      rect: range.getBoundingClientRect(), editor
+    };
+  }
+  const textarea = session.el?.querySelector('textarea[data-compose-field="body"]');
+  if (!textarea) return null;
+  const before = String(textarea.value || "").slice(0, textarea.selectionStart);
+  const match = before.match(/(?:^|[\s(])@([\p{L}\p{N}._-]{0,40})$/u);
+  if (!match) return null;
+  return {
+    field: "text", element: textarea, start: textarea.selectionStart - match[1].length - 1,
+    end: textarea.selectionStart, query: match[1], rect: textarea.getBoundingClientRect()
+  };
+}
+
+function closeComposeMentionMenu(session) {
+  if (!session) return;
+  session.mentionMenu?.remove();
+  session.mentionMenu = null;
+  session.mentionCtx = null;
+}
+
+function placeComposeMentionMenu(menu, rect) {
+  const width = Math.min(310, window.innerWidth - 24);
+  const left = Math.min(window.innerWidth - width - 12, Math.max(12, rect.left || 12));
+  let top = (rect.bottom || rect.top || 12) + 5;
+  const height = menu.offsetHeight;
+  if (top + height > window.innerHeight - 12) top = Math.max(12, (rect.top || 12) - height - 5);
+  menu.style.width = `${width}px`;
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function showComposeMentionMenu(session, ctx) {
+  closeComposeMentionMenu(session);
+  const people = composeMentionCandidates(ctx.query);
+  if (!people.length) return;
+  session.mentionCtx = ctx;
+  const menu = document.createElement("div");
+  menu.className = "compose-mention-menu";
+  menu.setAttribute("role", "listbox");
+  menu.innerHTML = people.map((person) => `<button type="button" role="option" data-mention-email="${esc(person.email)}"><span class="compose-mention-name">${esc(person.name || person.email)}</span><span class="compose-mention-address">${esc(person.email)}</span></button>`).join("");
+  menu.addEventListener("mousedown", (event) => event.preventDefault());
+  menu.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-mention-email]");
+    if (!option) return;
+    const person = people.find((item) => normalizeEmail(item.email) === normalizeEmail(option.getAttribute("data-mention-email")));
+    if (person) insertComposeMention(session, person);
+  });
+  document.body.appendChild(menu);
+  session.mentionMenu = menu;
+  placeComposeMentionMenu(menu, ctx.rect);
+}
+
+function refreshComposeMentionPicker(session) {
+  const ctx = composeMentionContext(session);
+  if (!ctx) {
+    closeComposeMentionMenu(session);
+    return;
+  }
+  showComposeMentionMenu(session, ctx);
+}
+
+function insertComposeMention(session, person) {
+  const ctx = session.mentionCtx;
+  const email = normalizeEmail(person.email);
+  if (!ctx || !email) return;
+  const insertion = "@" + (person.name || email) + " ";
+  session.mentions.set(email, { email, name: person.name || email });
+  if (ctx.field === "html" && ctx.node) {
+    const text = String(ctx.node.nodeValue || "");
+    ctx.node.nodeValue = text.slice(0, ctx.start) + insertion + text.slice(ctx.end);
+    const range = document.createRange();
+    range.setStart(ctx.node, ctx.start + insertion.length);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    ctx.editor.focus();
+    ctx.editor.dispatchEvent(new Event("input", { bubbles: true }));
+  } else if (ctx.field === "text" && ctx.element) {
+    ctx.element.setRangeText(insertion, ctx.start, ctx.end, "end");
+    ctx.element.focus();
+    ctx.element.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  closeComposeMentionMenu(session);
+}
+
+function openComposeMentionPicker(session) {
+  const editor = session.el?.querySelector("[data-compose-editor]");
+  if (editor) {
+    editor.focus();
+    document.execCommand("insertText", false, "@");
+  } else {
+    const textarea = session.el?.querySelector('textarea[data-compose-field="body"]');
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setRangeText("@", textarea.selectionStart, textarea.selectionEnd, "end");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  refreshComposeMentionPicker(session);
 }
 
 function commitRecipientInput(session, field, { focus = true } = {}) {
@@ -8799,6 +9073,10 @@ function composeAiToolbarButton() {
   return `<button type="button" class="compose-ai-btn" data-compose-action="ai" title="AI writing assistant" aria-label="AI writing assistant"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span class="compose-ai-label">AI</span></button>`;
 }
 
+function composeMentionToolbarButton() {
+  return `<button type="button" class="compose-mention-btn" data-compose-action="mention" title="Mention a coworker" aria-label="Mention a coworker">@</button>`;
+}
+
 function composeLightButton(session) {
   return `<button type="button" class="editor-light-btn" data-compose-action="editor-light" title="Light writing area" aria-label="Toggle light writing area" aria-pressed="${session.editorLight ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-bulb"/></svg></button>`;
 }
@@ -8873,6 +9151,7 @@ function composeEditorToolbar(session) {
     <button type="button" data-compose-action="source" title="Edit HTML source" aria-label="Edit HTML source">&lt;&gt;</button>
     ${session.hasQuote ? `<span class="editor-sep"></span><button type="button" data-compose-action="toggle-quote" class="compose-quote-toggle${session.quoteCollapsed ? " is-active" : ""}" title="${session.quoteCollapsed ? "Show quoted message" : "Hide quoted message"}" aria-pressed="${session.quoteCollapsed ? "true" : "false"}">❝ Quote</button>` : ""}
     ${composeAiToolbarButton()}
+    ${composeMentionToolbarButton()}
     ${composeLightButton(session)}
     <span class="compose-toolbar-mode">
       <button type="button" data-compose-action="mode" data-mode="html" class="${session.htmlMode ? "is-active" : ""}">HTML</button>
@@ -8893,7 +9172,7 @@ function composeTemplate(session) {
   const lightClass = session.editorLight ? " is-editor-light" : "";
   const bodyField = htmlMode
     ? `<div class="compose-editor-wrap${lightClass}">${composeEditorToolbar(session)}<div class="compose-editor${session.quoteCollapsed ? " is-quote-collapsed" : ""}" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…">${editorHTML}</div>${composeAiThinkingMarkup(session)}</div>`
-    : `<div class="compose-editor-wrap${lightClass}"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${aiButton}${composeLightButton(session)}${modeSwitch}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea>${composeAiThinkingMarkup(session)}</div>`;
+    : `<div class="compose-editor-wrap${lightClass}"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${aiButton}${composeMentionToolbarButton()}${composeLightButton(session)}${modeSwitch}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea>${composeAiThinkingMarkup(session)}</div>`;
   return `<section class="compose${htmlMode ? " has-html-editor" : ""}" data-compose-id="${esc(session.id)}" role="dialog" aria-label="${esc(title)}">
     <div class="compose-head" data-compose-head>
       <span class="compose-grip" aria-hidden="true"></span>
@@ -9044,6 +9323,9 @@ function openCompose(prefill = {}, options = {}) {
     toneSuggestion: null,
     toneTimer: null,
     toneStyle: "",
+    mentions: mentionMapFrom(data.mentions),
+    mentionMenu: null,
+    mentionCtx: null,
     kind: data.kind || "",
     ccOpen: Boolean(data.ccText || data.cc || data.bccText || data.bcc),
     optionsOpen: false,
@@ -9114,6 +9396,7 @@ function openComposeFromDraft(draft, options = {}) {
     delivery: draft.delivery,
     saveCopy: draft.saveCopy,
     attachments: draft.attachments,
+    mentions: draft.mentions || [],
     threadId: draft.threadId,
     inReplyTo: draft.inReplyTo,
     sourceMessageId: draft.sourceMessageId || "",
@@ -9923,6 +10206,7 @@ function expandComposeSession(id) {
 
 function removeComposeSessionUi(id) {
   const session = sessionById(id);
+  closeComposeMentionMenu(session);
   if (session && session.el) session.el.remove();
   if (attachPickerSessionId === id) closeComposeAttach();
   composeSessions = composeSessions.filter((item) => item.id !== id);
@@ -9971,6 +10255,15 @@ async function closeComposeSession(id, { discard = false } = {}) {
   showToast("Draft saved on the server");
 }
 
+function activeComposeMentions(session) {
+  const haystack = `${session.body || ""} ${stripHtml(session.bodyHtml || "")}`.toLowerCase();
+  return Array.from(session.mentions.values()).filter((mention) => {
+    const name = String(mention.name || "").toLowerCase();
+    const email = String(mention.email || "").toLowerCase();
+    return (name && haystack.includes("@" + name)) || (email && haystack.includes("@" + email));
+  });
+}
+
 function composePayload(session) {
   flushRecipientInputs(session);
   return {
@@ -9982,6 +10275,7 @@ function composePayload(session) {
     bodyHtml: session.htmlMode ? restoreEditorImageSources(session.bodyHtml) : "",
     fromEmail: session.fromEmail,
     attachments: session.files,
+    mentions: activeComposeMentions(session),
     threadId: session.threadId,
     inReplyTo: session.inReplyTo,
     composeKind: session.kind || "",
@@ -10417,6 +10711,7 @@ function composeSendPayload(session, extra = {}) {
     bodyText: session.body,
     bodyHtml: session.htmlMode ? restoreEditorImageSources(session.bodyHtml) : "",
     attachments: session.files,
+    mentions: activeComposeMentions(session),
     threadId: session.threadId,
     inReplyTo: session.inReplyTo,
     composeKind: session.kind || "",
@@ -16365,7 +16660,8 @@ const LIST_FILTERS = [
   { id: "toMe", label: "To me", icon: "i-arrow-left" },
   { id: "attachments", label: "Has files", icon: "i-paperclip" },
   { id: "mentions", label: "Mentions me", icon: "i-at" },
-  { id: "calendar", label: "Has calendar invites", icon: "i-calendar" }
+  { id: "calendar", label: "Has calendar invites", icon: "i-calendar" },
+  { id: "closed", label: "Closed conversations", icon: "i-check-circle" }
 ];
 
 function listFilterLabel(filter = state.filter) {
@@ -16589,6 +16885,8 @@ function notificationIconName(kind) {
   if (kind === "security") return "i-shield-check";
   if (kind === "scheduled") return "i-calendar-clock";
   if (kind === "quota") return "i-alert";
+  if (kind === "mention") return "i-at";
+  if (kind === "assignment") return "i-users";
   return "i-bell";
 }
 
@@ -16692,8 +16990,27 @@ function buildNotifications() {
       action: { type: "security" }
     });
   }
+  for (const notification of state.serverNotifications || []) {
+    if (!notification?.id) continue;
+    const id = "server:" + notification.id;
+    add({
+      id,
+      kind: notification.kind === "mention" ? "mention" : notification.kind === "assignment" ? "assignment" : "system",
+      title: notification.title || "Workspace notification",
+      body: notification.body || "",
+      detail: notification.detail || "",
+      time: notification.createdAt,
+      unread: !notification.readAt && !state.dismissedNotifications.has(id),
+      action: {
+        type: notification.kind === "mention" ? "mention" : notification.kind === "assignment" ? "assignment" : "security",
+        threadId: notification.threadId,
+        messageId: notification.messageId,
+        ownerId: notification.ownerId
+      }
+    });
+  }
   return items
-    .map((item) => ({ ...item, unread: !state.dismissedNotifications.has(item.id) }))
+    .map((item) => ({ ...item, unread: !state.dismissedNotifications.has(item.id) && item.unread !== false }))
     .sort((a, b) => Date.parse(b.time || 0) - Date.parse(a.time || 0));
 }
 
@@ -16718,6 +17035,28 @@ function noticeCenterRowMarkup(item) {
       <button class="icon-btn" data-notice-open="${esc(item.id)}" type="button" aria-label="Open notification" title="Open"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
     </div>
   </div>`;
+}
+
+let notificationRefreshTimer = null;
+
+async function refreshServerNotifications() {
+  if (!state.user || !state.csrf) return;
+  try {
+    const data = await api("/api/notifications");
+    state.serverNotifications = Array.isArray(data.notifications) ? data.notifications : [];
+    renderNotifications();
+  } catch {
+    // Background refresh failures leave the last known list in place.
+  }
+}
+
+function startNotificationRefresh() {
+  if (notificationRefreshTimer) return;
+  notificationRefreshTimer = setInterval(refreshServerNotifications, 60_000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshServerNotifications();
+  });
+  window.addEventListener("focus", () => refreshServerNotifications());
 }
 
 function renderNotifications() {
@@ -16754,7 +17093,7 @@ function renderNoticeCenter() {
   const filter = state.noticeFilter || "all";
   let list = state.notifications || buildNotifications();
   if (filter === "unread") list = list.filter((item) => item.unread);
-  else if (filter === "mail") list = list.filter((item) => item.kind === "mail" || item.kind === "scheduled");
+  else if (filter === "mail") list = list.filter((item) => ["mail", "scheduled", "mention", "assignment"].includes(item.kind));
   else if (filter === "system") list = list.filter((item) => item.kind === "security" || item.kind === "calendar" || item.kind === "quota");
   const unread = list.filter((item) => item.unread).length;
   if (noticeCount) noticeCount.textContent = `${list.length} notification${list.length === 1 ? "" : "s"}${unread ? ` · ${unread} unread` : ""}`;
@@ -16776,6 +17115,11 @@ function renderNoticeCenter() {
 
 function markNotificationRead(id) {
   state.dismissedNotifications.add(id);
+  if (String(id).startsWith("server:")) {
+    const raw = String(id).slice("server:".length);
+    state.serverNotifications = (state.serverNotifications || []).map((item) => item.id === raw ? { ...item, readAt: new Date().toISOString() } : item);
+    api(`/api/notifications/${encodeURIComponent(raw)}/read`, { method: "POST", body: {} }).catch(() => {});
+  }
   persistDismissedNotifications();
   state.notifications = buildNotifications();
   const unread = state.notifications.filter((item) => item.unread).length;
@@ -16789,6 +17133,8 @@ function markNotificationRead(id) {
 
 function markAllNotificationsRead() {
   state.notifications.forEach((item) => state.dismissedNotifications.add(item.id));
+  state.serverNotifications = (state.serverNotifications || []).map((item) => ({ ...item, readAt: item.readAt || new Date().toISOString() }));
+  api("/api/notifications/read-all", { method: "POST", body: {} }).catch(() => {});
   persistDismissedNotifications();
   renderNotifications();
   if (!noticeLayer.hidden) renderNoticeCenter();
@@ -16808,6 +17154,29 @@ function handleNotificationAction(id) {
     if (selection) selectThread(selection);
   } else if (item.action?.type === "scheduled") {
     setTask("scheduled");
+  } else if (item.action?.type === "mention" || item.action?.type === "assignment") {
+    setTask("mail");
+    const ownerId = item.action.ownerId || "";
+    if (ownerId && ownerId !== state.user?.id) {
+      const folderId = "delegate_" + ownerId;
+      if (!state.folders.some((folder) => folder.id === folderId)) {
+        showToast("This conversation is in a shared mailbox you cannot open.");
+        return;
+      }
+      setFolder(folderId);
+    } else {
+      setFolder("inbox");
+    }
+    const threadId = item.action.threadId || item.action.messageId;
+    if (threadId) {
+      setTimeout(() => {
+        if (!threadById(threadId) && !messageById(threadId)) {
+          showToast("This conversation is in a mailbox you do not have access to.");
+          return;
+        }
+        selectThread(threadId);
+      }, 280);
+    }
   } else if (item.action?.type === "calendar") {
     setTask("calendar");
   } else if (item.action?.type === "account") {
@@ -18086,6 +18455,9 @@ function bindEvents() {
   });
   window.addEventListener("resize", closeReaderAiMenus);
   document.addEventListener("click", (event) => {
+    if (!event.target.closest(".compose-mention-menu")) {
+      composeSessions.forEach(closeComposeMentionMenu);
+    }
     const catchUpDismiss = event.target.closest("[data-catchup-dismiss]");
     if (catchUpDismiss) {
       const since = state.catchUp?.since;
@@ -18099,6 +18471,49 @@ function bindEvents() {
     if (event.target.closest("[data-catchup-unread]")) {
       state.catchUp = null;
       setFilter("unread");
+      return;
+    }
+    const threadCloseButton = event.target.closest("[data-thread-close]");
+    if (threadCloseButton) {
+      const bar = threadCloseButton.closest(".thread-collab-bar");
+      const thread = bar ? threadById(bar.getAttribute("data-collab-thread")) : null;
+      if (bar && thread) {
+        const meta = threadMetaForThread(thread);
+        patchThreadCollaboration(thread, bar.getAttribute("data-collab-owner"), { closed: !(meta?.closed === true) });
+      }
+      return;
+    }
+    const notesToggle = event.target.closest("[data-thread-notes-toggle]");
+    if (notesToggle) {
+      const panel = notesToggle.closest(".thread-collab-bar")?.nextElementSibling?.matches("[data-thread-notes-panel]")
+        ? notesToggle.closest(".thread-collab-bar").nextElementSibling
+        : document.querySelector("[data-thread-notes-panel]");
+      const thread = currentThread();
+      if (panel && thread) {
+        if (panel.hidden) {
+          panel.hidden = false;
+          renderThreadNotesPanel(thread, panel.getAttribute("data-owner-id"), panel);
+        } else {
+          panel.hidden = true;
+        }
+      }
+      return;
+    }
+    if (event.target.closest("[data-thread-notes-close]")) {
+      const panel = event.target.closest("[data-thread-notes-panel]");
+      if (panel) panel.hidden = true;
+      return;
+    }
+    const noteDelete = event.target.closest("[data-thread-note-delete]");
+    if (noteDelete) {
+      const panel = noteDelete.closest("[data-thread-notes-panel]");
+      const thread = panel ? threadById(panel.getAttribute("data-thread-id")) : null;
+      if (panel && thread) {
+        const ownerId = panel.getAttribute("data-owner-id");
+        api(`/api/threads/${encodeURIComponent(thread.id)}/notes/${encodeURIComponent(noteDelete.getAttribute("data-thread-note-delete"))}`, {
+          method: "DELETE", body: { ownerId }
+        }).then(() => renderThreadNotesPanel(thread, ownerId, panel)).catch(showError);
+      }
       return;
     }
     if (event.target.closest("[data-ai-reader-close]")) { closeReaderAi(); return; }
@@ -18301,6 +18716,18 @@ function bindEvents() {
   /* regional, task, file and schedule inputs */
   document.addEventListener("change", (event) => {
     const target = event.target;
+    if (target.matches("[data-thread-status], [data-thread-assignee]")) {
+      const bar = target.closest(".thread-collab-bar");
+      const thread = bar ? threadById(bar.getAttribute("data-collab-thread")) : null;
+      if (bar && thread) {
+        if (target.matches("[data-thread-status]")) {
+          patchThreadCollaboration(thread, bar.getAttribute("data-collab-owner"), { status: target.value });
+        } else {
+          patchThreadCollaboration(thread, bar.getAttribute("data-collab-owner"), { assignedTo: target.value });
+        }
+      }
+      return;
+    }
     if (target.id === "languageSelect") {
       prefs.set("language", target.value);
       setLocale(target.value).catch(() => {});
@@ -18362,7 +18789,22 @@ function bindEvents() {
     if (target.id === "scheduledEditDate" || target.id === "scheduledEditTime") updateScheduledEditInsight();
   });
   document.addEventListener("submit", (event) => {
-    if (event.target && event.target.id === "taskEditorForm") { saveTaskForm(event); }
+    if (event.target && event.target.id === "taskEditorForm") { saveTaskForm(event); return; }
+    const noteForm = event.target.closest?.("[data-thread-note-form]");
+    if (noteForm) {
+      event.preventDefault();
+      const panel = noteForm.closest("[data-thread-notes-panel]");
+      const thread = panel ? threadById(panel.getAttribute("data-thread-id")) : null;
+      const input = noteForm.querySelector("[data-thread-note-input]");
+      const body = String(input?.value || "").trim();
+      if (!panel || !thread || !body) return;
+      const ownerId = panel.getAttribute("data-owner-id");
+      const button = noteForm.querySelector("button[type=submit]");
+      if (button) button.disabled = true;
+      api(`/api/threads/${encodeURIComponent(thread.id)}/notes`, { method: "POST", body: { ownerId, body } })
+        .then(() => renderThreadNotesPanel(thread, ownerId, panel))
+        .catch((error) => { if (button) button.disabled = false; showError(error); });
+    }
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -18492,6 +18934,7 @@ function bindEvents() {
           if (ok) closeComposeSession(session.id, { discard: true });
         });
       } else if (kind === "attach") { openComposeAttach(session.id); }
+      else if (kind === "mention") { openComposeMentionPicker(session); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
       else if (kind === "editor-light") { setEditorLight(session, !session.editorLight); }
       else if (kind === "toggle-quote") { toggleComposeQuote(session); }
@@ -18518,6 +18961,7 @@ function bindEvents() {
     if (!session) return;
     if (event.target.matches("[data-compose-editor]")) {
       updateComposeEditor(session, event.target);
+      if (event.type === "input") refreshComposeMentionPicker(session);
       return;
     }
     if (event.target.matches("[data-ai-compose-attachment]")) {
@@ -18535,7 +18979,10 @@ function bindEvents() {
       return;
     }
     const field = event.target.closest("[data-compose-field]");
-    if (field) updateComposeField(session, field);
+    if (field) {
+      updateComposeField(session, field);
+      if (event.type === "input" && field.matches('[data-compose-field="body"]')) refreshComposeMentionPicker(session);
+    }
   };
   composeLayer.addEventListener("input", handleComposeFieldEvent);
   composeLayer.addEventListener("change", handleComposeFieldEvent);
@@ -18543,10 +18990,31 @@ function bindEvents() {
     if (event.target.closest(".recipient-suggestion")) event.preventDefault();
   }, true);
   composeLayer.addEventListener("keydown", (event) => {
+    const section = event.target.closest(".compose[data-compose-id]");
+    const activeSession = section ? sessionById(section.getAttribute("data-compose-id")) : null;
+    if (activeSession?.mentionMenu) {
+      const options = [...activeSession.mentionMenu.querySelectorAll("[data-mention-email]")];
+      let index = options.findIndex((option) => option.classList.contains("is-active"));
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        index = event.key === "ArrowDown" ? (index + 1) % options.length : (index <= 0 ? options.length - 1 : index - 1);
+        options.forEach((option, itemIndex) => option.classList.toggle("is-active", itemIndex === index));
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        (options[index] || options[0])?.click();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeComposeMentionMenu(activeSession);
+        return;
+      }
+    }
     const input = event.target.closest("[data-recipient-input]");
     if (!input) return;
-    const section = input.closest(".compose[data-compose-id]");
-    const session = sessionById(section?.getAttribute("data-compose-id"));
+    const session = sessionById(input.closest(".compose[data-compose-id]")?.getAttribute("data-compose-id"));
     if (session) recipientKeydown(event, session, input);
   });
   composeLayer.addEventListener("paste", (event) => {

@@ -82,6 +82,15 @@ func (s *Server) policyDecision(ctx context.Context, attrs map[string]string) st
 		return "action=DUNNO"
 	}
 	if blocked, err := s.securityReportBlocked(ctx, sender); err == nil && blocked {
+		_, _ = s.db.Exec(ctx, `
+			INSERT INTO public.security_block_events (sender_email, recipient_domain)
+			SELECT $1, $2
+			WHERE NOT EXISTS (
+				SELECT 1 FROM public.security_block_events
+				WHERE sender_email=$1 AND recipient_domain=$2
+				  AND blocked_at > now() - interval '1 hour'
+			)
+		`, sender, emailDomain(recipient))
 		return "action=REJECT 5.7.1 Sender blocked by Alt8Mail Security review"
 	} else if err != nil {
 		s.logger.Warn("security report policy lookup failed", "err", err)

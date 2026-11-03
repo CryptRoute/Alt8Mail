@@ -161,6 +161,33 @@ export async function createApp(options = {}) {
   }
   if (!db.user.preferences) db.user.preferences = {};
   if (!db.user.security) db.user.security = { twoFactor: { enabled: false } };
+  if (!db.user.id) db.user.id = "user_demo_avery";
+  ensureCollaborationSeed();
+
+  function ensureCollaborationSeed() {
+    if (!Array.isArray(db.threadMeta)) db.threadMeta = [];
+    if (!Array.isArray(db.threadNotes)) db.threadNotes = [];
+    if (!Array.isArray(db.notifications)) db.notifications = [];
+    if (db.threadMeta.length || db.threadNotes.length || db.notifications.length) return;
+    db.threadMeta.push({
+      ownerId: db.user.id, threadId: "N2Acmhe6TzJMY7c6L5yRfg", status: "in_progress",
+      assignedTo: { id: "user_elena", name: "Elena Vasquez", email: "elena.vasquez@a8m.example" },
+      closed: false, updatedAt: nowIso()
+    });
+    db.threadMeta.push({
+      ownerId: db.user.id, threadId: "2z5Ft5gFLRaxGO7OORpmcw", status: "done",
+      assignedTo: { id: "user_priya", name: "Priya Shah", email: "priya.shah@a8m.example" },
+      closed: true, closedAt: nowIso(), updatedAt: nowIso()
+    });
+    db.notifications.push({
+      id: "ntf_demo_mention", kind: "mention", title: "Elena Vasquez mentioned you",
+      body: "Q4 roadmap review — Thursday 10:00",
+      detail: "Could you bring the latest macro library estimate?",
+      actorName: "Elena Vasquez", actorEmail: "elena.vasquez@a8m.example",
+      threadId: "N2Acmhe6TzJMY7c6L5yRfg", messageId: "m3", ownerId: db.user.id,
+      readAt: null, createdAt: nowIso()
+    });
+  }
 
   const sessions = new Map();
   const sendTimers = new Map();
@@ -733,6 +760,20 @@ export async function createApp(options = {}) {
     });
   }
 
+  function normalizeMentions(input) {
+    if (!Array.isArray(input)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const raw of input) {
+      const email = normalizeEmail(typeof raw === "string" ? raw : (raw && raw.email) || "");
+      if (!email || !looksLikeEmail(email) || seen.has(email)) continue;
+      seen.add(email);
+      out.push({ email });
+      if (out.length >= 20) break;
+    }
+    return out;
+  }
+
   function aliasForEmail(email) {
     return db.user.aliases.find((alias) => alias.canSend && normalizeEmail(alias.email) === normalizeEmail(email)) || null;
   }
@@ -794,6 +835,7 @@ export async function createApp(options = {}) {
       starred: false,
       draft: true,
       attachments,
+      mentions: normalizeMentions(input.mentions || (existing && existing.mentions) || []),
       categories: [],
       classification: "Internal",
       external: false,
@@ -845,6 +887,7 @@ export async function createApp(options = {}) {
       bodyText: item.bodyText || "",
       bodyHtml: textToHtml(item.bodyText || ""),
       attachments: item.attachments || [],
+      mentions: normalizeMentions(item.mentions || snapshot.mentions || []),
       date: now,
       updatedAt: now,
       createdAt: snapshot.createdAt || now,
@@ -1010,6 +1053,8 @@ export async function createApp(options = {}) {
       quota: quotaInfo(),
       outbound: outboundInfo(),
       pendingSends: db.outbox.map(publicOutboxItem),
+      threadMeta: db.threadMeta.slice(),
+      serverNotifications: db.notifications.slice().sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 50),
       signatures: db.signatures,
       ai: { enabled: aiEnabled, languages: [], styles: [] },
       push: { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true },
@@ -1834,6 +1879,12 @@ export async function createApp(options = {}) {
         if (query) messages = getIndex().search(query).messages;
         else if (folder === "starred") messages = db.messages.filter((message) => message.starred);
         else messages = db.messages.filter((message) => message.folder === folder);
+        if (!query) {
+          const closedThreads = new Set(db.threadMeta.filter((item) => item.ownerId === db.user.id && item.closed).map((item) => item.threadId));
+          messages = filter === "closed"
+            ? messages.filter((message) => closedThreads.has(message.threadId))
+            : messages.filter((message) => !closedThreads.has(message.threadId));
+        }
         if (filter === "unread") messages = messages.filter((message) => message.unread);
         if (filter === "starred") messages = messages.filter((message) => message.starred);
         if (filter === "attachments") messages = messages.filter((message) => (message.attachments || []).length);
@@ -2068,6 +2119,131 @@ export async function createApp(options = {}) {
         return;
       }
 
+      if (pathname === "/api/thread-meta" && req.method === "GET") {
+        const threadId = String(url.searchParams.get("threadId") || "");
+        const ownerId = String(url.searchParams.get("ownerId") || db.user.id);
+        if (ownerId !== db.user.id) throw new ApiError(403, "THREAD_FORBIDDEN", "You do not have access to this shared mailbox");
+        if (threadId) {
+          const meta = db.threadMeta.find((item) => item.ownerId === ownerId && item.threadId === threadId)
+            || { ownerId, threadId, status: "new", assignedTo: null, closed: false };
+          sendJson(res, 200, { meta });
+        } else {
+          sendJson(res, 200, { meta: db.threadMeta.filter((item) => item.ownerId === ownerId) });
+        }
+        return;
+      }
+
+      const threadMetaMatch = pathname.match(/^\/api\/threads\/([^/]{1,120})\/meta$/);
+      if (threadMetaMatch && req.method === "PATCH") {
+        const body = await readJson(req);
+        const threadId = decodeURIComponent(threadMetaMatch[1]);
+        const ownerId = String(body.ownerId || db.user.id);
+        if (ownerId !== db.user.id) throw new ApiError(403, "THREAD_FORBIDDEN", "You do not have access to this shared mailbox");
+        if (!db.messages.some((message) => message.threadId === threadId)) throw new ApiError(404, "THREAD_NOT_FOUND", "Conversation not found");
+        let meta = db.threadMeta.find((item) => item.ownerId === ownerId && item.threadId === threadId);
+        if (!meta) {
+          meta = { ownerId, threadId, status: "new", assignedTo: null, closed: false };
+          db.threadMeta.push(meta);
+        }
+        if (body.status !== undefined) {
+          const status = String(body.status || "new");
+          if (!["new", "in_progress", "done"].includes(status)) throw new ApiError(400, "THREAD_STATUS", "Status must be new, in_progress or done");
+          meta.status = status;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "assignedTo")) {
+          const email = normalizeEmail(body.assignedTo || "");
+          if (!email) meta.assignedTo = null;
+          else if (email === normalizeEmail(db.user.email)) {
+            meta.assignedTo = { id: db.user.id, name: db.user.name, email: db.user.email };
+          } else {
+            const person = db.people.find((entry) => (entry.source || "directory") === "directory" && normalizeEmail(entry.email) === email);
+            if (!person) throw new ApiError(400, "THREAD_ASSIGNEE", "Choose an active person in this organization");
+            meta.assignedTo = { id: "user_" + email.split("@")[0].replace(/[^a-z0-9]/g, ""), name: person.name, email: person.email };
+          }
+        }
+        if (typeof body.closed === "boolean") {
+          meta.closed = body.closed;
+          if (body.closed) meta.closedAt = nowIso();
+          else delete meta.closedAt;
+        }
+        meta.updatedAt = nowIso();
+        await store.save();
+        sendJson(res, 200, { ok: true, meta });
+        return;
+      }
+
+      if (pathname === "/api/thread-notes" && req.method === "GET") {
+        const threadId = String(url.searchParams.get("threadId") || "");
+        const ownerId = String(url.searchParams.get("ownerId") || db.user.id);
+        if (ownerId !== db.user.id) throw new ApiError(403, "THREAD_FORBIDDEN", "You do not have access to this shared mailbox");
+        if (!threadId) throw new ApiError(400, "THREAD", "A conversation is required");
+        const notes = db.threadNotes
+          .filter((note) => note.ownerId === ownerId && note.threadId === threadId)
+          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+        sendJson(res, 200, { notes });
+        return;
+      }
+
+      const threadNotesMatch = pathname.match(/^\/api\/threads\/([^/]{1,120})\/notes$/);
+      if (threadNotesMatch && req.method === "POST") {
+        const body = await readJson(req);
+        const threadId = decodeURIComponent(threadNotesMatch[1]);
+        const ownerId = String(body.ownerId || db.user.id);
+        if (ownerId !== db.user.id) throw new ApiError(403, "THREAD_FORBIDDEN", "You do not have access to this shared mailbox");
+        if (!db.messages.some((message) => message.threadId === threadId)) throw new ApiError(404, "THREAD_NOT_FOUND", "Conversation not found");
+        const text = String(body.body || "").trim();
+        if (!text || [...text].length > 2000) throw new ApiError(400, "THREAD_NOTE", "Write a note of 1–2000 characters");
+        const note = {
+          id: id("note"), authorId: db.user.id, authorName: db.user.name, authorEmail: db.user.email,
+          body: text, createdAt: nowIso(), ownerId, threadId
+        };
+        db.threadNotes.push(note);
+        addAudit(req, "thread.note_added", threadId, "Added an internal team note");
+        await store.save();
+        sendJson(res, 200, { ok: true, note });
+        return;
+      }
+
+      const threadNoteMatch = pathname.match(/^\/api\/threads\/([^/]{1,120})\/notes\/([A-Za-z0-9_-]{1,100})$/);
+      if (threadNoteMatch && req.method === "DELETE") {
+        const body = await readJson(req);
+        const threadId = decodeURIComponent(threadNoteMatch[1]);
+        const noteId = threadNoteMatch[2];
+        const ownerId = String(body.ownerId || db.user.id);
+        if (ownerId !== db.user.id) throw new ApiError(403, "THREAD_FORBIDDEN", "You do not have access to this shared mailbox");
+        const index = db.threadNotes.findIndex((note) => note.id === noteId && note.threadId === threadId && note.ownerId === ownerId);
+        if (index < 0) throw new ApiError(404, "THREAD_NOTE_NOT_FOUND", "Team note not found");
+        db.threadNotes.splice(index, 1);
+        addAudit(req, "thread.note_deleted", threadId, "Removed an internal team note");
+        await store.save();
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (pathname === "/api/notifications" && req.method === "GET") {
+        const notifications = db.notifications.slice().sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+        sendJson(res, 200, { notifications });
+        return;
+      }
+      if (pathname === "/api/notifications/read-all" && req.method === "POST") {
+        for (const notification of db.notifications) {
+          if (!notification.readAt) notification.readAt = nowIso();
+        }
+        await store.save();
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      const notificationReadMatch = pathname.match(/^\/api\/notifications\/([A-Za-z0-9_-]{1,100})\/read$/);
+      if (notificationReadMatch && req.method === "POST") {
+        const notification = db.notifications.find((item) => item.id === notificationReadMatch[1]);
+        if (notification) {
+          notification.readAt = notification.readAt || nowIso();
+          await store.save();
+        }
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
       if (pathname === "/api/send" && req.method === "POST") {
         const body = await readJson(req);
         const fromEmail = String(body.fromEmail || body.from || db.user.email);
@@ -2119,6 +2295,7 @@ export async function createApp(options = {}) {
           subject,
           bodyText,
           attachments,
+          mentions: normalizeMentions(body.mentions || (draft && draft.mentions) || []),
           threadId: String(body.threadId || (draft && draft.threadId) || newThreadId()).slice(0, 100),
           inReplyTo: body.inReplyTo ? String(body.inReplyTo).slice(0, 400) : (draft && draft.inReplyTo) || null,
           priority: ["low", "normal", "high"].includes(body.priority) ? body.priority : (draft && draft.priority) || "normal",
@@ -2138,7 +2315,8 @@ export async function createApp(options = {}) {
             priority: draft.priority,
             receipt: draft.receipt,
             delivery: draft.delivery,
-            saveCopy: draft.saveCopy
+            saveCopy: draft.saveCopy,
+            mentions: draft.mentions || []
           } : null,
           ip: requestIp(req),
           userAgent: String(req.headers["user-agent"] || "").slice(0, 240)
@@ -2491,6 +2669,10 @@ export async function createApp(options = {}) {
         await store.reset();
         const fresh = store.db;
         Object.assign(db, fresh);
+        if (!db.user.id) db.user.id = "user_demo_avery";
+        if (!db.user.preferences) db.user.preferences = {};
+        if (!db.user.security) db.user.security = { twoFactor: { enabled: false } };
+        ensureCollaborationSeed();
         invalidateIndex();
         addAudit(req, "demo.reset", "Demo workspace", "Mailbox and audit data reset to seed");
         await store.save();

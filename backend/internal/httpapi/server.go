@@ -281,6 +281,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ai/tone", s.requireUser(s.aiToneSuggestion))
 	mux.HandleFunc("GET /api/catch-up", s.requireUser(s.catchUpSummary))
 	mux.HandleFunc("GET /api/messages/{id}/trust-explanation", s.requireUser(s.messageTrustExplanation))
+	s.registerCollaborationRoutes(mux)
 	mux.HandleFunc("GET /api/audit", s.requireUser(s.getAudit))
 	mux.HandleFunc("GET /api/audit.csv", s.requireUser(s.getAuditCSV))
 	mux.HandleFunc("/api/", s.apiNotFound)
@@ -668,6 +669,8 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	if len(recentAudit) > 12 {
 		recentAudit = recentAudit[:12]
 	}
+	threadMeta := s.collaborationThreadMeta(ctx, sess.User)
+	serverNotifications := s.loadMailNotifications(ctx, sess.User.ID, 50)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":       user,
 		"aliases":    aliases,
@@ -711,16 +714,18 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 				"guestInvites":    policy.Sharing.GuestInvites,
 			},
 		},
-		"sieve":        sieve,
-		"quota":        s.mailQuota(ctx, sess.User.ID, state),
-		"outbound":     stateOutbound(state),
-		"pendingSends": statePendingSends(state),
-		"auditCount":   len(stateSlice(state, "audit")),
-		"recentAudit":  recentAudit,
-		"ai":           s.aiPublicConfig(ctx, sess.User.TenantID),
-		"push":         s.pushPublicConfig(ctx, sess.User.ID),
-		"capabilities": capabilities(),
-		"mailboxMode":  stateString(state, "mailMode"),
+		"sieve":               sieve,
+		"quota":               s.mailQuota(ctx, sess.User.ID, state),
+		"outbound":            stateOutbound(state),
+		"pendingSends":        statePendingSends(state),
+		"auditCount":          len(stateSlice(state, "audit")),
+		"recentAudit":         recentAudit,
+		"threadMeta":          threadMeta,
+		"serverNotifications": serverNotifications,
+		"ai":                  s.aiPublicConfig(ctx, sess.User.TenantID),
+		"push":                s.pushPublicConfig(ctx, sess.User.ID),
+		"capabilities":        capabilities(),
+		"mailboxMode":         stateString(state, "mailMode"),
 		"mailSync": map[string]any{
 			"lastError":  nullableString(stateString(stateMap(state, "mailSync"), "lastError")),
 			"lastSyncAt": nullableString(stateString(stateMap(state, "mailSync"), "lastSyncAt")),

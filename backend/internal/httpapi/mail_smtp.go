@@ -88,6 +88,9 @@ func (s *Server) processOutboxItem(ctx context.Context, userID, tenantID, itemID
 		if err != nil {
 			return nil, err
 		}
+		if sender, senderErr := s.userByID(ctx, userID); senderErr == nil {
+			s.createMentionNotifications(ctx, sender, itemCopy, sentID)
+		}
 		return map[string]any{"sentMessageId": sentID, "subject": firstNonEmpty(stateString(itemCopy, "subject"), "(no subject)")}, nil
 	}
 
@@ -105,6 +108,9 @@ func (s *Server) processOutboxItem(ctx context.Context, userID, tenantID, itemID
 	sentID, err := s.finalizeOutboxItem(userID, tenantID, itemID, delivered.MessageID, delivered.Raw)
 	if err != nil {
 		return nil, err
+	}
+	if sender, senderErr := s.userByID(ctx, userID); senderErr == nil {
+		s.createMentionNotifications(ctx, sender, itemCopy, sentID)
 	}
 	fromIdentity, _ := itemCopy["from"].(map[string]any)
 	s.appendToSent(delivered.Raw, stateString(fromIdentity, "email"))

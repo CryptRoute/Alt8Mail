@@ -48,6 +48,7 @@ type draftBody struct {
 	Body            *string `json:"body"`
 	FromEmail       string  `json:"fromEmail"`
 	Attachments     []any   `json:"attachments"`
+	Mentions        []any   `json:"mentions"`
 	ThreadID        string  `json:"threadId"`
 	InReplyTo       *string `json:"inReplyTo"`
 	WindowMode      string  `json:"windowMode"`
@@ -1157,6 +1158,16 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 	if body.Attachments == nil && existing != nil {
 		attachments = normalizeAttachments(state, existing["attachments"])
 	}
+	mentions := []any{}
+	if existing != nil {
+		mentions = stateSlice(existing, "mentions")
+	}
+	if body.Mentions != nil {
+		mentions = []any{}
+		for _, email := range sanitizeMentionInput(body.Mentions) {
+			mentions = append(mentions, email)
+		}
+	}
 	now := nowISO()
 	createdAt := now
 	messageID := fmt.Sprintf("<%s@a8m.test>", newID("draft"))
@@ -1218,7 +1229,7 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 		"subject": subject, "snippet": snippet(firstNonEmpty(bodyText, subject, "Draft")),
 		"bodyHtml": bodyHTML, "bodyText": bodyText,
 		"date": now, "updatedAt": now, "createdAt": createdAt,
-		"unread": false, "starred": false, "draft": true, "attachments": attachments,
+		"unread": false, "starred": false, "draft": true, "attachments": attachments, "mentions": mentions,
 		"categories": []any{}, "classification": "Internal", "external": false, "auth": auth,
 		"event": nil, "sizeBytes": sizeBytes, "messageId": messageID, "inReplyTo": inReplyTo,
 		"threadId": threadID, "priority": priority, "receipt": body.Receipt, "delivery": body.Delivery,

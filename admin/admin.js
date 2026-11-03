@@ -334,6 +334,7 @@ async function renderOverview() {
     const posture = stats.posture || {};
     const storage = stats.storage || {};
     const mailImports = stats.mailImports || {};
+    const blocklist = stats.blocklist || {};
     const usedPercent = storage.quotaBytes > 0 ? Math.round((storage.usedBytes / storage.quotaBytes) * 100) : 0;
     $("#viewRoot").innerHTML = `
       <div class="view-head">
@@ -378,6 +379,16 @@ async function renderOverview() {
           <div class="card-pad" style="border-top:1px solid var(--line);padding-top:15px">
             <div class="stat-label" style="margin-bottom:8px">${icon("clock")}Last 24 hours</div>
             <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="muted" style="font-size:11px">Sign-ins</span><b style="font-size:18px">${stats.logins24h || 0}</b></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-head"><div><h2>Blocklist health</h2><p>Confirmed threat intelligence and the blocks it produced for ${esc(state.activeTenant.name)}.</p></div>${Number(blocklist.confirmed || 0) ? '<span class="badge pending">Protection active</span>' : '<span class="badge active">Clear</span>'}</div>
+        <div class="card-pad">
+          <div class="stat-grid" style="margin:0">
+            <div class="stat-card"><span class="stat-label">${icon("shield")}Confirmed threats</span><span class="stat-value">${blocklist.confirmed || 0}</span><span class="stat-meta">${blocklist.pending || 0} awaiting review</span></div>
+            <div class="stat-card"><span class="stat-label">${icon("alert")}Blocks fired · 7 days</span><span class="stat-value">${blocklist.blocksWeek || 0}</span><span class="stat-meta">Rejected at SMTP policy</span></div>
+            <div class="stat-card"><span class="stat-label">${icon("check")}Dismissed reports</span><span class="stat-value">${blocklist.dismissed || 0}</span><span class="stat-meta">Reviewed and unblocked</span></div>
           </div>
         </div>
       </div>`;

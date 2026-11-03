@@ -51,6 +51,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   public.security_reports,
   public.security_report_url_hosts
 TO alt8mail_control;
+GRANT SELECT, INSERT ON public.security_block_events TO alt8mail_control;
+GRANT USAGE, SELECT ON SEQUENCE public.security_block_events_id_seq TO alt8mail_control;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO alt8mail_control;
 
 -- The webmail and customer-admin services own the public application schema.

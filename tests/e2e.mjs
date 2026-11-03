@@ -994,6 +994,109 @@ try {
     check(false, "Send now offers a View sent action");
   }
 
+  console.log("\n[9i] Collaboration: handling, team notes and close");
+  await page.eval("window.__a8mAutoConfirm = true");
+  await page.click(".rail-btn[data-task='mail']");
+  await sleep(300);
+  await page.click("[data-folder='inbox']");
+  await sleep(450);
+  await clickByText(".msg", "Q4 roadmap");
+  await sleep(500);
+  check(await page.eval("Boolean(document.querySelector('.thread-collab-bar'))"), "reader exposes the conversation handling bar");
+  equal(await page.eval("document.querySelector('[data-thread-status]')?.value"), "in_progress", "seeded handling status is shown");
+  check(await page.eval("[...document.querySelectorAll('[data-thread-assignee] option')].some((option) => option.value === 'elena.vasquez@a8m.example' && option.selected)"), "seeded assignee is selected");
+  check(await page.eval("[...document.querySelectorAll('.msg')].some((row) => row.textContent.includes('Q4 roadmap') && row.querySelector('.msg-collab-status.is-progress'))"), "list rows show the in-progress chip");
+
+  await page.setValue("[data-thread-status]", "done");
+  await sleep(750);
+  const doneMeta = await page.eval(`fetch('/api/thread-meta?threadId=${encodeURIComponent(DEMO_THREAD_ID)}').then(r=>r.json()).then(d=>d.meta)`);
+  equal(doneMeta.status, "done", "handling status persists on the server");
+  check(await page.eval("[...document.querySelectorAll('.msg')].some((row) => row.textContent.includes('Q4 roadmap') && row.querySelector('.msg-collab-status.is-done'))"), "list row switches to the done chip");
+
+  await page.setValue("[data-thread-assignee]", DEMO_EMAIL);
+  await sleep(750);
+  const assignedMeta = await page.eval(`fetch('/api/thread-meta?threadId=${encodeURIComponent(DEMO_THREAD_ID)}').then(r=>r.json()).then(d=>d.meta)`);
+  equal(assignedMeta.assignedTo?.email, DEMO_EMAIL, "assignment persists on the server");
+  check(await page.eval("[...document.querySelectorAll('.msg')].some((row) => row.textContent.includes('Q4 roadmap') && row.querySelector('.msg-collab-assignee')?.textContent === 'AC')"), "list row shows the assignee initials");
+
+  await page.click("[data-thread-notes-toggle]");
+  await page.waitFor(() => {
+    const panel = document.querySelector("[data-thread-notes-panel]");
+    return Boolean(panel && !panel.hidden && panel.querySelector("[data-thread-note-form]"));
+  }, 5000);
+  check(await page.eval("!document.querySelector('[data-thread-notes-panel]').hidden"), "Team notes opens for the conversation");
+  await page.setValue("[data-thread-note-input]", "Legal review complete. Keep the shared-inbox beta in Q4.");
+  await page.click("[data-thread-note-form] button[type=submit]");
+  await page.waitFor(() => document.querySelector("[data-thread-notes-panel]").textContent.includes("Legal review complete"), 5000);
+  check(await page.eval("document.querySelector('[data-thread-notes-panel]').textContent.includes('Legal review complete')"), "team note renders after saving");
+  const notesPayload = await page.eval(`fetch('/api/thread-notes?threadId=${encodeURIComponent(DEMO_THREAD_ID)}').then(r=>r.json())`);
+  equal(notesPayload.notes.length, 1, "team note is stored on the server");
+  await page.screenshot(path.join(artifacts, "24e-collaboration-notes.png"));
+  const noteId = await page.eval("document.querySelector('[data-thread-note-delete]')?.getAttribute('data-thread-note-delete')");
+  check(Boolean(noteId), "note author can remove the note");
+  await page.click(`[data-thread-note-delete="${noteId}"]`);
+  await page.waitFor(() => !document.querySelector("[data-thread-notes-panel]").textContent.includes("Legal review complete"), 5000);
+  const notesAfterDelete = await page.eval(`fetch('/api/thread-notes?threadId=${encodeURIComponent(DEMO_THREAD_ID)}').then(r=>r.json())`);
+  equal(notesAfterDelete.notes.length, 0, "deleted team note is removed from the server");
+
+  await page.click("[data-thread-close]");
+  await sleep(800);
+  check(await page.eval("document.querySelector('[data-thread-close]')?.textContent.includes('Reopen conversation')"), "closing the conversation offers reopen");
+  check(await page.eval("[...document.querySelectorAll('.msg')].every((row) => !row.textContent.includes('Q4 roadmap'))"), "closed conversation leaves the active Inbox list");
+  const closedMeta = await page.eval(`fetch('/api/thread-meta?threadId=${encodeURIComponent(DEMO_THREAD_ID)}').then(r=>r.json()).then(d=>d.meta)`);
+  equal(closedMeta.closed, true, "closed state persists on the server");
+
+  await page.click("#filterBtn");
+  await sleep(200);
+  await page.click("[data-list-filter='closed']");
+  await sleep(700);
+  check(await page.eval("[...document.querySelectorAll('.msg')].some((row) => row.textContent.includes('Q4 roadmap'))"), "Closed conversations view lists the closed thread");
+  await clickByText(".msg", "Q4 roadmap");
+  await sleep(450);
+  await page.click("[data-thread-close]");
+  await sleep(800);
+  const reopenedMeta = await page.eval(`fetch('/api/thread-meta?threadId=${encodeURIComponent(DEMO_THREAD_ID)}').then(r=>r.json()).then(d=>d.meta)`);
+  equal(reopenedMeta.closed, false, "reopening clears the closed state");
+  check(await page.eval("[...document.querySelectorAll('.msg')].every((row) => !row.textContent.includes('Q4 roadmap'))"), "reopened conversation leaves the Closed view");
+  await page.click("[data-folder='inbox']");
+  await sleep(450);
+
+  console.log("\n[9j] Coworker mentions in compose");
+  await page.click("#cmdCompose");
+  await sleep(350);
+  const mentionComposeId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
+  const mentionComposeSel = `[data-compose-id="${mentionComposeId}"]`;
+  await page.click(`${mentionComposeSel} [data-compose-action="mode"][data-mode="plain"]`);
+  await sleep(200);
+  await page.click(`${mentionComposeSel} [data-compose-field="body"]`);
+  await page.pressKey("Enter");
+  await page.typeText("@");
+  await sleep(450);
+  check(await page.eval("Boolean(document.querySelector('.compose-mention-menu'))"), "typing @ opens the coworker picker");
+  check(await page.eval("document.querySelector('.compose-mention-menu')?.textContent.includes('Priya Shah')"), "mention picker lists directory coworkers");
+  await page.click(".compose-mention-menu [data-mention-email='priya.shah@a8m.example']");
+  await sleep(350);
+  check((await composeBodyText(mentionComposeSel)).includes("@Priya Shah"), "choosing a coworker inserts the mention");
+  await page.setValue(`${mentionComposeSel} [data-compose-field="to"]`, "elena.vasquez@a8m.example");
+  await page.setValue(`${mentionComposeSel} [data-compose-field="subject"]`, "Mention test");
+  await sleep(1600);
+  const draftMentions = await page.eval("fetch('/api/drafts').then(r=>r.json()).then(d=>{const draft=d.drafts.find((item)=>item.subject==='Mention test'); return draft ? (draft.mentions||[]).map((item)=>item.email) : null;})");
+  check(Array.isArray(draftMentions) && draftMentions.includes("priya.shah@a8m.example"), "draft keeps the mention recipient for the eventual send");
+  await page.screenshot(path.join(artifacts, "24f-compose-mention.png"));
+  await page.click(`${mentionComposeSel} [data-compose-action="discard"]`);
+  await sleep(550);
+
+  console.log("\n[9k] Mention notifications");
+  await page.click("#notifyBtn");
+  await sleep(350);
+  check(await page.eval("!document.getElementById('notifyPop').hidden"), "notification center opens");
+  check(await page.eval("document.getElementById('notifyPop').textContent.includes('mentioned you')"), "seeded mention notification is listed");
+  const mentionNotice = await page.eval("[...document.querySelectorAll('.notify-item')].find((item)=>item.textContent.includes('mentioned you'))?.getAttribute('data-notify-id')");
+  check(Boolean(mentionNotice), "mention notification is actionable");
+  await page.click(`[data-notify-id="${mentionNotice}"]`);
+  await sleep(800);
+  check(await page.eval("document.querySelector('.reader-subject h2')?.textContent.includes('Q4 roadmap')"), "opening a mention notification jumps to the conversation");
+
   console.log("\n[10] PWA and theming");
   const swReady = await page.eval("navigator.serviceWorker.ready.then(r=>({scope:r.scope,state:r.active?.state}))", { timeout: 15000 });
   equal(swReady.state, "activated", "service worker is activated");
@@ -1011,9 +1114,8 @@ try {
   await sleep(350);
   await page.eval("document.querySelector('[data-close-reader]')?.click()");
   await sleep(200);
-  await page.eval("window.dispatchEvent(new Event('offline'))");
-  await sleep(200);
-  equal(await page.eval("document.title"), "Offline · Inbox — Alt8Mail", "offline tab title replaces the folder title");
+  const offlineTitle = await page.eval("window.dispatchEvent(new Event('offline')); document.title");
+  equal(offlineTitle, "Offline · Inbox — Alt8Mail", "offline tab title replaces the folder title");
   await page.eval("window.dispatchEvent(new Event('online'))");
   await sleep(700);
   check(await page.eval("document.title.endsWith('Inbox — avery.chen@a8m.example - Alt8Mail')"), "online tab title returns to the folder format");

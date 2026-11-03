@@ -46,6 +46,18 @@ func (s *Server) adminTenantStats(ctx context.Context, tenantID string) (map[str
 		       COALESCE(SUM(imported_messages), 0)
 		FROM mail_import_jobs WHERE tenant_id = $1
 	`, tenantID).Scan(&activeImports, &pendingImports, &importedMessages)
+	var confirmedThreats, pendingReports, dismissedReports, blocksWeek int
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE status='confirmed'),
+		       COUNT(*) FILTER (WHERE status='pending'),
+		       COUNT(*) FILTER (WHERE status='dismissed')
+		FROM public.security_reports WHERE tenant_id=$1
+	`, tenantID).Scan(&confirmedThreats, &pendingReports, &dismissedReports)
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT COUNT(*) FROM public.security_block_events e
+		JOIN public.mail_domains d ON d.domain=e.recipient_domain AND d.tenant_id=$1
+		WHERE e.blocked_at > now() - interval '7 days'
+	`, tenantID).Scan(&blocksWeek)
 	var adminRoleUsers, logins24h int
 	_ = s.store.DB.QueryRow(ctx, `
 		SELECT COUNT(DISTINCT u.id) FROM users u
@@ -95,6 +107,10 @@ func (s *Server) adminTenantStats(ctx context.Context, tenantID string) (map[str
 			return (domains - pendingDomains) * 100 / domains
 		}(),
 		"adminAccounts": adminRoleUsers,
+	}
+	stats["blocklist"] = map[string]any{
+		"confirmed": confirmedThreats, "pending": pendingReports,
+		"dismissed": dismissedReports, "blocksWeek": blocksWeek,
 	}
 	stats["recentAudit"] = recent
 	return stats, nil

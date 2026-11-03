@@ -20,6 +20,7 @@ type sendBody struct {
 	BodyHTML        *string  `json:"bodyHtml"`
 	Body            *string  `json:"body"`
 	Attachments     []any    `json:"attachments"`
+	Mentions        []any    `json:"mentions"`
 	ThreadID        string   `json:"threadId"`
 	InReplyTo       *string  `json:"inReplyTo"`
 	Priority        string   `json:"priority"`
@@ -43,6 +44,7 @@ type outboxPatch struct {
 	BodyHTML     *string `json:"bodyHtml"`
 	Body         *string `json:"body"`
 	Attachments  []any   `json:"attachments"`
+	Mentions     []any   `json:"mentions"`
 	SendAt       string  `json:"sendAt"`
 	ScheduledFor string  `json:"scheduledFor"`
 }
@@ -208,7 +210,8 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			"id": newID("send"), "draftId": body.DraftID, "from": aliasPerson(alias),
 			"to": to, "cc": cc, "bcc": bcc, "subject": subject,
 			"bodyText": bodyText, "bodyHtml": bodyHTML,
-			"attachments": attachments, "threadId": threadID, "inReplyTo": inReplyTo,
+			"attachments": attachments, "mentions": sanitizeMentionInput(body.Mentions),
+			"threadId": threadID, "inReplyTo": inReplyTo,
 			"priority": priority, "receipt": receipt, "delivery": delivery, "saveCopy": saveCopy,
 			"queuedAt": now.Format(time.RFC3339), "sendAt": sendAt.Format(time.RFC3339),
 			"holdMs": holdMs, "scheduled": !scheduledAt.IsZero(),
@@ -418,6 +421,10 @@ func (s *Server) patchOutbox(w http.ResponseWriter, r *http.Request) {
 			item["attachments"] = normalizeAttachments(state, body.Attachments)
 			changed = append(changed, "attachments")
 		}
+		if body.Mentions != nil {
+			item["mentions"] = sanitizeMentionInput(body.Mentions)
+			changed = append(changed, "mentions")
+		}
 		if body.SendAt != "" || body.ScheduledFor != "" {
 			raw := firstNonEmpty(body.SendAt, body.ScheduledFor)
 			parsed, err := time.Parse(time.RFC3339Nano, raw)
@@ -533,7 +540,8 @@ func restoreDraft(state map[string]any, item map[string]any) map[string]any {
 		"bcc": bcc, "bccText": firstNonEmpty(stateString(snapshot, "bccText"), recipientText(bcc)),
 		"subject": stateString(item, "subject"), "snippet": snippet(firstNonEmpty(text, stateString(item, "subject"), "Draft")),
 		"bodyText": text, "bodyHtml": htmlBody, "attachments": attachments,
-		"date": now, "updatedAt": now, "createdAt": firstNonEmpty(stateString(snapshot, "createdAt"), now),
+		"mentions": stateSlice(item, "mentions"),
+		"date":     now, "updatedAt": now, "createdAt": firstNonEmpty(stateString(snapshot, "createdAt"), now),
 		"unread": false, "starred": false, "sizeBytes": sizeBytes,
 		"threadId":  firstNonEmpty(normalizeThreadID(stateString(item, "threadId")), newThreadID()),
 		"inReplyTo": item["inReplyTo"], "windowMode": "floating", "external": false,

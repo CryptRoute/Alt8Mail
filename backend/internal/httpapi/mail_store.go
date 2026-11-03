@@ -380,6 +380,12 @@ func mailFolderCondition(userID, folder, filter string) (string, []any) {
 		args = append(args, folder)
 		conditions = append(conditions, fmt.Sprintf(`folder = $%d`, len(args)), `(snoozed_until IS NULL OR snoozed_until <= now())`)
 	}
+	closedCondition := `EXISTS (SELECT 1 FROM public.mail_thread_meta mt WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id AND mt.closed_at IS NOT NULL)`
+	if filter == "closed" {
+		conditions = append(conditions, closedCondition)
+	} else {
+		conditions = append(conditions, "NOT "+closedCondition)
+	}
 	switch filter {
 	case "unread":
 		conditions = append(conditions, `unread`)
