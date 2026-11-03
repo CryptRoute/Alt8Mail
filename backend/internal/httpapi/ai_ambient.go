@@ -201,9 +201,14 @@ func (s *Server) aiToneSuggestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sent < 2 {
+		reason := "New recipient — a clear, professional tone is the safest default."
+		if sent == 1 {
+			reason = "You have written to this recipient once; a professional tone keeps continuity."
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"available": false, "reason": "There is not enough history with this recipient yet.",
-			"history": map[string]any{"sent": sent, "received": received},
+			"available": true, "style": "professional", "label": "Professional", "reason": reason,
+			"history":  map[string]any{"sent": sent, "received": received, "firstContact": firstContact, "lastContact": lastContact},
+			"language": language, "fallback": true,
 		})
 		return
 	}
@@ -216,7 +221,12 @@ func (s *Server) aiToneSuggestion(w http.ResponseWriter, r *http.Request) {
 		truncate(strings.TrimSpace(body.Subject), 300), truncate(strings.TrimSpace(body.Draft), 4000))
 	raw, err := s.callAI(r.Context(), settings, system, user, 220, 0.2)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"available": false, "reason": "The AI provider could not suggest a tone right now."})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"available": true, "style": "professional", "label": "Professional",
+			"reason":   "No AI suggestion was available; a professional tone is a safe default.",
+			"history":  map[string]any{"sent": sent, "received": received, "firstContact": firstContact, "lastContact": lastContact},
+			"language": language, "fallback": true,
+		})
 		return
 	}
 	payload := aiJSONPayload(raw)
@@ -227,12 +237,18 @@ func (s *Server) aiToneSuggestion(w http.ResponseWriter, r *http.Request) {
 		Reason    string `json:"reason"`
 	}
 	if payload == "" || json.Unmarshal([]byte(payload), &parsed) != nil || !parsed.Available {
-		writeJSON(w, http.StatusOK, map[string]any{"available": false, "reason": "The AI could not make a confident tone suggestion."})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"available": true, "style": "professional", "label": "Professional",
+			"reason":   "No confident AI suggestion was returned; a professional tone is a safe default.",
+			"history":  map[string]any{"sent": sent, "received": received, "firstContact": firstContact, "lastContact": lastContact},
+			"language": language, "fallback": true,
+		})
 		return
 	}
 	if _, ok := aiStyles[parsed.Style]; !ok {
-		writeJSON(w, http.StatusOK, map[string]any{"available": false, "reason": "The AI could not make a confident tone suggestion."})
-		return
+		parsed.Style = "professional"
+		parsed.Label = "Professional"
+		parsed.Reason = "A professional tone is a safe default."
 	}
 	label := truncate(strings.TrimSpace(parsed.Label), 40)
 	if label == "" {
@@ -283,21 +299,28 @@ type catchUpThread struct {
 
 func (s *Server) catchUpSummary(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	force := r.URL.Query().Get("force") == "1"
 	var currentCreated time.Time
 	var previousSeen *time.Time
-	err := s.store.DB.QueryRow(r.Context(), `
+	_ = s.store.DB.QueryRow(r.Context(), `
 		SELECT
 		  (SELECT created_at FROM public.sessions WHERE id=$2 AND user_id=$1),
 		  (SELECT max(last_seen_at) FROM public.sessions
 		   WHERE user_id=$1 AND id<>$2
 		     AND last_seen_at < (SELECT created_at FROM public.sessions WHERE id=$2))
 	`, sess.User.ID, sess.ID).Scan(&currentCreated, &previousSeen)
-	if err != nil || currentCreated.IsZero() || previousSeen == nil {
+	var since time.Time
+	switch {
+	case previousSeen != nil && time.Since(*previousSeen) >= 12*time.Hour:
+		since = previousSeen.UTC()
+	case force:
+		// The manual catch-up action is useful at any time, including during
+		// testing or after a busy afternoon rather than a long vacation.
+		since = time.Now().UTC().Add(-72 * time.Hour)
+	case currentCreated.IsZero() || previousSeen == nil:
 		writeJSON(w, http.StatusOK, map[string]any{"available": false})
 		return
-	}
-	since := previousSeen.UTC()
-	if time.Since(since) < 12*time.Hour {
+	default:
 		writeJSON(w, http.StatusOK, map[string]any{"available": false})
 		return
 	}
@@ -347,12 +370,12 @@ func (s *Server) catchUpSummary(w http.ResponseWriter, r *http.Request) {
 			needReply++
 		}
 	}
-	if changed == 0 {
+	if changed == 0 && !force {
 		writeJSON(w, http.StatusOK, map[string]any{"available": false})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"available": true, "since": since.Format(time.RFC3339),
+		"available": true, "since": since.Format(time.RFC3339), "manual": force,
 		"changed": changed, "needReply": needReply, "unread": unreadMessages,
 	})
 }

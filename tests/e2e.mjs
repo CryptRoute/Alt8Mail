@@ -138,6 +138,7 @@ try {
   await page.waitFor(() => Boolean(document.querySelector(".catchup-card")), 5000);
   check(await page.eval("document.querySelector('.catchup-card')?.textContent.includes('While you were away')"), "inbox shows a dismissible catch-up card after time away");
   check(await page.eval("document.querySelector('.catchup-card')?.textContent.includes('conversations changed')"), "catch-up card reports changed conversations");
+  check(await page.eval("Boolean(document.getElementById('catchUpBtn'))"), "inbox exposes a manual Catch me up action");
   await page.screenshot(path.join(artifacts, "01-inbox.png"));
 
   console.log("\n[2] Threaded reader collapse/expand");
@@ -147,9 +148,8 @@ try {
   check(await page.eval("document.title.includes('Inbox · Q4 roadmap review — Thursday 10:00') && document.title.endsWith('— Alt8Mail')"), "open thread title shows the folder and subject");
   equal(await page.eval("document.querySelectorAll('.thread-msg.is-expanded').length"), 1, "latest message is expanded by default");
   check(await page.eval("document.querySelector('.reader-subject h2')?.textContent.includes('Q4 roadmap')"), "thread subject is shown without Re: noise");
-  await page.click("#readerAiBtn");
-  await sleep(120);
-  await page.click("#readerAiMenu [data-ai-action='commitments']");
+  check(await page.eval("Boolean(document.querySelector('[data-ai-commitments-chip]'))"), "reader exposes a visible What did I commit to? chip");
+  await page.click("[data-ai-commitments-chip]");
   await page.waitFor(() => Boolean(document.querySelector("#readerAiCard .ai-commitment-item")), 5000);
   check(await page.eval("document.querySelector('#readerAiCard')?.textContent.includes('What you committed to')"), "AI commitments card summarises the owner's promises");
   check(await page.eval("document.querySelectorAll('#readerAiCard .ai-commitment-item').length === 1"), "commitments are linked to their source message");
@@ -401,6 +401,7 @@ try {
   await page.setValue(`${intentComposeSel} [data-compose-field="to"]`, "elena.vasquez@a8m.example");
   await page.setValue(`${intentComposeSel} [data-compose-field="subject"]`, "Intent check");
   await setComposeBody(intentComposeSel, "I have attached the final report. I will call you tomorrow.");
+  check(await page.eval(`Boolean(document.querySelector('${intentComposeSel} [data-compose-intent-check]'))`), "compose footer exposes the Send check action");
   await page.click(`${intentComposeSel} [data-compose-action="send"]`);
   await page.waitFor(() => !document.getElementById("confirmOverlay").hidden, 5000);
   check(await page.eval("document.getElementById('confirmTitle').textContent.includes('Check before sending')"), "send-time intent check opens before sending");
@@ -1124,8 +1125,9 @@ try {
     if (row) row.click();
   })()`);
   await sleep(400);
-  await page.waitFor(() => Boolean(document.querySelector(".reader [data-details]")), 5000);
-  await page.click(".reader [data-details]");
+  await page.waitFor(() => Boolean(document.querySelector(".reader [data-trust-explain]")), 5000);
+  check(await page.eval("document.querySelector('.reader [data-trust-explain]')?.textContent.includes('Why is this')"), "reader shows a visible safety-explanation action");
+  await page.click(".reader [data-trust-explain]");
   await page.waitFor(() => !document.getElementById("detailsOverlay").hidden, 5000);
   await page.waitFor(() => Boolean(document.querySelector("[data-trust-explanation] .trust-explanation-head")), 5000);
   check(await page.eval("document.querySelector('[data-trust-explanation]')?.textContent.includes('Why this is safe')"), "security details include a plain-English safety explanation");

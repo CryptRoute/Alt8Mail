@@ -281,7 +281,7 @@ func webNetWebmailLocations(upstream string) string {
 	builder.WriteString("    location = /sw.js { add_header Cache-Control \"no-cache\"; try_files $uri =404; }\n")
 	builder.WriteString("    location = /manifest.webmanifest { add_header Cache-Control \"no-cache\"; try_files $uri =404; }\n")
 	builder.WriteString("    location ~* \\.(css|js|mjs|json|png|svg|woff2)$ { expires 1h; add_header Cache-Control \"public, max-age=3600\"; try_files $uri =404; }\n")
-	builder.WriteString("    location / { try_files $uri $uri/ /index.html; }\n")
+	builder.WriteString("    location / { expires -1; try_files $uri $uri/ /index.html; }\n")
 	builder.WriteString("    location ~ /\\.(?!well-known) { deny all; }\n")
 	return builder.String()
 }

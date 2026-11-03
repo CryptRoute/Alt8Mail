@@ -1,21 +1,21 @@
 /* Alt8Mail — offline app shell.
    API calls are always network-only; mailbox data is never cached here. */
-const VERSION = "2026.11.03-05";
+const VERSION = "2026.11.04-01";
 const CACHE = `a8m-shell-${VERSION}`;
 const SHELL = [
   "/",
-  "/styles.css?v=0.20.18",
-  "/features.css?v=0.20.18",
-  "/workspace.css?v=0.20.18",
-  "/cabinet-calendar.css?v=0.20.18",
-  "/features-0.7.css?v=0.20.18",
-  "/onboarding.css?v=0.20.18",
-  "/email-ui.css?v=0.20.18",
+  "/styles.css?v=0.20.19",
+  "/features.css?v=0.20.19",
+  "/workspace.css?v=0.20.19",
+  "/cabinet-calendar.css?v=0.20.19",
+  "/features-0.7.css?v=0.20.19",
+  "/onboarding.css?v=0.20.19",
+  "/email-ui.css?v=0.20.19",
   "/vendor/typo.js",
   "/vendor/qrcode.min.js",
   "/vendor/en_US.aff",
   "/vendor/en_US.dic",
-  "/app.js?v=0.20.18",
+  "/app.js?v=0.20.19",
   "/search.mjs",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
@@ -111,7 +111,7 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: "no-store" })
         .then((response) => {
           if (response && response.ok) {
             const copy = response.clone();

@@ -5344,17 +5344,61 @@ function catchUpMarkup() {
   </div>`;
 }
 
-async function loadCatchUp() {
+async function loadCatchUp({ force = false } = {}) {
   if (!state.user) return;
   try {
-    const data = await api("/api/catch-up");
-    if (!data?.available || catchUpDismissed(data.since)) {
+    const data = await api(`/api/catch-up${force ? "?force=1" : ""}`);
+    if (!data?.available) {
+      state.catchUp = null;
+      if (force) showToast("You're all caught up.");
+      return;
+    }
+    if (Number(data.changed) === 0) {
+      state.catchUp = null;
+      if (force) showToast("You're all caught up.");
+      return;
+    }
+    if (catchUpDismissed(data.since)) {
       state.catchUp = null;
       return;
     }
     state.catchUp = data;
     if (state.folder === "inbox" && !state.query && state.filter === "all") renderList({ preserveScroll: true });
-  } catch {}
+  } catch (error) {
+    if (force) showError(error);
+  }
+}
+
+function openManualCatchUp() {
+  if (state.folder !== "inbox") setFolder("inbox");
+  if (state.filter !== "all") setFilter("all");
+  if (state.query) clearSearch();
+  loadCatchUp({ force: true });
+}
+
+function ensureAmbientUi() {
+  const commitmentMarkup = `<button type="button" role="menuitem" data-ai-action="commitments"><span class="ai-menu-icon"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg></span><span><strong>What did I commit to?</strong><small>Promises, deadlines and requests</small></span></button>`;
+  for (const id of ["cmdAiMenu", "readerAiMenu"]) {
+    const menu = document.getElementById(id);
+    if (menu && !menu.querySelector('[data-ai-action="commitments"]')) {
+      const translate = menu.querySelector('[data-ai-action="translate"]');
+      if (translate) translate.insertAdjacentHTML("beforebegin", commitmentMarkup);
+      else menu.insertAdjacentHTML("beforeend", commitmentMarkup);
+    }
+  }
+  if (!document.getElementById("catchUpHost")) {
+    const scroller = document.getElementById("messageList");
+    if (scroller) scroller.insertAdjacentHTML("beforebegin", '<div class="catchup-host" id="catchUpHost"></div>');
+  }
+  const actions = document.querySelector(".list-actions");
+  if (actions && !document.getElementById("catchUpBtn")) {
+    actions.insertAdjacentHTML("afterbegin", '<button class="icon-btn catchup-trigger" id="catchUpBtn" type="button" aria-label="Catch me up" title="Catch me up"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></button>');
+  }
+  const button = document.getElementById("catchUpBtn");
+  if (button && !button.dataset.bound) {
+    button.dataset.bound = "1";
+    button.addEventListener("click", openManualCatchUp);
+  }
 }
 
 function renderList({ preserveScroll = false, appendOnly = false } = {}) {
@@ -5627,6 +5671,7 @@ function threadMessageMarkup(message, expanded) {
         <span class="trust-dot" aria-hidden="true"></span>
         <span>${esc(trust.detail)}</span>
         ${message.external ? threadAuthChips(message) : ""}
+        <button class="trust-details" data-trust-explain="${esc(message.id)}" type="button">${spamMessage ? "Why is this junk?" : "Why is this safe?"}</button>
         <button class="trust-details" data-details="${esc(message.id)}" type="button">Message details</button>
       </div>
       ${activityBits.length ? `<div class="thread-activity-line">${activityBits.join("")}</div>` : ""}
@@ -5725,6 +5770,9 @@ function renderReader({ preserveScroll = false } = {}) {
   const canPrev = readerIndex > 0;
   const canNext = readerIndex >= 0 && readerIndex < state.viewThreads.length - 1;
   const canMoveInbox = thread.messages.some((message) => ["spam", "archive", "trash"].includes(message.folder));
+  const commitmentsChip = state.ai?.enabled && !thread.latest?.draft
+    ? `<div class="thread-ai-row"><button class="thread-ai-chip" data-ai-commitments-chip type="button"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span>What did I commit to?</span><small>Promises, deadlines and requests</small></button></div>`
+    : "";
   readerContent.innerHTML = `
     <div class="reader-subject-bar">
       <button class="reader-subject-close" data-close-reader type="button" aria-label="Close this conversation" title="Close conversation"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
@@ -5752,6 +5800,7 @@ function renderReader({ preserveScroll = false } = {}) {
       </div>
     </div>
     ${readerAiCardMarkup(thread)}
+    ${commitmentsChip}
     ${externalBannerMarkup(thread)}
     <div class="thread-messages">
       ${thread.messages.map((message) => threadMessageMarkup(message, state.expanded.has(message.id))).join("")}
@@ -8915,6 +8964,7 @@ function composeTemplate(session) {
         <button class="icon-btn" data-compose-action="attach" type="button" aria-label="Attach files" title="Attach files"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></button>
         <button class="icon-btn" data-compose-action="discard" type="button" aria-label="Discard draft" title="Discard draft"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>
       </div>
+      <button class="compose-intent-check" data-compose-intent-check type="button" title="Check for missing attachments and date mismatches"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Send check</button>
       <span class="compose-note" data-compose-status>${session.lastSavedAt ? "Draft saved on server" : "Draft not saved yet"}</span>
     </div>
     <div class="compose-resize" data-compose-resize title="Resize" aria-hidden="true"></div>
@@ -17440,6 +17490,13 @@ function bindEvents() {
       renderReader({ preserveScroll: true });
       return;
     }
+    const trustExplain = target.closest("[data-trust-explain]");
+    if (trustExplain) {
+      event.preventDefault();
+      openDetails(trustExplain.getAttribute("data-trust-explain"));
+      setTimeout(() => detailsBody.querySelector("[data-trust-explanation]")?.scrollIntoView({ behavior: "smooth", block: "center" }), 420);
+      return;
+    }
     const detailsButton = target.closest("[data-details]");
     if (detailsButton) { event.preventDefault(); openDetails(detailsButton.getAttribute("data-details")); return; }
     const detailsTab = target.closest("[data-details-tab]");
@@ -18045,6 +18102,10 @@ function bindEvents() {
       return;
     }
     if (event.target.closest("[data-ai-reader-close]")) { closeReaderAi(); return; }
+    if (event.target.closest("[data-ai-commitments-chip]")) {
+      runReaderAi("commitments");
+      return;
+    }
     const commitment = event.target.closest("[data-ai-commitment]");
     if (commitment) {
       event.preventDefault();
@@ -18378,6 +18439,12 @@ function bindEvents() {
     if (event.target.closest("[data-ai-compose-generate]")) { composeAiGenerate(session); return; }
     if (event.target.closest("[data-ai-compose-insert]")) { applyComposeAiResult(session, false); return; }
     if (event.target.closest("[data-ai-compose-replace]")) { applyComposeAiResult(session, true); return; }
+    if (event.target.closest("[data-compose-intent-check]")) {
+      const warnings = composeIntentWarnings(session, null);
+      if (warnings.length) showToast(warnings.join(" "), "warning", { title: "Check before sending" });
+      else showToast("No missing attachment or date mismatch found.");
+      return;
+    }
     const toneChip = event.target.closest("[data-compose-tone-chip]");
     if (toneChip) {
       const style = toneChip.getAttribute("data-tone-style") || "";
@@ -19012,6 +19079,7 @@ async function boot() {
   await initI18n(prefs.get("language") || navigator.language || "en-US");
   applyStaticTranslations(document);
   applySavedPreferences();
+  ensureAmbientUi();
   bindEvents();
   registerServiceWorker();
   if (!navigator.onLine) setOffline(true);
