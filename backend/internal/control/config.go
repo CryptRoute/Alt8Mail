@@ -47,6 +47,7 @@ type Config struct {
 	AdminHealthURL    string
 	SMTPAddr          string
 	PolicyListen      string
+	RedisAddr         string
 	RedisPasswordFile string
 	IngestInterval    time.Duration
 	HealthInterval    time.Duration
@@ -93,6 +94,7 @@ func LoadConfig() (Config, error) {
 		AdminHealthURL:    env("CONTROL_ADMIN_HEALTH_URL", "http://127.0.0.1:8081/api/health"),
 		SMTPAddr:          env("CONTROL_SMTP_ADDR", "127.0.0.1:25"),
 		PolicyListen:      env("CONTROL_POLICY_LISTEN", "127.0.0.1:10040"),
+		RedisAddr:         env("CONTROL_REDIS_ADDR", "127.0.0.1:6379"),
 		RedisPasswordFile: env("CONTROL_REDIS_PASSWORD_FILE", "/opt/a8m/secrets/redis_password"),
 		IngestInterval:    envDuration("CONTROL_INGEST_INTERVAL", 8*time.Second),
 		HealthInterval:    envDuration("CONTROL_HEALTH_INTERVAL", 15*time.Second),

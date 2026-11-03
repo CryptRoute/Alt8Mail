@@ -343,6 +343,28 @@ for unit in "$TARGET_RELEASE"/deploy/systemd/*.service "$TARGET_RELEASE"/deploy/
 done
 systemctl daemon-reload
 
+# Install the Redis-backed multimap rules once. Existing administrator rules
+# are preserved; the Alt8Mail block is appended only when it is absent.
+log "installing Rspamd threat-intelligence rules"
+MULTIMAP_CONF=/etc/rspamd/local.d/multimap.conf
+install -d -m 0755 /etc/rspamd/local.d
+if [[ ! -e "$MULTIMAP_CONF" ]]; then
+  install -m 0644 "$TARGET_RELEASE/deploy/rspamd/multimap.conf" "$MULTIMAP_CONF"
+elif ! grep -q 'A8M_REPORTED_SENDER' "$MULTIMAP_CONF"; then
+  printf '\n# Alt8Mail threat-intelligence rules\n' >> "$MULTIMAP_CONF"
+  cat "$TARGET_RELEASE/deploy/rspamd/multimap.conf" >> "$MULTIMAP_CONF"
+fi
+chmod 0644 "$MULTIMAP_CONF"
+if command -v rspamadm >/dev/null 2>&1; then
+  if rspamadm configtest >/var/log/alt8mail-rspamd-configtest.log 2>&1; then
+    systemctl try-reload-or-restart rspamd || log "WARNING: Rspamd reload failed after installing threat-intelligence rules"
+  else
+    log "WARNING: Rspamd config test failed; see /var/log/alt8mail-rspamd-configtest.log"
+  fi
+else
+  systemctl try-reload-or-restart rspamd || log "WARNING: Rspamd reload failed after installing threat-intelligence rules"
+fi
+
 UPDATE_ACTIVE=1
 log "applying migrations for $LATEST_VERSION"
 MIGRATION_TMP="$WORK/migrations"

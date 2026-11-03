@@ -415,6 +415,16 @@ sed "s|__REDIS_PASSWORD__|$REDIS_PASSWORD|g" "$SOURCE_DIR/deploy/rspamd/redis.co
 chown root:_rspamd /etc/rspamd/local.d/redis.conf 2>/dev/null || true
 chmod 0640 /etc/rspamd/local.d/redis.conf
 chmod 0644 /etc/rspamd/local.d/antivirus.conf /etc/rspamd/local.d/dkim_signing.conf
+MULTIMAP_CONF=/etc/rspamd/local.d/multimap.conf
+if [[ ! -e "$MULTIMAP_CONF" ]]; then
+  install -m 0644 "$SOURCE_DIR/deploy/rspamd/multimap.conf" "$MULTIMAP_CONF"
+elif ! grep -q 'A8M_REPORTED_SENDER' "$MULTIMAP_CONF"; then
+  # Preserve any administrator rules already in multimap.conf and append the
+  # Alt8Mail block once.
+  printf '\n# Alt8Mail threat-intelligence rules\n' >> "$MULTIMAP_CONF"
+  cat "$SOURCE_DIR/deploy/rspamd/multimap.conf" >> "$MULTIMAP_CONF"
+fi
+chmod 0644 "$MULTIMAP_CONF"
 touch /var/lib/rspamd/dkim/selectors.map
 chown -R _rspamd:_rspamd /var/lib/rspamd/dkim 2>/dev/null || true
 
@@ -568,6 +578,7 @@ CONTROL_CERTBOT_DIR=/etc/letsencrypt/live
 CONTROL_CERTBOT_WEBROOT=/var/www/certbot
 CONTROL_SMTP_ADDR=127.0.0.1:25
 CONTROL_POLICY_LISTEN=127.0.0.1:10040
+CONTROL_REDIS_ADDR=127.0.0.1:6379
 CONTROL_REDIS_PASSWORD_FILE=$SECRETS_DIR/redis_password
 CONTROL_RETENTION_DAYS=365
 CONTROL_TRUSTED_PROXY=false

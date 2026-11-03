@@ -35,6 +35,7 @@ type Server struct {
 	termMu       sync.Mutex
 	termSessions map[string]*terminalSession
 	webNetMu     sync.Mutex
+	threatMu     sync.Mutex
 }
 
 type Options struct {
@@ -108,6 +109,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerNotificationRoutes(mux)
 	s.registerWebPushRoutes(mux)
 	s.registerSecurityReportRoutes(mux)
+	s.registerThreatIntelRoutes(mux)
 	s.registerUpdateRoutes(mux)
 	s.registerSystemRoutes(mux)
 	s.registerTerminalRoutes(mux)

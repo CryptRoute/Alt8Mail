@@ -70,6 +70,8 @@ can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
 
+The **0.8.0** release adds confirmed threat-intelligence sharing with Rspamd. Reports now extract and store normalized URL hostnames at creation, the reviewer sees every extracted host before deciding, and shared destinations such as shorteners, cloud storage and email-service redirectors are excluded unless the reviewer explicitly opts in. When the new **Share confirmed threat indicators with Rspamd** setting is enabled, confirmed senders, sender domains and approved URL hosts are written to the Redis-backed `a8m_reported_*` hashes and consumed by three new multimap rules. Dismissing, reopening or undoing a report rebuilds the complete active set from all still-confirmed reports, so one dismissal cannot remove an indicator another report still confirms. The setting is off by default; turning it off clears the maps. The installer and updater add the Rspamd rules without overwriting existing administrator rules, and [`docs/THREAT_INTELLIGENCE.md`](docs/THREAT_INTELLIGENCE.md) documents the rules, Redis keys and inspection commands.
+
 The **0.7.5** release fixes Web Push enrollment and key rotation, and widens the reading pane. Browser subscriptions now accept the standard `expirationTime` field in `PushSubscription.toJSON()`, so **Enable on this device** no longer fails with `json: unknown field "expirationTime"`. VAPID key rotation now updates the correct database parameter, replaces the key and clears subscriptions in one transaction, restores the previous private key if the database step fails, and reports the real cause instead of the generic control-service error. The message body now fills the reading pane while the reading column is capped at 2000px and centred on ultra-wide displays, replacing the narrow 90ch text measure.
 
 The **0.7.4** release makes test notifications appear while Alt8Mail is open. A requested test now carries an explicit foreground hint, so the service worker shows it even when a webmail window is visible instead of deferring to the in-app notifier; ordinary new-mail pushes keep the duplicate-suppression behaviour. Both the webmail and System Control test senders include the hint.
@@ -419,7 +421,8 @@ it is not proxied and is not used by the staging frontend. See
 storage model, [`docs/ADMIN.md`](docs/ADMIN.md) for the admin console, RBAC,
 policy matrix, API and subdomain deployment,
 [`docs/PLATFORM_BUILD_PLAN.md`](docs/PLATFORM_BUILD_PLAN.md),
-[`docs/PHASE_REVIEW.md`](docs/PHASE_REVIEW.md) and
+[`docs/PHASE_REVIEW.md`](docs/PHASE_REVIEW.md),
+[`docs/THREAT_INTELLIGENCE.md`](docs/THREAT_INTELLIGENCE.md) and
 [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for the phase gate, exact commands,
 verification evidence and remaining gaps (public domain/MTA-STS validation,
 live provider OAuth/AI credentials, DAV client/iTIP scope, identity-email

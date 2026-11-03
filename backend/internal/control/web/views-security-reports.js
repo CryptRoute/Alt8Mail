@@ -34,6 +34,8 @@ export async function renderSecurityReports(ctx) {
   const canManage = ctx.can('security.manage');
   let reports = [];
   let summary = { counts: { pending: 0, confirmed: 0, dismissed: 0, blockedSenders: 0 }, recent: [] };
+  let threatIntel = { enabled: false, active: { senders: 0, domains: 0, hosts: 0 } };
+  let threatIntelError = '';
 
   ctx.setTitle('Security reports', 'Security');
   ctx.root.innerHTML = `
@@ -44,6 +46,9 @@ export async function renderSecurityReports(ctx) {
       actions: `<button class="btn btn-secondary" type="button" id="security-reports-refresh">${ui.icon('refresh', 15)} Refresh</button>`,
     })}
     <div class="stat-grid" id="security-report-stats"></div>
+    <section class="card mt-4" id="threat-intel-card">
+      <div class="card-body">${ui.loadingState('Loading threat intelligence settings…', 2)}</div>
+    </section>
     <section class="card mt-4">
       <header class="card-head">
         <div><h3>Review queue</h3><p>Newest pending reports first · sender block applies immediately</p></div>
@@ -68,6 +73,63 @@ export async function renderSecurityReports(ctx) {
       ui.statTile({ label: 'Dismissed', value: ui.num(counts.dismissed || 0), detail: 'Block removed after review', iconName: 'check-circle' }),
       ui.statTile({ label: 'Blocked senders', value: ui.num(counts.blockedSenders || 0), detail: 'Distinct addresses or domains', iconName: 'users', tone: Number(counts.blockedSenders) ? 'warning' : 'good' }),
     ].join('');
+  };
+
+  const renderThreatIntel = () => {
+    const host = document.getElementById('threat-intel-card');
+    if (!host) return;
+    if (threatIntelError) {
+      host.innerHTML = `<div class="card-body">${ui.inlineNotice('critical', 'Could not load threat intelligence settings', threatIntelError)}</div>`;
+      return;
+    }
+    const active = threatIntel.active || {};
+    host.innerHTML = `
+      <header class="card-head">
+        <div><h3>Threat intelligence</h3><p>Confirmed indicators can train Rspamd through Redis-backed multimaps.</p></div>
+        <div class="card-actions">${ui.badge(threatIntel.enabled ? 'Sharing enabled' : 'Off', threatIntel.enabled ? 'good' : 'neutral')}</div>
+      </header>
+      <div class="card-body">
+        ${ui.switchField({
+          label: 'Share confirmed threat indicators with Rspamd',
+          name: 'rspamdShare',
+          checked: Boolean(threatIntel.enabled),
+          disabled: !canManage,
+          help: 'Publishes the confirmed sender, sender domain and reviewer-approved URL hosts system-wide. Pending reports stay at the Postfix policy layer only.',
+        })}
+        <div class="form-actions" style="margin-top:12px">
+          <span class="form-note">${threatIntel.enabled ? 'Active indicators' : 'Confirmed indicators ready to share'}: ${ui.num(active.senders || 0)} sender${Number(active.senders) === 1 ? '' : 's'} · ${ui.num(active.domains || 0)} domain${Number(active.domains) === 1 ? '' : 's'} · ${ui.num(active.hosts || 0)} URL host${Number(active.hosts) === 1 ? '' : 's'}.</span>
+          ${canManage ? '<div class="form-actions-right"><button class="btn btn-primary btn-sm" type="button" id="threat-intel-save">Save threat sharing</button></div>' : ''}
+        </div>
+      </div>`;
+    host.querySelector('#threat-intel-save')?.addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      const enabled = Boolean(host.querySelector('[name="rspamdShare"]')?.checked);
+      button.disabled = true;
+      try {
+        const result = await ctx.api('/control/api/security/threat-intel', { method: 'PUT', body: { enabled } });
+        threatIntel = { enabled: Boolean(result.enabled), active: result.active || { senders: 0, domains: 0, hosts: 0 } };
+        renderThreatIntel();
+        ui.toast(enabled
+          ? 'Confirmed threat indicators are now shared with Rspamd.'
+          : 'Rspamd threat sharing is off and the Redis maps were cleared.', 'good');
+      } catch (error) {
+        button.disabled = false;
+        ui.toast(errorText(error), 'critical', { title: 'Could not update threat sharing' });
+      }
+    });
+  };
+
+  const loadThreatIntel = async () => {
+    try {
+      const data = await ctx.api('/control/api/security/threat-intel');
+      if (!ctx.isCurrent()) return;
+      threatIntel = { enabled: Boolean(data.enabled), active: data.active || { senders: 0, domains: 0, hosts: 0 } };
+      threatIntelError = '';
+    } catch (error) {
+      if (!ctx.isCurrent()) return;
+      threatIntelError = errorText(error);
+    }
+    renderThreatIntel();
   };
 
   const renderList = () => {
@@ -117,6 +179,16 @@ export async function renderSecurityReports(ctx) {
     const report = detail.report || {};
     const message = detail.message || {};
     const body = message.bodyText || message.snippet || report.snippet || 'No message body snapshot is available.';
+    const urlHosts = Array.isArray(report.urlHosts) ? report.urlHosts : [];
+    const hostEditable = report.status !== 'confirmed';
+    const hostControls = urlHosts.length
+      ? `<div class="option-list">${urlHosts.map((item) => `<label class="switch-field"><span class="switch"><input type="checkbox" data-report-url-host value="${ui.attr(item.host)}"${item.approved ? ' checked' : ''}${hostEditable ? '' : ' disabled'}><span class="switch-track"><span></span></span></span><span class="switch-copy"><strong>${esc(item.host)}</strong>${item.shared ? '<small>Shared destination · excluded by default</small>' : ''}</span></label>`).join('')}</div>`
+      : '<p class="form-note">No HTTP or HTTPS hostnames were found in this message.</p>';
+    const hostNote = !hostEditable
+      ? 'This report is confirmed. Undo or dismiss it before changing URL-host approvals.'
+      : report.threatSharingEnabled
+        ? 'Checked hosts are published when you confirm the threat. Shared destinations are excluded unless you explicitly check them.'
+        : 'Rspamd sharing is currently off. These selections are saved for when an administrator enables sharing.';
     const footer = canManage
       ? `<button class="btn btn-secondary" type="button" data-modal-close>Close</button>
          ${report.status !== 'pending' ? `<button class="btn btn-secondary" type="button" data-report-review="reopen">${ui.icon('refresh', 14)} Reopen</button>` : ''}
@@ -142,6 +214,7 @@ export async function renderSecurityReports(ctx) {
           <div><span class="field-label">Reviewed by</span><div class="read-box">${esc(report.reviewedBy || 'Pending review')}${report.reviewedAt ? ` · ${esc(fmt.dateTime(report.reviewedAt))}` : ''}</div></div>
           <div class="span-2"><span class="field-label">User note</span><div class="read-box">${esc(report.note || 'No note supplied.')}</div></div>
           <div class="span-2"><span class="field-label">Resolution</span><div class="read-box">${esc(report.resolution || 'Not reviewed yet.')}</div></div>
+          <div class="span-2"><span class="field-label">URL hosts to publish to Rspamd</span>${hostControls}<p class="form-note">${esc(hostNote)}</p></div>
           <div class="span-2"><span class="field-label">Message snapshot</span><div class="read-box message-snapshot">${esc(ui.truncate(body, 5000))}</div></div>
         </div>`,
       footer,
@@ -158,12 +231,13 @@ export async function renderSecurityReports(ctx) {
           if (!confirmed) return;
           button.disabled = true;
           try {
-            await ctx.api(`/control/api/security/reports/${encodeURIComponent(reportID)}/undo`, {
+            const result = await ctx.api(`/control/api/security/reports/${encodeURIComponent(reportID)}/undo`, {
               method: 'POST', body: { confirm: 'UNDO' },
             });
-            ui.toast('Threat confirmation undone; sender unblocked.', 'good');
+            if (result && result.warning) ui.toast(result.warning, 'warning', { title: 'Undo saved with a warning' });
+            else ui.toast('Threat confirmation undone; sender unblocked.', 'good');
             close();
-            await load();
+            await Promise.all([load(), loadThreatIntel()]);
           } catch (error) {
             button.disabled = false;
             ui.toast(errorText(error), 'critical', { title: 'Could not undo the threat' });
@@ -172,17 +246,19 @@ export async function renderSecurityReports(ctx) {
         root.querySelectorAll('[data-report-review]').forEach((button) => {
           button.addEventListener('click', async () => {
             const action = button.getAttribute('data-report-review');
+            const selectedHosts = [...root.querySelectorAll('[data-report-url-host]:checked')].map((input) => input.value);
             const payload = action === 'reopen'
               ? { status: 'pending', blockScope: 'address', resolution: '' }
               : action === 'dismiss'
                 ? { status: 'dismissed', blockScope: 'none', resolution: 'Dismissed by security review' }
-                : { status: 'confirmed', blockScope: action === 'domain' ? 'domain' : 'address', resolution: action === 'domain' ? 'Confirmed; sender domain blocked' : 'Confirmed malicious sender' };
+                : { status: 'confirmed', blockScope: action === 'domain' ? 'domain' : 'address', resolution: action === 'domain' ? 'Confirmed; sender domain blocked' : 'Confirmed malicious sender', urlHosts: selectedHosts };
             button.disabled = true;
             try {
-              await ctx.api(`/control/api/security/reports/${encodeURIComponent(reportID)}`, { method: 'PATCH', body: payload });
-              ui.toast(action === 'dismiss' ? 'Report dismissed and block removed.' : action === 'reopen' ? 'Report reopened for review.' : 'Threat confirmed and block updated.', 'good');
+              const result = await ctx.api(`/control/api/security/reports/${encodeURIComponent(reportID)}`, { method: 'PATCH', body: payload });
+              if (result && result.warning) ui.toast(result.warning, 'warning', { title: 'Review saved with a warning' });
+              else ui.toast(action === 'dismiss' ? 'Report dismissed and block removed.' : action === 'reopen' ? 'Report reopened for review.' : 'Threat confirmed and block updated.', 'good');
               close();
-              await load();
+              await Promise.all([load(), loadThreatIntel()]);
             } catch (error) {
               button.disabled = false;
               ui.toast(errorText(error), 'critical', { title: 'Could not review report' });
@@ -209,5 +285,5 @@ export async function renderSecurityReports(ctx) {
   });
 
   renderStats();
-  await load();
+  await Promise.all([load(), loadThreatIntel()]);
 }

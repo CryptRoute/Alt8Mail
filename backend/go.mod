@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
+	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/config v1.33.12
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.12
@@ -50,6 +51,7 @@ require (
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect

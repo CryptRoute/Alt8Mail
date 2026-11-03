@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/CryptRoute/Alt8Mail/backend/internal/threatintel"
 )
 
 func (s *Server) registerSecurityReportRoutes(mux *http.ServeMux) {
@@ -156,15 +158,60 @@ func (s *Server) handleSecurityReportDetail(w http.ResponseWriter, r *http.Reque
 			"auth": decodeJSONObject(authJSON), "date": sentAt.UTC().Format(time.RFC3339),
 		}
 	}
+	report["urlHosts"] = s.loadSecurityReportURLHosts(r.Context(), id, bodyHTML, bodyText)
+	report["threatSharingEnabled"] = s.settingBool(r.Context(), threatShareSetting, false)
 	writeJSON(w, http.StatusOK, map[string]any{"report": report, "message": message})
+}
+
+// loadSecurityReportURLHosts returns the stored hosts for a report. Reports
+// created before the threat-intelligence migration have no rows yet, so their
+// stored message body is extracted lazily and persisted for the reviewer.
+func (s *Server) loadSecurityReportURLHosts(ctx context.Context, reportID, bodyHTML, bodyText string) []map[string]any {
+	hosts := s.querySecurityReportURLHosts(ctx, reportID)
+	if len(hosts) > 0 || (strings.TrimSpace(bodyHTML) == "" && strings.TrimSpace(bodyText) == "") {
+		return hosts
+	}
+	extracted := threatintel.ExtractURLHosts(bodyHTML, bodyText)
+	if len(extracted) == 0 {
+		return hosts
+	}
+	for _, host := range extracted {
+		_, _ = s.db.Exec(ctx, `
+			INSERT INTO public.security_report_url_hosts (report_id, host, shared, approved)
+			VALUES ($1,$2,$3,$4)
+			ON CONFLICT (report_id, host) DO NOTHING
+		`, reportID, host.Host, host.Shared, !host.Shared)
+	}
+	return s.querySecurityReportURLHosts(ctx, reportID)
+}
+
+func (s *Server) querySecurityReportURLHosts(ctx context.Context, reportID string) []map[string]any {
+	rows, err := s.db.Query(ctx, `
+		SELECT host, shared, approved FROM public.security_report_url_hosts
+		WHERE report_id=$1 ORDER BY host
+	`, reportID)
+	if err != nil {
+		return []map[string]any{}
+	}
+	defer rows.Close()
+	hosts := []map[string]any{}
+	for rows.Next() {
+		var host string
+		var shared, approved bool
+		if rows.Scan(&host, &shared, &approved) == nil {
+			hosts = append(hosts, map[string]any{"host": host, "shared": shared, "approved": approved})
+		}
+	}
+	return hosts
 }
 
 func (s *Server) handleSecurityReportReview(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	id := pathID(r)
 	var body struct {
-		Status     string `json:"status"`
-		BlockScope string `json:"blockScope"`
-		Resolution string `json:"resolution"`
+		Status     string    `json:"status"`
+		BlockScope string    `json:"blockScope"`
+		Resolution string    `json:"resolution"`
+		URLHosts   *[]string `json:"urlHosts"`
 	}
 	if err := decodeJSON(w, r, &body, 64<<10); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
@@ -189,7 +236,20 @@ func (s *Server) handleSecurityReportReview(w http.ResponseWriter, r *http.Reque
 		scope = "address"
 	}
 	resolution := truncateText(strings.TrimSpace(body.Resolution), 500)
-	_, err := s.db.Exec(r.Context(), `
+	approvedHosts := []string{}
+	if status == "confirmed" && body.URLHosts != nil {
+		approvedHosts = sanitizeURLHosts(*body.URLHosts)
+	}
+
+	s.threatMu.Lock()
+	defer s.threatMu.Unlock()
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	_, err = tx.Exec(r.Context(), `
 		UPDATE public.security_reports
 		SET status=$2, block_scope=$3, resolution=$4, reviewed_by=$5,
 		    reviewed_at=CASE WHEN $2='pending' THEN NULL ELSE now() END, updated_at=now()
@@ -199,15 +259,57 @@ func (s *Server) handleSecurityReportReview(w http.ResponseWriter, r *http.Reque
 		writeFromError(w, err)
 		return
 	}
+	if status == "confirmed" && body.URLHosts != nil {
+		if _, err := tx.Exec(r.Context(), `
+			UPDATE public.security_report_url_hosts
+			SET approved = (host = ANY($2::text[]))
+			WHERE report_id=$1
+		`, id, approvedHosts); err != nil {
+			writeFromError(w, err)
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeFromError(w, err)
+		return
+	}
 	var sender, subject string
 	_ = s.db.QueryRow(r.Context(), `SELECT sender_email::text, subject FROM public.security_reports WHERE id=$1`, id).Scan(&sender, &subject)
+	syncErr := s.refreshThreatIndicatorsLocked(r.Context())
+	if syncErr != nil {
+		s.logger.Warn("could not synchronize threat indicators after review", "report", id, "err", syncErr)
+	}
 	s.actorAudit(r, sess, "security.report_reviewed", sender, "Reviewed a report as "+status,
-		map[string]any{"reportId": id, "status": status, "blockScope": scope})
+		map[string]any{"reportId": id, "status": status, "blockScope": scope, "urlHosts": len(approvedHosts)})
 	s.notifyEvent(r.Context(), "security.report_reviewed", map[string]any{
 		"reportId": id, "sender": sender, "subject": subject, "status": status, "blockScope": scope,
 	})
 	s.hub.Broadcast("security.report_reviewed", map[string]any{"id": id, "status": status})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": status, "blockScope": scope})
+	response := map[string]any{"ok": true, "status": status, "blockScope": scope}
+	if syncErr != nil {
+		response["warning"] = "The review was saved, but Redis threat indicators could not be updated: " + syncErr.Error()
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func sanitizeURLHosts(values []string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, raw := range values {
+		host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+		if host == "" {
+			continue
+		}
+		if _, exists := seen[host]; exists {
+			continue
+		}
+		seen[host] = struct{}{}
+		out = append(out, host)
+		if len(out) >= 200 {
+			break
+		}
+	}
+	return out
 }
 
 func (s *Server) handleSecurityReportUndo(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
@@ -223,6 +325,8 @@ func (s *Server) handleSecurityReportUndo(w http.ResponseWriter, r *http.Request
 		return
 	}
 	id := pathID(r)
+	s.threatMu.Lock()
+	defer s.threatMu.Unlock()
 	var sender, subject, statusValue string
 	if err := s.db.QueryRow(r.Context(), `
 		SELECT sender_email::text, subject, status FROM public.security_reports WHERE id=$1
@@ -249,6 +353,10 @@ func (s *Server) handleSecurityReportUndo(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, "NOT_CONFIRMED", "The report is no longer confirmed")
 		return
 	}
+	syncErr := s.refreshThreatIndicatorsLocked(r.Context())
+	if syncErr != nil {
+		s.logger.Warn("could not synchronize threat indicators after undo", "report", id, "err", syncErr)
+	}
 	s.actorAudit(r, sess, "security.report_confirmation_undone", sender,
 		"Undid a confirmed threat and removed the sender block",
 		map[string]any{"reportId": id, "status": "dismissed", "blockScope": "none", "subject": subject})
@@ -257,7 +365,11 @@ func (s *Server) handleSecurityReportUndo(w http.ResponseWriter, r *http.Request
 		"blockScope": "none", "undone": true,
 	})
 	s.hub.Broadcast("security.report_reviewed", map[string]any{"id": id, "status": "dismissed", "undone": true})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "dismissed", "blockScope": "none"})
+	response := map[string]any{"ok": true, "status": "dismissed", "blockScope": "none"}
+	if syncErr != nil {
+		response["warning"] = "The confirmation was undone, but Redis threat indicators could not be updated: " + syncErr.Error()
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) runSecurityReportMonitor(ctx context.Context) {
@@ -270,12 +382,13 @@ func (s *Server) runSecurityReportMonitor(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		defer rows.Close()
+		changed := false
 		for rows.Next() {
 			var id, sender, senderName, subject, reason, status, tenantID, userEmail string
 			if rows.Scan(&id, &sender, &senderName, &subject, &reason, &status, &tenantID, &userEmail) != nil {
 				continue
 			}
+			changed = true
 			data := map[string]any{
 				"reportId": id, "sender": sender, "senderName": senderName, "subject": subject,
 				"reason": reason, "status": status, "tenantId": tenantID, "userEmail": userEmail,
@@ -286,6 +399,13 @@ func (s *Server) runSecurityReportMonitor(ctx context.Context) {
 			`, truncateText(sender+" · "+subject+" · reported by "+userEmail, 1000))
 			s.notifyEvent(ctx, "security.report", data)
 			s.hub.Broadcast("security.report", data)
+		}
+		rows.Close()
+		if changed {
+			// A re-report resets an existing report to pending. Rebuild here so
+			// confirmed indicators are retracted promptly, not only on the
+			// five-minute reconciler.
+			s.reconcileThreatIndicators(ctx)
 		}
 	}
 	timer := time.NewTimer(20 * time.Second)

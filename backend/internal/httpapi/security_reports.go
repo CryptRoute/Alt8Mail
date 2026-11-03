@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"strings"
+
+	"github.com/CryptRoute/Alt8Mail/backend/internal/threatintel"
 )
 
 func normalizeReportReason(value string) string {
@@ -38,8 +40,29 @@ func (s *Server) recordSecurityReport(ctx context.Context, user userRecord, mess
 	if messageID == "" {
 		return nil
 	}
+	// Prefer the stored copy: the in-memory state payload may be truncated.
+	bodyHTML, bodyText := "", ""
+	if err := s.store.DB.QueryRow(ctx, `
+		SELECT body_html, body_text FROM public.mail_messages WHERE id=$1 AND user_id=$2
+	`, messageID, user.ID).Scan(&bodyHTML, &bodyText); err != nil ||
+		(strings.TrimSpace(bodyHTML) == "" && strings.TrimSpace(bodyText) == "") {
+		if value := stateString(message, "bodyHtml"); value != "" {
+			bodyHTML = value
+		}
+		if value := stateString(message, "bodyText"); value != "" {
+			bodyText = value
+		}
+	}
+	hosts := threatintel.ExtractURLHosts(bodyHTML, bodyText)
+
 	reportID := newID("security")
-	_, err := s.store.DB.Exec(ctx, `
+	tx, err := s.store.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var persistedID string
+	err = tx.QueryRow(ctx, `
 		INSERT INTO security_reports (
 			id, tenant_id, user_id, user_email, message_id, sender_email, sender_name,
 			sender_domain, subject, snippet, reason, note
@@ -50,9 +73,26 @@ func (s *Server) recordSecurityReport(ctx context.Context, user userRecord, mess
 		    subject=EXCLUDED.subject, snippet=EXCLUDED.snippet, status='pending',
 		    block_scope='address', notified_at=NULL, reviewed_by='', reviewed_at=NULL,
 		    resolution='', created_at=now(), updated_at=now()
+		RETURNING id
 	`, reportID, user.TenantID, user.ID, user.Email, messageID, senderEmail, senderName,
 		strings.ToLower(domainOf(senderEmail)), truncate(stateString(message, "subject"), 300),
 		truncate(stateString(message, "snippet"), 500), normalizeReportReason(reason),
-		truncate(strings.TrimSpace(note), 500))
-	return err
+		truncate(strings.TrimSpace(note), 500)).Scan(&persistedID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM public.security_report_url_hosts WHERE report_id=$1`, persistedID); err != nil {
+		return err
+	}
+	for _, host := range hosts {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO public.security_report_url_hosts (report_id, host, shared, approved)
+			VALUES ($1,$2,$3,$4)
+			ON CONFLICT (report_id, host) DO UPDATE
+			SET shared=EXCLUDED.shared, approved=EXCLUDED.approved
+		`, persistedID, host.Host, host.Shared, !host.Shared); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
