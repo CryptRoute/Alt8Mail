@@ -49,6 +49,7 @@ type draftBody struct {
 	FromEmail       string  `json:"fromEmail"`
 	Attachments     []any   `json:"attachments"`
 	Mentions        []any   `json:"mentions"`
+	Classification  string  `json:"classification"`
 	ThreadID        string  `json:"threadId"`
 	InReplyTo       *string `json:"inReplyTo"`
 	WindowMode      string  `json:"windowMode"`
@@ -525,6 +526,17 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 			delegatedIDs = append(delegatedIDs, id)
 		} else {
 			localIDs = append(localIDs, id)
+		}
+	}
+	if body.Action == "delete" && len(localIDs) > 0 {
+		held, err := s.userOnLegalHold(r.Context(), sess.User.TenantID, sess.User.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "LEGAL_HOLD", "Could not verify the mailbox legal hold")
+			return
+		}
+		if held {
+			writeError(w, http.StatusConflict, "LEGAL_HOLD", "A legal hold preserves this mailbox. Messages cannot be deleted while the hold is active.")
+			return
 		}
 	}
 	delegatedChanged := 0
@@ -1158,6 +1170,13 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 	if body.Attachments == nil && existing != nil {
 		attachments = normalizeAttachments(state, existing["attachments"])
 	}
+	classification := "Internal"
+	if existing != nil {
+		classification = firstNonEmpty(stateString(existing, "classification"), "Internal")
+	}
+	if canonical := canonicalDLPClassification(body.Classification); canonical != "" {
+		classification = canonical
+	}
 	mentions := []any{}
 	if existing != nil {
 		mentions = stateSlice(existing, "mentions")
@@ -1230,7 +1249,7 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 		"bodyHtml": bodyHTML, "bodyText": bodyText,
 		"date": now, "updatedAt": now, "createdAt": createdAt,
 		"unread": false, "starred": false, "draft": true, "attachments": attachments, "mentions": mentions,
-		"categories": []any{}, "classification": "Internal", "external": false, "auth": auth,
+		"categories": []any{}, "classification": classification, "external": false, "auth": auth,
 		"event": nil, "sizeBytes": sizeBytes, "messageId": messageID, "inReplyTo": inReplyTo,
 		"threadId": threadID, "priority": priority, "receipt": body.Receipt, "delivery": body.Delivery,
 		"saveCopy": saveCopy, "windowMode": windowMode, "viaApi": true,

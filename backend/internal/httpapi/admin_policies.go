@@ -39,6 +39,10 @@ var adminPermissionCatalog = []permissionDescriptor{
 	{"domains.read", "View domains", "Domains", "Read domain ownership and DNS verification state.", "low"},
 	{"domains.manage", "Manage domains", "Domains", "Add domains, select primary domains and verify DNS.", "high"},
 	{"audit.read", "View audit log", "Audit", "Read and export administrative activity.", "medium"},
+	{"legal.read", "View compliance archive", "Compliance", "Read legal holds and run eDiscovery searches.", "medium"},
+	{"legal.manage", "Manage legal holds", "Compliance", "Place and release holds that preserve mailbox data.", "critical"},
+	{"siem.read", "View SIEM integration", "Integrations", "Read audit webhook configuration and delivery state.", "low"},
+	{"siem.manage", "Manage SIEM integration", "Integrations", "Configure signed audit webhooks and rotate signing secrets.", "critical"},
 	{"sessions.manage", "Manage sessions", "Security", "Revoke user or admin sign-in sessions.", "high"},
 	{"system.tenants.manage", "Manage all organizations", "System", "Create, suspend and configure any tenant.", "critical"},
 	{"system.admins.manage", "Manage system administrators", "System", "Grant or revoke platform-wide administrator access.", "critical"},
@@ -51,6 +55,7 @@ var tenantAdminPermissionKeys = []string{
 	"groups.read", "groups.manage", "orgunits.read", "orgunits.manage",
 	"roles.read", "roles.manage", "policies.read", "policies.manage",
 	"domains.read", "domains.manage", "audit.read", "sessions.manage",
+	"legal.read", "legal.manage", "siem.read", "siem.manage",
 }
 
 func adminPermissionKeys() map[string]bool {
@@ -168,12 +173,31 @@ type adminBrandingPolicy struct {
 	LoginMessage string `json:"loginMessage"`
 }
 
+type adminDLPRule struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Terms          []string `json:"terms"`
+	Fields         []string `json:"fields"`
+	Classification string   `json:"classification"`
+	Action         string   `json:"action"`
+	Direction      string   `json:"direction"`
+	Enabled        bool     `json:"enabled"`
+}
+
+type adminDLPPolicy struct {
+	Enabled               bool           `json:"enabled"`
+	DefaultClassification string         `json:"defaultClassification"`
+	NotifySender          bool           `json:"notifySender"`
+	Rules                 []adminDLPRule `json:"rules"`
+}
+
 type adminTenantPolicy struct {
 	Security  adminSecurityPolicy  `json:"security"`
 	Mail      adminMailPolicy      `json:"mail"`
 	Sharing   adminSharingPolicy   `json:"sharing"`
 	Directory adminDirectoryPolicy `json:"directory"`
 	Branding  adminBrandingPolicy  `json:"branding"`
+	DLP       adminDLPPolicy       `json:"dlp"`
 }
 
 func defaultTenantPolicy() adminTenantPolicy {
@@ -197,6 +221,10 @@ func defaultTenantPolicy() adminTenantPolicy {
 		Sharing:   adminSharingPolicy{ExternalSharing: true, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
 		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: true},
 		Branding:  adminBrandingPolicy{ProductName: "Alt8Mail", PrimaryColor: "#0f6cbd", SupportEmail: "", LoginMessage: ""},
+		DLP: adminDLPPolicy{
+			Enabled: true, DefaultClassification: "Internal", NotifySender: false,
+			Rules: []adminDLPRule{},
+		},
 	}
 }
 
@@ -217,7 +245,61 @@ func tenantPolicyFromSettings(raw json.RawMessage) adminTenantPolicy {
 	if policy.Sharing.AllowedDomains == nil {
 		policy.Sharing.AllowedDomains = []string{}
 	}
+	if policy.DLP.DefaultClassification == "" {
+		policy.DLP.DefaultClassification = "Internal"
+	}
+	if policy.DLP.Rules == nil {
+		policy.DLP.Rules = []adminDLPRule{}
+	}
+	for index := range policy.DLP.Rules {
+		if policy.DLP.Rules[index].Fields == nil {
+			policy.DLP.Rules[index].Fields = []string{"subject", "body"}
+		}
+		if policy.DLP.Rules[index].Direction == "" {
+			policy.DLP.Rules[index].Direction = "outbound"
+		}
+		if policy.DLP.Rules[index].Action == "" {
+			policy.DLP.Rules[index].Action = "warn"
+		}
+		if policy.DLP.Rules[index].Classification == "" {
+			policy.DLP.Rules[index].Classification = policy.DLP.DefaultClassification
+		}
+	}
 	return policy
+}
+
+var dlpClassifications = []string{"Public", "Internal", "Confidential", "Restricted"}
+
+func validDLPClassification(value string) bool {
+	for _, item := range dlpClassifications {
+		if strings.EqualFold(item, strings.TrimSpace(value)) {
+			return true
+		}
+	}
+	return false
+}
+
+func dlpClassificationRank(value string) int {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "restricted":
+		return 4
+	case "confidential":
+		return 3
+	case "internal":
+		return 2
+	case "public":
+		return 1
+	}
+	return 0
+}
+
+func canonicalDLPClassification(value string) string {
+	for _, item := range dlpClassifications {
+		if strings.EqualFold(item, strings.TrimSpace(value)) {
+			return item
+		}
+	}
+	return ""
 }
 
 func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string) {
@@ -313,6 +395,82 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 		domains = append(domains, raw)
 	}
 	policy.Sharing.AllowedDomains = domains
+	if len(policy.DLP.Rules) > 30 {
+		errors = append(errors, "DLP supports at most 30 classification rules")
+	}
+	if canonical := canonicalDLPClassification(policy.DLP.DefaultClassification); canonical != "" {
+		policy.DLP.DefaultClassification = canonical
+	} else {
+		errors = append(errors, "DLP default classification is not valid")
+	}
+	seenDLPIDs := map[string]bool{}
+	for index := range policy.DLP.Rules {
+		rule := &policy.DLP.Rules[index]
+		rule.Name = truncate(strings.TrimSpace(rule.Name), 120)
+		canonicalClass := canonicalDLPClassification(rule.Classification)
+		if canonicalClass != "" {
+			rule.Classification = canonicalClass
+		} else {
+			errors = append(errors, fmt.Sprintf("DLP rule %q has an invalid classification", rule.Name))
+		}
+		rule.Action = strings.ToLower(strings.TrimSpace(rule.Action))
+		rule.Direction = strings.ToLower(strings.TrimSpace(rule.Direction))
+		if rule.ID == "" {
+			rule.ID = newID("dlp")
+		}
+		if seenDLPIDs[rule.ID] {
+			errors = append(errors, "DLP rule identifiers must be unique")
+		}
+		seenDLPIDs[rule.ID] = true
+		if rule.Name == "" {
+			errors = append(errors, fmt.Sprintf("DLP rule %d needs a name", index+1))
+		}
+		switch rule.Action {
+		case "label", "warn", "block":
+		default:
+			errors = append(errors, fmt.Sprintf("DLP rule %q action must be label, warn or block", rule.Name))
+		}
+		switch rule.Direction {
+		case "outbound", "both":
+		default:
+			errors = append(errors, fmt.Sprintf("DLP rule %q direction must be outbound or both", rule.Name))
+		}
+		terms := []string{}
+		seenTerms := map[string]bool{}
+		for _, raw := range rule.Terms {
+			term := truncate(strings.TrimSpace(raw), 80)
+			key := strings.ToLower(term)
+			if term == "" || seenTerms[key] {
+				continue
+			}
+			seenTerms[key] = true
+			terms = append(terms, term)
+		}
+		if len(terms) == 0 {
+			errors = append(errors, fmt.Sprintf("DLP rule %q needs at least one term", rule.Name))
+		}
+		if len(terms) > 20 {
+			terms = terms[:20]
+		}
+		rule.Terms = terms
+		fields := []string{}
+		seenFields := map[string]bool{}
+		for _, raw := range rule.Fields {
+			field := strings.ToLower(strings.TrimSpace(raw))
+			if field != "subject" && field != "body" && field != "attachment" {
+				errors = append(errors, fmt.Sprintf("DLP rule %q has an invalid match field", rule.Name))
+				continue
+			}
+			if !seenFields[field] {
+				seenFields[field] = true
+				fields = append(fields, field)
+			}
+		}
+		if len(fields) == 0 {
+			fields = []string{"subject", "body"}
+		}
+		rule.Fields = fields
+	}
 	if policy.Branding.PrimaryColor != "" && !strings.HasPrefix(policy.Branding.PrimaryColor, "#") {
 		errors = append(errors, "Brand color must be a hex color")
 	}

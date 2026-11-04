@@ -108,6 +108,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/public/shares/{token}/replace", s.publicShareReplace)
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/ready", s.health)
+	mux.HandleFunc("GET /api/branding", s.publicBranding)
 	mux.HandleFunc("POST /api/session", s.login)
 	mux.HandleFunc("GET /api/session", s.session)
 	mux.HandleFunc("DELETE /api/session", s.logout)
@@ -286,6 +287,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerSubscriptionRoutes(mux)
 	s.registerYearReviewRoutes(mux)
 	s.registerSendTimeRoutes(mux)
+	s.registerDLPRoutes(mux)
 	mux.HandleFunc("GET /api/audit", s.requireUser(s.getAudit))
 	mux.HandleFunc("GET /api/audit.csv", s.requireUser(s.getAuditCSV))
 	mux.HandleFunc("/api/", s.apiNotFound)
@@ -718,6 +720,18 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 				"allowedDomains":  policy.Sharing.AllowedDomains,
 				"guestInvites":    policy.Sharing.GuestInvites,
 			},
+			"dlp": map[string]any{
+				"enabled": policy.DLP.Enabled, "defaultClassification": policy.DLP.DefaultClassification,
+				"labels": dlpClassifications,
+			},
+			"branding": map[string]any{
+				"productName": policy.Branding.ProductName, "primaryColor": policy.Branding.PrimaryColor,
+				"supportEmail": policy.Branding.SupportEmail, "loginMessage": policy.Branding.LoginMessage,
+			},
+		},
+		"branding": map[string]any{
+			"productName": policy.Branding.ProductName, "primaryColor": policy.Branding.PrimaryColor,
+			"supportEmail": policy.Branding.SupportEmail, "loginMessage": policy.Branding.LoginMessage,
 		},
 		"sieve":               sieve,
 		"quota":               s.mailQuota(ctx, sess.User.ID, state),

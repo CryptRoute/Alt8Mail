@@ -21,6 +21,7 @@ type sendBody struct {
 	Body            *string  `json:"body"`
 	Attachments     []any    `json:"attachments"`
 	Mentions        []any    `json:"mentions"`
+	Classification  string   `json:"classification"`
 	ThreadID        string   `json:"threadId"`
 	InReplyTo       *string  `json:"inReplyTo"`
 	Priority        string   `json:"priority"`
@@ -35,18 +36,19 @@ type sendBody struct {
 }
 
 type outboxPatch struct {
-	FromEmail    string  `json:"fromEmail"`
-	To           any     `json:"to"`
-	CC           any     `json:"cc"`
-	BCC          any     `json:"bcc"`
-	Subject      *string `json:"subject"`
-	BodyText     *string `json:"bodyText"`
-	BodyHTML     *string `json:"bodyHtml"`
-	Body         *string `json:"body"`
-	Attachments  []any   `json:"attachments"`
-	Mentions     []any   `json:"mentions"`
-	SendAt       string  `json:"sendAt"`
-	ScheduledFor string  `json:"scheduledFor"`
+	FromEmail      string  `json:"fromEmail"`
+	To             any     `json:"to"`
+	CC             any     `json:"cc"`
+	BCC            any     `json:"bcc"`
+	Subject        *string `json:"subject"`
+	BodyText       *string `json:"bodyText"`
+	BodyHTML       *string `json:"bodyHtml"`
+	Body           *string `json:"body"`
+	Attachments    []any   `json:"attachments"`
+	Mentions       []any   `json:"mentions"`
+	Classification string  `json:"classification"`
+	SendAt         string  `json:"sendAt"`
+	ScheduledFor   string  `json:"scheduledFor"`
 }
 
 func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +64,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		draftIDs = append(draftIDs, body.DraftID)
 	}
 	err := s.withMailState(r.Context(), sess.User, draftIDs, false, func(state map[string]any) error {
+		policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
 		fromEmail := body.FromEmail
 		if fromEmail == "" {
 			fromEmail = stateString(stateMap(state, "user"), "email")
@@ -108,7 +111,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			}
 			draftMessageID = stateString(draft, "messageId")
 		}
-		if err := s.enforceOutboundPolicy(r.Context(), sess.User.TenantID, append(append(append([]any{}, to...), cc...), bcc...), nil, s.tenantPolicyFor(r.Context(), sess.User.TenantID)); err != nil {
+		if err := s.enforceOutboundPolicy(r.Context(), sess.User.TenantID, append(append(append([]any{}, to...), cc...), bcc...), nil, policy); err != nil {
 			return err
 		}
 		outbound := stateOutbound(state)
@@ -187,9 +190,23 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		if body.Attachments == nil && draft != nil {
 			attachments = normalizeAttachments(state, draft["attachments"])
 		}
-		if err := s.enforceOutboundPolicy(r.Context(), sess.User.TenantID, append(append(append([]any{}, to...), cc...), bcc...), attachments, s.tenantPolicyFor(r.Context(), sess.User.TenantID)); err != nil {
+		if err := s.enforceOutboundPolicy(r.Context(), sess.User.TenantID, append(append(append([]any{}, to...), cc...), bcc...), attachments, policy); err != nil {
 			return err
 		}
+		selectedClassification := body.Classification
+		if selectedClassification == "" && draft != nil {
+			selectedClassification = stateString(draft, "classification")
+		}
+		if selectedClassification != "" && !validDLPClassification(selectedClassification) {
+			return fail(http.StatusBadRequest, "CLASSIFICATION", "Choose a valid classification")
+		}
+		classification, dlpWarnings, dlpMatches, dlpBlocked := evaluateOutboundDLP(policy, subject, bodyText, dlpAttachmentNames(attachments), selectedClassification)
+		if dlpBlocked {
+			return failDetails(http.StatusUnprocessableEntity, "DLP_BLOCKED",
+				"This message is blocked by your organization's data protection policy.",
+				map[string]any{"matches": dlpMatches, "warnings": dlpWarnings, "classification": classification})
+		}
+		bodyText, bodyHTML = applyBrandingFooter(policy, bodyText, bodyHTML)
 		sendAt := now.Add(time.Duration(holdMs) * time.Millisecond)
 		if !scheduledAt.IsZero() {
 			sendAt = scheduledAt
@@ -211,6 +228,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			"to": to, "cc": cc, "bcc": bcc, "subject": subject,
 			"bodyText": bodyText, "bodyHtml": bodyHTML,
 			"attachments": attachments, "mentions": sanitizeMentionInput(body.Mentions),
+			"classification": classification, "dlpWarnings": dlpWarnings,
 			"threadId": threadID, "inReplyTo": inReplyTo,
 			"priority": priority, "receipt": receipt, "delivery": delivery, "saveCopy": saveCopy,
 			"queuedAt": now.Format(time.RFC3339), "sendAt": sendAt.Format(time.RFC3339),
@@ -224,12 +242,12 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 				"bccText": stateString(draft, "bccText"), "createdAt": stateString(draft, "createdAt"),
 				"auth": draft["auth"], "priority": stateString(draft, "priority"),
 				"receipt": stateBool(draft, "receipt"), "delivery": stateBool(draft, "delivery"),
-				"saveCopy": draft["saveCopy"],
+				"saveCopy": draft["saveCopy"], "classification": stateString(draft, "classification"),
 			}
 			removeMessage(state, body.DraftID)
 		}
 		state["outbox"] = append(stateSlice(state, "outbox"), item)
-		auditDetail := fmt.Sprintf("Queued for %ds undo window · %d recipient · from %s", holdMs/1000, len(to), stateString(alias, "email"))
+		auditDetail := fmt.Sprintf("Queued for %ds undo window · %d recipient · from %s · %s classification", holdMs/1000, len(to), stateString(alias, "email"), classification)
 		auditAction := "send.queued"
 		if !scheduledAt.IsZero() {
 			auditAction = "send.scheduled"
@@ -348,6 +366,7 @@ func (s *Server) patchOutbox(w http.ResponseWriter, r *http.Request) {
 		if sendAt, ok := parseStateTime(stateString(item, "sendAt")); !ok || !time.Now().Before(sendAt) {
 			return fail(http.StatusConflict, "SEND_ALREADY_COMMITTED", "This message is already sending and can no longer be edited")
 		}
+		policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
 		changed := []string{}
 		if body.FromEmail != "" {
 			alias := aliasFor(state, body.FromEmail)
@@ -412,6 +431,7 @@ func (s *Server) patchOutbox(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			htmlBody, text = normalizeComposeBody(htmlBody, text)
+			text, htmlBody = applyBrandingFooter(policy, text, htmlBody)
 			item["bodyText"] = truncate(text, 200_000)
 			item["bodyHtml"] = truncate(htmlBody, 500_000)
 			changed = append(changed, "body")
@@ -424,6 +444,13 @@ func (s *Server) patchOutbox(w http.ResponseWriter, r *http.Request) {
 		if body.Mentions != nil {
 			item["mentions"] = sanitizeMentionInput(body.Mentions)
 			changed = append(changed, "mentions")
+		}
+		if body.Classification != "" {
+			if !validDLPClassification(body.Classification) {
+				return fail(http.StatusBadRequest, "CLASSIFICATION", "Choose a valid classification")
+			}
+			item["classification"] = canonicalDLPClassification(body.Classification)
+			changed = append(changed, "classification")
 		}
 		if body.SendAt != "" || body.ScheduledFor != "" {
 			raw := firstNonEmpty(body.SendAt, body.ScheduledFor)
@@ -445,6 +472,17 @@ func (s *Server) patchOutbox(w http.ResponseWriter, r *http.Request) {
 		if len(changed) == 0 {
 			return fail(http.StatusBadRequest, "NOTHING_TO_UPDATE", "No scheduled-message changes were provided")
 		}
+		classification, dlpWarnings, dlpMatches, dlpBlocked := evaluateOutboundDLP(
+			policy, stateString(item, "subject"), stateString(item, "bodyText"),
+			dlpAttachmentNames(stateSlice(item, "attachments")), stateString(item, "classification"),
+		)
+		if dlpBlocked {
+			return failDetails(http.StatusUnprocessableEntity, "DLP_BLOCKED",
+				"This message is blocked by your organization's data protection policy.",
+				map[string]any{"matches": dlpMatches, "warnings": dlpWarnings, "classification": classification})
+		}
+		item["classification"] = classification
+		item["dlpWarnings"] = dlpWarnings
 		appendStateAudit(state, "send.rescheduled", firstNonEmpty(stateString(item, "subject"), "(no subject)"),
 			stateString(stateMap(state, "user"), "name"),
 			fmt.Sprintf("Scheduled message updated · %s · sends %s", strings.Join(changed, ", "), stateString(item, "sendAt")),
@@ -547,7 +585,7 @@ func restoreDraft(state map[string]any, item map[string]any) map[string]any {
 		"inReplyTo": item["inReplyTo"], "windowMode": "floating", "external": false,
 		"priority": firstNonEmpty(stateString(item, "priority"), "normal"),
 		"receipt":  stateBool(item, "receipt"), "delivery": stateBool(item, "delivery"),
-		"saveCopy": item["saveCopy"] != false, "categories": []any{}, "classification": "Internal",
+		"saveCopy": item["saveCopy"] != false, "categories": []any{}, "classification": firstNonEmpty(stateString(item, "classification"), "Internal"),
 		"messageId": fmt.Sprintf("<%s@a8m.test>", draftID),
 		"viaApi":    true, "composeKind": stateString(item, "composeKind"),
 		"sourceMessageId": stateString(item, "sourceMessageId"),
@@ -610,7 +648,7 @@ func commitQueued(state map[string]any, item map[string]any) string {
 			"subject": firstNonEmpty(stateString(item, "subject"), "(no subject)"),
 			"snippet": snippet(firstNonEmpty(text, "(no body)")), "bodyHtml": htmlBody, "bodyText": text,
 			"date": now, "unread": false, "starred": false, "draft": false,
-			"attachments": attachments, "categories": []any{}, "classification": "Internal", "external": false,
+			"attachments": attachments, "categories": []any{}, "classification": firstNonEmpty(stateString(item, "classification"), "Internal"), "external": false,
 			"auth":  map[string]any{"spf": "pass", "dkim": "pass", "dmarc": "pass", "tls": "TLS 1.3", "ip": "127.0.0.1", "signer": "a8m.test", "firstContact": false, "warnings": []any{}},
 			"event": nil, "sizeBytes": sizeBytes,
 			"messageId": firstNonEmpty(stateString(item, "mimeMessageId"), fmt.Sprintf("<%s@a8m.test>", newID("sent"))),
@@ -666,6 +704,7 @@ func (s *Server) StartWorkers(ctx context.Context) {
 	go s.webPushWorker(ctx)
 	go s.reactionDispatchWorker(ctx)
 	go s.reactionRuleWorker(ctx)
+	go s.siemWorker(ctx)
 	if s.mailSyncConfigured() {
 		go func() {
 			ticker := time.NewTicker(15 * time.Second)
@@ -690,6 +729,7 @@ func (s *Server) dispatchDueSends(ctx context.Context) {
 		SELECT id, user_id::text, tenant_id::text
 		FROM outbox
 		WHERE status='queued' AND send_at <= now()
+		  AND delivery_state <> 'blocked'
 		  AND (retry_at IS NULL OR retry_at <= now())
 		ORDER BY send_at ASC
 		LIMIT 200

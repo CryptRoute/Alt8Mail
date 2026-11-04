@@ -624,10 +624,19 @@ func (s *Server) emptyFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "FOLDER_SYSTEM", "Inbox, Sent, Drafts and Archive cannot be emptied")
 		return
 	}
+	held, err := s.userOnLegalHold(r.Context(), sess.User.TenantID, sess.User.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "LEGAL_HOLD", "Could not verify the mailbox legal hold")
+		return
+	}
+	if held {
+		writeError(w, http.StatusConflict, "LEGAL_HOLD", "A legal hold preserves this mailbox. Folders cannot be emptied while the hold is active.")
+		return
+	}
 	mutations := []imapAction{}
 	removed := 0
 	imapName := ""
-	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
+	err = s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
 		if folder == nil {
 			return fail(http.StatusNotFound, "FOLDER_NOT_FOUND", "Folder not found")

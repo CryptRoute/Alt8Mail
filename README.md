@@ -14,8 +14,10 @@ PDF/image attachment preview with a multi-file pager, BIMI/favicon sender
 icons, outbound caps, live quota, shared-mailbox collaboration with assignment,
 internal notes and @mentions, newsletter subscriptions with unsubscribe
 management, quick, semantic and sent reactions, recipient-time scheduling
-suggestions, reading-time estimates, a personal yearly review, an audit log,
-PWA support and a responsive mobile layout. The Go build adds a separate
+suggestions, reading-time estimates, a personal yearly review, policy-linked
+classification and DLP, legal holds and eDiscovery, one-click offboarding,
+signed SIEM audit webhooks, tenant branding, an audit log, PWA support and a
+responsive mobile layout. The Go build adds a separate
 customer/system administration console for tenants, users, groups, org units,
 custom RBAC roles, domains, policy, audit and system administrators, plus a
 separate root-level **System Control** plane for the host and mail stack.
@@ -72,6 +74,8 @@ Dutch, Italian and Arabic catalogs ship in this release; additional languages
 can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
+
+The **0.12.0** release completes the enterprise layer. Outbound mail now carries an organization classification and is evaluated against up to 30 **DLP rules** that can label, warn or block a send; the composer runs the same check before delivery and scheduled edits are re-evaluated. **Legal holds** preserve tenant-wide or individual mailboxes against deletion, folder emptying and retention, and the new **Compliance** console provides keyword, mailbox, date, folder and classification **eDiscovery** with CSV export. **One-click offboarding** closes an account, revokes every session and trusted device, optionally hands mailbox access to a coworker, places a legal hold and enables an automatic reply in one audited workflow. **Signed SIEM audit webhooks** stream user and administrator audit events over HTTPS with HMAC-SHA256 signatures, sealed signing secrets and retry/backoff delivery tracking. **Tenant branding** now reaches the public sign-in screen, webmail shell, browser title, accent color and outbound mail footer. New permissions are `legal.read`, `legal.manage`, `siem.read` and `siem.manage`; see [docs/ENTERPRISE_CONTROLS.md](docs/ENTERPRISE_CONTROLS.md). The release includes migration `0036_phase4`.
 
 The **0.11.4** patch moves Year in review higher in the account overview and opens external unsubscribe pages without giving the page access to the Alt8Mail window.
 

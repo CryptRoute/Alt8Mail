@@ -1750,8 +1750,9 @@ function handleSessionExpired() {
   }
 }
 
-const TITLE_LOGIN = "Alt8Mail: Secure Email with AI built in - Sign-in";
-const TITLE_GENERIC = "Alt8Mail: Secure, AI-Powered Email that thinks with you !";
+let TITLE_LOGIN = "Alt8Mail: Secure Email with AI built in - Sign-in";
+let TITLE_GENERIC = "Alt8Mail: Secure, AI-Powered Email that thinks with you !";
+let tenantBranding = null;
 const TITLE_ACCOUNT = "Smarter conversations, AI-powered Email";
 
 function documentTitleSubject(thread) {
@@ -1760,12 +1761,17 @@ function documentTitleSubject(thread) {
   return `${text.slice(0, 79).replace(/[\s·—-]+$/, "")}…`;
 }
 
+function brandName() {
+  return (tenantBranding && tenantBranding.productName ? String(tenantBranding.productName).trim() : "") || "Alt8Mail";
+}
+
 function updateDocumentTitle() {
+  const brand = brandName();
   let title = TITLE_GENERIC;
   if (!state.user) {
     title = loginScreen && !loginScreen.hidden ? TITLE_LOGIN : TITLE_GENERIC;
   } else if (state.task !== "mail") {
-    title = `Alt8Mail: ${state.user.email || "Alt8Mail account"} - ${TITLE_ACCOUNT}`;
+    title = `${brand}: ${state.user.email || `${brand} account`} - ${TITLE_ACCOUNT}`;
   } else {
     const folderLabel = (folderDef(state.folder).label || "Inbox").trim();
     const thread = state.selectedThreadId ? (viewThreadById(state.selectedThreadId) || currentThread()) : null;
@@ -1773,17 +1779,97 @@ function updateDocumentTitle() {
     const offline = Boolean(state.offline) || imapOffline;
     if (offline) {
       title = thread
-        ? `Offline · ${folderLabel} · ${documentTitleSubject(thread)} — Alt8Mail`
-        : `Offline · ${folderLabel} — Alt8Mail`;
+        ? `Offline · ${folderLabel} · ${documentTitleSubject(thread)} — ${brand}`
+        : `Offline · ${folderLabel} — ${brand}`;
     } else {
       const unread = Math.max(0, Math.floor(Number(unreadCount(state.folder)) || 0));
       const prefix = unread > 0 ? `(${unread}) ` : "";
       title = thread
-        ? `${prefix}${folderLabel} · ${documentTitleSubject(thread)} — Alt8Mail`
-        : `${prefix}${folderLabel} — ${state.user.email || "Alt8Mail account"} - Alt8Mail`;
+        ? `${prefix}${folderLabel} · ${documentTitleSubject(thread)} — ${brand}`
+        : `${prefix}${folderLabel} — ${state.user.email || `${brand} account`} - ${brand}`;
     }
   }
   if (document.title !== title) document.title = title;
+}
+
+function brandInitials(name) {
+  const words = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+  return String(name || "A8").slice(0, 2).toUpperCase() || "A8";
+}
+
+function applyTenantBranding(branding) {
+  if (!branding || typeof branding !== "object") return;
+  const name = String(branding.productName || "").trim().slice(0, 60) || "Alt8Mail";
+  const supportEmail = String(branding.supportEmail || "").trim().slice(0, 200);
+  const loginMessage = String(branding.loginMessage || "").trim().slice(0, 240);
+  const color = /^#[0-9a-f]{6}$/i.test(String(branding.primaryColor || "")) ? branding.primaryColor : "";
+  tenantBranding = { ...branding, productName: name };
+  if (color) {
+    document.documentElement.style.setProperty("--accent", color);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", color);
+  }
+  const initials = brandInitials(name);
+  document.querySelectorAll(".brand-name, .login-brand-top strong, .login-heading > .eyebrow").forEach((node) => { node.textContent = name; });
+  document.querySelectorAll(".brand-mark, .login-mark, .login-watermark").forEach((node) => { node.textContent = initials; });
+  document.querySelectorAll(".login-demo, .login-legal").forEach((node) => {
+    if (node.textContent.includes("Alt8Mail")) node.textContent = node.textContent.replaceAll("Alt8Mail", name);
+  });
+  const splash = document.getElementById("bootSplash");
+  if (splash) {
+    splash.setAttribute("aria-label", `Opening ${name}`);
+    const eyebrow = splash.querySelector(".eyebrow");
+    if (eyebrow) eyebrow.textContent = name;
+  }
+  TITLE_GENERIC = name === "Alt8Mail" ? "Alt8Mail: Secure, AI-Powered Email that thinks with you !" : `${name}: Secure, AI-powered email`;
+  TITLE_LOGIN = name === "Alt8Mail" ? "Alt8Mail: Secure Email with AI built in - Sign-in" : `${name}: Sign in`;
+  let message = document.getElementById("tenantLoginMessage");
+  if (loginMessage) {
+    if (!message) {
+      message = document.createElement("p");
+      message.id = "tenantLoginMessage";
+      message.className = "login-demo tenant-login-message";
+      document.querySelector(".login-heading")?.appendChild(message);
+    }
+    message.textContent = loginMessage;
+  } else if (message) {
+    message.remove();
+  }
+  const foot = document.querySelector(".login-card-foot");
+  let support = document.getElementById("tenantSupportLink");
+  const safeSupport = supportEmail.replace(/[^a-zA-Z0-9@._+-]/g, "");
+  if (foot && safeSupport.includes("@")) {
+    if (!support) {
+      support = document.createElement("a");
+      support.id = "tenantSupportLink";
+      support.style.marginLeft = "8px";
+      support.style.color = "var(--accent-ink)";
+      foot.appendChild(support);
+    }
+    support.href = `mailto:${safeSupport}`;
+    support.textContent = safeSupport;
+  } else if (support) {
+    support.remove();
+  }
+  const legal = document.querySelector('.login-card-foot [data-i18n="login.legal"]');
+  if (legal) {
+    legal.removeAttribute("data-i18n");
+    legal.textContent = `Protected by ${name} · TLS 1.3`;
+  }
+  updateDocumentTitle();
+}
+
+async function loadTenantBranding() {
+  try {
+    const response = await fetch("/api/branding", {
+      method: "GET", credentials: "same-origin", cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return;
+    applyTenantBranding(await response.json());
+  } catch (_) {
+    // Branding is progressive enhancement; the default identity remains.
+  }
 }
 
 function setOffline(offline) {
@@ -2212,7 +2298,7 @@ function showLogoutSplash() {
   bootSplash.hidden = false;
   bootSplash.classList.remove("is-hiding");
   bootSplash.classList.add("is-logout");
-  bootSplash.setAttribute("aria-label", "Closing Alt8Mail");
+  bootSplash.setAttribute("aria-label", `Closing ${brandName()}`);
   const heading = bootSplash.querySelector("h1");
   if (heading) heading.textContent = "Closing your workspace.";
   const copy = bootSplash.querySelector("p:not(.eyebrow)");
@@ -2238,6 +2324,7 @@ function clearThemeAccentForLogout() {
   } catch {}
   state.accent = "blue";
   document.documentElement.style.setProperty("--accent", ACCENTS.blue.value);
+  if (tenantBranding) applyTenantBranding(tenantBranding);
   $$("[data-set-accent]").forEach((button) => {
     const active = button.getAttribute("data-set-accent") === "blue";
     button.classList.toggle("is-active", active);
@@ -9681,6 +9768,28 @@ function composePriorityMarkup(session) {
   ).join("");
 }
 
+function dlpPolicy() {
+  const config = state.tenantPolicy && state.tenantPolicy.dlp;
+  const labels = Array.isArray(config?.labels) && config.labels.length ? config.labels : ["Public", "Internal", "Confidential", "Restricted"];
+  return {
+    enabled: config?.enabled !== false,
+    labels,
+    defaultClassification: config?.defaultClassification || "Internal",
+  };
+}
+
+function classificationOptionsMarkup(selected) {
+  const config = dlpPolicy();
+  const value = config.labels.includes(selected) ? selected : config.defaultClassification;
+  return config.labels.map((label) => `<option value="${esc(label)}"${label === value ? " selected" : ""}>${esc(label)}</option>`).join("");
+}
+
+function updateComposeClassification(session) {
+  if (!session?.el) return;
+  const select = session.el.querySelector('[data-compose-field="classification"]');
+  if (select && dlpPolicy().labels.includes(session.classification)) select.value = session.classification;
+}
+
 function composeAiToolbarButton() {
   if (!state.ai.enabled) return "";
   return `<button type="button" class="compose-ai-btn" data-compose-action="ai" title="AI writing assistant" aria-label="AI writing assistant"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span class="compose-ai-label">AI</span></button>`;
@@ -9839,6 +9948,7 @@ function composeTemplate(session) {
           <label class="compose-option"><span>From</span><select data-compose-field="fromEmail">${fromOptions}</select></label>
           <div class="compose-option compose-signature-action"><span>Signature</span><button class="compose-insert-signature" data-compose-action="insert-signature" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Insert signature</button></div>
           <div class="compose-option"><span>Priority</span><div class="compose-priority" role="radiogroup" aria-label="Priority">${composePriorityMarkup(session)}</div></div>
+          <label class="compose-option"><span>Classification</span><select data-compose-field="classification">${classificationOptionsMarkup(session.classification)}</select></label>
           <label class="compose-check"><input type="checkbox" data-compose-field="receipt" ${session.receipt ? "checked" : ""}>Return receipt</label>
           <label class="compose-check"><input type="checkbox" data-compose-field="delivery" ${session.delivery ? "checked" : ""}>Delivery status notification</label>
           <label class="compose-check"><input type="checkbox" data-compose-field="saveCopy" ${session.saveCopy ? "checked" : ""}>Save a copy in Sent</label>
@@ -9922,6 +10032,7 @@ function openCompose(prefill = {}, options = {}) {
     autoSignature: signatureItem ? { id: signatureItem.id, text: signatureText, html: signatureHTML } : null,
     signatureContext: context,
     priority: data.priority || state.defaultPriority,
+    classification: dlpPolicy().labels.includes(data.classification) ? data.classification : dlpPolicy().defaultClassification,
     receipt: data.receipt != null ? !!data.receipt : state.defaultReceipt === true,
     delivery: !!data.delivery,
     saveCopy: data.saveCopy != null ? !!data.saveCopy : state.preferences.saveCopyEnabled !== false,
@@ -10005,6 +10116,7 @@ function openComposeFromDraft(draft, options = {}) {
     htmlMode: draft.bodyHtml ? true : undefined,
     fromEmail: draft.fromEmail || (draft.from && draft.from.email) || state.user.email,
     priority: draft.priority,
+    classification: draft.classification,
     receipt: draft.receipt,
     delivery: draft.delivery,
     saveCopy: draft.saveCopy,
@@ -10895,6 +11007,7 @@ function composePayload(session) {
     sourceMessageId: session.sourceMessageId || "",
     windowMode: session.mode,
     priority: session.priority,
+    classification: session.classification,
     receipt: session.receipt,
     delivery: session.delivery,
     saveCopy: session.saveCopy
@@ -11186,6 +11299,71 @@ async function confirmSendIntent(session, scheduledFor) {
   });
 }
 
+async function runComposeDataProtectionCheck(session) {
+  if (!dlpPolicy().enabled) return true;
+  let result;
+  try {
+    result = await api("/api/dlp/check", {
+      method: "POST",
+      body: {
+        subject: session.subject,
+        bodyText: session.body,
+        bodyHtml: session.htmlMode ? restoreEditorImageSources(session.bodyHtml) : "",
+        attachments: session.files,
+        classification: session.classification
+      }
+    });
+  } catch (_) {
+    // The send endpoint enforces the same policy, so a failed pre-check must
+    // not block delivery on its own.
+    return true;
+  }
+  if (result.classification && result.classification !== session.classification) {
+    session.classification = result.classification;
+    updateComposeClassification(session);
+    session.dirty = true;
+    showToast(`Classification set to ${result.classification} by policy`);
+  }
+  const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+  if (result.blocked) {
+    session.error = warnings[0] || "This message is blocked by your organization's data protection policy.";
+    updateComposeStatus(session);
+    await appConfirm({
+      title: "Data protection policy",
+      message: `${warnings.join(" ") || session.error} Remove the flagged content before sending.`,
+      confirmLabel: "Review message",
+      cancelLabel: "Close",
+      tone: "danger",
+      icon: "i-shield-check"
+    });
+    return false;
+  }
+  if (warnings.length) {
+    return appConfirm({
+      title: "Data protection check",
+      message: warnings.join(" "),
+      confirmLabel: "Send anyway",
+      cancelLabel: "Review",
+      tone: "warning",
+      icon: "i-shield-check"
+    });
+  }
+  return true;
+}
+
+function showDataProtectionBlock(error) {
+  const details = (error && error.details) || {};
+  const warnings = Array.isArray(details.warnings) ? details.warnings.filter(Boolean) : [];
+  return appConfirm({
+    title: "Data protection policy",
+    message: `${warnings.join(" ") || error.message || "This message is blocked by your organization's data protection policy."} Remove the flagged content before sending.`,
+    confirmLabel: "Review message",
+    cancelLabel: "Close",
+    tone: "danger",
+    icon: "i-shield-check"
+  });
+}
+
 async function sendComposeSession(id) {
   const session = sessionById(id);
   if (!session || !session.el) return;
@@ -11195,6 +11373,10 @@ async function sendComposeSession(id) {
   try {
     const spellingOK = await runSpellCheckBeforeSend(session);
     if (!spellingOK) {
+      if (sendButton) sendButton.disabled = false;
+      return;
+    }
+    if (!(await runComposeDataProtectionCheck(session))) {
       if (sendButton) sendButton.disabled = false;
       return;
     }
@@ -11242,6 +11424,10 @@ async function sendComposeSession(id) {
     updateComposeStatus(session);
     if (error.code === "DOMAIN_DNS_REQUIRED") {
       openDomainBlockedDialog(error.details || {});
+    } else if (error.code === "DLP_BLOCKED") {
+      session.error = error.message || "Blocked by your organization's data protection policy.";
+      updateComposeStatus(session);
+      await showDataProtectionBlock(error);
     } else {
       showError(error);
     }
@@ -11330,6 +11516,7 @@ function composeSendPayload(session, extra = {}) {
     composeKind: session.kind || "",
     sourceMessageId: session.sourceMessageId || "",
     priority: session.priority,
+    classification: session.classification,
     receipt: session.receipt,
     delivery: session.delivery,
     saveCopy: session.saveCopy,
@@ -11583,6 +11770,7 @@ async function confirmScheduledSend() {
   try {
     const spellingOK = await runSpellCheckBeforeSend(session, "schedule");
     if (!spellingOK) return;
+    if (!(await runComposeDataProtectionCheck(session))) return;
     if (!(await confirmSendIntent(session, stamp))) return;
     await flushDraft(session);
     const data = await api("/api/send", {
@@ -11609,6 +11797,7 @@ async function confirmScheduledSend() {
     scheduleWarning.hidden = false;
     scheduleWarning.textContent = error.message;
     if (error.code === "DOMAIN_DNS_REQUIRED") openDomainBlockedDialog(error.details || {});
+    else if (error.code === "DLP_BLOCKED") await showDataProtectionBlock(error);
     else showError(error);
   } finally {
     button.disabled = false;
@@ -13433,6 +13622,7 @@ async function resetDemoPreferences() {
   loadPreferences();
   syncThemeUI();
   setAccent("blue", false);
+  if (tenantBranding) applyTenantBranding(tenantBranding);
   showSettingsTab("appearance");
   if (state.task === "people") renderPeople();
   showToast("Preferences reset");
@@ -20291,6 +20481,7 @@ async function boot() {
   await initI18n(prefs.get("language") || navigator.language || "en-US");
   applyStaticTranslations(document);
   applySavedPreferences();
+  await loadTenantBranding();
   ensureAmbientUi();
   bindEvents();
   registerServiceWorker();

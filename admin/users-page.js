@@ -67,6 +67,7 @@ function renderUserPageShell() {
         ${can("users.update") && status !== "deleted" ? `<button class="btn secondary" data-user-page-action="edit">${icon("sliders")}Edit profile</button>` : ""}
         ${can("users.reset_password") ? `<button class="btn secondary" data-user-page-action="reset-password">${icon("key")}Reset password</button>` : ""}
         ${can("users.update") && status !== "deleted" ? `<button class="btn ${status === "active" ? "secondary" : "primary"}" data-user-page-action="${status === "active" ? "suspend" : "activate"}">${icon(status === "active" ? "pause" : "play")}${status === "active" ? "Suspend" : "Activate"}</button>` : ""}
+        ${can("users.delete") && status !== "deleted" ? `<button class="btn secondary" data-user-page-action="offboard">${icon("logout")}Offboard</button>` : ""}
         ${can("users.delete") && status !== "deleted" ? `<button class="btn danger" data-user-page-action="delete">${icon("trash")}Close account</button>` : ""}
         ${can("users.delete") && status === "deleted" ? `<button class="btn primary" data-user-page-action="restore">${icon("refresh")}Restore account</button>` : ""}
       </div>
@@ -328,6 +329,10 @@ async function userPageAction(action) {
     location.hash = "#/users";
     return;
   }
+  if (action === "offboard") {
+    openOffboardModal(user);
+    return;
+  }
   if (action === "restore") {
     await restoreUserModal(user.id);
     await renderUserPage(user.id);
@@ -337,6 +342,61 @@ async function userPageAction(action) {
     await toggleUserStatus(user.id, action);
     await renderUserPage(user.id);
   }
+}
+
+function openOffboardModal(user) {
+  const candidates = (state.userCandidates || []).filter((candidate) => candidate.id !== user.id && !candidate.deletedAt);
+  const transferOptions = candidates.map((candidate) => `<option value="${esc(candidate.id)}">${esc(candidate.name)} · ${esc(candidate.email)}</option>`).join("");
+  openModal({
+    title: `Offboard ${user.name}`,
+    subtitle: "Close the account, preserve its mail and hand the mailbox to a colleague in one step.",
+    wide: true,
+    body: `<form id="offboardForm">
+      <div class="import-alert" style="margin-bottom:14px"><span class="import-alert-icon">${icon("shield")}</span><div><b>What happens immediately</b><small>Sign-in sessions and trusted devices are revoked, the mailbox password is rotated, the account is suspended and the mailbox is retained for review. An optional legal hold prevents retention from removing messages.</small></div></div>
+      <label class="field"><span>Transfer mailbox access to</span><select id="offboardTransfer"><option value="">No delegate — retain for administrators only</option>${transferOptions}</select><small class="muted">The delegate receives read and send access to the mailbox without changing ownership.</small></label>
+      <div style="display:grid;gap:10px;margin:14px 0">
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px"><input type="checkbox" id="offboardRetain" checked><span><b>Retain mailbox and mail data</b><br><small class="muted">Keep the mailbox active for the delegate. When off, the mailbox is deactivated but its messages remain available to administrators and eDiscovery.</small></span></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px"><input type="checkbox" id="offboardHold"><span><b>Place a legal hold</b><br><small class="muted">Preserve all messages and prevent permanent deletion until the hold is released from Compliance.</small></span></label>
+        <label class="field" id="offboardHoldNameField" style="display:none"><span>Matter name</span><input id="offboardHoldName" placeholder="Offboarding hold · ${esc(user.name)}"></label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px"><input type="checkbox" id="offboardAutoReply"><span><b>Enable an automatic reply</b><br><small class="muted">Tell senders the person has left and who to contact.</small></span></label>
+        <label class="field" id="offboardAutoReplyField" style="display:none"><span>Automatic reply message</span><textarea id="offboardAutoReplyMessage" rows="3" placeholder="This person has left the organization. Please contact the team for assistance."></textarea></label>
+      </div>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;padding:10px;border:1px solid var(--line);border-radius:8px"><input type="checkbox" id="offboardConfirm"><span><b>I confirm this account should be closed.</b><br><small class="muted">The user will be signed out and cannot sign in again until an administrator restores the account.</small></span></label>
+    </form>`,
+    footer: `<button class="btn secondary" data-modal-close>Cancel</button><button class="btn danger" id="offboardSubmit">${icon("logout")}Offboard account</button>`,
+    onMount: () => {
+      $("#offboardTransfer")?.addEventListener("change", () => {
+        if ($("#offboardTransfer")?.value) $("#offboardRetain").checked = true;
+      });
+      $("#offboardHold")?.addEventListener("change", () => { const field = $("#offboardHoldNameField"); if (field) field.style.display = $("#offboardHold").checked ? "" : "none"; });
+      $("#offboardAutoReply")?.addEventListener("change", () => { const field = $("#offboardAutoReplyField"); if (field) field.style.display = $("#offboardAutoReply").checked ? "" : "none"; });
+      $("#offboardSubmit")?.addEventListener("click", async (event) => {
+        if (!$("#offboardConfirm")?.checked) { showError(new Error("Confirm the offboarding action before continuing")); return; }
+        const button = event.currentTarget;
+        setBusy(button, true, "Offboarding…");
+        try {
+          const result = await api(`users/${encodeURIComponent(user.id)}/offboard`, {
+            method: "POST",
+            body: {
+              transferTo: $("#offboardTransfer")?.value || "",
+              retainMailbox: $("#offboardRetain")?.checked !== false,
+              createLegalHold: Boolean($("#offboardHold")?.checked),
+              legalHoldName: $("#offboardHoldName")?.value.trim() || "",
+              autoReply: Boolean($("#offboardAutoReply")?.checked),
+              autoReplyMessage: $("#offboardAutoReplyMessage")?.value.trim() || "",
+              confirm: true
+            }
+          });
+          closeModal();
+          toast("Account offboarded");
+          if (Array.isArray(result.warnings) && result.warnings.length) {
+            openModal({ title: "Offboarding complete", subtitle: "Review the retention note below.", body: `<div class="detail-list">${result.warnings.map((warning) => `<div class="detail-row"><span>${esc(warning)}</span></div>`).join("")}</div>`, footer: `<button class="btn primary" data-modal-close>Done</button>` });
+          }
+          await renderUserPage(user.id);
+        } catch (error) { showError(error); setBusy(button, false); }
+      });
+    }
+  });
 }
 
 function openAliasEditor(userId, alias) {

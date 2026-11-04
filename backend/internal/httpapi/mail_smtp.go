@@ -51,6 +51,9 @@ func (s *Server) mailDeliveryConfigured() bool {
 }
 
 func (s *Server) processOutboxItem(ctx context.Context, userID, tenantID, itemID string, requireScheduled bool) (map[string]any, error) {
+	if err := s.enforceOutboxDLP(ctx, userID, tenantID, itemID); err != nil {
+		return nil, err
+	}
 	var itemCopy map[string]any
 	var attachmentRecords map[string]any
 	err := s.withMailState(ctx, userRecord{ID: userID, TenantID: tenantID}, nil, false, func(state map[string]any) error {

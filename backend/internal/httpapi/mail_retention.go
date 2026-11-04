@@ -13,11 +13,12 @@ import (
 const retentionBatchSize = 500
 
 type retentionStats struct {
-	Users    int      `json:"users"`
-	Folders  int      `json:"folders"`
-	Messages int      `json:"messages"`
-	Failures int      `json:"failures"`
-	Errors   []string `json:"errors,omitempty"`
+	Users        int      `json:"users"`
+	Folders      int      `json:"folders"`
+	Messages     int      `json:"messages"`
+	Failures     int      `json:"failures"`
+	SkippedHolds int      `json:"skippedHolds"`
+	Errors       []string `json:"errors,omitempty"`
 }
 
 // runTenantRetention permanently removes messages older than the tenant's
@@ -60,9 +61,17 @@ func (s *Server) runTenantRetention(ctx context.Context, tenantID string) (reten
 	}
 
 	cutoff := time.Now().UTC().AddDate(0, 0, -policy.Mail.RetentionDays)
+	tenantWideHold, heldUsers, err := s.tenantLegalHoldSnapshot(ctx, tenantID)
+	if err != nil {
+		return stats, err
+	}
 	for _, user := range users {
 		if ctx.Err() != nil {
 			return stats, ctx.Err()
+		}
+		if tenantWideHold || heldUsers[user.ID] {
+			stats.SkippedHolds++
+			continue
 		}
 		stats.Users++
 		removed, folders, err := s.expungeRetainedMessages(ctx, user, cutoff, policy.Mail.RetentionDays)

@@ -303,6 +303,9 @@ func publicOutboxItem(item map[string]any) map[string]any {
 		"attachmentCount": len(attachments), "saveCopy": item["saveCopy"] != false,
 		"threadId": stateString(item, "threadId"), "scheduled": stateBool(item, "scheduled"),
 		"kind": map[bool]string{true: "scheduled", false: "undo"}[stateBool(item, "scheduled")],
+		"classification": firstNonEmpty(stateString(item, "classification"), "Internal"),
+		"deliveryState": stateString(item, "deliveryState"), "lastError": stateString(item, "lastError"),
+		"dlpWarnings": stateSlice(item, "dlpWarnings"),
 	}
 }
 

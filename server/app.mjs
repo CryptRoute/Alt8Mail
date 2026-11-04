@@ -22,6 +22,16 @@ const UNDO_TTL_MS = 30_000;
 const MAX_JSON_BYTES = 1.5 * 1024 * 1024;
 const MAX_UPLOAD_JSON_BYTES = 13 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const MOCK_BRANDING = { productName: "Alt8Mail", primaryColor: "#0f6cbd", supportEmail: "", loginMessage: "" };
+const MOCK_DLP = {
+  enabled: true,
+  defaultClassification: "Internal",
+  labels: ["Public", "Internal", "Confidential", "Restricted"],
+  rules: [
+    { id: "dlp_customer", name: "Customer identifiers", terms: ["account number", "customer id"], fields: ["subject", "body", "attachment"], action: "warn", classification: "Confidential", direction: "outbound", enabled: true },
+    { id: "dlp_secret", name: "Highly restricted material", terms: ["top secret"], fields: ["subject", "body"], action: "block", classification: "Restricted", direction: "outbound", enabled: true }
+  ]
+};
 const TRUSTED_DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const FOLDER_IDS = new Set(["inbox", "sent", "drafts", "archive", "spam", "trash"]);
 const GIB = 1024 ** 3;
@@ -299,6 +309,7 @@ export async function createApp(options = {}) {
       canCancel: Date.now() < Date.parse(item.sendAt),
       attachmentCount: (item.attachments || []).length,
       saveCopy: item.saveCopy !== false,
+      classification: item.classification || "Internal",
       threadId: item.threadId,
       scheduled: !!item.scheduled,
       kind: item.scheduled ? "scheduled" : "undo"
@@ -948,7 +959,7 @@ export async function createApp(options = {}) {
         draft: false,
         attachments: item.attachments || [],
         categories: [],
-        classification: "Internal",
+        classification: item.classification || "Internal",
         external: false,
         auth: {
           spf: "pass", dkim: "pass", dmarc: "pass", tls: "TLS 1.3",
@@ -1046,6 +1057,36 @@ export async function createApp(options = {}) {
     };
   }
 
+  function mockDlpEvaluate(input = {}) {
+    const classificationRank = { Public: 1, Internal: 2, Confidential: 3, Restricted: 4 };
+    let classification = MOCK_DLP.labels.includes(input.classification) ? input.classification : MOCK_DLP.defaultClassification;
+    const warnings = [];
+    const matches = [];
+    let blocked = false;
+    const subject = String(input.subject || "").toLowerCase();
+    const body = String(input.bodyText || input.bodyHtml || "").toLowerCase();
+    const attachments = (Array.isArray(input.attachments) ? input.attachments : []).map((item) => String(item?.name || item?.filename || "")).join("\n").toLowerCase();
+    for (const rule of MOCK_DLP.rules) {
+      if (!rule.enabled) continue;
+      for (const term of rule.terms) {
+        const needle = String(term).toLowerCase();
+        for (const field of rule.fields) {
+          const haystack = field === "subject" ? subject : field === "attachment" ? attachments : body;
+          if (!haystack.includes(needle)) continue;
+          matches.push({ ruleId: rule.id, ruleName: rule.name, term, field, action: rule.action, classification: rule.classification });
+          if ((classificationRank[rule.classification] || 0) > (classificationRank[classification] || 0)) classification = rule.classification;
+          if (rule.action === "block") {
+            blocked = true;
+            warnings.push(`Blocked by "${rule.name}": "${term}" appears in the ${field}.`);
+          } else if (rule.action === "warn") {
+            warnings.push(`Policy "${rule.name}" matched "${term}" in the ${field}.`);
+          }
+        }
+      }
+    }
+    return { allowed: !blocked, blocked, classification, defaultClassification: MOCK_DLP.defaultClassification, labels: MOCK_DLP.labels, enabled: MOCK_DLP.enabled, warnings, matches };
+  }
+
   function bootstrapPayload(session) {
     return {
       user: publicUser(db.user),
@@ -1073,6 +1114,14 @@ export async function createApp(options = {}) {
       signatures: db.signatures,
       ai: { enabled: aiEnabled, languages: [], styles: [] },
       push: { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true },
+      tenantPolicy: {
+        mail: { externalTag: true, quarantine: false },
+        directory: { contactSharing: true, externalDirectory: false, profileEditing: true, autoAddExternal: true },
+        sharing: { externalSharing: true, linkDefault: "view", allowedDomains: [], guestInvites: false },
+        dlp: { enabled: MOCK_DLP.enabled, defaultClassification: MOCK_DLP.defaultClassification, labels: MOCK_DLP.labels },
+        branding: { ...MOCK_BRANDING }
+      },
+      branding: { ...MOCK_BRANDING },
       auditCount: db.audit.length,
       capabilities: ["threads", "instant-search", "bulk-actions", "undo", "server-drafts", "undo-send", "scheduled-send", "sieve", "automatic-replies", "sender-trust", "outbound-caps", "quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files", "storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences"],
       attachmentMaxBytes: MAX_UPLOAD_BYTES,
@@ -1166,6 +1215,11 @@ export async function createApp(options = {}) {
       // ------- public API -------
       if (pathname === "/api/health" && req.method === "GET") {
         sendJson(res, 200, { ok: true, time: nowIso(), version: 2 });
+        return;
+      }
+
+      if (pathname === "/api/branding" && req.method === "GET") {
+        sendJson(res, 200, { ...MOCK_BRANDING });
         return;
       }
 
@@ -1304,6 +1358,10 @@ export async function createApp(options = {}) {
       }
       if (pathname === "/api/bootstrap" && req.method === "GET") {
         sendJson(res, 200, bootstrapPayload(session));
+        return;
+      }
+      if (pathname === "/api/dlp/check" && req.method === "POST") {
+        sendJson(res, 200, mockDlpEvaluate(await readJson(req)));
         return;
       }
       if (pathname === "/api/mail/avatar" && req.method === "GET") {
@@ -2572,6 +2630,18 @@ export async function createApp(options = {}) {
           scheduledFor = new Date(parsed).toISOString();
         }
         const holdMs = scheduledFor ? 0 : resolveHold(body);
+        const dlp = mockDlpEvaluate({
+          subject,
+          bodyText,
+          bodyHtml: body.bodyHtml || "",
+          attachments,
+          classification: body.classification || (draft && draft.classification) || MOCK_DLP.defaultClassification
+        });
+        if (dlp.blocked) {
+          throw new ApiError(422, "DLP_BLOCKED", "This message is blocked by your organization's data protection policy.", {
+            matches: dlp.matches, warnings: dlp.warnings, classification: dlp.classification
+          });
+        }
         const item = {
           id: id("send"),
           draftId,
@@ -2583,6 +2653,8 @@ export async function createApp(options = {}) {
           bodyText,
           attachments,
           mentions: normalizeMentions(body.mentions || (draft && draft.mentions) || []),
+          classification: dlp.classification,
+          dlpWarnings: dlp.warnings,
           threadId: String(body.threadId || (draft && draft.threadId) || newThreadId()).slice(0, 100),
           inReplyTo: body.inReplyTo ? String(body.inReplyTo).slice(0, 400) : (draft && draft.inReplyTo) || null,
           priority: ["low", "normal", "high"].includes(body.priority) ? body.priority : (draft && draft.priority) || "normal",
@@ -2603,6 +2675,7 @@ export async function createApp(options = {}) {
             receipt: draft.receipt,
             delivery: draft.delivery,
             saveCopy: draft.saveCopy,
+            classification: draft.classification || MOCK_DLP.defaultClassification,
             mentions: draft.mentions || []
           } : null,
           ip: requestIp(req),

@@ -208,7 +208,19 @@ async function loadBootstrap() {
   state.policy = data.policy;
   state.catalog = data.catalog || [];
   state.permissions = data.permissions || [];
+  applyAdminBranding(data.policy && data.policy.branding);
   updateChrome();
+}
+
+function applyAdminBranding(branding) {
+  if (!branding) return;
+  const name = String(branding.productName || "").trim().slice(0, 60) || "Alt8Mail";
+  $$(".brand-lockup > span:not(.brand-mark)").forEach((node) => {
+    node.innerHTML = `${esc(name)} <b>Admin</b>`;
+  });
+  if (document.title.endsWith("Admin") || document.title.startsWith("Alt8Mail")) {
+    document.title = `${name} Admin`;
+  }
 }
 
 $("#adminLoginForm").addEventListener("submit", async (event) => {
@@ -273,7 +285,7 @@ async function logout() {
 /* ------------------------------------------------------------
    Navigation / route
 ------------------------------------------------------------ */
-const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "policies", "storage", "ai", "quarantine", "audit", "tenants", "settings"]);
+const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "policies", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "tenants", "settings"]);
 
 function route() {
   if (!state.admin) return;
@@ -286,7 +298,7 @@ function route() {
   else if (view === "mailboxes" && parts[1] === "import") view = "import-mailboxes";
   state.routeParam = routeParam;
   state.view = views.has(view) ? view : "overview";
-  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", policies: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
+  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", policies: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
   if (required && !can(required)) { state.view = "overview"; location.hash = "#/overview"; return; }
   const navView = ["user-detail", "import-users", "import-mailboxes"].includes(state.view) ? "users" : state.view;
   $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === navView));
@@ -306,6 +318,8 @@ function route() {
     case "ai": renderAI(); break;
     case "quarantine": renderQuarantine(); break;
     case "audit": renderAudit(); break;
+    case "compliance": renderCompliance(); break;
+    case "integrations": renderIntegrations(); break;
     case "tenants": renderTenants(); break;
     case "settings": renderSettings(); break;
   }
@@ -1204,7 +1218,7 @@ async function renderPolicies() {
     const data = await api("policies");
     state.policy = data.policy;
     const policy = data.policy;
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Policies</h1><p>Organization-wide guardrails for authentication, mail, sharing and directory.</p></div><div class="view-actions"><span class="badge system">Enforced at sign-in where applicable</span></div></div><div class="policy-layout"><nav class="policy-nav"><button class="active" data-policy-tab="security">Security</button><button data-policy-tab="mail">Mail</button><button data-policy-tab="sharing">Sharing</button><button data-policy-tab="directory">Directory</button><button data-policy-tab="branding">Branding</button></nav><div><form id="policyForm">${policySections(policy)}</form><div class="policy-save"><span>Changes apply to the whole organization. Sensitive changes are audited.</span><button class="btn secondary" type="button" data-action="run-retention" title="Save the retention policy first">Run retention</button><button class="btn secondary" type="button" data-action="reload-policies">Reset changes</button><button class="btn primary" type="button" data-action="save-policies">${icon("check")}Save policies</button></div></div></div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Policies</h1><p>Organization-wide guardrails for authentication, mail, sharing and directory.</p></div><div class="view-actions"><span class="badge system">Enforced at sign-in where applicable</span></div></div><div class="policy-layout"><nav class="policy-nav"><button class="active" data-policy-tab="security">Security</button><button data-policy-tab="mail">Mail</button><button data-policy-tab="sharing">Sharing</button><button data-policy-tab="directory">Directory</button><button data-policy-tab="dlp">Classification &amp; DLP</button><button data-policy-tab="branding">Branding</button></nav><div><form id="policyForm">${policySections(policy)}</form><div class="policy-save"><span>Changes apply to the whole organization. Sensitive changes are audited.</span><button class="btn secondary" type="button" data-action="run-retention" title="Save the retention policy first">Run retention</button><button class="btn secondary" type="button" data-action="reload-policies">Reset changes</button><button class="btn primary" type="button" data-action="save-policies">${icon("check")}Save policies</button></div></div></div>`;
     bindPolicyForm();
   } catch (error) { viewError(error); }
 }
@@ -1219,6 +1233,7 @@ function policySections(policy) {
   const sharing = policy.sharing;
   const directory = policy.directory;
   const branding = policy.branding;
+  const dlp = policy.dlp || { enabled: true, defaultClassification: "Internal", rules: [] };
   return `<section class="card policy-panel active" data-policy-panel="security">
     <div class="policy-section"><h3>Password policy</h3><p>Applied to new users and password resets issued from this console.</p>
       <div class="setting-row"><div class="setting-copy"><b>Minimum length</b><small>Passwords shorter than this are rejected.</small></div><div class="setting-control"><div class="input-group"><input class="input" type="number" min="8" max="64" data-policy-input="security.passwordMinLength" value="${security.passwordMinLength}"><span class="muted">chars</span></div></div></div>
@@ -1272,12 +1287,51 @@ function policySections(policy) {
       ${toggleRow("Auto-add external contacts", "Automatically add external senders to personal contacts.", "directory.autoAddExternal", directory.autoAddExternal)}
     </div>
   </section>
+  <section class="card policy-panel" data-policy-panel="dlp">
+    <div class="policy-section"><h3>Classification &amp; data loss prevention</h3><p>Scan outbound mail for sensitive terms, label messages and stop restricted content before it leaves the organization.</p>
+      ${toggleRow("Outbound DLP", "Evaluate classification rules whenever a user sends or schedules a message.", "dlp.enabled", dlp.enabled)}
+      <div class="setting-row"><div class="setting-copy"><b>Default classification</b><small>Applied when a sender does not choose a label.</small></div><div class="setting-control"><select class="input" data-policy-input="dlp.defaultClassification">${dlpClassificationOptions(dlp.defaultClassification)}</select></div></div>
+    </div>
+    <div class="policy-section"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><div><h3 style="margin:0">DLP rules</h3><p style="margin:4px 0 0">A rule can label a message, warn the sender, or block the send entirely.</p></div><button class="btn secondary" type="button" id="dlpAddRule">${icon("plus")}Add rule</button></div><div id="dlpRules" style="margin-top:14px">${dlpRulesMarkup(dlp.rules)}</div></div>
+  </section>
   <section class="card policy-panel" data-policy-panel="branding">
     <div class="policy-section"><h3>Organization branding</h3><p>Shown in the admin console and organization communications.</p>
       <div class="field-row"><label class="field"><span>Product name</span><input data-policy-input="branding.productName" value="${esc(branding.productName)}"></label><label class="field"><span>Primary color</span><input type="color" data-policy-input="branding.primaryColor" value="${esc(branding.primaryColor || "#0f6cbd")}"></label></div>
       <div class="field-row"><label class="field"><span>Support email</span><input type="email" data-policy-input="branding.supportEmail" value="${esc(branding.supportEmail || "")}" placeholder="support@company.com"></label><label class="field"><span>Login message</span><input data-policy-input="branding.loginMessage" value="${esc(branding.loginMessage || "")}" placeholder="A short message for users"></label></div>
     </div>
   </section>`;
+}
+
+function dlpClassifications() {
+  return ["Public", "Internal", "Confidential", "Restricted"];
+}
+
+function dlpClassificationOptions(selected) {
+  return dlpClassifications().map((label) => `<option value="${label}" ${label === selected ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function dlpRulesMarkup(rules) {
+  const list = Array.isArray(rules) ? rules : [];
+  if (!list.length) return `<div class="empty-mini" data-dlp-empty>No rules yet. Mail is labelled with the default classification until a rule matches.</div>`;
+  return list.map(dlpRuleMarkup).join("");
+}
+
+function dlpRuleMarkup(rule = {}) {
+  const fields = Array.isArray(rule.fields) && rule.fields.length ? rule.fields : ["subject", "body"];
+  const action = rule.action || "warn";
+  return `<div class="dlp-rule" data-dlp-rule data-rule-id="${esc(rule.id || "")}" style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
+    <div class="field-row">
+      <label class="field"><span>Rule name</span><input class="input" data-dlp-field="name" value="${esc(rule.name || "")}" placeholder="Customer identifiers"></label>
+      <label class="field"><span>Action</span><select class="input" data-dlp-field="action">${[["label", "Label only"], ["warn", "Warn sender"], ["block", "Block send"]].map(([value, label]) => `<option value="${value}" ${action === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+      <label class="field"><span>Classification</span><select class="input" data-dlp-field="classification">${dlpClassificationOptions(rule.classification || "Confidential")}</select></label>
+      <label class="field"><span>Direction</span><select class="input" data-dlp-field="direction">${[["outbound", "Outbound"], ["both", "Outbound and internal"]].map(([value, label]) => `<option value="${value}" ${(rule.direction || "outbound") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+    </div>
+    <div class="field-row">
+      <label class="field"><span>Terms</span><input class="input" data-dlp-field="terms" value="${esc((rule.terms || []).join(", "))}" placeholder="account number, social security"><small class="muted">Comma-separated. Matching is case-insensitive.</small></label>
+      <div class="field"><span>Search fields</span><div style="display:flex;gap:14px;flex-wrap:wrap;padding-top:6px">${["subject", "body", "attachment"].map((field) => `<label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" data-dlp-field="fields" value="${field}" ${fields.includes(field) ? "checked" : ""}>${field[0].toUpperCase() + field.slice(1)}</label>`).join("")}</div></div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" data-dlp-field="enabled" ${rule.enabled !== false ? "checked" : ""}>Rule enabled</label><button class="btn small ghost" type="button" data-dlp-remove>Remove rule</button></div>
+  </div>`;
 }
 
 function bindPolicyForm() {
@@ -1288,6 +1342,14 @@ function bindPolicyForm() {
   $$("[data-policy-toggle]").forEach((button) => button.addEventListener("click", () => {
     button.setAttribute("aria-checked", button.getAttribute("aria-checked") === "true" ? "false" : "true");
   }));
+  $("#dlpAddRule")?.addEventListener("click", () => {
+    $("#dlpRules")?.querySelector("[data-dlp-empty]")?.remove();
+    $("#dlpRules")?.insertAdjacentHTML("beforeend", dlpRuleMarkup({}));
+  });
+  $("#dlpRules")?.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-dlp-remove]");
+    if (remove) remove.closest("[data-dlp-rule]")?.remove();
+  });
 }
 
 function collectPolicy() {
@@ -1307,6 +1369,18 @@ function collectPolicy() {
     for (let index = 0; index < path.length - 1; index++) target = target[path[index]];
     target[path[path.length - 1]] = button.getAttribute("aria-checked") === "true";
   });
+  if (policy.dlp) {
+    policy.dlp.rules = $$("[data-dlp-rule]").map((row) => ({
+      id: row.dataset.ruleId || "",
+      name: row.querySelector('[data-dlp-field="name"]')?.value.trim() || "",
+      terms: String(row.querySelector('[data-dlp-field="terms"]')?.value || "").split(",").map((value) => value.trim()).filter(Boolean),
+      fields: $$('[data-dlp-field="fields"]', row).filter((input) => input.checked).map((input) => input.value),
+      classification: row.querySelector('[data-dlp-field="classification"]')?.value || "Confidential",
+      action: row.querySelector('[data-dlp-field="action"]')?.value || "warn",
+      direction: row.querySelector('[data-dlp-field="direction"]')?.value || "outbound",
+      enabled: row.querySelector('[data-dlp-field="enabled"]')?.checked !== false
+    }));
+  }
   return policy;
 }
 
@@ -1473,6 +1547,182 @@ function auditRow(entry) {
 }
 
 /* ------------------------------------------------------------
+   Compliance · legal holds & eDiscovery
+------------------------------------------------------------ */
+async function renderCompliance() {
+  loading("Compliance");
+  try {
+    const [data, jobsData] = await Promise.all([
+      api("legal/holds"),
+      api("offboarding/jobs").catch(() => ({ jobs: [] }))
+    ]);
+    const holds = data.holds || [];
+    const stats = data.stats || {};
+    const jobs = jobsData.jobs || [];
+    const canManage = can("legal.manage");
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Compliance</h1><p>Preserve mailboxes under legal hold and search the organization archive with eDiscovery.</p></div><div class="view-actions">${canManage ? `<button class="btn primary" id="createHoldBtn">${icon("shield")}Place legal hold</button>` : ""}</div></div>
+      <div class="stat-grid">
+        <div class="stat-card"><span class="stat-label">${icon("shield")}Active holds</span><span class="stat-value">${stats.active || 0}</span><span class="stat-meta">${stats.tenantWide ? "Tenant-wide preservation" : "Scoped to selected mailboxes"}</span></div>
+        <div class="stat-card"><span class="stat-label">${icon("users")}Held users</span><span class="stat-value">${stats.heldUsers || 0}</span><span class="stat-meta">Retention and deletion are paused</span></div>
+        <div class="stat-card"><span class="stat-label">${icon("mail")}Archive scope</span><span class="stat-value">${esc(state.activeTenant.name)}</span><span class="stat-meta">Every synchronized mailbox</span></div>
+      </div>
+      <div class="card"><div class="card-head"><div><h2>Legal holds</h2><p>Held mailboxes cannot be permanently deleted or purged by retention.</p></div><span class="badge ${stats.active ? "system" : "neutral"}">${stats.active || 0} active</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Matter</th><th>Scope</th><th>Mailbox</th><th>Reason</th><th>Placed</th><th>Status</th><th></th></tr></thead><tbody>${holds.map((hold) => `<tr><td><b>${esc(hold.name || "Untitled hold")}</b>${hold.reason ? `<br><small class="muted">${esc(hold.reason)}</small>` : ""}</td><td>${esc(hold.scope === "tenant" ? "Tenant-wide" : "Mailbox")}</td><td>${esc(hold.userEmail || "All mailboxes")}${hold.userName ? `<br><small class="muted">${esc(hold.userName)}</small>` : ""}</td><td class="cell-sub">${esc(hold.createdBy || "—")}</td><td class="cell-sub">${formatDate(hold.createdAt, { time: true })}</td><td>${hold.status === "active" ? badge("active") : `<span class="badge neutral">Released</span>`}</td><td>${canManage && hold.status === "active" ? `<button class="btn small ghost" data-release-hold="${esc(hold.id)}">Release</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="7"><div class="empty">${icon("shield")}<h3>No legal holds</h3><p>Place a hold before an employee leaves or when litigation is reasonably anticipated.</p></div></td></tr>`}</tbody></table></div></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>eDiscovery search</h2><p>Search subjects, participants and message bodies across every mailbox in this organization.</p></div><span class="badge system">Read-only</span></div><div class="card-pad"><form id="discoveryForm"><div class="field-row"><label class="field"><span>Keywords</span><input id="discoveryQuery" placeholder="contract, account number, project name" autocomplete="off"></label><label class="field"><span>Mailbox email</span><input id="discoveryUserEmail" type="email" placeholder="person@company.com" autocomplete="off"></label></div><div class="field-row"><label class="field"><span>Sent from</span><input id="discoveryFrom" type="date"></label><label class="field"><span>Sent to</span><input id="discoveryTo" type="date"></label></div><div class="field-row"><label class="field"><span>Folder</span><input id="discoveryFolder" placeholder="inbox, sent, archive"></label><label class="field"><span>Classification</span><select id="discoveryClassification"><option value="">Any classification</option>${dlpClassificationOptions("")}</select></label></div><div style="display:flex;align-items:center;justify-content:flex-end;gap:8px"><a class="btn secondary" id="discoveryExport" href="./api/legal/discovery.csv" download>${icon("download")}Export CSV</a><button class="btn primary" type="submit">${icon("search")}Search archive</button></div></form><div id="discoveryResults" style="margin-top:18px"><div class="empty-mini">Enter a keyword or mailbox to search the archive.</div></div></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Recent offboarding</h2><p>Accounts closed through the one-click workflow, including mailbox handoff and preservation choices.</p></div><span class="badge neutral">${jobs.length} recent</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Time</th><th>User</th><th>Transfer</th><th>Preservation</th><th>Status</th></tr></thead><tbody>${jobs.slice(0, 10).map((job) => `<tr><td class="cell-sub">${formatDate(job.createdAt, { time: true })}</td><td><b>${esc(job.userEmail || "—")}</b><br><small class="muted">${esc(job.userName || "")}</small></td><td>${esc(job.transferToEmail || "No delegate")}</td><td>${job.createLegalHold ? "Legal hold" : job.retainMailbox ? "Mailbox retained" : "Mailbox deactivated"}${job.autoReply ? " · auto-reply" : ""}</td><td>${job.status === "completed" ? badge("active") : badge("failed")}</td></tr>`).join("") || `<tr><td colspan="5"><div class="empty-mini">No offboarding jobs yet.</div></td></tr>`}</tbody></table></div></div></div>`;
+    $("#createHoldBtn")?.addEventListener("click", openHoldModal);
+    $$("[data-release-hold]").forEach((button) => button.addEventListener("click", () => releaseLegalHold(button.dataset.releaseHold)));
+    $("#discoveryForm")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      searchDiscovery(0).catch(showError);
+    });
+    $("#discoveryResults")?.addEventListener("click", (event) => {
+      const pageButton = event.target.closest("[data-discovery-offset]");
+      if (pageButton) searchDiscovery(Number(pageButton.dataset.discoveryOffset) || 0).catch(showError);
+    });
+  } catch (error) { viewError(error); }
+}
+
+function discoverySearchParams() {
+  const params = new URLSearchParams();
+  const values = {
+    q: $("#discoveryQuery")?.value.trim(),
+    userEmail: $("#discoveryUserEmail")?.value.trim(),
+    from: $("#discoveryFrom")?.value,
+    to: $("#discoveryTo")?.value,
+    folder: $("#discoveryFolder")?.value.trim(),
+    classification: $("#discoveryClassification")?.value
+  };
+  Object.entries(values).forEach(([key, value]) => { if (value) params.set(key, value); });
+  return params;
+}
+
+async function searchDiscovery(offset = 0) {
+  const params = discoverySearchParams();
+  params.set("offset", String(Math.max(0, offset)));
+  params.set("limit", "25");
+  const results = $("#discoveryResults");
+  if (results) results.innerHTML = `<div class="empty-mini">${icon("refresh")}Searching the archive…</div>`;
+  const exportLink = $("#discoveryExport");
+  if (exportLink) {
+    const exportParams = discoverySearchParams();
+    exportLink.href = "./api/legal/discovery.csv" + (exportParams.toString() ? "?" + exportParams.toString() : "");
+  }
+  const data = await api("legal/discovery?" + params.toString());
+  if (!results) return;
+  const messages = data.messages || [];
+  const total = Number(data.total) || 0;
+  const current = Number(data.offset) || 0;
+  const limit = Number(data.limit) || 25;
+  const rows = messages.map((message) => `<tr><td class="cell-sub">${formatDate(message.sentAt, { time: true })}</td><td><b>${esc(message.userEmail)}</b><br><small class="muted">${esc(message.userName || "")}</small></td><td><b>${esc(message.subject || "(no subject)")}</b><div class="cell-sub" style="max-width:460px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(message.snippet || "")}">${esc(message.snippet || "")}</div></td><td><small>${esc(message.fromEmail || "")}</small><br><small class="muted">to ${esc(message.to || "")}</small></td><td><span class="badge neutral">${esc(message.folder || "")}</span></td><td>${esc(message.classification || "Internal")}</td></tr>`).join("");
+  results.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span class="muted" style="font-size:11px">${total} message${total === 1 ? "" : "s"} matched${total > limit ? ` · showing ${current + 1}–${Math.min(current + limit, total)}` : ""}</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Sent</th><th>Mailbox</th><th>Subject &amp; excerpt</th><th>Participants</th><th>Folder</th><th>Class</th></tr></thead><tbody>${rows || `<tr><td colspan="6"><div class="empty">${icon("search")}<h3>No matching messages</h3><p>Try a broader keyword or remove a filter.</p></div></td></tr>`}</tbody></table></div></div><div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">${current > 0 ? `<button class="btn secondary small" data-discovery-offset="${Math.max(0, current - limit)}">Previous</button>` : ""}${current + limit < total ? `<button class="btn secondary small" data-discovery-offset="${current + limit}">Next</button>` : ""}</div>`;
+}
+
+function openHoldModal() {
+  openModal({
+    title: "Place a legal hold",
+    subtitle: "Preservation applies immediately. Release the hold only when the matter is formally closed.",
+    wide: true,
+    body: `<form id="holdForm"><div class="field-row"><label class="field"><span>Scope</span><select id="holdScope"><option value="user">One mailbox</option><option value="tenant">Tenant-wide</option></select></label><label class="field" id="holdEmailField"><span>Mailbox email</span><input id="holdEmail" type="email" placeholder="custodian@company.com"></label></div><label class="field"><span>Matter name</span><input id="holdName" placeholder="Litigation hold · Matter 2026-014" required></label><label class="field"><span>Reason or instructions</span><textarea id="holdReason" rows="3" placeholder="Describe the matter and preservation scope"></textarea></label><p class="muted" style="font-size:10.5px;margin:0">Held mail is excluded from retention and permanent deletion. eDiscovery remains available.</p></form>`,
+    footer: `<button class="btn secondary" data-modal-close>Cancel</button><button class="btn primary" data-modal-submit="holdForm">${icon("shield")}Place hold</button>`
+  });
+  $("#holdScope")?.addEventListener("change", () => {
+    const field = $("#holdEmailField");
+    if (field) field.style.display = $("#holdScope").value === "tenant" ? "none" : "";
+  });
+}
+
+async function submitHoldForm() {
+  const scope = $("#holdScope")?.value || "user";
+  const email = $("#holdEmail")?.value.trim() || "";
+  const name = $("#holdName")?.value.trim() || "";
+  const reason = $("#holdReason")?.value.trim() || "";
+  if (scope === "user" && !email) throw new Error("Enter the mailbox email to preserve");
+  if (!name) throw new Error("Give the hold a matter name");
+  await api("legal/holds", { method: "POST", body: { scope, email, name, reason } });
+  closeModal();
+  toast("Legal hold placed");
+  await renderCompliance();
+}
+
+async function releaseLegalHold(id) {
+  if (!(await confirmDialog("Release legal hold", "Retention and permanent deletion will be allowed again for this scope. The release is audited.", "Release hold", true))) return;
+  try {
+    await api("legal/holds/" + encodeURIComponent(id) + "/release", { method: "POST", body: {} });
+    toast("Legal hold released");
+    await renderCompliance();
+  } catch (error) { showError(error); }
+}
+
+/* ------------------------------------------------------------
+   Integrations · signed SIEM audit webhooks
+------------------------------------------------------------ */
+async function renderIntegrations() {
+  loading("Integrations");
+  try {
+    const [config, deliveries] = await Promise.all([api("integrations/siem"), api("integrations/siem/deliveries").catch(() => ({ deliveries: [] }))]);
+    const counts = config.deliveries || {};
+    const canManage = can("siem.manage");
+    const statusBadge = config.enabled ? `<span class="badge active">Delivering</span>` : config.configured ? `<span class="badge pending">Paused</span>` : `<span class="badge neutral">Not configured</span>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Integrations</h1><p>Stream signed audit events into your SIEM, SOC or compliance archive.</p></div><div class="view-actions">${statusBadge}</div></div>
+      <div class="stat-grid">
+        <div class="stat-card"><span class="stat-label">${icon("send")}Pending</span><span class="stat-value">${counts.pending || 0}</span><span class="stat-meta">Queued for delivery</span></div>
+        <div class="stat-card"><span class="stat-label">${icon("check")}Delivered</span><span class="stat-value">${counts.delivered || 0}</span><span class="stat-meta">${config.lastDeliveryAt ? "Last success " + formatDate(config.lastDeliveryAt, { time: true }) : "No successful delivery yet"}</span></div>
+        <div class="stat-card"><span class="stat-label">${icon("alert")}Failed</span><span class="stat-value">${counts.failed || 0}</span><span class="stat-meta">Retried with backoff</span></div>
+      </div>
+      <div class="dashboard-grid"><div class="card"><div class="card-head"><div><h2>SIEM webhook</h2><p>HMAC-SHA256 signed JSON over HTTPS. Signing covers the timestamp and raw request body.</p></div></div><div class="card-pad"><form id="siemForm"><label class="field"><span>Endpoint URL</span><input id="siemEndpoint" type="url" value="${esc(config.endpoint || "")}" placeholder="https://siem.example.com/a8m/audit" ${canManage ? "" : "disabled"}><small class="muted">HTTPS only, public host, port 443. Redirects are rejected.</small></label><div class="field-row"><label class="field"><span>Signing secret</span><input id="siemSecret" type="password" autocomplete="new-password" placeholder="${config.hasSecret ? "Leave blank to keep the current secret" : "A secret will be generated"}" ${canManage ? "" : "disabled"}><small class="muted">Optional custom secret, 16–256 characters. Shown only once when created or rotated.</small></label><label class="field"><span>Status</span><select id="siemEnabled" ${canManage ? "" : "disabled"}><option value="true" ${config.enabled ? "selected" : ""}>Enabled</option><option value="false" ${!config.enabled ? "selected" : ""}>Paused</option></select></label></div><div style="display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 14px"><label style="display:flex;gap:6px;align-items:center;font-size:12px"><input id="siemUserEvents" type="checkbox" ${config.includeUserEvents !== false ? "checked" : ""} ${canManage ? "" : "disabled"}>User audit events</label><label style="display:flex;gap:6px;align-items:center;font-size:12px"><input id="siemAdminEvents" type="checkbox" ${config.includeAdminEvents !== false ? "checked" : ""} ${canManage ? "" : "disabled"}>Administrator audit events</label></div>${config.lastError ? `<div style="border:1px solid var(--danger);border-radius:8px;padding:10px;margin-bottom:12px;background:var(--danger-soft);font-size:12px"><b>Last delivery error</b><br><small>${esc(config.lastError)}</small></div>` : ""}<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">${canManage ? `<button class="btn secondary" type="button" id="siemTestBtn">${icon("send")}Send test event</button><button class="btn secondary" type="button" id="siemRotateBtn">${icon("refresh")}Rotate secret</button><button class="btn primary" type="submit">${icon("check")}Save integration</button>` : ""}</div></form></div></div>
+      <div class="card"><div class="card-head"><div><h2>Delivery activity</h2><p>The 100 most recent audit events queued for this endpoint.</p></div><span class="badge neutral">${(deliveries.deliveries || []).length} shown</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Time</th><th>Source</th><th>Event</th><th>Status</th><th>Attempts</th><th>Last error</th></tr></thead><tbody>${(deliveries.deliveries || []).map((item) => `<tr><td class="cell-sub">${formatDate(item.createdAt, { time: true })}</td><td>${esc(item.source)}</td><td><span class="audit-action">${esc(item.action || "—")}</span><br><small class="muted">#${esc(item.sourceId)}</small></td><td>${item.status === "delivered" ? badge("active") : item.status === "failed" ? badge("failed") : badge("pending")}</td><td>${item.attempts || 0}</td><td class="cell-sub" title="${esc(item.lastError || "")}">${esc(item.lastError || "—")}</td></tr>`).join("") || `<tr><td colspan="6"><div class="empty-mini">No deliveries yet. Save the integration and send a test event.</div></td></tr>`}</tbody></table></div></div></div></div>`;
+    $("#siemForm")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = event.target.querySelector('button[type="submit"]');
+      setBusy(button, true, "Saving…");
+      try {
+        const body = {
+          endpoint: $("#siemEndpoint").value.trim(),
+          enabled: $("#siemEnabled").value === "true",
+          includeUserEvents: $("#siemUserEvents").checked,
+          includeAdminEvents: $("#siemAdminEvents").checked
+        };
+        const secret = $("#siemSecret").value.trim();
+        if (secret) body.secret = secret;
+        const result = await api("integrations/siem", { method: "PUT", body });
+        if (result.secret) showSIEMSecret(result.secret);
+        else toast("SIEM integration saved");
+        await renderIntegrations();
+      } catch (error) { showError(error); setBusy(button, false); }
+    });
+    $("#siemTestBtn")?.addEventListener("click", async (event) => {
+      setBusy(event.currentTarget, true, "Sending…");
+      try {
+        await api("integrations/siem/test", { method: "POST", body: {} });
+        toast("Test event delivered");
+        await renderIntegrations();
+      } catch (error) { showError(error); setBusy(event.currentTarget, false); }
+    });
+    $("#siemRotateBtn")?.addEventListener("click", async () => {
+      if (!(await confirmDialog("Rotate signing secret", "The current secret stops working immediately. Update the receiver before rotating.", "Rotate secret", true))) return;
+      try {
+        const result = await api("integrations/siem/rotate-secret", { method: "POST", body: {} });
+        showSIEMSecret(result.secret);
+        await renderIntegrations();
+      } catch (error) { showError(error); }
+    });
+  } catch (error) { viewError(error); }
+}
+
+function showSIEMSecret(secret) {
+  openModal({
+    title: "SIEM signing secret",
+    subtitle: "Copy this value into your SIEM receiver now. Alt8Mail will not show it again.",
+    body: `<div class="copy-box"><span>${esc(secret)}</span><button class="icon-button" data-copy-siem-secret="${esc(secret)}" aria-label="Copy secret">${icon("list")}</button></div><p class="muted" style="font-size:10.5px;margin:10px 0 0">Signature header: <code>X-A8M-Signature: sha256=&lt;hex&gt;</code>, computed over <code>&lt;timestamp&gt;.&lt;raw-body&gt;</code>. Timestamp header: <code>X-A8M-Timestamp</code>.</p>`,
+    footer: `<button class="btn primary" data-modal-close>I have stored it</button>`
+  });
+  $("[data-copy-siem-secret]")?.addEventListener("click", async (event) => {
+    await navigator.clipboard.writeText(event.currentTarget.dataset.copySiemSecret).catch(() => {});
+    toast("Signing secret copied");
+  });
+}
+
+/* ------------------------------------------------------------
    Tenants (system admin)
 ------------------------------------------------------------ */
 async function renderTenants() {
@@ -1541,7 +1791,7 @@ async function renderSettings() {
     const data = await api("settings");
     const tenant = data.tenant;
     const branding = data.branding || {};
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Organization settings</h1><p>Profile, billing contact and branding for ${esc(tenant.name)}.</p></div></div><div class="dashboard-grid"><div class="card"><div class="card-head"><div><h2>Organization profile</h2><p>Visible to administrators and used in communications.</p></div></div><div class="card-pad"><form id="tenantSettingsForm"><div class="field-row"><label class="field"><span>Organization name</span><input data-settings-field="name" value="${esc(tenant.name)}" required></label><label class="field"><span>Billing email</span><input data-settings-field="billingEmail" type="email" value="${esc(tenant.billingEmail || "")}" placeholder="billing@company.com"></label></div>${state.admin?.isSystemAdmin ? `<div class="field-row"><label class="field"><span>Plan</span><select data-settings-field="plan">${["starter", "business", "enterprise", "education"].map((plan) => `<option value="${plan}" ${tenant.plan === plan ? "selected" : ""}>${plan[0].toUpperCase() + plan.slice(1)}</option>`).join("")}</select></label><label class="field"><span>Region</span><select data-settings-field="region">${["us-east-1", "us-west-2", "eu-west-1", "eu-central-1", "ap-southeast-1"].map((region) => `<option value="${region}" ${tenant.region === region ? "selected" : ""}>${region}</option>`).join("")}</select></label></div>` : ""}<div class="field-row"><label class="field"><span>Product name</span><input data-settings-branding="productName" value="${esc(branding.productName || "")}"></label><label class="field"><span>Primary color</span><input data-settings-branding="primaryColor" type="color" value="${esc(branding.primaryColor || "#0f6cbd")}"></label></div><div class="field-row"><label class="field"><span>Support email</span><input data-settings-branding="supportEmail" type="email" value="${esc(branding.supportEmail || "")}"></label><label class="field"><span>Login message</span><input data-settings-branding="loginMessage" value="${esc(branding.loginMessage || "")}"></label></div><div style="display:flex;justify-content:flex-end"><button class="btn primary" type="submit">${icon("check")}Save settings</button></div></form></div></div><div><div class="card"><div class="card-head"><div><h2>My security</h2><p>Admin console protection.</p></div></div><div class="card-pad"><div class="detail-list"><div class="detail-row"><span>Authenticator</span><b>${state.admin?.security?.twoFactor?.totpEnabled ? "Enabled" : "Not enrolled"}</b></div><div class="detail-row"><span>Recovery codes</span><b>${state.admin?.security?.twoFactor?.recoveryCodesRemaining || 0} remaining</b></div><div class="detail-row"><span>Active admin sessions</span><b>${state.admin?.security?.twoFactor?.passkeys?.length ? `${state.admin.security.twoFactor.passkeys.length} passkeys` : "Password + MFA"}</b></div></div><button class="btn secondary" data-action="open-security" style="margin-top:14px">${icon("shield")}Manage security</button></div></div><div class="card" style="margin-top:14px"><div class="card-head"><div><h2>Tenant lifecycle</h2><p>${tenant.status === "active" ? "Active organization" : "Suspended organization"}</p></div></div><div class="card-pad"><p class="muted" style="font-size:11px">${state.admin?.isSystemAdmin ? "System administrators can suspend this organization from the Organizations page." : "Organization lifecycle is managed by Alt8Mail support."}</p></div></div></div></div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Organization settings</h1><p>Profile, billing contact and branding for ${esc(tenant.name)}.</p></div></div><div class="dashboard-grid"><div class="card"><div class="card-head"><div><h2>Organization profile</h2><p>Visible to administrators and used in communications.</p></div></div><div class="card-pad"><form id="tenantSettingsForm"><div class="field-row"><label class="field"><span>Organization name</span><input data-settings-field="name" value="${esc(tenant.name)}" required></label><label class="field"><span>Billing email</span><input data-settings-field="billingEmail" type="email" value="${esc(tenant.billingEmail || "")}" placeholder="billing@company.com"></label></div>${state.admin?.isSystemAdmin ? `<div class="field-row"><label class="field"><span>Plan</span><select data-settings-field="plan">${["starter", "business", "enterprise", "education"].map((plan) => `<option value="${plan}" ${tenant.plan === plan ? "selected" : ""}>${plan[0].toUpperCase() + plan.slice(1)}</option>`).join("")}</select></label><label class="field"><span>Region</span><select data-settings-field="region">${["us-east-1", "us-west-2", "eu-west-1", "eu-central-1", "ap-southeast-1"].map((region) => `<option value="${region}" ${tenant.region === region ? "selected" : ""}>${region}</option>`).join("")}</select></label></div>` : ""}<div class="field-row"><label class="field"><span>Product name</span><input data-settings-branding="productName" value="${esc(branding.productName || "")}"></label><label class="field"><span>Primary color</span><input data-settings-branding="primaryColor" type="color" value="${esc(branding.primaryColor || "#0f6cbd")}"></label></div><div class="field-row"><label class="field"><span>Support email</span><input data-settings-branding="supportEmail" type="email" value="${esc(branding.supportEmail || "")}"></label><label class="field"><span>Login message</span><input data-settings-branding="loginMessage" value="${esc(branding.loginMessage || "")}"></label></div><p class="muted" style="font-size:10.5px;margin:0 0 12px">Applied to the webmail sign-in screen, app shell and outbound mail footer when the product name or support address differs from Alt8Mail defaults.</p><div style="display:flex;justify-content:flex-end"><button class="btn primary" type="submit">${icon("check")}Save settings</button></div></form></div></div><div><div class="card"><div class="card-head"><div><h2>My security</h2><p>Admin console protection.</p></div></div><div class="card-pad"><div class="detail-list"><div class="detail-row"><span>Authenticator</span><b>${state.admin?.security?.twoFactor?.totpEnabled ? "Enabled" : "Not enrolled"}</b></div><div class="detail-row"><span>Recovery codes</span><b>${state.admin?.security?.twoFactor?.recoveryCodesRemaining || 0} remaining</b></div><div class="detail-row"><span>Active admin sessions</span><b>${state.admin?.security?.twoFactor?.passkeys?.length ? `${state.admin.security.twoFactor.passkeys.length} passkeys` : "Password + MFA"}</b></div></div><button class="btn secondary" data-action="open-security" style="margin-top:14px">${icon("shield")}Manage security</button></div></div><div class="card" style="margin-top:14px"><div class="card-head"><div><h2>Tenant lifecycle</h2><p>${tenant.status === "active" ? "Active organization" : "Suspended organization"}</p></div></div><div class="card-pad"><p class="muted" style="font-size:11px">${state.admin?.isSystemAdmin ? "System administrators can suspend this organization from the Organizations page." : "Organization lifecycle is managed by Alt8Mail support."}</p></div></div></div></div>`;
     $("#tenantSettingsForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const button = event.target.querySelector("button[type=submit]");
@@ -1794,6 +2044,7 @@ document.addEventListener("click", async (event) => {
       else if (formId === "adminTotpForm") await submitAdminTOTP();
       else if (formId === "disableTotpForm") await submitDisableAdminTOTP();
       else if (formId === "adminPasswordForm") await submitAdminPassword();
+      else if (formId === "holdForm") await submitHoldForm();
     } catch (error) { showError(error); setBusy(submit, false); }
   }
 });

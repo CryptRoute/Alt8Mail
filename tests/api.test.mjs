@@ -1204,6 +1204,50 @@ test("phase 3: subscriptions, reactions, rules and yearly review", async () => {
   assert.ok(Array.isArray(review.body.highlights) && review.body.highlights.length > 0);
 });
 
+test("phase 4: public branding and outbound classification/DLP", async () => {
+  const publicBranding = await fetch(base + "/api/branding");
+  assert.equal(publicBranding.status, 200);
+  const branding = await publicBranding.json();
+  assert.equal(branding.productName, "Alt8Mail");
+  assert.match(branding.primaryColor, /^#[0-9a-f]{6}$/i);
+
+  const bootstrap = (await client.request("/api/bootstrap")).body;
+  assert.equal(bootstrap.tenantPolicy.dlp.enabled, true);
+  assert.equal(bootstrap.tenantPolicy.dlp.defaultClassification, "Internal");
+  assert.ok(Array.isArray(bootstrap.tenantPolicy.dlp.labels));
+  assert.equal(bootstrap.tenantPolicy.branding.productName, "Alt8Mail");
+
+  const blockedCheck = await client.request("/api/dlp/check", {
+    method: "POST", body: { subject: "Top secret launch", bodyText: "Do not share" }
+  });
+  assert.equal(blockedCheck.status, 200);
+  assert.equal(blockedCheck.body.blocked, true);
+  assert.equal(blockedCheck.body.classification, "Restricted");
+
+  const warningCheck = await client.request("/api/dlp/check", {
+    method: "POST", body: { subject: "Renewal", bodyText: "Please confirm the account number" }
+  });
+  assert.equal(warningCheck.status, 200);
+  assert.equal(warningCheck.body.allowed, true);
+  assert.equal(warningCheck.body.classification, "Confidential");
+  assert.ok(warningCheck.body.warnings.length > 0);
+
+  const blockedSend = await client.request("/api/send", {
+    method: "POST", body: { to: "elena.vasquez@a8m.example", subject: "Top secret launch", bodyText: "This must not leave" }
+  });
+  assert.equal(blockedSend.status, 422);
+  assert.equal(blockedSend.body.error.code, "DLP_BLOCKED");
+  assert.equal(blockedSend.body.error.details.classification, "Restricted");
+
+  const allowedSend = await client.request("/api/send", {
+    method: "POST", body: { to: "elena.vasquez@a8m.example", subject: "Quarterly plan", bodyText: "Attached is the plan.", classification: "Confidential" }
+  });
+  assert.equal(allowedSend.status, 200);
+  assert.equal(allowedSend.body.queued.classification, "Confidential");
+  const cancelled = await client.request(`/api/outbox/${encodeURIComponent(allowedSend.body.queued.id)}/cancel`, { method: "POST", body: {} });
+  assert.equal(cancelled.status, 200);
+});
+
 test("data persists across an application restart", async () => {
   const dataFile = path.join(tempDir, "persist.json");
   const first = await createApp({ dataFile });
