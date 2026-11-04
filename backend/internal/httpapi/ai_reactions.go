@@ -56,6 +56,10 @@ func heuristicReactionSuggestions(message map[string]any) []reactionSuggestion {
 
 func (s *Server) aiReactionSuggestions(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.reactionsFeatureEnabled(r.Context(), sess.User.TenantID) {
+		writeError(w, http.StatusForbidden, "FEATURE_DISABLED", "Reactions are turned off for this organization")
+		return
+	}
 	var body struct {
 		MessageID string `json:"messageId"`
 	}

@@ -10,13 +10,13 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.20.28">
-<link rel="stylesheet" href="/features.css?v=0.20.28">
-<link rel="stylesheet" href="/workspace.css?v=0.20.28">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.20.28">
-<link rel="stylesheet" href="/features-0.7.css?v=0.20.28">
-<link rel="stylesheet" href="/onboarding.css?v=0.20.28">
-<link rel="stylesheet" href="/email-ui.css?v=0.20.28">
+<link rel="stylesheet" href="/styles.css?v=0.20.29">
+<link rel="stylesheet" href="/features.css?v=0.20.29">
+<link rel="stylesheet" href="/workspace.css?v=0.20.29">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.20.29">
+<link rel="stylesheet" href="/features-0.7.css?v=0.20.29">
+<link rel="stylesheet" href="/onboarding.css?v=0.20.29">
+<link rel="stylesheet" href="/email-ui.css?v=0.20.29">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -422,6 +422,9 @@
           <button class="cmd-btn ai-reply-action" data-action="ai-reply" id="cmdAiReply" type="button" aria-label="Reply with AI" title="Reply with AI" hidden>
             <svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span>Reply with AI</span>
           </button>
+          <button class="cmd-btn reader-react-btn" data-action="react" id="cmdReact" type="button" aria-label="React to this message" title="React to this message">
+            <span class="react-tool-emoji" aria-hidden="true">😊</span><span>React</span>
+          </button>
           <span class="cmd-divider" aria-hidden="true"></span>
           <button class="cmd-btn" data-action="archive" type="button" aria-label="Archive" title="Archive">
             <svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg><span>Archive</span>
@@ -548,6 +551,9 @@
             </button>
             <button class="tool-btn ai-reply-action" data-action="ai-reply" id="readerAiReplyBtn" type="button" aria-label="Reply with AI" title="Reply with AI" hidden>
               <svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span class="tool-label">Reply with AI</span>
+            </button>
+            <button class="tool-btn reader-react-btn" data-action="react" id="readerReactBtn" type="button" aria-label="React to this message" title="React to this message">
+              <span class="react-tool-emoji" aria-hidden="true">😊</span><span class="tool-label">React</span>
             </button>
             <span class="tool-divider" aria-hidden="true"></span>
             <button class="tool-btn" data-action="archive" type="button" aria-label="Archive" title="Archive">
@@ -1925,6 +1931,7 @@
 <div class="cmd-newmenu" id="newMenu" hidden>
   <button data-new="message" type="button"><svg class="icon" aria-hidden="true"><use href="#i-compose"/></svg>New mail</button>
   <button data-new="event" type="button"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>New event</button>
+  <button data-new="sticky" type="button"><span class="newmenu-emoji" aria-hidden="true">📌</span>New sticky note</button>
 </div>
 
 <div class="cmd-newmenu" id="moveMenu" hidden></div>
@@ -3006,6 +3013,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.20.28"></script>
+<script type="module" src="/app.js?v=0.20.29"></script>
 </body>
 </html>

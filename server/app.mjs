@@ -32,6 +32,54 @@ const MOCK_DLP = {
     { id: "dlp_secret", name: "Highly restricted material", terms: ["top secret"], fields: ["subject", "body"], action: "block", classification: "Restricted", direction: "outbound", enabled: true }
   ]
 };
+const MOCK_REACTION_CATEGORIES = [
+  { name: "Smileys & emotion", emojis: [
+    { emoji: "😀", label: "Grinning", keywords: "happy smile", semantic: "happiness" },
+    { emoji: "😂", label: "Tears of joy", keywords: "laugh funny", semantic: "humour" },
+    { emoji: "😊", label: "Warm smile", keywords: "happy warm", semantic: "appreciation" },
+    { emoji: "😍", label: "Heart eyes", keywords: "love", semantic: "appreciation" },
+    { emoji: "🥳", label: "Partying", keywords: "celebrate", semantic: "celebration" },
+    { emoji: "🤔", label: "Thinking", keywords: "think", semantic: "needs thought" },
+    { emoji: "😢", label: "Sad", keywords: "sad", semantic: "sympathy" },
+    { emoji: "🫡", label: "Salute", keywords: "respect", semantic: "respect" }
+  ]},
+  { name: "Gestures & people", emojis: [
+    { emoji: "👍", label: "Thumbs up", keywords: "approve yes", semantic: "acknowledgement" },
+    { emoji: "👎", label: "Thumbs down", keywords: "no", semantic: "disagreement" },
+    { emoji: "👏", label: "Applause", keywords: "clap", semantic: "appreciation" },
+    { emoji: "🙌", label: "Raised hands", keywords: "hooray", semantic: "celebration" },
+    { emoji: "🙏", label: "Folded hands", keywords: "thanks", semantic: "gratitude" },
+    { emoji: "🤝", label: "Handshake", keywords: "deal", semantic: "agreement" },
+    { emoji: "👀", label: "Eyes", keywords: "attention", semantic: "attention" },
+    { emoji: "💪", label: "Strong", keywords: "power", semantic: "encouragement" }
+  ]},
+  { name: "Hearts & appreciation", emojis: [
+    { emoji: "❤️", label: "Red heart", keywords: "love", semantic: "appreciation" },
+    { emoji: "🧡", label: "Orange heart", keywords: "love", semantic: "appreciation" },
+    { emoji: "💙", label: "Blue heart", keywords: "love", semantic: "appreciation" },
+    { emoji: "💜", label: "Purple heart", keywords: "love", semantic: "appreciation" },
+    { emoji: "💯", label: "Hundred points", keywords: "perfect", semantic: "strong agreement" }
+  ]},
+  { name: "Celebration & work", emojis: [
+    { emoji: "🎉", label: "Party popper", keywords: "celebrate", semantic: "celebration" },
+    { emoji: "🎊", label: "Confetti", keywords: "party", semantic: "celebration" },
+    { emoji: "🏆", label: "Trophy", keywords: "win", semantic: "celebration" },
+    { emoji: "🚀", label: "Rocket", keywords: "launch", semantic: "excitement" },
+    { emoji: "✅", label: "Check", keywords: "done approve", semantic: "approval" },
+    { emoji: "📌", label: "Pin", keywords: "reminder", semantic: "attention" },
+    { emoji: "💡", label: "Idea", keywords: "insight", semantic: "needs thought" },
+    { emoji: "🔥", label: "Fire", keywords: "hot", semantic: "excitement" }
+  ]},
+  { name: "Nature & food", emojis: [
+    { emoji: "🌈", label: "Rainbow", keywords: "hope", semantic: "happiness" },
+    { emoji: "🌸", label: "Blossom", keywords: "flower", semantic: "appreciation" },
+    { emoji: "🍀", label: "Clover", keywords: "luck", semantic: "hope" },
+    { emoji: "🍕", label: "Pizza", keywords: "food", semantic: "playfulness" },
+    { emoji: "☕", label: "Coffee", keywords: "break", semantic: "acknowledgement" }
+  ]}
+];
+const MOCK_REACTION_EMOJIS = new Set(MOCK_REACTION_CATEGORIES.flatMap((category) => category.emojis.map((item) => item.emoji)));
+
 const TRUSTED_DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const FOLDER_IDS = new Set(["inbox", "sent", "drafts", "archive", "spam", "trash"]);
 const GIB = 1024 ** 3;
@@ -1090,6 +1138,7 @@ export async function createApp(options = {}) {
   function bootstrapPayload(session) {
     return {
       user: publicUser(db.user),
+      organizationName: "Alt8Mail",
       aliases: db.user.aliases,
       folders: db.folders,
       people: db.people.map((person) => ({ ...person, source: person.source || "directory" })),
@@ -1119,11 +1168,12 @@ export async function createApp(options = {}) {
         directory: { contactSharing: true, externalDirectory: false, profileEditing: true, autoAddExternal: true },
         sharing: { externalSharing: true, linkDefault: "view", allowedDomains: [], guestInvites: false },
         dlp: { enabled: MOCK_DLP.enabled, defaultClassification: MOCK_DLP.defaultClassification, labels: MOCK_DLP.labels },
+        features: { stickyNotes: true, reactions: true },
         branding: { ...MOCK_BRANDING }
       },
       branding: { ...MOCK_BRANDING },
       auditCount: db.audit.length,
-      capabilities: ["threads", "instant-search", "bulk-actions", "undo", "server-drafts", "undo-send", "scheduled-send", "sieve", "automatic-replies", "sender-trust", "outbound-caps", "quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files", "storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences"],
+      capabilities: ["threads", "instant-search", "bulk-actions", "undo", "server-drafts", "undo-send", "scheduled-send", "sieve", "automatic-replies", "sender-trust", "outbound-caps", "quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files", "storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences", "mail-pulse", "sticky-notes", "reaction-catalog"],
       attachmentMaxBytes: MAX_UPLOAD_BYTES,
       csrf: session.csrf,
       mailSync: { lastError: null, lastSyncAt: nowIso() },
@@ -1362,6 +1412,62 @@ export async function createApp(options = {}) {
       }
       if (pathname === "/api/dlp/check" && req.method === "POST") {
         sendJson(res, 200, mockDlpEvaluate(await readJson(req)));
+        return;
+      }
+      if (pathname === "/api/sticky-note" && req.method === "GET") {
+        const note = db.stickyNote || {
+          content: "", color: "yellow", collapsed: false, enabled: true,
+          links: [], position: { x: 0.7, y: 0.14 }, updatedBy: "", updatedAt: ""
+        };
+        sendJson(res, 200, { note, shared: false, owner: { id: db.user.id, name: db.user.name, email: db.user.email } });
+        return;
+      }
+      if (pathname === "/api/sticky-note" && req.method === "PUT") {
+        const body = await readJson(req);
+        const current = db.stickyNote || {
+          content: "", color: "yellow", collapsed: false, enabled: true,
+          links: [], position: { x: 0.7, y: 0.14 }, updatedBy: "", updatedAt: ""
+        };
+        const note = { ...current };
+        if (body.content !== undefined) {
+          const content = String(body.content || "").replace(/[ \t\r\n]+$/, "");
+          if (content.length > 2000) throw new ApiError(400, "STICKY_NOTE", "Keep the sticky note under 2,000 characters");
+          note.content = content;
+        }
+        if (body.color !== undefined) {
+          const color = String(body.color || "").toLowerCase();
+          if (!["yellow", "blue", "pink", "green"].includes(color)) throw new ApiError(400, "STICKY_NOTE_COLOR", "Choose a valid sticky-note color");
+          note.color = color;
+        }
+        if (body.collapsed !== undefined) note.collapsed = Boolean(body.collapsed);
+        if (body.enabled !== undefined) note.enabled = Boolean(body.enabled);
+        if (body.position && Number.isFinite(Number(body.position.x)) && Number.isFinite(Number(body.position.y))) {
+          note.position = { x: Math.max(0, Math.min(1, Number(body.position.x))), y: Math.max(0, Math.min(1, Number(body.position.y))) };
+        }
+        if (Array.isArray(body.links)) {
+          const links = [];
+          const seen = new Set();
+          for (const rawId of body.links.slice(0, 12)) {
+            const threadId = String(rawId || "").trim();
+            if (!threadId || seen.has(threadId)) continue;
+            const candidates = db.messages.filter((message) => message.threadId === threadId).sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+            const latest = candidates[0];
+            if (!latest) continue;
+            seen.add(threadId);
+            links.push({
+              threadId, subject: latest.subject || "(no subject)",
+              fromName: latest.from?.name || latest.from?.email || "", fromEmail: latest.from?.email || "",
+              date: latest.date
+            });
+          }
+          note.links = links;
+        }
+        note.updatedBy = db.user.name;
+        note.updatedAt = nowIso();
+        db.stickyNote = note;
+        addAudit(req, "sticky_note.updated", "Sticky note", "Updated the mailbox sticky note");
+        await store.save();
+        sendJson(res, 200, { ok: true, note, shared: false });
         return;
       }
       if (pathname === "/api/mail/avatar" && req.method === "GET") {
@@ -1948,12 +2054,14 @@ export async function createApp(options = {}) {
         const folder = String(url.searchParams.get("folder") || "inbox");
         const query = String(url.searchParams.get("q") || "");
         const filter = String(url.searchParams.get("filter") || "all");
+        const requestedThread = String(url.searchParams.get("thread") || "").trim();
         let messages;
-        if (query) messages = getIndex().search(query).messages;
+        if (requestedThread) messages = db.messages.filter((message) => message.threadId === requestedThread || message.id === requestedThread);
+        else if (query) messages = getIndex().search(query).messages;
         else if (folder === "starred") messages = db.messages.filter((message) => message.starred);
         else if (folder === "subscriptions") messages = db.messages.filter((message) => message.unsubscribe);
         else messages = db.messages.filter((message) => message.folder === folder);
-        if (!query) {
+        if (!query && !requestedThread) {
           const closedThreads = new Set(db.threadMeta.filter((item) => item.ownerId === db.user.id && item.closed).map((item) => item.threadId));
           messages = filter === "closed"
             ? messages.filter((message) => closedThreads.has(message.threadId))
@@ -1964,6 +2072,7 @@ export async function createApp(options = {}) {
         if (filter === "attachments") messages = messages.filter((message) => (message.attachments || []).length);
         sendJson(res, 200, {
           folder,
+          thread: requestedThread || undefined,
           count: messages.length,
           messages: messages.map(publicMessage),
           threads: buildThreads(messages, db.messages).map((thread) => ({
@@ -2352,6 +2461,11 @@ export async function createApp(options = {}) {
         return;
       }
 
+      if (pathname === "/api/reaction-catalog" && req.method === "GET") {
+        sendJson(res, 200, { categories: MOCK_REACTION_CATEGORIES, quick: ["👍", "❤️", "😂", "🎉", "👀", "✅"] });
+        return;
+      }
+
       if (pathname === "/api/reactions" && req.method === "GET") {
         const threadId = String(url.searchParams.get("threadId") || "");
         const ownerId = String(url.searchParams.get("ownerId") || db.user.id);
@@ -2369,6 +2483,15 @@ export async function createApp(options = {}) {
         const messageId = decodeURIComponent(reactionMatch[1]);
         const message = findMessage(messageId);
         if (!message) throw new ApiError(404, "MESSAGE_NOT_FOUND", "Message not found");
+        if (message.folder === "sent" || message.folder === "drafts" || message.folder === "spam") {
+          throw new ApiError(400, "REACTION_UNAVAILABLE", "Reactions are unavailable in this folder");
+        }
+        if (message.unsubscribe && typeof message.unsubscribe === "object" && Object.keys(message.unsubscribe).length) {
+          throw new ApiError(400, "REACTION_UNAVAILABLE", "Reactions are unavailable for newsletter and unsubscribe mail");
+        }
+        if (message.threadId && db.messages.some((item) => item.threadId === message.threadId && item.unsubscribe && typeof item.unsubscribe === "object" && Object.keys(item.unsubscribe).length)) {
+          throw new ApiError(400, "REACTION_UNAVAILABLE", "Reactions are unavailable for newsletter and unsubscribe mail");
+        }
         const existing = db.reactions.find((item) => item.ownerId === db.user.id && item.messageId === message.id && item.userId === db.user.id && !item.dismissedAt);
         if (req.method === "DELETE") {
           if (!existing) throw new ApiError(404, "REACTION_NOT_FOUND", "Reaction not found");
@@ -2381,7 +2504,7 @@ export async function createApp(options = {}) {
         }
         const body = await readJson(req);
         const emoji = String(body.emoji || "");
-        const allowed = new Set(["👍", "❤️", "😂", "🎉", "👀", "✅", "🙏", "🤔", "🚀", "💯"]);
+        const allowed = MOCK_REACTION_EMOJIS;
         if (!allowed.has(emoji)) throw new ApiError(400, "REACTION_EMOJI", "Choose one of the available reactions");
         const visibility = body.visibility === "sent" ? "sent" : "private";
         if (visibility === "sent" && normalizeEmail(message.from?.email || "") === normalizeEmail(db.user.email)) {
@@ -2531,11 +2654,40 @@ export async function createApp(options = {}) {
         });
         const sent = inYear.filter((message) => message.folder === "sent");
         const received = inYear.filter((message) => message.folder !== "sent");
-        const monthly = Array.from({ length: 12 }, (_, index) => ({ month: index + 1, label: new Date(Date.UTC(year, index, 1)).toLocaleString("en-US", { month: "long" }), count: 0 }));
+        const monthly = Array.from({ length: 12 }, (_, index) => ({
+          month: index + 1,
+          label: new Date(Date.UTC(year, index, 1)).toLocaleString("en-US", { month: "long" }),
+          count: 0, sent: 0, received: 0,
+          start: new Date(Date.UTC(year, index, 1)).toISOString().slice(0, 10),
+          end: new Date(Date.UTC(year, index + 1, 1)).toISOString().slice(0, 10)
+        }));
         for (const message of inYear) {
           const month = new Date(Date.parse(message.date)).getUTCMonth();
-          if (monthly[month]) monthly[month].count += 1;
+          if (!monthly[month]) continue;
+          monthly[month].count += 1;
+          if (message.folder === "sent") monthly[month].sent += 1;
+          else monthly[month].received += 1;
         }
+        const weeklyMap = new Map();
+        for (const message of inYear) {
+          const date = new Date(Date.parse(message.date));
+          const day = date.getUTCDay();
+          const offset = (day + 6) % 7;
+          const weekStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - offset));
+          const key = weekStart.toISOString().slice(0, 10);
+          const current = weeklyMap.get(key) || { weekStart, count: 0, sent: 0, received: 0 };
+          current.count += 1;
+          if (message.folder === "sent") current.sent += 1;
+          else current.received += 1;
+          weeklyMap.set(key, current);
+        }
+        const weekly = Array.from(weeklyMap.values()).sort((a, b) => a.weekStart - b.weekStart).map((item) => ({
+          week: (() => { const date = new Date(item.weekStart); const first = new Date(Date.UTC(date.getUTCFullYear(), 0, 1)); return Math.ceil((((date - first) / 86400000) + first.getUTCDay() + 1) / 7); })(),
+          label: `Week of ${item.weekStart.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`,
+          count: item.count, sent: item.sent, received: item.received,
+          start: item.weekStart.toISOString().slice(0, 10),
+          end: new Date(item.weekStart.getTime() + 6 * 86400000).toISOString().slice(0, 10)
+        }));
         const senderCounts = new Map();
         for (const message of received) {
           const key = normalizeEmail(message.from?.email);
@@ -2580,6 +2732,7 @@ export async function createApp(options = {}) {
           year, years: years.length ? years : [year], timeZone: "UTC",
           totals: { messages: inYear.length, sent: sent.length, received: received.length, threads: new Set(inYear.map((message) => message.threadId)).size, unread: inYear.filter((message) => message.unread).length, newsletters: inYear.filter((message) => message.unsubscribe).length, readingMinutes, readingHours: readingMinutes / 60 },
           topSenders, topRecipients, monthly,
+          weekly,
           busiestMonth: { month: busiestMonth.month, label: busiestMonth.label, count: busiestMonth.count },
           busiestDay: { date: busiestDay[0], count: busiestDay[1] },
           busiestHour: { hour: 10, count: Math.max(1, Math.round(inYear.length / 8)) },

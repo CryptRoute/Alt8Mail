@@ -10,14 +10,14 @@ import (
 )
 
 type offboardingRequest struct {
-	TransferTo        string `json:"transferTo"`
-	TransferEmail     string `json:"transferEmail"`
-	RetainMailbox     *bool  `json:"retainMailbox"`
-	CreateLegalHold   bool   `json:"createLegalHold"`
-	LegalHoldName     string `json:"legalHoldName"`
-	AutoReply         bool   `json:"autoReply"`
-	AutoReplyMessage  string `json:"autoReplyMessage"`
-	Confirm           bool   `json:"confirm"`
+	TransferTo       string `json:"transferTo"`
+	TransferEmail    string `json:"transferEmail"`
+	RetainMailbox    *bool  `json:"retainMailbox"`
+	CreateLegalHold  bool   `json:"createLegalHold"`
+	LegalHoldName    string `json:"legalHoldName"`
+	AutoReply        bool   `json:"autoReply"`
+	AutoReplyMessage string `json:"autoReplyMessage"`
+	Confirm          bool   `json:"confirm"`
 }
 
 func (s *Server) adminOffboardUser(w http.ResponseWriter, r *http.Request) {

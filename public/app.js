@@ -835,6 +835,7 @@ const state = {
   query: "",
   sortDesc: true,
   user: null,
+  organizationName: "",
   csrf: null,
   aliases: [],
   identities: [],
@@ -857,6 +858,22 @@ const state = {
   reactionRuleEditing: null,
   yearReview: null,
   yearReviewYear: null,
+  homeTab: "home",
+  homeTabsRestored: false,
+  homeSearchQuery: "",
+  homeSearchData: null,
+  homeSearchLoading: false,
+  homeSearchSeq: 0,
+  pulseData: null,
+  pulseYear: null,
+  pulseLoading: false,
+  pulsePeriod: "months",
+  pulseSelection: "",
+  stickyNotes: new Map(),
+  stickyNoteLoading: new Set(),
+  stickyNoteSaveTimer: null,
+  stickyEditorOwner: "",
+  reactionCatalog: null,
   notifications: [],
   dismissedNotifications: new Set(),
   noticeFilter: "all",
@@ -1772,6 +1789,10 @@ function updateDocumentTitle() {
     title = loginScreen && !loginScreen.hidden ? TITLE_LOGIN : TITLE_GENERIC;
   } else if (state.task !== "mail") {
     title = `${brand}: ${state.user.email || `${brand} account`} - ${TITLE_ACCOUNT}`;
+  } else if (!state.selectedThreadId && state.homeTab === "pulse") {
+    title = `Pulse — ${brand}`;
+  } else if (!state.selectedThreadId && state.homeTab === "search" && state.homeSearchQuery) {
+    title = `Search report: ${state.homeSearchQuery.slice(0, 48)} — ${brand}`;
   } else {
     const folderLabel = (folderDef(state.folder).label || "Inbox").trim();
     const thread = state.selectedThreadId ? (viewThreadById(state.selectedThreadId) || currentThread()) : null;
@@ -3613,6 +3634,7 @@ async function logout() {
     try { await api("/api/session", { method: "DELETE" }); } catch {}
   } finally {
     state.user = null;
+    state.organizationName = "";
     state.csrf = null;
     state.messages = [];
     state.mailPages = {};
@@ -3636,6 +3658,19 @@ async function logout() {
     state.selectedThreadId = null;
     state.selectedIds.clear();
     state.collapsedMailGroups = new Set();
+    state.homeTab = "home";
+    state.homeTabsRestored = false;
+    state.homeSearchQuery = "";
+    state.homeSearchData = null;
+    state.homeSearchLoading = false;
+    state.pulseData = null;
+    state.pulseYear = null;
+    state.stickyNotes.clear();
+    state.stickyNoteLoading.clear();
+    try {
+      sessionStorage.removeItem(HOME_TABS_KEY);
+      Object.keys(sessionStorage).filter((key) => key.startsWith("a8m.sticky.")).forEach((key) => sessionStorage.removeItem(key));
+    } catch {}
     rebuildIndex();
     clearThemeAccentForLogout();
     if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
@@ -3661,6 +3696,10 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   const previousThread = state.selectedThreadId;
   const firstUserLoad = !state.user;
   state.user = data.user;
+  state.organizationName = data.organizationName || "";
+  if (firstUserLoad) {
+    restoreHomeTabsState();
+  }
   state.mailboxMode = data.mailboxMode || "demo";
   state.mailSyncError = String((data.mailSync && data.mailSync.lastError) || "").trim();
   state.aliases = data.aliases || [];
@@ -3727,6 +3766,10 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.storageProviders = data.storageProviders || [];
   state.defaultStorage = data.defaultStorage || state.defaultStorage || "a8m";
   state.tenantPolicy = data.tenantPolicy || null;
+  ensureStickySettingsUi();
+  const stickyNewMenu = document.querySelector('[data-new="sticky"]');
+  if (stickyNewMenu) stickyNewMenu.hidden = !tenantFeatureEnabled("stickyNotes");
+  if (firstUserLoad) ensureStickyNote(stickyNoteOwnerId());
   state.attachmentMaxBytes = data.attachmentMaxBytes || 8 * 1024 * 1024;
   state.preferences = { ...DEFAULT_PREFERENCES, ...(data.user && data.user.preferences ? data.user.preferences : {}) };
   state.security = data.user && data.user.security ? data.user.security : null;
@@ -4405,6 +4448,49 @@ const REACTION_SEMANTIC = {
 };
 let reactionMenu = null;
 let reactionMenuMessage = null;
+let reactionMenuSendMode = "private";
+
+function reactionRecentEmojis() {
+  try {
+    const list = JSON.parse(localStorage.getItem("a8m.reaction.recent") || "[]");
+    return Array.isArray(list) ? list.filter((emoji) => typeof emoji === "string").slice(0, 12) : [];
+  } catch { return []; }
+}
+
+function rememberReactionEmoji(emoji) {
+  const list = reactionRecentEmojis().filter((item) => item !== emoji);
+  list.unshift(emoji);
+  try { localStorage.setItem("a8m.reaction.recent", JSON.stringify(list.slice(0, 12))); } catch {}
+}
+
+async function ensureReactionCatalog() {
+  if (state.reactionCatalog) return state.reactionCatalog;
+  const data = await api("/api/reaction-catalog");
+  state.reactionCatalog = data && Array.isArray(data.categories) ? data : { categories: [] };
+  return state.reactionCatalog;
+}
+
+function reactionSearchMatches(item, query) {
+  if (!query) return true;
+  const needle = query.toLowerCase();
+  return [item.emoji, item.label, item.keywords, item.semantic].some((value) => String(value || "").toLowerCase().includes(needle));
+}
+
+function reactionCatalogMarkup(query = "") {
+  const catalog = state.reactionCatalog;
+  if (!catalog) return `<div class="reaction-catalog-loading"><span class="passkey-spinner" aria-hidden="true"></span>Loading emoji…</div>`;
+  const recent = reactionRecentEmojis();
+  const groups = [];
+  if (!query && recent.length) {
+    groups.push(`<div class="reaction-catalog-group"><span class="reaction-catalog-label">Recently used</span><div class="reaction-catalog-grid">${recent.map((emoji) => `<button type="button" data-reaction-emoji="${esc(emoji)}" title="React ${esc(emoji)}">${esc(emoji)}</button>`).join("")}</div></div>`);
+  }
+  for (const category of catalog.categories || []) {
+    const items = (category.emojis || []).filter((item) => reactionSearchMatches(item, query));
+    if (!items.length) continue;
+    groups.push(`<div class="reaction-catalog-group"><span class="reaction-catalog-label">${esc(category.name)}</span><div class="reaction-catalog-grid">${items.map((item) => `<button type="button" data-reaction-emoji="${esc(item.emoji)}" data-reaction-semantic="${esc(item.semantic || "")}" title="${esc(item.label || item.emoji)}">${esc(item.emoji)}</button>`).join("")}</div></div>`);
+  }
+  return groups.join("") || `<div class="reaction-catalog-empty">No emoji match “${esc(query)}”.</div>`;
+}
 
 function rawMessageId(messageId) {
   const value = String(messageId || "");
@@ -4443,8 +4529,24 @@ function reactionHintMarkup(message) {
   return `<span class="meta-dot" aria-hidden="true"></span><span class="thread-reaction-hint" title="Reactions on this message">${esc(summary)}</span>`;
 }
 
+function reactionAllowedForMessage(message) {
+  if (!message || !tenantFeatureEnabled("reactions")) return false;
+  if (message.draft || message.folder === "drafts" || message.folder === "sent" || message.folder === "spam") return false;
+  if (message.unsubscribe && typeof message.unsubscribe === "object" && Object.keys(message.unsubscribe).length) return false;
+  if (isSentLike(message)) return false;
+  return true;
+}
+
+function threadReactionAllowed(thread) {
+  if (!tenantFeatureEnabled("reactions")) return false;
+  if (["sent", "drafts", "spam", "subscriptions"].includes(state.folder)) return false;
+  if (!reactionAllowedForMessage(thread?.latest)) return false;
+  return !(thread.messages || []).some((message) => message.unsubscribe && typeof message.unsubscribe === "object" && Object.keys(message.unsubscribe).length);
+}
+
 function reactionBarMarkup(message) {
   const reactions = reactionsForMessage(message);
+  const canReact = reactionAllowedForMessage(message);
   const groups = new Map();
   for (const reaction of reactions) {
     const group = groups.get(reaction.emoji) || { emoji: reaction.emoji, count: 0, own: false, status: "" };
@@ -4479,7 +4581,7 @@ function reactionBarMarkup(message) {
   }
   return `<div class="reaction-bar" data-reaction-bar="${esc(message.id)}">
     ${chips}
-    <button class="reaction-add" type="button" data-reaction-open="${esc(message.id)}" aria-label="Add a reaction" title="Add a reaction"><span class="reaction-smile" aria-hidden="true">☺</span><span>React</span></button>
+    ${canReact ? `<button class="reaction-add" type="button" data-reaction-open="${esc(message.id)}" aria-label="Add a reaction" title="Add a reaction"><span class="reaction-smile" aria-hidden="true">☺</span><span>React</span></button>` : ""}
     ${statusLine}
   </div>`;
 }
@@ -4572,10 +4674,11 @@ function closeReactionMenu() {
   reactionMenu?.remove();
   reactionMenu = null;
   reactionMenuMessage = null;
+  reactionMenuSendMode = "private";
 }
 
 function positionReactionMenu(menu, rect) {
-  const width = Math.min(328, window.innerWidth - 24);
+  const width = Math.min(380, window.innerWidth - 24);
   const left = Math.min(window.innerWidth - width - 12, Math.max(12, rect.left || 12));
   let top = (rect.bottom || rect.top || 12) + 6;
   if (top + menu.offsetHeight > window.innerHeight - 12) top = Math.max(12, (rect.top || 12) - menu.offsetHeight - 6);
@@ -4584,24 +4687,82 @@ function positionReactionMenu(menu, rect) {
   menu.style.top = `${top}px`;
 }
 
+function openReactionConfirm(message, emoji, semantic) {
+  if (!message) return;
+  document.getElementById("reactionConfirmOverlay")?.remove();
+  const senderName = message.from?.name || message.from?.email || "the sender";
+  const reactorName = state.user?.name || state.user?.email || "You";
+  const organization = state.organizationName || "your organization";
+  const overlay = document.createElement("div");
+  overlay.className = "overlay reaction-confirm-overlay";
+  overlay.id = "reactionConfirmOverlay";
+  overlay.innerHTML = `<div class="dialog reaction-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="reactionConfirmTitle">
+    <div class="reaction-confirm-emoji" aria-hidden="true">${esc(emoji)}</div>
+    <h2 id="reactionConfirmTitle">Send this reaction?</h2>
+    <p><strong>${esc(senderName)}</strong> will receive a short email from ${esc(reactorName)} at ${esc(organization)}.</p>
+    <div class="reaction-confirm-preview"><span aria-hidden="true">${esc(emoji)}</span><div><b>${esc(reactorName)} from ${esc(organization)}</b><small>reacted via Alt8Mail</small></div></div>
+    <div class="reaction-confirm-actions"><button class="btn-secondary" type="button" data-reaction-confirm-cancel>Cancel</button><button class="btn-secondary" type="button" data-reaction-confirm-private>Keep private</button><button class="btn-primary" type="button" data-reaction-confirm-send>Send reaction</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const onKey = (event) => { if (event.key === "Escape") close(); };
+  const close = () => {
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+  };
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+  overlay.querySelector("[data-reaction-confirm-cancel]")?.addEventListener("click", close);
+  overlay.querySelector("[data-reaction-confirm-private]")?.addEventListener("click", () => { close(); applyReaction(message, emoji, "private", semantic).catch(showError); });
+  overlay.querySelector("[data-reaction-confirm-send]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    close();
+    applyReaction(message, emoji, "sent", semantic).catch(showError);
+  });
+  document.addEventListener("keydown", onKey);
+  setTimeout(() => overlay.querySelector("[data-reaction-confirm-send]")?.focus(), 50);
+}
+
 function openReactionMenu(button, message) {
   closeReactionMenu();
-  const outgoing = isSentLike(message);
+  if (!reactionAllowedForMessage(message)) {
+    showToast("Reactions are unavailable for this message");
+    return;
+  }
   const readOnlyDelegate = Boolean(message.delegateOwnerId) && message.delegateCanSend !== true;
   const senderName = message.from?.name || message.from?.email || "the sender";
   const menu = document.createElement("div");
   menu.className = "reaction-menu";
   menu.setAttribute("role", "dialog");
   menu.setAttribute("aria-label", "React to this message");
-  menu.innerHTML = `<div class="reaction-menu-head"><strong>React</strong><button class="icon-btn" type="button" data-reaction-close aria-label="Close reactions"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
-    <div class="reaction-quick" role="group" aria-label="Quick reactions">${REACTION_QUICK.map((emoji) => `<button type="button" data-reaction-emoji="${emoji}" title="React ${emoji}">${emoji}</button>`).join("")}</div>
+  reactionMenuSendMode = "private";
+  menu.innerHTML = `<div class="reaction-menu-head"><div><strong>React</strong><small>${esc(senderName)}</small></div><button class="icon-btn" type="button" data-reaction-close aria-label="Close reactions"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="reaction-quick" role="group" aria-label="Quick reactions">${REACTION_QUICK.map((emoji) => `<button type="button" data-reaction-emoji="${emoji}" data-reaction-semantic="${esc(REACTION_SEMANTIC[emoji] || "")}" title="React ${emoji}">${emoji}</button>`).join("")}</div>
+    <div class="reaction-mode" role="group" aria-label="Reaction visibility"><button type="button" class="is-active" data-reaction-mode="private">Private</button><button type="button" data-reaction-mode="sent" ${readOnlyDelegate ? "disabled" : ""}>Send to sender</button></div>
+    <label class="reaction-search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input type="search" data-reaction-search placeholder="Search emoji" autocomplete="off" aria-label="Search emoji"></label>
+    <div class="reaction-catalog" data-reaction-catalog><div class="reaction-catalog-loading"><span class="passkey-spinner" aria-hidden="true"></span>Loading emoji…</div></div>
     <div class="reaction-suggestions" data-reaction-suggestions><span class="reaction-suggestions-loading">Finding the right response…</span></div>
-    ${outgoing || readOnlyDelegate ? "" : `<label class="reaction-visibility"><input type="checkbox" data-reaction-sent> <span><strong>Send to ${esc(senderName)}</strong><small>Also emails this reaction to the sender. You can undo for 8 seconds.</small></span></label>`}`;
+    <p class="reaction-menu-note">Private reactions stay in your mailbox. Sending emails ${esc(senderName)} a short reaction from ${esc(state.organizationName || "your organization")}.</p>`;
   document.body.appendChild(menu);
   reactionMenu = menu;
   reactionMenuMessage = message;
   positionReactionMenu(menu, button.getBoundingClientRect());
   menu.querySelector("[data-reaction-close]")?.focus();
+  menu.querySelector("[data-reaction-search]")?.addEventListener("input", (event) => {
+    const container = menu.querySelector("[data-reaction-catalog]");
+    if (container) container.innerHTML = reactionCatalogMarkup(event.target.value.trim());
+  });
+  menu.querySelectorAll("[data-reaction-mode]").forEach((modeButton) => modeButton.addEventListener("click", () => {
+    reactionMenuSendMode = modeButton.getAttribute("data-reaction-mode") === "sent" ? "sent" : "private";
+    menu.querySelectorAll("[data-reaction-mode]").forEach((item) => item.classList.toggle("is-active", item === modeButton));
+  }));
+  ensureReactionCatalog().then(() => {
+    if (reactionMenu !== menu) return;
+    const container = menu.querySelector("[data-reaction-catalog]");
+    if (container) container.innerHTML = reactionCatalogMarkup();
+  }).catch(() => {
+    const container = menu.querySelector("[data-reaction-catalog]");
+    if (container) container.innerHTML = `<div class="reaction-catalog-empty">Emoji catalog unavailable.</div>`;
+  });
   api("/api/ai/reactions", { method: "POST", body: { messageId: message.id } })
     .then((data) => {
       if (reactionMenu !== menu) return;
@@ -4869,7 +5030,7 @@ function ensurePhase3SettingsUi() {
     document.getElementById("openYearReview")?.addEventListener("click", () => openYearReview());
   }
   const rulesPanel = document.querySelector('[data-settings-panel="rules"]');
-  if (rulesPanel && !document.getElementById("reactionRulesBlock")) {
+  if (rulesPanel && tenantFeatureEnabled("reactions") && !document.getElementById("reactionRulesBlock")) {
     rulesPanel.insertAdjacentHTML("beforeend", `<div class="settings-block" id="reactionRulesBlock">
       <div class="settings-block-head"><h3>Reaction rules</h3><p>Automatically add a private reaction when new mail matches a sender or subject. Rules never send email.</p></div>
       <div class="reaction-rule-list" id="reactionRuleList"><div class="settings-note">Loading reaction rules…</div></div>
@@ -6069,7 +6230,28 @@ function ensureAmbientUi() {
   }
 }
 
+function ensureStickyListHost() {
+  if (!tenantFeatureEnabled("stickyNotes")) {
+    document.getElementById("stickyListHost")?.remove();
+    return null;
+  }
+  let host = document.getElementById("stickyListHost");
+  if (!host && messageList) {
+    messageList.insertAdjacentHTML("beforebegin", '<div class="sticky-list-host" id="stickyListHost" data-sticky-host="list"></div>');
+    host = document.getElementById("stickyListHost");
+  }
+  return host;
+}
+
+function renderStickyListHost() {
+  const host = ensureStickyListHost();
+  if (!host) return;
+  host.innerHTML = stickyNoteHostMarkup("list");
+  host.hidden = !host.innerHTML;
+}
+
 function renderList({ preserveScroll = false, appendOnly = false } = {}) {
+  ensureStickyNote(stickyNoteOwnerId());
   const previousScroll = preserveScroll ? messageList.scrollTop : 0;
   const threads = computeView();
   const page = currentMailPage();
@@ -6151,6 +6333,7 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
     state.renderedThreadIds = new Set(threads.map((thread) => thread.id));
     messageList.innerHTML = mailThreadRowsMarkup(threads) + mailLoadMoreMarkup(page);
   }
+  renderStickyListHost();
 
   const catchUpHost = document.getElementById("catchUpHost");
   if (catchUpHost) {
@@ -6534,33 +6717,790 @@ async function renderThreadNotesPanel(thread, ownerId, panel) {
   }
 }
 
+/* ============================================================
+   Mail Home · Pulse · search reports · sticky notes
+   ============================================================ */
+const HOME_TABS_KEY = "a8m.home.tabs.v1";
+
+function tenantFeatureEnabled(key) {
+  const features = state.tenantPolicy && state.tenantPolicy.features;
+  return !features || features[key] !== false;
+}
+
+function stickySessionKey(ownerId) {
+  return `a8m.sticky.hidden.${ownerId || state.user?.id || "guest"}`;
+}
+
+function stickySessionHidden(ownerId) {
+  try { return sessionStorage.getItem(stickySessionKey(ownerId)) === "1"; } catch { return false; }
+}
+
+function setStickySessionHidden(ownerId, hidden) {
+  try {
+    if (hidden) sessionStorage.setItem(stickySessionKey(ownerId), "1");
+    else sessionStorage.removeItem(stickySessionKey(ownerId));
+  } catch {}
+}
+
+function restoreHomeTabsState() {
+  if (state.homeTabsRestored) return;
+  state.homeTabsRestored = true;
+  try {
+    const raw = sessionStorage.getItem(HOME_TABS_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (saved && ["home", "pulse", "search"].includes(saved.tab)) state.homeTab = saved.tab;
+    if (saved && typeof saved.query === "string") state.homeSearchQuery = saved.query.trim().slice(0, 500);
+    if (saved && Number.isFinite(Number(saved.year))) state.pulseYear = Number(saved.year);
+    if (saved && ["months", "weeks"].includes(saved.period)) state.pulsePeriod = saved.period;
+    if (state.homeTab === "search" && !state.homeSearchQuery) state.homeTab = "pulse";
+  } catch {}
+}
+
+function persistHomeTabsState() {
+  try {
+    sessionStorage.setItem(HOME_TABS_KEY, JSON.stringify({
+      tab: state.homeTab, query: state.homeSearchQuery,
+      year: state.pulseYear, period: state.pulsePeriod
+    }));
+  } catch {}
+}
+
+function setHomeTab(tab, { query } = {}) {
+  if (tab === "search" && query !== undefined) state.homeSearchQuery = String(query || "").trim().slice(0, 500);
+  if (tab === "search" && !state.homeSearchQuery) return;
+  state.homeTab = tab;
+  persistHomeTabsState();
+  if (readerScroll) readerScroll.scrollTop = 0;
+  if (state.task === "mail" && loginScreen.hidden && !state.selectedThreadId) renderReader();
+  updateDocumentTitle();
+}
+
+function closeHomeSearchTab() {
+  state.homeSearchQuery = "";
+  state.homeSearchData = null;
+  if (state.homeTab === "search") state.homeTab = "pulse";
+  persistHomeTabsState();
+  if (readerScroll) readerScroll.scrollTop = 0;
+  renderReader();
+}
+
+function openHomeSearch(query) {
+  const value = String(query || "").trim();
+  if (!value) { showToast("Enter something to search your mailbox"); return; }
+  state.homeSearchQuery = value.slice(0, 500);
+  state.homeSearchData = null;
+  state.homeSearchLoading = false;
+  state.homeTab = "search";
+  persistHomeTabsState();
+  if (readerScroll) readerScroll.scrollTop = 0;
+  renderReader();
+  ensureHomeSearch();
+}
+
+function stickyNoteOwnerId() {
+  const folder = folderDef(state.folder);
+  return folder && folder.delegated && folder.delegateOwnerId ? folder.delegateOwnerId : "";
+}
+
+function stickyNoteKey(ownerId) {
+  return ownerId || state.user?.id || "";
+}
+
+function currentStickyNote(ownerId = stickyNoteOwnerId()) {
+  return state.stickyNotes.get(stickyNoteKey(ownerId)) || null;
+}
+
+function stickyNoteHasContent(note) {
+  return Boolean(note && ((note.content || "").trim() || (note.links || []).length));
+}
+
+function ensureStickyNote(ownerId = stickyNoteOwnerId()) {
+  if (!state.user || !tenantFeatureEnabled("stickyNotes")) return Promise.resolve(null);
+  const key = stickyNoteKey(ownerId);
+  if (!key) return Promise.resolve(null);
+  if (state.stickyNotes.has(key)) return Promise.resolve(state.stickyNotes.get(key));
+  if (state.stickyNoteLoading.has(key)) return Promise.resolve(null);
+  state.stickyNoteLoading.add(key);
+  const params = ownerId ? `?ownerId=${encodeURIComponent(ownerId)}` : "";
+  return api(`/api/sticky-note${params}`)
+    .then((data) => {
+      const note = { ...(data.note || {}), shared: Boolean(data.shared), owner: data.owner || null };
+      state.stickyNotes.set(key, note);
+      refreshStickyHosts();
+      return note;
+    })
+    .catch(() => null)
+    .finally(() => { state.stickyNoteLoading.delete(key); });
+}
+
+function refreshStickyHosts() {
+  $$("[data-sticky-host]").forEach((host) => {
+    const surface = host.getAttribute("data-sticky-host");
+    host.innerHTML = stickyNoteHostMarkup(surface);
+  });
+}
+
+function stickyNoteHostMarkup(surface) {
+  if (!state.user || !tenantFeatureEnabled("stickyNotes")) return "";
+  const ownerId = surface === "calendar" ? "" : stickyNoteOwnerId();
+  if (stickySessionHidden(ownerId)) return "";
+  const note = currentStickyNote(ownerId);
+  if (!note) return "";
+  if (note.enabled === false) return "";
+  if (surface === "list") {
+    if (!stickyNoteHasContent(note)) return "";
+    if (state.query) return "";
+    const folder = folderDef(state.folder);
+    if (state.folder !== "inbox" && !(folder && folder.delegated)) return "";
+    return stickyNoteMarkup(note, { surface, ownerId, compact: false });
+  }
+  if (surface === "home") {
+    if (!stickyNoteHasContent(note)) return stickySpawnMarkup(ownerId);
+    return stickyNoteMarkup(note, { surface, ownerId, draggable: true });
+  }
+  if (surface === "calendar") {
+    if (!stickyNoteHasContent(note)) return "";
+    return stickyNoteMarkup(note, { surface, ownerId, compact: true });
+  }
+  return "";
+}
+
+function stickySpawnMarkup(ownerId) {
+  return `<button class="sticky-spawn" type="button" data-sticky-create="${esc(ownerId)}"><span aria-hidden="true">📌</span><span><b>Pin a note</b><small>Reminders, links and a few lines, always in reach.</small></span><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>`;
+}
+
+function stickyPlainText(value) {
+  return String(value || "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^[-*]\s+\[[ xX]\]\s+/, "")
+    .replace(/^[-*]\s+/, "")
+    .trim();
+}
+
+function stickyInlineMarkup(text) {
+  let value = esc(text);
+  value = value.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  value = value.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+  value = value.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+)\)/g, (_match, label, href) => {
+    return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+  return value;
+}
+
+function stickyContentMarkup(note) {
+  const lines = String(note.content || "").split("\n");
+  let rendered = "";
+  lines.forEach((line, index) => {
+    const check = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.*)$/);
+    if (check) {
+      rendered += `<label class="sticky-check"><input type="checkbox" data-sticky-check="${index}" ${check[1].toLowerCase() === "x" ? "checked" : ""}><span>${stickyInlineMarkup(check[2])}</span></label>`;
+      return;
+    }
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    if (bullet) {
+      rendered += `<div class="sticky-bullet"><span aria-hidden="true">•</span><span>${stickyInlineMarkup(bullet[1])}</span></div>`;
+      return;
+    }
+    if (!line.trim()) {
+      rendered += `<span class="sticky-gap" aria-hidden="true"></span>`;
+      return;
+    }
+    rendered += `<p>${stickyInlineMarkup(line)}</p>`;
+  });
+  return rendered || `<p class="sticky-empty-copy">Pin a reminder, a link, or a few lines.</p>`;
+}
+
+function stickyLinksMarkup(note) {
+  const links = Array.isArray(note.links) ? note.links : [];
+  if (!links.length) return "";
+  return `<div class="sticky-links">${links.map((link) => `<div class="sticky-link-row"><button class="sticky-link" type="button" data-sticky-open-thread="${esc(link.threadId || "")}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span><b>${esc(link.subject || "(no subject)")}</b><small>${esc(link.fromName || link.fromEmail || "Conversation")}</small></span></button><button class="sticky-link-remove" type="button" data-sticky-remove-link="${esc(link.threadId || "")}" aria-label="Remove linked conversation" title="Remove link">×</button></div>`).join("")}</div>`;
+}
+
+function stickyCollapsedLine(note) {
+  const source = String(note.content || "").split("\n").map((line) => stickyPlainText(line)).filter(Boolean);
+  if (source.length) {
+    const more = Math.max(0, source.length - 1) + (Array.isArray(note.links) ? note.links.length : 0);
+    return `<span class="sticky-collapsed-line"><b>${esc(source[0])}</b>${more ? ` — ${more} more line${more === 1 ? "" : "s"}` : ""}</span>`;
+  }
+  const link = Array.isArray(note.links) ? note.links[0] : null;
+  return link ? `<span class="sticky-collapsed-line"><b>${esc(link.subject || "Linked conversation")}</b></span>` : `<span class="sticky-collapsed-line"><b>Sticky note</b></span>`;
+}
+
+function stickyNoteMarkup(note, { surface = "list", ownerId = "", draggable = false, compact = false } = {}) {
+  const color = ["yellow", "blue", "pink", "green"].includes(note.color) ? note.color : "yellow";
+  const collapsed = Boolean(note.collapsed);
+  const sessionPosition = surface === "home" ? stickySessionPosition(ownerId) : null;
+  const position = sessionPosition || (note.position && Number.isFinite(Number(note.position.x)) && Number.isFinite(Number(note.position.y))
+    ? { x: Number(note.position.x), y: Number(note.position.y) } : { x: 0.7, y: 0.14 });
+  const style = surface === "home" ? ` style="left:clamp(0px, ${(position.x * 100).toFixed(2)}%, calc(100% - 308px));top:${(position.y * 100).toFixed(2)}%"` : "";
+  const sharedLabel = note.shared ? "Team note" : "Sticky note";
+  const updated = note.shared && note.updatedBy ? `<span class="sticky-shared">Visible to delegates · edited by ${esc(note.updatedBy)}</span>` : "";
+  return `<aside class="sticky-note is-${color}${collapsed ? " is-collapsed" : ""}${surface === "home" ? " sticky-home" : ""}${compact ? " is-compact" : ""}" data-sticky-note data-sticky-owner="${esc(ownerId)}" data-sticky-surface="${esc(surface)}" data-sticky-drop="${esc(ownerId)}"${style}>
+    <div class="sticky-note-head"${draggable ? ' data-sticky-drag-handle title="Drag to move"' : ""}>
+      <span class="sticky-pin" aria-hidden="true">📌</span>
+      <span class="sticky-note-title">${sharedLabel}</span>
+      ${note.shared ? `<span class="sticky-team">Team</span>` : ""}
+      <button class="sticky-icon" type="button" data-sticky-collapse aria-label="${collapsed ? "Expand sticky note" : "Collapse sticky note"}" title="${collapsed ? "Expand" : "Collapse"}"><svg class="icon" aria-hidden="true"><use href="#${collapsed ? "i-chevron-down" : "i-collapse"}"/></svg></button>
+      <span class="sticky-dismiss-wrap"><button class="sticky-icon" type="button" data-sticky-dismiss-toggle aria-label="Dismiss sticky note" title="Dismiss"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button><span class="sticky-dismiss-menu" data-sticky-dismiss-menu hidden><button type="button" data-sticky-hide="session">Hide for now</button><button type="button" data-sticky-hide="permanent">Turn off sticky notes</button></span></span>
+    </div>
+    <div class="sticky-note-content">${collapsed ? stickyCollapsedLine(note) : `${stickyContentMarkup(note)}${stickyLinksMarkup(note)}`}</div>
+    <div class="sticky-note-foot"><span class="sticky-note-hint">${Array.isArray(note.links) && note.links.length ? "Double-click to edit" : "Drop a conversation here to pin it"}</span>${updated}<button class="sticky-edit" type="button" data-sticky-edit="${esc(ownerId)}"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>Edit</button></div>
+  </aside>`;
+}
+
+function mailHomeMarkup() {
+  const todayKey = dateKey(new Date());
+  const todayEvents = eventsFor(todayKey);
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const nextEvent = todayEvents.find((event) => {
+    const [hours, minutes] = event.start.split(":").map(Number);
+    return hours * 60 + minutes >= nowMinutes;
+  }) || todayEvents[0] || null;
+  return `<section class="mail-home">
+    <div class="home-sticky-layer" data-sticky-host="home">${stickyNoteHostMarkup("home")}</div>
+    <div class="empty-mark"><span class="empty-monogram" aria-hidden="true">${esc(brandInitials(brandName()))}</span></div>
+    <h2>No conversation selected</h2>
+    <p>Select a conversation from the list to open it here. Threads expand in place, with security checks and attachments alongside.</p>
+    <div class="empty-overview">
+      <div class="empty-stat"><span class="empty-stat-value is-number">${unreadInboxCount()}</span><span class="empty-stat-label">unread in Inbox</span></div>
+      <div class="empty-stat"><span class="empty-stat-value">${nextEvent ? esc(nextEvent.title) : "No meetings"}</span><span class="empty-stat-label">${nextEvent ? `Today · ${esc(nextEvent.start)}` : "Today"}</span></div>
+      <div class="empty-stat"><span class="empty-stat-value empty-protected"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Protected</span><span class="empty-stat-label">SPF · DKIM · DMARC</span></div>
+      <button class="empty-stat empty-stat-action" type="button" data-home-tab="pulse"><span class="empty-stat-value"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Pulse</span><span class="empty-stat-label">Your year in email</span></button>
+    </div>
+    <div class="empty-keys">
+      <span class="empty-key"><kbd>J</kbd><kbd>K</kbd> move</span>
+      <span class="empty-key"><kbd>X</kbd> select</span>
+      <span class="empty-key"><kbd>C</kbd> compose</span>
+      <span class="empty-key"><kbd>/</kbd> search</span>
+    </div>
+  </section>`;
+}
+
+function pulseStatMarkup(label, value, detail, iconName) {
+  return `<div class="pulse-stat"><span class="pulse-stat-label"><svg class="icon" aria-hidden="true"><use href="#${iconName}"/></svg>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(detail)}</small></div>`;
+}
+
+function pulseChartItems() {
+  const data = state.pulseData || {};
+  if (state.pulsePeriod === "weeks") return Array.isArray(data.weekly) ? data.weekly : [];
+  return Array.isArray(data.monthly) ? data.monthly : [];
+}
+
+function pulseChartMarkup() {
+  const items = pulseChartItems();
+  if (!items.length) {
+    return `<div class="pulse-chart-empty"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><b>No mail in this period yet</b><span>Try another year or send the first message.</span></div>`;
+  }
+  const max = Math.max(1, ...items.map((item) => Number(item.count) || 0));
+  return `<div class="pulse-bars" data-pulse-bars role="group" aria-label="Mail volume by ${state.pulsePeriod === "weeks" ? "week" : "month"}">${items.map((item, index) => {
+    const total = Number(item.count) || 0;
+    const sent = Number(item.sent) || 0;
+    const received = Number(item.received) || 0;
+    const totalPercent = Math.max(total ? 3 : 1, Math.round((total / max) * 100));
+    const sentPercent = total ? Math.round((sent / total) * totalPercent) : 0;
+    const receivedPercent = Math.max(0, totalPercent - sentPercent);
+    const label = state.pulsePeriod === "weeks" ? `W${item.week || index + 1}` : String(item.label || "").slice(0, 3);
+    const selected = String(state.pulseSelection) === String(index);
+    return `<button class="pulse-bar${selected ? " is-selected" : ""}${total ? "" : " is-empty"}" type="button" data-pulse-bar="${index}" title="${esc(item.label || label)}: ${yearNumber(total)} messages" aria-label="${esc(item.label || label)}: ${yearNumber(total)} messages"><span class="pulse-bar-stack"><span class="pulse-bar-received" style="height:${receivedPercent}%"></span><span class="pulse-bar-sent" style="height:${sentPercent}%"></span></span><small>${esc(label)}</small></button>`;
+  }).join("")}</div>`;
+}
+
+function pulseSelectionMarkup() {
+  const items = pulseChartItems();
+  const index = Number(state.pulseSelection);
+  const item = Number.isInteger(index) && index >= 0 ? items[index] : null;
+  if (!item) return `<div class="pulse-selection is-empty"><span>Select a bar to inspect that ${state.pulsePeriod === "weeks" ? "week" : "month"}.</span></div>`;
+  const start = item.start || "";
+  const end = item.end || "";
+  return `<div class="pulse-selection"><div><span>${esc(item.label || "Selected period")}</span><strong>${yearNumber(item.count || 0)} messages</strong><small>${yearNumber(item.sent || 0)} sent · ${yearNumber(item.received || 0)} received</small></div>${start && end ? `<button class="btn-secondary small" type="button" data-pulse-search-range data-start="${esc(start)}" data-end="${esc(end)}">Open messages <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>` : ""}</div>`;
+}
+
+function pulseHomeMarkup() {
+  const data = state.pulseData;
+  const year = state.pulseYear || (data && data.year) || new Date().getFullYear();
+  const totals = (data && data.totals) || {};
+  const years = data && Array.isArray(data.years) && data.years.length ? data.years : [year];
+  const loading = state.pulseLoading && !data;
+  const contacts = (data && data.topSenders) || [];
+  const reactions = (data && data.reactions && data.reactions.top) || [];
+  return `<section class="pulse-home">
+    <header class="pulse-head"><div><p class="eyebrow">Pulse</p><h2>Your mailbox, in motion</h2><p>Private analytics for the conversations, people and moments that shaped your year.</p></div><label class="pulse-year"><span>Year</span><select data-pulse-year>${years.map((value) => `<option value="${value}"${Number(value) === Number(year) ? " selected" : ""}>${value}</option>`).join("")}</select></label></header>
+    <form class="pulse-search-form" data-pulse-search-form><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input data-pulse-search-input type="search" placeholder="Search your mailbox and open a report…" value="${esc(state.homeSearchQuery || "")}" aria-label="Search mailbox from Pulse"><button class="btn-primary small" type="submit">Search report</button></form>
+    ${loading ? `<div class="pulse-loading"><div class="list-loading-spinner" aria-hidden="true"></div><b>Reading your mailbox…</b><span>Counting conversations, people and quiet hours.</span></div>` : !data ? `<div class="pulse-loading"><b>Pulse is unavailable</b><span>Try again in a moment.</span></div>` : `
+      <div class="pulse-stats">
+        ${pulseStatMarkup("Messages", yearNumber(totals.messages), `${yearNumber(totals.threads)} conversations`, "i-mail")}
+        ${pulseStatMarkup("Sent", yearNumber(totals.sent), `${yearNumber(totals.received)} received`, "i-send")}
+        ${pulseStatMarkup("Reading time", yearReadingLabel(totals.readingMinutes), `${yearNumber(totals.newsletters)} newsletters`, "i-clock")}
+        ${pulseStatMarkup("Reactions", yearNumber(data.reactions && data.reactions.given), `${yearNumber(data.reactions && data.reactions.received)} received`, "i-thumbs")}
+      </div>
+      <div class="pulse-chart-card">
+        <div class="pulse-chart-head"><div><h3>When your mailbox moved</h3><p>${state.pulsePeriod === "weeks" ? "Messages by week" : "Messages by month"} · received and sent</p></div><div class="pulse-periods" role="group" aria-label="Chart period"><button type="button" data-pulse-period="months" class="${state.pulsePeriod === "months" ? "is-active" : ""}">Months</button><button type="button" data-pulse-period="weeks" class="${state.pulsePeriod === "weeks" ? "is-active" : ""}">Weeks</button></div></div>
+        <div class="pulse-legend"><span><i class="pulse-legend-dot is-received"></i>Received</span><span><i class="pulse-legend-dot is-sent"></i>Sent</span><span class="pulse-legend-note">Click a bar for details</span></div>
+        ${pulseChartMarkup()}
+        ${pulseSelectionMarkup()}
+        <div class="pulse-chart-foot"><span>Busiest day: ${esc(data.busiestDay && data.busiestDay.date ? formatDateOnly(data.busiestDay.date) : "—")}</span><span>Busiest hour: ${esc(Number.isFinite(Number(data.busiestHour && data.busiestHour.hour)) ? `${data.busiestHour.hour}:00` : "—")}</span><span>${yearNumber(totals.unread)} unread</span></div>
+      </div>
+      <div class="pulse-columns">
+        <section class="pulse-card"><div class="pulse-card-head"><h3>People who shaped your year</h3><span>${contacts.length ? "Top senders" : "Quiet"}</span></div><div class="pulse-people">${contacts.length ? contacts.slice(0, 4).map((person, index) => `<div class="pulse-person"><span class="pulse-rank">${index + 1}</span><div><b>${esc(person.name || person.email)}</b><small>${esc(person.email || "")}</small></div><strong>${yearNumber(person.count)}</strong></div>`).join("") : `<div class="pulse-empty">No incoming mail yet.</div>`}</div></section>
+        <section class="pulse-card"><div class="pulse-card-head"><h3>Reactions you shared</h3><span>${yearNumber(data.reactions && data.reactions.given)} total</span></div><div class="pulse-reactions">${reactions.length ? reactions.map((item) => `<div class="pulse-reaction"><span>${esc(item.emoji)}</span><div><b>${esc(item.semantic || "reaction")}</b><small>${yearNumber(item.count)} times</small></div></div>`).join("") : `<div class="pulse-empty">No reactions yet.</div>`}</div></section>
+      </div>
+      <div class="pulse-highlights"><span class="pulse-highlights-mark">✦</span><div>${(data.highlights || []).slice(0, 2).map((item) => `<span>${esc(item)}</span>`).join("")}</div></div>
+    `}
+  </section>`;
+}
+
+function homeSearchMonths(messages) {
+  const counts = new Map();
+  for (const message of messages) {
+    const date = new Date(message.date || message.sentAt || Date.now());
+    if (Number.isNaN(date.getTime())) continue;
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return Array.from(counts.entries()).sort(([a], [b]) => a.localeCompare(b)).slice(-12);
+}
+
+function homeSearchReportMarkup() {
+  const query = state.homeSearchQuery;
+  const data = state.homeSearchData;
+  if (state.homeSearchLoading && !data) return `<section class="search-report"><div class="pulse-loading"><div class="list-loading-spinner" aria-hidden="true"></div><b>Searching your mailbox…</b><span>Building a report for “${esc(query)}”.</span></div></section>`;
+  if (!data) return `<section class="search-report"><div class="pulse-loading"><b>Search report unavailable</b><span>Try another search.</span></div></section>`;
+  const messages = Array.isArray(data.messages) ? data.messages : [];
+  const threads = new Set(messages.map((message) => message.threadId || message.id));
+  const senders = new Map();
+  for (const message of messages) {
+    const key = normalizeEmail(message.from && message.from.email) || "unknown";
+    const current = senders.get(key) || { name: (message.from && message.from.name) || key, email: key, count: 0 };
+    current.count += 1;
+    senders.set(key, current);
+  }
+  const topSenders = Array.from(senders.values()).sort((a, b) => b.count - a.count).slice(0, 5);
+  const months = homeSearchMonths(messages);
+  const maxMonth = Math.max(1, ...months.map(([, count]) => count));
+  const folders = new Map();
+  for (const message of messages) folders.set(message.folder || "mail", (folders.get(message.folder || "mail") || 0) + 1);
+  return `<section class="search-report">
+    <header class="search-report-head"><div><p class="eyebrow">Search report</p><h2>“${esc(query)}”</h2><p>${yearNumber(messages.length)} matching message${messages.length === 1 ? "" : "s"} across ${yearNumber(threads.size)} conversation${threads.size === 1 ? "" : "s"}.</p></div><form class="search-report-form" data-home-search-form><input type="search" value="${esc(query)}" aria-label="Refine search report" placeholder="Refine your search"><button class="btn-secondary small" type="submit">Refresh</button></form></header>
+    <div class="pulse-stats search-report-stats">
+      ${pulseStatMarkup("Matches", yearNumber(messages.length), `${yearNumber(threads.size)} conversations`, "i-search")}
+      ${pulseStatMarkup("Senders", yearNumber(senders.size), "unique people", "i-people")}
+      ${pulseStatMarkup("Span", data.parsed && data.parsed.free ? "Custom" : "Archive", months.length ? `${months[0][0]} → ${months[months.length - 1][0]}` : "No date range", "i-clock")}
+    </div>
+    <div class="search-report-grid">
+      <section class="pulse-card"><div class="pulse-card-head"><h3>Matches by month</h3><span>${months.length} months</span></div><div class="search-report-bars">${months.length ? months.map(([key, count]) => `<div class="search-report-bar" title="${esc(key)}: ${yearNumber(count)}"><span style="height:${Math.max(4, Math.round((count / maxMonth) * 100))}%"></span><small>${esc(key.slice(5))}</small></div>`).join("") : `<div class="pulse-empty">No dated messages in this result.</div>`}</div></section>
+      <section class="pulse-card"><div class="pulse-card-head"><h3>Top senders</h3><span>${yearNumber(topSenders.length)}</span></div><div class="pulse-people">${topSenders.length ? topSenders.map((person, index) => `<div class="pulse-person"><span class="pulse-rank">${index + 1}</span><div><b>${esc(person.name)}</b><small>${esc(person.email)}</small></div><strong>${yearNumber(person.count)}</strong></div>`).join("") : `<div class="pulse-empty">No senders in this result.</div>`}</div></section>
+    </div>
+    <div class="search-report-list"><div class="pulse-card-head"><h3>Messages</h3><span>${yearNumber(messages.length)} result${messages.length === 1 ? "" : "s"}</span></div>${messages.length ? messages.slice(0, 50).map((message) => `<button class="search-report-row" type="button" data-home-search-open="${esc(message.threadId || message.id)}"><span class="search-report-from">${esc((message.from && (message.from.name || message.from.email)) || "Unknown sender")}</span><span class="search-report-subject"><b>${esc(message.subject || "(no subject)")}</b><small>${esc(message.snippet || message.preview || "")}</small></span><span class="search-report-meta">${esc(message.folder || "")} · ${esc(formatListWhen(message.date || message.sentAt))}</span></button>`).join("") : `<div class="pulse-empty search-report-empty">No messages matched. Try a broader term or remove an operator.</div>`}</div>
+  </section>`;
+}
+
+function renderHomeWorkspace() {
+  const tab = state.homeTab === "search" && state.homeSearchQuery ? "search" : state.homeTab === "pulse" ? "pulse" : "home";
+  const tabs = [
+    { id: "home", label: "Mail Home", icon: "i-mail" },
+    { id: "pulse", label: "Pulse", icon: "i-sparkles" }
+  ];
+  if (state.homeSearchQuery) tabs.push({ id: "search", label: "Search report", icon: "i-search", closable: true });
+  readerContent.innerHTML = `<div class="reader-home" data-home-shell>
+    <div class="reader-home-bar"><div class="reader-home-tabs" role="tablist" aria-label="Mailbox home">${tabs.map((item) => `<button class="reader-home-tab${tab === item.id ? " is-active" : ""}${item.closable ? " is-closable" : ""}" type="button" role="tab" aria-selected="${tab === item.id ? "true" : "false"}" data-home-tab="${item.id}"><svg class="icon" aria-hidden="true"><use href="#${item.icon}"/></svg><span>${esc(item.label)}</span>${item.closable ? `<span class="reader-home-tab-close" data-home-search-close role="button" aria-label="Close search report">×</span>` : ""}</button>`).join("")}</div><span class="reader-home-private"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Private to you</span></div>
+    <div class="reader-home-body">${tab === "pulse" ? pulseHomeMarkup() : tab === "search" ? homeSearchReportMarkup() : mailHomeMarkup()}</div>
+  </div>`;
+  bindHomeWorkspace();
+  if (tab === "pulse") ensurePulseData();
+  if (tab === "search") ensureHomeSearch();
+}
+
+function bindHomeWorkspace() {
+  $$('[data-home-tab]', readerContent).forEach((button) => button.addEventListener("click", (event) => {
+    if (event.target.closest("[data-home-search-close]")) { event.preventDefault(); event.stopPropagation(); closeHomeSearchTab(); return; }
+    setHomeTab(button.getAttribute("data-home-tab"));
+  }));
+  $("[data-pulse-search-form]", readerContent)?.addEventListener("submit", (event) => { event.preventDefault(); const input = $("[data-pulse-search-input]", event.currentTarget); openHomeSearch(input?.value || ""); });
+  $("[data-home-search-form]", readerContent)?.addEventListener("submit", (event) => { event.preventDefault(); const input = $("input", event.currentTarget); openHomeSearch(input?.value || ""); });
+  $("[data-pulse-year]", readerContent)?.addEventListener("change", (event) => { state.pulseYear = Number(event.target.value) || new Date().getFullYear(); state.pulseData = null; state.pulseSelection = ""; persistHomeTabsState(); renderReader(); });
+  $$("[data-pulse-period]", readerContent).forEach((button) => button.addEventListener("click", () => { state.pulsePeriod = button.getAttribute("data-pulse-period") === "weeks" ? "weeks" : "months"; state.pulseSelection = ""; persistHomeTabsState(); renderReader(); }));
+  $$("[data-pulse-bar]", readerContent).forEach((button) => button.addEventListener("click", () => { state.pulseSelection = button.getAttribute("data-pulse-bar") || ""; renderReader(); }));
+  $("[data-pulse-search-range]", readerContent)?.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    const start = button.getAttribute("data-start");
+    const end = button.getAttribute("data-end");
+    if (start && end) openHomeSearch(`after:${start} before:${end}`);
+  });
+  $$("[data-home-search-open]", readerContent).forEach((button) => button.addEventListener("click", async () => {
+    const threadId = button.getAttribute("data-home-search-open");
+    if (!threadId) return;
+    const loaded = await ensureThreadLoaded(threadId);
+    if (loaded) selectThread(threadId);
+  }));
+}
+
+function ensurePulseData() {
+  if (!state.user) return;
+  const year = Number(state.pulseYear) || new Date().getFullYear();
+  if (state.pulseData && Number(state.pulseData.year) === year) return;
+  if (state.pulseLoading) return;
+  state.pulseLoading = true;
+  state.pulseYear = year;
+  api(`/api/yearly-review?year=${encodeURIComponent(year)}`)
+    .then((data) => {
+      state.pulseData = data;
+      state.pulseYear = data.year;
+      if (state.homeTab === "pulse" && !state.selectedThreadId) renderReader();
+    })
+    .catch(() => { state.pulseData = null; })
+    .finally(() => { state.pulseLoading = false; });
+}
+
+function ensureHomeSearch() {
+  if (!state.user || !state.homeSearchQuery) return;
+  if (state.homeSearchData && state.homeSearchData.query === state.homeSearchQuery) return;
+  if (state.homeSearchLoading) return;
+  const sequence = ++state.homeSearchSeq;
+  state.homeSearchLoading = true;
+  api(`/api/search?q=${encodeURIComponent(state.homeSearchQuery)}`)
+    .then((data) => {
+      if (sequence !== state.homeSearchSeq) return;
+      mergeSearchMessages(data.messages || []);
+      state.homeSearchData = { ...data, query: state.homeSearchQuery };
+      state.homeSearchLoading = false;
+      if (state.homeTab === "search" && !state.selectedThreadId) renderReader();
+    })
+    .catch((error) => {
+      if (sequence !== state.homeSearchSeq) return;
+      state.homeSearchLoading = false;
+      state.homeSearchData = { query: state.homeSearchQuery, messages: [], error: error.message || "Search failed" };
+      if (state.homeTab === "search" && !state.selectedThreadId) renderReader();
+    });
+}
+
+function stickySessionPositionKey(ownerId) {
+  return `a8m.sticky.position.${ownerId || state.user?.id || "guest"}`;
+}
+
+function stickySessionPosition(ownerId) {
+  try {
+    const raw = sessionStorage.getItem(stickySessionPositionKey(ownerId));
+    if (!raw) return null;
+    const value = JSON.parse(raw);
+    if (Number.isFinite(Number(value.x)) && Number.isFinite(Number(value.y))) return { x: Number(value.x), y: Number(value.y) };
+  } catch {}
+  return null;
+}
+
+function setStickySessionPosition(ownerId, position) {
+  try {
+    if (position) sessionStorage.setItem(stickySessionPositionKey(ownerId), JSON.stringify(position));
+    else sessionStorage.removeItem(stickySessionPositionKey(ownerId));
+  } catch {}
+}
+
+async function saveStickyNotePatch(patch, ownerId = stickyNoteOwnerId()) {
+  if (!state.user) return null;
+  const key = stickyNoteKey(ownerId);
+  const body = { ...patch };
+  if (ownerId) body.ownerId = ownerId;
+  const data = await api("/api/sticky-note", { method: "PUT", body });
+  const existing = state.stickyNotes.get(key) || {};
+  state.stickyNotes.set(key, { ...existing, ...(data.note || {}), shared: Boolean(data.shared), owner: existing.owner || null });
+  refreshStickyHosts();
+  return state.stickyNotes.get(key);
+}
+
+function stickyFromElement(element) {
+  const node = element.closest("[data-sticky-note]");
+  if (!node) return null;
+  const ownerId = node.getAttribute("data-sticky-owner") || "";
+  return { node, ownerId, note: currentStickyNote(ownerId) };
+}
+
+function bindStickyNoteEvents(root = document) {
+  if (!root || root.__a8mStickyBound) return;
+  root.__a8mStickyBound = true;
+  root.addEventListener("click", (event) => {
+    const create = event.target.closest("[data-sticky-create]");
+    if (create) { event.preventDefault(); openStickyNoteEditor(create.getAttribute("data-sticky-create") || ""); return; }
+    const edit = event.target.closest("[data-sticky-edit]");
+    if (edit) { event.preventDefault(); openStickyNoteEditor(edit.getAttribute("data-sticky-edit") || ""); return; }
+    const collapse = event.target.closest("[data-sticky-collapse]");
+    if (collapse) {
+      event.preventDefault();
+      const found = stickyFromElement(collapse);
+      if (!found?.note) return;
+      saveStickyNotePatch({ collapsed: !found.note.collapsed }, found.ownerId).catch(showError);
+      return;
+    }
+    const dismissToggle = event.target.closest("[data-sticky-dismiss-toggle]");
+    if (dismissToggle) {
+      event.preventDefault();
+      const menu = dismissToggle.parentElement?.querySelector("[data-sticky-dismiss-menu]");
+      if (menu) menu.hidden = !menu.hidden;
+      return;
+    }
+    const hide = event.target.closest("[data-sticky-hide]");
+    if (hide) {
+      event.preventDefault();
+      const found = stickyFromElement(hide);
+      if (!found) return;
+      if (hide.getAttribute("data-sticky-hide") === "permanent") {
+        saveStickyNotePatch({ enabled: false }, found.ownerId).catch(showError);
+        showToast("Sticky notes turned off. Re-enable them in Settings.");
+      } else {
+        setStickySessionHidden(found.ownerId, true);
+        refreshStickyHosts();
+      }
+      return;
+    }
+    const removeLink = event.target.closest("[data-sticky-remove-link]");
+    if (removeLink) {
+      event.preventDefault();
+      const found = stickyFromElement(removeLink);
+      if (!found?.note) return;
+      const ids = (found.note.links || []).map((link) => link.threadId).filter((id) => id && id !== removeLink.getAttribute("data-sticky-remove-link"));
+      saveStickyNotePatch({ links: ids }, found.ownerId).catch(showError);
+      return;
+    }
+    const openThread = event.target.closest("[data-sticky-open-thread]");
+    if (openThread) {
+      event.preventDefault();
+      const threadId = openThread.getAttribute("data-sticky-open-thread");
+      if (!threadId) return;
+      ensureThreadLoaded(threadId).then((loaded) => { if (loaded) selectThread(threadId); });
+      return;
+    }
+    if (!event.target.closest("[data-sticky-note]")) {
+      $$("[data-sticky-dismiss-menu]").forEach((menu) => { menu.hidden = true; });
+    }
+  });
+  root.addEventListener("change", (event) => {
+    const check = event.target.closest("[data-sticky-check]");
+    if (!check) return;
+    const found = stickyFromElement(check);
+    if (!found?.note) return;
+    const index = Number(check.getAttribute("data-sticky-check"));
+    const lines = String(found.note.content || "").split("\n");
+    if (!Number.isInteger(index) || index < 0 || index >= lines.length) return;
+    lines[index] = lines[index].replace(/^(\s*[-*]\s+\[)([ xX])(\])/, (_match, pre, _state, post) => `${pre}${check.checked ? "x" : " "}${post}`);
+    saveStickyNotePatch({ content: lines.join("\n") }, found.ownerId).catch(showError);
+  });
+  root.addEventListener("dblclick", (event) => {
+    if (event.target.closest("[data-sticky-check], a, button")) return;
+    const found = stickyFromElement(event.target);
+    if (found) openStickyNoteEditor(found.ownerId);
+  });
+  root.addEventListener("dragover", (event) => {
+    const target = event.target.closest("[data-sticky-drop]");
+    if (!target) return;
+    const types = Array.from(event.dataTransfer?.types || []);
+    if (!types.includes("application/x-a8m-threads")) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "link";
+    target.classList.add("is-drop-target");
+  });
+  root.addEventListener("dragleave", (event) => {
+    const target = event.target.closest("[data-sticky-drop]");
+    if (target && (!event.relatedTarget || !target.contains(event.relatedTarget))) target.classList.remove("is-drop-target");
+  });
+  root.addEventListener("drop", (event) => {
+    const target = event.target.closest("[data-sticky-drop]");
+    if (!target) return;
+    const types = Array.from(event.dataTransfer?.types || []);
+    if (!types.includes("application/x-a8m-threads")) return;
+    event.preventDefault();
+    target.classList.remove("is-drop-target");
+    let ids = [];
+    try {
+      const encoded = event.dataTransfer.getData("application/x-a8m-threads");
+      if (encoded) ids = JSON.parse(encoded);
+    } catch {}
+    addThreadsToStickyNote(ids, target.getAttribute("data-sticky-owner") || "").catch(showError);
+  });
+  root.addEventListener("pointerdown", (event) => {
+    const handle = event.target.closest("[data-sticky-drag-handle]");
+    if (!handle || event.button !== 0 || event.target.closest("button, a, input")) return;
+    const noteNode = handle.closest("[data-sticky-note]");
+    if (!noteNode || noteNode.getAttribute("data-sticky-surface") !== "home") return;
+    const layer = noteNode.closest("[data-sticky-host='home']");
+    if (!layer) return;
+    event.preventDefault();
+    const ownerId = noteNode.getAttribute("data-sticky-owner") || "";
+    const layerRect = layer.getBoundingClientRect();
+    const noteRect = noteNode.getBoundingClientRect();
+    const offsetX = event.clientX - noteRect.left;
+    const offsetY = event.clientY - noteRect.top;
+    const move = (moveEvent) => {
+      const left = Math.max(0, Math.min(layerRect.width - noteRect.width, moveEvent.clientX - layerRect.left - offsetX));
+      const top = Math.max(0, Math.min(layerRect.height - noteRect.height, moveEvent.clientY - layerRect.top - offsetY));
+      noteNode.style.left = `${left}px`;
+      noteNode.style.top = `${top}px`;
+    };
+    const up = async (upEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const left = Math.max(0, Math.min(layerRect.width - noteRect.width, upEvent.clientX - layerRect.left - offsetX));
+      const top = Math.max(0, Math.min(layerRect.height - noteRect.height, upEvent.clientY - layerRect.top - offsetY));
+      const position = { x: layerRect.width > 0 ? left / layerRect.width : 0, y: layerRect.height > 0 ? top / layerRect.height : 0 };
+      setStickySessionPosition(ownerId, position);
+      try {
+        await saveStickyNotePatch({ position }, ownerId);
+        setStickySessionPosition(ownerId, null);
+      } catch (error) { showError(error); }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+}
+
+async function addThreadsToStickyNote(threadIds, ownerId) {
+  if (!tenantFeatureEnabled("stickyNotes")) return;
+  const ids = Array.from(new Set((threadIds || []).filter(Boolean))).slice(0, 12);
+  if (!ids.length) return;
+  await ensureStickyNote(ownerId);
+  const note = currentStickyNote(ownerId);
+  if (!note) return;
+  const existing = (note.links || []).map((link) => link.threadId).filter(Boolean);
+  const merged = Array.from(new Set([...existing, ...ids])).slice(0, 12);
+  await saveStickyNotePatch({ links: merged }, ownerId);
+  showToast(`Pinned ${Math.min(ids.length, 12)} conversation${ids.length === 1 ? "" : "s"} to the sticky note`);
+}
+
+function offerStickySnooze(threads) {
+  if (!tenantFeatureEnabled("stickyNotes") || !threads.length) return;
+  const first = threads[0];
+  const subject = first.subject || "this conversation";
+  appConfirm({
+    title: "Add to sticky note?",
+    message: `Pin “${subject}” so it stays visible while you wait for a reply.`,
+    confirmLabel: "Add to note",
+    cancelLabel: "Not now",
+    tone: "default",
+    icon: "i-pin"
+  }).then((ok) => { if (ok) addThreadsToStickyNote(threads.map((thread) => thread.id), stickyNoteOwnerId()).catch(showError); });
+}
+
+function ensureStickyEditorOverlay() {
+  if (document.getElementById("stickyNoteEditorOverlay")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay sticky-editor-overlay" id="stickyNoteEditorOverlay" hidden>
+    <div class="dialog sticky-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="stickyEditorTitle">
+      <div class="dialog-head"><div class="dialog-title-wrap"><span class="dialog-icon sticky-editor-mark" aria-hidden="true">📌</span><div><h2 id="stickyEditorTitle">Sticky note</h2><p>One short note for your desk. **bold**, *italic*, [links](https://example.com) and checkbox lists.</p></div></div><button class="icon-btn" type="button" data-sticky-editor-close aria-label="Close sticky note"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body"><textarea id="stickyNoteEditorText" class="sticky-editor-text" rows="7" maxlength="2000" placeholder="Dentist Friday 3pm&#10;- [ ] Send the Q4 deck&#10;Alex is out — route refunds to Sam"></textarea><div class="sticky-editor-colors" role="group" aria-label="Sticky note color"><button type="button" class="sticky-color is-yellow is-active" data-sticky-editor-color="yellow" aria-label="Yellow"></button><button type="button" class="sticky-color is-blue" data-sticky-editor-color="blue" aria-label="Blue"></button><button type="button" class="sticky-color is-pink" data-sticky-editor-color="pink" aria-label="Pink"></button><button type="button" class="sticky-color is-green" data-sticky-editor-color="green" aria-label="Green"></button></div><div class="sticky-editor-links" id="stickyEditorLinks"></div><p class="sticky-editor-hint">Keep it short. Drop a conversation on the note to track it with a click-through link.</p></div>
+      <div class="dialog-actions"><button class="btn-secondary" type="button" data-sticky-editor-clear><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Clear</button><span class="sticky-editor-spacer"></span><button class="btn-secondary" type="button" data-sticky-editor-close>Cancel</button><button class="btn-primary" type="button" data-sticky-editor-save><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save note</button></div>
+    </div>
+  </div>`);
+}
+
+function openStickyNoteEditor(ownerId = "") {
+  if (!state.user || !tenantFeatureEnabled("stickyNotes")) return;
+  state.stickyEditorOwner = ownerId || "";
+  ensureStickyEditorOverlay();
+  ensureStickyNote(ownerId).then(() => {
+    const note = currentStickyNote(ownerId);
+    const overlay = document.getElementById("stickyNoteEditorOverlay");
+    const textarea = document.getElementById("stickyNoteEditorText");
+    if (!overlay || !textarea) return;
+    textarea.value = note?.content || "";
+    state.stickyEditorColor = note?.color || "yellow";
+    $$("[data-sticky-editor-color]").forEach((button) => button.classList.toggle("is-active", button.getAttribute("data-sticky-editor-color") === state.stickyEditorColor));
+    const links = document.getElementById("stickyEditorLinks");
+    if (links) links.innerHTML = (note?.links || []).length ? `<span class="sticky-editor-links-label">Pinned conversations</span>${(note.links || []).map((link) => `<button type="button" class="sticky-editor-link" data-sticky-open-thread="${esc(link.threadId || "")}">${esc(link.subject || "Conversation")}</button>`).join("")}` : "";
+    overlay.hidden = false;
+    setTimeout(() => textarea.focus(), 50);
+  });
+}
+
+function closeStickyEditor() {
+  const overlay = document.getElementById("stickyNoteEditorOverlay");
+  if (overlay) overlay.hidden = true;
+  state.stickyEditorOwner = "";
+}
+
+function bindStickyEditorEvents() {
+  if (document.__a8mStickyEditorBound) return;
+  document.__a8mStickyEditorBound = true;
+  document.addEventListener("click", async (event) => {
+    const overlay = document.getElementById("stickyNoteEditorOverlay");
+    if (!overlay || overlay.hidden) return;
+    if (event.target.closest("[data-sticky-editor-close]")) { closeStickyEditor(); return; }
+    const color = event.target.closest("[data-sticky-editor-color]");
+    if (color) {
+      state.stickyEditorColor = color.getAttribute("data-sticky-editor-color") || "yellow";
+      $$("[data-sticky-editor-color]").forEach((button) => button.classList.toggle("is-active", button === color));
+      return;
+    }
+    if (event.target.closest("[data-sticky-editor-clear]")) {
+      const textarea = document.getElementById("stickyNoteEditorText");
+      if (textarea) textarea.value = "";
+      return;
+    }
+    if (event.target.closest("[data-sticky-editor-save]")) {
+      const ownerId = state.stickyEditorOwner;
+      const textarea = document.getElementById("stickyNoteEditorText");
+      const button = event.target.closest("[data-sticky-editor-save]");
+      if (!textarea || !button) return;
+      button.disabled = true;
+      try {
+        await saveStickyNotePatch({ content: textarea.value, color: state.stickyEditorColor || "yellow" }, ownerId);
+        closeStickyEditor();
+        showToast("Sticky note saved");
+      } catch (error) { showError(error); }
+      finally { button.disabled = false; }
+    }
+  });
+}
+
+function ensureStickySettingsUi() {
+  const existing = document.getElementById("stickyNoteSettingsBlock");
+  if (!tenantFeatureEnabled("stickyNotes")) { if (existing) existing.hidden = true; return; }
+  if (existing) existing.hidden = false;
+  const panel = document.querySelector('[data-settings-panel="mail"]');
+  if (!panel || document.getElementById("stickyNoteSettingsBlock")) return;
+  panel.insertAdjacentHTML("beforeend", `<div class="settings-block" id="stickyNoteSettingsBlock">
+    <div class="settings-block-head"><h3>Sticky note</h3><p>One short desk note, pinned above Inbox and on Mail Home. Shared with delegates when this mailbox is shared.</p></div>
+    <div class="setting-list"><div class="setting-row"><div class="setting-copy"><b>Show sticky note</b><small>Turn the note back on after dismissing it permanently.</small></div><div class="setting-control"><button class="switch" id="stickyNoteEnabledToggle" type="button" role="switch" aria-checked="true" aria-label="Show sticky note"><span></span></button></div></div></div>
+  </div>`);
+  const toggle = document.getElementById("stickyNoteEnabledToggle");
+  if (!toggle) return;
+  const sync = () => {
+    const note = currentStickyNote("");
+    toggle.setAttribute("aria-checked", note?.enabled === false ? "false" : "true");
+    toggle.classList.toggle("is-on", note?.enabled !== false);
+  };
+  ensureStickyNote("").then(sync);
+  toggle.addEventListener("click", async () => {
+    const note = currentStickyNote("");
+    const next = note?.enabled === false;
+    try {
+      await saveStickyNotePatch({ enabled: next }, "");
+      sync();
+      setStickySessionHidden("", false);
+      showToast(next ? "Sticky note is on" : "Sticky note hidden");
+    } catch (error) { showError(error); }
+  });
+}
+
+function ensureCalendarStickyHost() {
+  const pane = document.getElementById("calAgendaPane");
+  if (!pane) return;
+  let host = document.getElementById("calStickyHost");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "calStickyHost";
+    host.className = "cal-sticky-host";
+    host.setAttribute("data-sticky-host", "calendar");
+    const head = pane.querySelector(".cal-agenda-head");
+    if (head) head.insertAdjacentElement("afterend", host);
+    else pane.prepend(host);
+  }
+  host.innerHTML = stickyNoteHostMarkup("calendar");
+}
+
 function renderReader({ preserveScroll = false } = {}) {
   const thread = currentThread();
   if (!thread) {
     reader.classList.add("is-empty");
-    const todayKey = dateKey(new Date());
-    const todayEvents = eventsFor(todayKey);
-    const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
-    const nextEvent = todayEvents.find((event) => {
-      const [hours, minutes] = event.start.split(":").map(Number);
-      return hours * 60 + minutes >= nowMinutes;
-    }) || todayEvents[0] || null;
-    readerContent.innerHTML = `<div class="reader-empty">
-      <div class="empty-mark"><span class="empty-monogram" aria-hidden="true">M</span></div>
-      <h2>No conversation selected</h2>
-      <p>Select a conversation from the list to open it here. Threads expand in place, with security checks and attachments alongside.</p>
-      <div class="empty-overview">
-        <div class="empty-stat"><span class="empty-stat-value is-number">${unreadInboxCount()}</span><span class="empty-stat-label">unread in Inbox</span></div>
-        <div class="empty-stat"><span class="empty-stat-value">${nextEvent ? esc(nextEvent.title) : "No meetings"}</span><span class="empty-stat-label">${nextEvent ? `Today · ${esc(nextEvent.start)}` : "Today"}</span></div>
-        <div class="empty-stat"><span class="empty-stat-value empty-protected"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Protected</span><span class="empty-stat-label">SPF · DKIM · DMARC</span></div>
-      </div>
-      <div class="empty-keys">
-        <span class="empty-key"><kbd>J</kbd><kbd>K</kbd> move</span>
-        <span class="empty-key"><kbd>X</kbd> select</span>
-        <span class="empty-key"><kbd>C</kbd> compose</span>
-        <span class="empty-key"><kbd>/</kbd> search</span>
-      </div>
-    </div>`;
+    renderHomeWorkspace();
     lastReaderId = null;
     syncCommandBar();
     syncReaderToolbar(false);
@@ -6867,6 +7807,21 @@ function syncReaderToolbar(enabled) {
   if (expand) { expand.disabled = !enabled; expand.hidden = individualView; }
   if (collapse) { collapse.disabled = !enabled; collapse.hidden = individualView; }
   const thread = enabled ? currentThread() : null;
+  const reactButton = document.getElementById("readerReactBtn");
+  if (reactButton) {
+    const reactionsOn = tenantFeatureEnabled("reactions");
+    const canReact = Boolean(thread) && threadReactionAllowed(thread);
+    reactButton.hidden = !reactionsOn;
+    reactButton.classList.toggle("is-disabled", !canReact);
+    if (canReact) reactButton.removeAttribute("aria-disabled");
+    else reactButton.setAttribute("aria-disabled", "true");
+    reactButton.setAttribute("aria-label", canReact ? "React to this message" : "Reactions are unavailable for this message");
+    reactButton.setAttribute("title", canReact
+      ? "React to this message"
+      : thread?.latest?.unsubscribe ? "Reactions are unavailable for newsletter and unsubscribe mail"
+        : ["sent", "drafts", "spam"].includes(thread?.latest?.folder) ? "Reactions are unavailable in this folder"
+          : "Reactions are unavailable for this message");
+  }
   const canReplyAll = Boolean(thread && replyAllAvailable(thread));
   $$('#readerToolbar [data-action="reply-all"]').forEach((button) => { button.hidden = !canReplyAll; });
   if (readerFlagBtn) {
@@ -6911,14 +7866,25 @@ function syncCommandBar() {
   const delegatedLocked = delegatedThreadReadOnly(thread);
   $$(".commandbar [data-action], .reader-toolbar [data-action], #cmdMove").forEach((button) => {
     const action = button.getAttribute("data-action");
-    const needsMessage = ["reply", "reply-all", "forward", "ai-reply"].includes(action);
-    const enabled = needsMessage ? hasThread && !(delegatedLocked && ["reply", "reply-all", "forward"].includes(action)) : hasMessage;
+    const needsThread = ["reply", "reply-all", "forward", "ai-reply", "react"].includes(action);
+    let enabled = needsThread ? hasThread && !(delegatedLocked && ["reply", "reply-all", "forward"].includes(action)) : hasMessage;
+    if (action === "react") enabled = Boolean(thread) && tenantFeatureEnabled("reactions") && threadReactionAllowed(thread);
     button.classList.toggle("is-disabled", !enabled);
     if (enabled) button.removeAttribute("aria-disabled");
     else button.setAttribute("aria-disabled", "true");
   });
   const canReplyAll = Boolean(thread && replyAllAvailable(thread));
   $$('.commandbar [data-action="reply-all"]').forEach((button) => { button.hidden = !canReplyAll; });
+  const commandReact = document.getElementById("cmdReact");
+  if (commandReact) {
+    const reactionsOn = tenantFeatureEnabled("reactions");
+    const canReact = Boolean(thread) && threadReactionAllowed(thread);
+    commandReact.hidden = !reactionsOn;
+    commandReact.classList.toggle("is-disabled", !canReact);
+    if (canReact) commandReact.removeAttribute("aria-disabled");
+    else commandReact.setAttribute("aria-disabled", "true");
+    commandReact.setAttribute("title", canReact ? "React to this message" : "Reactions are unavailable for this message");
+  }
 }
 
 function meetingMarkup(message) {
@@ -8201,6 +9167,13 @@ async function performBulkAction(action, folderValue, options = {}) {
       job.after = () => options.inboxRule ? updateSenderRules(senders, "inbox") : removeSenderFolderRules(senders, "spam");
     }
   }
+  if (action === "snooze" && tenantFeatureEnabled("stickyNotes") && threads.length) {
+    const previousAfter = job.after;
+    job.after = async (result) => {
+      if (typeof previousAfter === "function") await previousAfter(result);
+      offerStickySnooze(threads);
+    };
+  }
   enqueueMailAction(job);
 }
 function removeFolderMessagesLocally(folderId) {
@@ -9015,12 +9988,20 @@ function closeReaderPane() {
   writeAppHash({ replace: true });
 }
 
-function readerAction(action) {
+function readerAction(action, trigger = null) {
   const thread = currentThread();
   if (!thread) return;
   if (action === "reply") return replyToMessage(replyTarget(thread));
   if (action === "reply-all") return replyToMessage(replyTarget(thread), true);
   if (action === "ai-reply") return replyWithAi(thread);
+  if (action === "react") {
+    const message = thread.latest;
+    if (!threadReactionAllowed(thread)) {
+      showToast("Reactions are unavailable for this conversation");
+      return;
+    }
+    return openReactionMenu(trigger || document.getElementById("readerReactBtn"), message);
+  }
   if (action === "forward") return forwardMessage(thread.latest);
   if (action === "archive") return performBulkAction("archive");
   if (action === "delete") return performBulkAction("delete");
@@ -16044,6 +17025,8 @@ function renderCalendar() {
   else if (state.calendarView === "agenda") calMain.innerHTML = agendaViewMarkup(occurrences);
   else calMain.innerHTML = timeViewMarkup(calendarDaysForView(), occurrences);
   renderCalendarAgenda();
+  ensureStickyNote("");
+  ensureCalendarStickyHost();
   syncStatusRange();
   syncStatusContext();
 }
@@ -18670,6 +19653,8 @@ function wireHtmlSourceDialog() {
 }
 
 function bindEvents() {
+  bindStickyNoteEvents(document);
+  bindStickyEditorEvents();
   document.addEventListener("click", (event) => {
     const target = event.target;
 
@@ -18868,7 +19853,7 @@ function bindEvents() {
       if (state.selectedIds.size && ["archive", "delete", "mark-unread"].includes(action.getAttribute("data-action"))) {
         performBulkAction(action.getAttribute("data-action") === "mark-unread" ? "markUnread" : action.getAttribute("data-action"));
       } else {
-        readerAction(action.getAttribute("data-action"));
+        readerAction(action.getAttribute("data-action"), action);
       }
       return;
     }
@@ -18939,6 +19924,7 @@ function bindEvents() {
       const kind = newItem.getAttribute("data-new");
       if (kind === "message") openCompose();
       else if (kind === "event") { setTask("calendar"); openEventDialog(); }
+      else if (kind === "sticky") openStickyNoteEditor(stickyNoteOwnerId());
       return;
     }
     const moveFolder = target.closest("[data-move-folder]");
@@ -19381,10 +20367,14 @@ function bindEvents() {
     const reactionEmoji = event.target.closest(".reaction-menu [data-reaction-emoji]");
     if (reactionEmoji && reactionMenuMessage) {
       const message = reactionMenuMessage;
-      const visibility = reactionMenu?.querySelector("[data-reaction-sent]")?.checked ? "sent" : "private";
+      const emoji = reactionEmoji.getAttribute("data-reaction-emoji");
+      const readOnlyDelegate = Boolean(message.delegateOwnerId) && message.delegateCanSend !== true;
+      const visibility = readOnlyDelegate ? "private" : reactionMenuSendMode;
       const semantic = reactionEmoji.getAttribute("data-reaction-semantic") || "";
+      rememberReactionEmoji(emoji);
       closeReactionMenu();
-      applyReaction(message, reactionEmoji.getAttribute("data-reaction-emoji"), visibility, semantic).catch(showError);
+      if (visibility === "sent") openReactionConfirm(message, emoji, semantic);
+      else applyReaction(message, emoji, visibility, semantic).catch(showError);
       return;
     }
     if (event.target.closest("[data-reaction-close]")) {
@@ -19397,7 +20387,7 @@ function bindEvents() {
       if (message) removeReaction(message).catch(showError);
       return;
     }
-    if (reactionMenu && !event.target.closest(".reaction-menu")) closeReactionMenu();
+    if (reactionMenu && !event.target.closest(".reaction-menu") && !event.target.closest('[data-action="react"]')) closeReactionMenu();
     const unsubscribeButton = event.target.closest("[data-unsubscribe]");
     if (unsubscribeButton) {
       const message = messageById(unsubscribeButton.getAttribute("data-unsubscribe"));

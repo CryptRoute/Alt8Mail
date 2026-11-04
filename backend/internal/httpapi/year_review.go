@@ -117,16 +117,22 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	monthly := make([]int, 12)
+	monthlySent := make([]int, 12)
+	monthlyReceived := make([]int, 12)
 	if rows, err := s.store.DB.Query(ctx, `
-		SELECT extract(month from sent_at AT TIME ZONE $4)::int, count(*)
+		SELECT extract(month from sent_at AT TIME ZONE $4)::int,
+		       count(*) FILTER (WHERE folder='sent'),
+		       count(*) FILTER (WHERE folder<>'sent')
 		FROM public.mail_messages
 		WHERE user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft
 		GROUP BY 1
 	`, sess.User.ID, start.UTC(), end.UTC(), zoneName); err == nil {
 		for rows.Next() {
-			var month, count int
-			if rows.Scan(&month, &count) == nil && month >= 1 && month <= 12 {
-				monthly[month-1] = count
+			var month, sent, received int
+			if rows.Scan(&month, &sent, &received) == nil && month >= 1 && month <= 12 {
+				monthly[month-1] = sent + received
+				monthlySent[month-1] = sent
+				monthlyReceived[month-1] = received
 			}
 		}
 		rows.Close()
@@ -135,10 +141,40 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 	monthlyItems := make([]map[string]any, 0, 12)
 	for index, count := range monthly {
 		label := time.Month(index + 1).String()
-		monthlyItems = append(monthlyItems, map[string]any{"month": index + 1, "label": label, "count": count})
+		monthlyItems = append(monthlyItems, map[string]any{
+			"month": index + 1, "label": label, "count": count,
+			"sent": monthlySent[index], "received": monthlyReceived[index],
+			"start": time.Date(year, time.Month(index+1), 1, 0, 0, 0, 0, location).Format("2006-01-02"),
+			"end":   time.Date(year, time.Month(index+1), 1, 0, 0, 0, 0, location).AddDate(0, 1, 0).Format("2006-01-02"),
+		})
 		if count > busiestMonthCount {
 			busiestMonth, busiestMonthCount = index+1, count
 		}
+	}
+	weeklyItems := []map[string]any{}
+	if rows, err := s.store.DB.Query(ctx, `
+		SELECT date_trunc('week', sent_at AT TIME ZONE $4)::date AS week_start,
+		       count(*) FILTER (WHERE folder='sent'),
+		       count(*) FILTER (WHERE folder<>'sent')
+		FROM public.mail_messages
+		WHERE user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft
+		GROUP BY 1 ORDER BY 1
+	`, sess.User.ID, start.UTC(), end.UTC(), zoneName); err == nil {
+		for rows.Next() {
+			var weekStart time.Time
+			var sent, received int
+			if rows.Scan(&weekStart, &sent, &received) == nil {
+				isoYear, isoWeek := weekStart.ISOWeek()
+				weeklyItems = append(weeklyItems, map[string]any{
+					"week": isoWeek, "year": isoYear,
+					"label": "Week of " + weekStart.Format("Jan 2"), "count": sent + received,
+					"sent": sent, "received": received,
+					"start": weekStart.Format("2006-01-02"),
+					"end":   weekStart.AddDate(0, 0, 6).Format("2006-01-02"),
+				})
+			}
+		}
+		rows.Close()
 	}
 	var busiestDay string
 	var busiestDayCount int
@@ -214,6 +250,7 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 		},
 		"topSenders": topSenders, "topRecipients": topRecipients,
 		"monthly":      monthlyItems,
+		"weekly":       weeklyItems,
 		"busiestMonth": map[string]any{"month": busiestMonth, "label": monthName(busiestMonth), "count": busiestMonthCount},
 		"busiestDay":   map[string]any{"date": busiestDay, "count": busiestDayCount},
 		"busiestHour":  map[string]any{"hour": busiestHour, "count": busiestHourCount},

@@ -1248,6 +1248,67 @@ test("phase 4: public branding and outbound classification/DLP", async () => {
   assert.equal(cancelled.status, 200);
 });
 
+test("phase 5: pulse analytics, emoji catalog, sticky notes and reaction guardrails", async () => {
+  const bootstrap = (await client.request("/api/bootstrap")).body;
+  assert.equal(bootstrap.organizationName, "Alt8Mail");
+  assert.equal(bootstrap.tenantPolicy.features.stickyNotes, true);
+  assert.equal(bootstrap.tenantPolicy.features.reactions, true);
+
+  const catalog = await client.request("/api/reaction-catalog");
+  assert.equal(catalog.status, 200);
+  assert.ok(catalog.body.categories.length >= 5);
+  assert.ok(catalog.body.categories.some((category) => category.emojis.some((item) => item.emoji === "😀")));
+  assert.equal(catalog.body.quick.length, 6);
+
+  const review = await client.request("/api/yearly-review");
+  assert.equal(review.status, 200);
+  assert.ok("sent" in review.body.monthly[0] && "received" in review.body.monthly[0]);
+  assert.ok(Array.isArray(review.body.weekly));
+
+  const emptyNote = await client.request("/api/sticky-note");
+  assert.equal(emptyNote.status, 200);
+  assert.equal(emptyNote.body.note.color, "yellow");
+  assert.equal(emptyNote.body.note.enabled, true);
+  const savedNote = await client.request("/api/sticky-note", {
+    method: "PUT",
+    body: {
+      content: "Dentist Friday **3pm**\n- [ ] Send the Q4 deck",
+      color: "pink",
+      links: ["N2Acmhe6TzJMY7c6L5yRfg"],
+      position: { x: 0.2, y: 0.3 }
+    }
+  });
+  assert.equal(savedNote.status, 200);
+  assert.equal(savedNote.body.note.color, "pink");
+  assert.equal(savedNote.body.note.links.length, 1);
+  assert.equal(savedNote.body.note.links[0].threadId, "N2Acmhe6TzJMY7c6L5yRfg");
+  const collapsed = await client.request("/api/sticky-note", { method: "PUT", body: { collapsed: true } });
+  assert.equal(collapsed.body.note.collapsed, true);
+  const reread = await client.request("/api/sticky-note");
+  assert.equal(reread.body.note.content.includes("Dentist Friday"), true);
+  assert.equal(reread.body.note.links.length, 1);
+
+  const freshEmoji = await client.request("/api/messages/m16/reaction", {
+    method: "POST", body: { emoji: "😀", visibility: "private", semantic: "happiness" }
+  });
+  assert.equal(freshEmoji.status, 200);
+  assert.equal(freshEmoji.body.reaction.emoji, "😀");
+  await client.request("/api/messages/m16/reaction", { method: "DELETE", body: {} });
+
+  const newsletter = (await client.request("/api/messages?folder=subscriptions")).body.messages[0];
+  const newsletterReaction = await client.request(`/api/messages/${encodeURIComponent(newsletter.id)}/reaction`, {
+    method: "POST", body: { emoji: "👍", visibility: "private" }
+  });
+  assert.equal(newsletterReaction.status, 400);
+  assert.equal(newsletterReaction.body.error.code, "REACTION_UNAVAILABLE");
+
+  const sentReaction = await client.request("/api/messages/m2/reaction", {
+    method: "POST", body: { emoji: "👍", visibility: "private" }
+  });
+  assert.equal(sentReaction.status, 400);
+  assert.equal(sentReaction.body.error.code, "REACTION_UNAVAILABLE");
+});
+
 test("data persists across an application restart", async () => {
   const dataFile = path.join(tempDir, "persist.json");
   const first = await createApp({ dataFile });

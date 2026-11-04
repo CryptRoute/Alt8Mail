@@ -3,30 +3,13 @@ package httpapi
 import (
 	"context"
 	"fmt"
+	"html"
 	"net/http"
 	"strings"
 	"time"
 )
 
 const sentReactionUndo = 8 * time.Second
-
-// Reactions are deliberately constrained to a small, recognizable set. The
-// semantic label is a short human-readable intent used by summaries and the AI
-// assistant; emoji themselves are never treated as trusted markup.
-var reactionEmojiSemantics = map[string]string{
-	"👍":  "acknowledgement",
-	"❤️": "appreciation",
-	"😂":  "humour",
-	"🎉":  "celebration",
-	"👀":  "attention",
-	"✅":  "approval",
-	"🙏":  "gratitude",
-	"🤔":  "needs thought",
-	"🚀":  "excitement",
-	"💯":  "strong agreement",
-}
-
-var quickReactionEmojis = []string{"👍", "❤️", "😂", "🎉", "👀", "✅"}
 
 func validReactionEmoji(value string) (string, string, bool) {
 	value = strings.TrimSpace(value)
@@ -72,6 +55,7 @@ func (r reactionRecord) public(reactorID string) map[string]any {
 
 func (s *Server) registerReactionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/reactions", s.requireUser(s.listReactions))
+	mux.HandleFunc("GET /api/reaction-catalog", s.requireUser(s.reactionCatalog))
 	mux.HandleFunc("POST /api/messages/{id}/reaction", s.requireUser(s.upsertReaction))
 	mux.HandleFunc("DELETE /api/messages/{id}/reaction", s.requireUser(s.deleteReaction))
 	mux.HandleFunc("POST /api/ai/reactions", s.requireUser(s.aiReactionSuggestions))
@@ -79,6 +63,15 @@ func (s *Server) registerReactionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/reaction-rules", s.requireUser(s.createReactionRule))
 	mux.HandleFunc("PATCH /api/reaction-rules/{id}", s.requireUser(s.patchReactionRule))
 	mux.HandleFunc("DELETE /api/reaction-rules/{id}", s.requireUser(s.deleteReactionRule))
+}
+
+func (s *Server) reactionsFeatureEnabled(ctx context.Context, tenantID string) bool {
+	return s.tenantPolicyFor(ctx, tenantID).Features.Reactions
+}
+
+func (s *Server) reactionCatalog(w http.ResponseWriter, r *http.Request) {
+	_ = s.requireSessionFromContext(r)
+	writeJSON(w, http.StatusOK, reactionCatalogPayload())
 }
 
 func (s *Server) resolveReactionMessage(ctx context.Context, user userRecord, rawID string) (userRecord, string, map[string]any, error) {
@@ -114,6 +107,10 @@ func (s *Server) reactionSendAllowed(ctx context.Context, user, owner userRecord
 
 func (s *Server) listReactions(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.reactionsFeatureEnabled(r.Context(), sess.User.TenantID) {
+		writeError(w, http.StatusForbidden, "FEATURE_DISABLED", "Reactions are turned off for this organization")
+		return
+	}
 	owner, _, err := s.collaborationOwner(r.Context(), sess.User, r.URL.Query().Get("ownerId"))
 	if err != nil {
 		writeFromError(w, err)
@@ -151,8 +148,29 @@ func (s *Server) listReactions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"reactions": items, "quick": quickReactionEmojis})
 }
 
+func reactionUnavailableReason(message map[string]any) string {
+	if message == nil {
+		return "Message not found"
+	}
+	if stateBool(message, "draft") {
+		return "Open the sent conversation before reacting"
+	}
+	folder := strings.ToLower(stateString(message, "folder"))
+	if folder == "sent" || folder == "drafts" || folder == "spam" {
+		return "Reactions are unavailable in this folder"
+	}
+	if unsubscribe, ok := message["unsubscribe"].(map[string]any); ok && len(unsubscribe) > 0 {
+		return "Reactions are unavailable for newsletter and unsubscribe mail"
+	}
+	return ""
+}
+
 func (s *Server) upsertReaction(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.reactionsFeatureEnabled(r.Context(), sess.User.TenantID) {
+		writeError(w, http.StatusForbidden, "FEATURE_DISABLED", "Reactions are turned off for this organization")
+		return
+	}
 	var body struct {
 		Emoji      string `json:"emoji"`
 		Semantic   string `json:"semantic"`
@@ -183,9 +201,22 @@ func (s *Server) upsertReaction(w http.ResponseWriter, r *http.Request) {
 		writeFromError(w, err)
 		return
 	}
-	if stateBool(message, "draft") {
-		writeError(w, http.StatusBadRequest, "MESSAGE_DRAFT", "Open the sent conversation before reacting")
+	if reason := reactionUnavailableReason(message); reason != "" {
+		writeError(w, http.StatusBadRequest, "REACTION_UNAVAILABLE", reason)
 		return
+	}
+	if threadID := stateString(message, "threadId"); threadID != "" {
+		var subscriberThread bool
+		_ = s.store.DB.QueryRow(r.Context(), `
+			SELECT EXISTS(
+				SELECT 1 FROM public.mail_messages
+				WHERE user_id=$1 AND thread_id=$2 AND unsubscribe IS NOT NULL AND unsubscribe <> '{}'::jsonb
+			)
+		`, owner.ID, threadID).Scan(&subscriberThread)
+		if subscriberThread {
+			writeError(w, http.StatusBadRequest, "REACTION_UNAVAILABLE", "Reactions are unavailable for newsletter and unsubscribe mail")
+			return
+		}
 	}
 	originalSender := normalizeEmailValue(stateString(message, "fromEmail"))
 	status := "private"
@@ -350,6 +381,10 @@ func sanitizeReactionRule(body reactionRuleBody) (map[string]any, error) {
 
 func (s *Server) listReactionRules(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.reactionsFeatureEnabled(r.Context(), sess.User.TenantID) {
+		writeError(w, http.StatusForbidden, "FEATURE_DISABLED", "Reactions are turned off for this organization")
+		return
+	}
 	rows, err := s.store.DB.Query(r.Context(), `
 		SELECT id, name, sender_contains, subject_contains, emoji, enabled, created_at, updated_at
 		FROM public.mail_reaction_rules WHERE user_id=$1 ORDER BY created_at ASC
@@ -377,6 +412,10 @@ func (s *Server) listReactionRules(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createReactionRule(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.reactionsFeatureEnabled(r.Context(), sess.User.TenantID) {
+		writeError(w, http.StatusForbidden, "FEATURE_DISABLED", "Reactions are turned off for this organization")
+		return
+	}
 	var body reactionRuleBody
 	if !s.decodeBody(w, r, &body, 16*1024) {
 		return
@@ -403,6 +442,10 @@ func (s *Server) createReactionRule(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) patchReactionRule(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.reactionsFeatureEnabled(r.Context(), sess.User.TenantID) {
+		writeError(w, http.StatusForbidden, "FEATURE_DISABLED", "Reactions are turned off for this organization")
+		return
+	}
 	var body struct {
 		Name            *string `json:"name"`
 		SenderContains  *string `json:"senderContains"`
@@ -464,6 +507,10 @@ func (s *Server) patchReactionRule(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteReactionRule(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.reactionsFeatureEnabled(r.Context(), sess.User.TenantID) {
+		writeError(w, http.StatusForbidden, "FEATURE_DISABLED", "Reactions are turned off for this organization")
+		return
+	}
 	ruleID := strings.TrimSpace(r.PathValue("id"))
 	_, err := s.store.DB.Exec(r.Context(), `DELETE FROM public.mail_reaction_rules WHERE id=$1 AND user_id=$2`, ruleID, sess.User.ID)
 	if err != nil {
@@ -506,6 +553,13 @@ func (s *Server) applyAllReactionRules(ctx context.Context) {
 }
 
 func (s *Server) applyReactionRule(ctx context.Context, ruleID string) (int, error) {
+	var tenantID string
+	if err := s.store.DB.QueryRow(ctx, `SELECT tenant_id::text FROM public.mail_reaction_rules WHERE id=$1`, ruleID).Scan(&tenantID); err != nil {
+		return 0, err
+	}
+	if !s.reactionsFeatureEnabled(ctx, tenantID) {
+		return 0, nil
+	}
 	tag, err := s.store.DB.Exec(ctx, `
 		INSERT INTO public.mail_reactions
 		  (id, tenant_id, owner_user_id, user_id, message_id, thread_id, emoji, semantic,
@@ -552,9 +606,10 @@ func (s *Server) reactionDispatchWorker(ctx context.Context) {
 func (s *Server) dispatchDueReactions(ctx context.Context) {
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT r.id, r.user_id::text, r.owner_user_id::text, r.message_id, r.emoji,
-		       m.from_email::text, m.from_name, m.subject, m.message_id
+		       m.from_email::text, m.from_name, m.subject, m.message_id, t.name
 		FROM public.mail_reactions r
 		JOIN public.mail_messages m ON m.id=r.message_id AND m.user_id=r.owner_user_id
+		JOIN public.tenants t ON t.id=r.tenant_id
 		WHERE r.status='pending' AND r.dismissed_at IS NULL AND r.send_after <= now()
 		ORDER BY r.send_after ASC LIMIT 50
 	`)
@@ -562,13 +617,13 @@ func (s *Server) dispatchDueReactions(ctx context.Context) {
 		return
 	}
 	type dueReaction struct {
-		id, userID, ownerID, messageID, emoji, toEmail, toName, subject, rfcMessageID string
+		id, userID, ownerID, messageID, emoji, toEmail, toName, subject, rfcMessageID, tenantName string
 	}
 	due := []dueReaction{}
 	for rows.Next() {
 		var item dueReaction
 		if rows.Scan(&item.id, &item.userID, &item.ownerID, &item.messageID, &item.emoji,
-			&item.toEmail, &item.toName, &item.subject, &item.rfcMessageID) == nil {
+			&item.toEmail, &item.toName, &item.subject, &item.rfcMessageID, &item.tenantName) == nil {
 			due = append(due, item)
 		}
 	}
@@ -579,16 +634,34 @@ func (s *Server) dispatchDueReactions(ctx context.Context) {
 			s.failReaction(ctx, item.id, "Reaction recipient is no longer available")
 			continue
 		}
+		if !s.reactionsFeatureEnabled(ctx, reactor.TenantID) {
+			s.failReaction(ctx, item.id, "Reactions are turned off for this organization")
+			continue
+		}
 		subject := strings.TrimSpace(item.subject)
 		if !strings.HasPrefix(strings.ToLower(subject), "re:") {
 			subject = "Re: " + firstNonEmpty(subject, "(no subject)")
 		}
+		reactorName := strings.TrimSpace(reactor.Name)
+		if reactorName == "" {
+			reactorName = reactor.Email
+		}
+		tenantName := strings.TrimSpace(item.tenantName)
+		if tenantName == "" {
+			tenantName = "your organization"
+		}
+		attribution := reactorName + " from " + tenantName + " reacted via Alt8Mail"
+		bodyText := item.emoji + "\n\n" + attribution
+		bodyHTML := `<div style="font-family:Arial,Helvetica,sans-serif;text-align:center;padding:28px 16px;color:#334155">` +
+			`<div style="font-size:48px;line-height:56px" aria-hidden="true">` + html.EscapeString(item.emoji) + `</div>` +
+			`<p style="margin:14px 0 0;font-size:13px;line-height:20px;color:#64748b">` + html.EscapeString(attribution) + `</p>` +
+			`</div>`
 		outbound := map[string]any{
 			"from": map[string]any{"name": reactor.Name, "email": reactor.Email},
 			"to":   []any{map[string]any{"name": item.toName, "email": item.toEmail}},
 			"cc":   []any{}, "bcc": []any{},
-			"subject": truncate(subject, 500), "bodyText": item.emoji,
-			"bodyHtml": "", "saveCopy": false,
+			"subject": truncate(subject, 500), "bodyText": bodyText,
+			"bodyHtml": bodyHTML, "saveCopy": false,
 			"inReplyTo": item.rfcMessageID, "reaction": item.emoji,
 		}
 		if _, err := s.deliverSMTP(outbound, nil); err != nil {

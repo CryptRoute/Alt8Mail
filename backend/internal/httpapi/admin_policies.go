@@ -191,6 +191,11 @@ type adminDLPPolicy struct {
 	Rules                 []adminDLPRule `json:"rules"`
 }
 
+type adminFeaturePolicy struct {
+	StickyNotes bool `json:"stickyNotes"`
+	Reactions   bool `json:"reactions"`
+}
+
 type adminTenantPolicy struct {
 	Security  adminSecurityPolicy  `json:"security"`
 	Mail      adminMailPolicy      `json:"mail"`
@@ -198,6 +203,7 @@ type adminTenantPolicy struct {
 	Directory adminDirectoryPolicy `json:"directory"`
 	Branding  adminBrandingPolicy  `json:"branding"`
 	DLP       adminDLPPolicy       `json:"dlp"`
+	Features  adminFeaturePolicy   `json:"features"`
 }
 
 func defaultTenantPolicy() adminTenantPolicy {
@@ -225,6 +231,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 			Enabled: true, DefaultClassification: "Internal", NotifySender: false,
 			Rules: []adminDLPRule{},
 		},
+		Features: adminFeaturePolicy{StickyNotes: true, Reactions: true},
 	}
 }
 

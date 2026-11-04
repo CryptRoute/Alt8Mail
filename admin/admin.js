@@ -1218,7 +1218,7 @@ async function renderPolicies() {
     const data = await api("policies");
     state.policy = data.policy;
     const policy = data.policy;
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Policies</h1><p>Organization-wide guardrails for authentication, mail, sharing and directory.</p></div><div class="view-actions"><span class="badge system">Enforced at sign-in where applicable</span></div></div><div class="policy-layout"><nav class="policy-nav"><button class="active" data-policy-tab="security">Security</button><button data-policy-tab="mail">Mail</button><button data-policy-tab="sharing">Sharing</button><button data-policy-tab="directory">Directory</button><button data-policy-tab="dlp">Classification &amp; DLP</button><button data-policy-tab="branding">Branding</button></nav><div><form id="policyForm">${policySections(policy)}</form><div class="policy-save"><span>Changes apply to the whole organization. Sensitive changes are audited.</span><button class="btn secondary" type="button" data-action="run-retention" title="Save the retention policy first">Run retention</button><button class="btn secondary" type="button" data-action="reload-policies">Reset changes</button><button class="btn primary" type="button" data-action="save-policies">${icon("check")}Save policies</button></div></div></div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Policies</h1><p>Organization-wide guardrails for authentication, mail, sharing and directory.</p></div><div class="view-actions"><span class="badge system">Enforced at sign-in where applicable</span></div></div><div class="policy-layout"><nav class="policy-nav"><button class="active" data-policy-tab="security">Security</button><button data-policy-tab="mail">Mail</button><button data-policy-tab="sharing">Sharing</button><button data-policy-tab="directory">Directory</button><button data-policy-tab="dlp">Classification &amp; DLP</button><button data-policy-tab="features">Features</button><button data-policy-tab="branding">Branding</button></nav><div><form id="policyForm">${policySections(policy)}</form><div class="policy-save"><span>Changes apply to the whole organization. Sensitive changes are audited.</span><button class="btn secondary" type="button" data-action="run-retention" title="Save the retention policy first">Run retention</button><button class="btn secondary" type="button" data-action="reload-policies">Reset changes</button><button class="btn primary" type="button" data-action="save-policies">${icon("check")}Save policies</button></div></div></div>`;
     bindPolicyForm();
   } catch (error) { viewError(error); }
 }
@@ -1234,6 +1234,7 @@ function policySections(policy) {
   const directory = policy.directory;
   const branding = policy.branding;
   const dlp = policy.dlp || { enabled: true, defaultClassification: "Internal", rules: [] };
+  const features = policy.features || { stickyNotes: true, reactions: true };
   return `<section class="card policy-panel active" data-policy-panel="security">
     <div class="policy-section"><h3>Password policy</h3><p>Applied to new users and password resets issued from this console.</p>
       <div class="setting-row"><div class="setting-copy"><b>Minimum length</b><small>Passwords shorter than this are rejected.</small></div><div class="setting-control"><div class="input-group"><input class="input" type="number" min="8" max="64" data-policy-input="security.passwordMinLength" value="${security.passwordMinLength}"><span class="muted">chars</span></div></div></div>
@@ -1293,6 +1294,12 @@ function policySections(policy) {
       <div class="setting-row"><div class="setting-copy"><b>Default classification</b><small>Applied when a sender does not choose a label.</small></div><div class="setting-control"><select class="input" data-policy-input="dlp.defaultClassification">${dlpClassificationOptions(dlp.defaultClassification)}</select></div></div>
     </div>
     <div class="policy-section"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><div><h3 style="margin:0">DLP rules</h3><p style="margin:4px 0 0">A rule can label a message, warn the sender, or block the send entirely.</p></div><button class="btn secondary" type="button" id="dlpAddRule">${icon("plus")}Add rule</button></div><div id="dlpRules" style="margin-top:14px">${dlpRulesMarkup(dlp.rules)}</div></div>
+  </section>
+  <section class="card policy-panel" data-policy-panel="features">
+    <div class="policy-section"><h3>Mailbox features</h3><p>Turn optional personal and team tools on or off for every mailbox in this organization.</p>
+      ${toggleRow("Sticky notes", "One short markdown-lite note per mailbox, including shared team notes for delegated mailboxes. Visible above Inbox and on Mail Home.", "features.stickyNotes", features.stickyNotes)}
+      ${toggleRow("Message reactions", "Allow private and emailed reactions on inbound conversations. Disabling hides the React control and rejects new reactions.", "features.reactions", features.reactions)}
+    </div>
   </section>
   <section class="card policy-panel" data-policy-panel="branding">
     <div class="policy-section"><h3>Organization branding</h3><p>Shown in the admin console and organization communications.</p>

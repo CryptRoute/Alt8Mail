@@ -284,6 +284,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/messages/{id}/trust-explanation", s.requireUser(s.messageTrustExplanation))
 	s.registerCollaborationRoutes(mux)
 	s.registerReactionRoutes(mux)
+	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)
 	s.registerYearReviewRoutes(mux)
 	s.registerSendTimeRoutes(mux)
@@ -581,6 +582,8 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	security, _, _, _ := s.securityState(ctx, sess.User)
 	user := publicUserFromState(state, sess.User, preferencesFor(sess.User), security)
 	preferences := statePreferences(state, preferencesFor(sess.User))
+	organizationName := ""
+	_ = s.store.DB.QueryRow(ctx, `SELECT name FROM public.tenants WHERE id=$1`, sess.User.TenantID).Scan(&organizationName)
 	identities, err := s.mailIdentities(ctx, sess.User)
 	if err != nil {
 		s.logger.Warn("identity load failed", "user", sess.User.ID, "err", err)
@@ -679,14 +682,15 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	serverNotifications := s.loadMailNotifications(ctx, sess.User.ID, 50)
 	unsubscribeActions := s.loadUnsubscribeActions(ctx, sess.User.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user":       user,
-		"aliases":    aliases,
-		"identities": identities,
-		"signatures": signatures,
-		"labels":     labels,
-		"folders":    folders,
-		"people":     people,
-		"messages":   messages,
+		"user":             user,
+		"organizationName": organizationName,
+		"aliases":          aliases,
+		"identities":       identities,
+		"signatures":       signatures,
+		"labels":           labels,
+		"folders":          folders,
+		"people":           people,
+		"messages":         messages,
 		"mailPage": map[string]any{
 			"folder": folder, "filter": filter, "offset": offset, "limit": limit,
 			"total": page.Total, "totalMessages": page.TotalMessages, "hasMore": page.HasMore,
@@ -723,6 +727,9 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 			"dlp": map[string]any{
 				"enabled": policy.DLP.Enabled, "defaultClassification": policy.DLP.DefaultClassification,
 				"labels": dlpClassifications,
+			},
+			"features": map[string]any{
+				"stickyNotes": policy.Features.StickyNotes, "reactions": policy.Features.Reactions,
 			},
 			"branding": map[string]any{
 				"productName": policy.Branding.ProductName, "primaryColor": policy.Branding.PrimaryColor,
@@ -1206,7 +1213,7 @@ func capabilities() []string {
 		"quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files",
 		"storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences",
 		"labels", "message-filters", "calendar-realtime", "cabinet-folders", "storage-policy", "file-context-menu",
-		"web-push",
+		"web-push", "mail-pulse", "sticky-notes", "reaction-catalog",
 	}
 }
 

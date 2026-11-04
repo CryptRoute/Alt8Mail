@@ -13,11 +13,13 @@ two-factor sign-in with passkeys, enterprise Tasks and Files workspaces,
 PDF/image attachment preview with a multi-file pager, BIMI/favicon sender
 icons, outbound caps, live quota, shared-mailbox collaboration with assignment,
 internal notes and @mentions, newsletter subscriptions with unsubscribe
-management, quick, semantic and sent reactions, recipient-time scheduling
-suggestions, reading-time estimates, a personal yearly review, policy-linked
-classification and DLP, legal holds and eDiscovery, one-click offboarding,
-signed SIEM audit webhooks, tenant branding, an audit log, PWA support and a
-responsive mobile layout. The Go build adds a separate
+management, quick, semantic and sent reactions, a full categorized emoji
+picker, recipient-time scheduling suggestions, reading-time estimates, a
+personal yearly review, a **Mail Home / Pulse** analytics workspace, one
+shared-or-personal sticky note per mailbox, policy-linked classification and
+DLP, legal holds and eDiscovery, one-click offboarding, signed SIEM audit
+webhooks, tenant branding, an audit log, PWA support and a responsive mobile
+layout. The Go build adds a separate
 customer/system administration console for tenants, users, groups, org units,
 custom RBAC roles, domains, policy, audit and system administrators, plus a
 separate root-level **System Control** plane for the host and mail stack.
@@ -74,6 +76,8 @@ Dutch, Italian and Arabic catalogs ship in this release; additional languages
 can be added without application changes. Run `npm run test:i18n` to validate
 manifest entries, key coverage and UI key references.
 
+
+The **0.13.0** release turns the empty reading pane into **Mail Home**, with a second **Pulse** tab for a year-selectable, month/week mail-flow chart and interactive period details. A search started from Pulse opens a persistent **Search report** tab with sender, folder and monthly-match analytics; the tab survives a reload in the same browser session and clears on sign-out or tab close. Mailboxes gain **one short sticky note** with markdown-lite text, four tints, a one-line collapsed state, session or permanent dismissal, drag-to-pin conversations and an optional prompt after snoozing. Notes live in the existing PostgreSQL user-preferences document, appear above Inbox, on Mail Home and in the Today/Calendar agenda, and become an audited team note when a delegated mailbox is open. **Reactions** now use a full categorized emoji catalog with search and recent emoji, expose **React** beside Reply with AI, disable themselves for newsletters, Spam, Drafts, Sent and Subscriptions, and require a confirmation before the reacted email is sent. The reaction email shows the emoji at Gmail-like size with `{sender} from {organization} reacted via Alt8Mail` underneath. Sticky notes and reactions have tenant policy switches under **Policies → Features**. See [docs/MAIL_HOME_AND_NOTES.md](docs/MAIL_HOME_AND_NOTES.md). This release has no database migration.
 
 The **0.12.0** release completes the enterprise layer. Outbound mail now carries an organization classification and is evaluated against up to 30 **DLP rules** that can label, warn or block a send; the composer runs the same check before delivery and scheduled edits are re-evaluated. **Legal holds** preserve tenant-wide or individual mailboxes against deletion, folder emptying and retention, and the new **Compliance** console provides keyword, mailbox, date, folder and classification **eDiscovery** with CSV export. **One-click offboarding** closes an account, revokes every session and trusted device, optionally hands mailbox access to a coworker, places a legal hold and enables an automatic reply in one audited workflow. **Signed SIEM audit webhooks** stream user and administrator audit events over HTTPS with HMAC-SHA256 signatures, sealed signing secrets and retry/backoff delivery tracking. **Tenant branding** now reaches the public sign-in screen, webmail shell, browser title, accent color and outbound mail footer. New permissions are `legal.read`, `legal.manage`, `siem.read` and `siem.manage`; see [docs/ENTERPRISE_CONTROLS.md](docs/ENTERPRISE_CONTROLS.md). The release includes migration `0036_phase4`.
 
