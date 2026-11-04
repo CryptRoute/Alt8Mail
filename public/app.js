@@ -871,8 +871,37 @@ const state = {
   pulseSelection: "",
   stickyNotes: new Map(),
   stickyNoteLoading: new Set(),
+  stickyNotePromises: new Map(),
   stickyNoteSaveTimer: null,
   stickyEditorOwner: "",
+  stickyEditorNoteId: "",
+  stickyEditorColor: "yellow",
+  stickyEditorPin: false,
+  stickyEditorArchived: false,
+  stickyEditorCanEdit: true,
+  stickyEditorLinks: [],
+  stickyAttachKind: "",
+  stickyAttachItems: [],
+  stickyAttachQuery: "",
+  stickyAttachLoading: false,
+  stickyAttachSeq: 0,
+  stickyAttachTimer: null,
+  notesDeskOwner: "",
+  notesDeskArchive: false,
+  notesDeskQuery: "",
+  notesDeskRemote: null,
+  notesDeskRemoteQuery: "",
+  notesDeskRemoteArchive: false,
+  notesDeskRemoteSeq: 0,
+  notesDeskRemoteLoading: false,
+  notesDeskMailboxes: [],
+  notesDeskCanEdit: true,
+  notesDeskTeamCount: 0,
+  notesDeskTimer: null,
+  noteSearchResults: [],
+  noteSearchQuery: "",
+  noteSearchLoading: false,
+  noteSearchSeq: 0,
   reactionCatalog: null,
   notifications: [],
   dismissedNotifications: new Set(),
@@ -912,6 +941,20 @@ const state = {
   fileAction: null,
   fileShareList: [],
   fileContextTarget: null,
+  uploadManagerOpen: false,
+  uploadManagerMinimized: false,
+  uploadTab: "computer",
+  uploadQueue: [],
+  uploadWorkerBusy: false,
+  uploadTargetFolderId: null,
+  uploadTargetProvider: "a8m",
+  uploadMobileSession: null,
+  uploadMobilePoll: null,
+  uploadMobileSeen: new Map(),
+  uploadMobileQrData: "",
+  uploadMobileQrSession: "",
+  uploadUrlValue: "",
+  uploadDrag: null,
   editorLight: false,
   calendars: [],
   calendarSubscriptions: [],
@@ -926,6 +969,13 @@ const state = {
   calendarRefreshTimer: null,
   eventAttendees: [],
   eventAttachments: [],
+  eventResources: [],
+  eventOccurrenceDate: "",
+  eventEditScope: "series",
+  calendarResources: [],
+  calendarPolls: [],
+  calendarPollsLoading: false,
+  pollDraftSlots: [],
   eventCalendarId: "default",
   eventRecurrenceEnd: "",
   eventRsvpStatus: "",
@@ -1070,7 +1120,6 @@ let scheduleChoice = "tomorrow-morning";
 let scheduleSession = null;
 let taskEditorMode = false;
 let fileShareTarget = null;
-let uploadBusy = false;
 let mailActionQueue = [];
 let mailActionQueueRunning = false;
 const richEditorSelections = new WeakMap();
@@ -1217,6 +1266,9 @@ const folderOverlay = document.getElementById("folderOverlay");
 const fileActionOverlay = document.getElementById("fileActionOverlay");
 const calendarAddOverlay = document.getElementById("calendarAddOverlay");
 const calendarShareOverlay = document.getElementById("calendarShareOverlay");
+const calendarPollOverlay = document.getElementById("calendarPollOverlay");
+const calendarPollsOverlay = document.getElementById("calendarPollsOverlay");
+let notesDeskOverlay = null;
 const fileProviderFilter = document.getElementById("fileProviderFilter");
 const fileList = document.getElementById("fileList");
 const fileDetail = document.getElementById("fileDetail");
@@ -3667,6 +3719,46 @@ async function logout() {
     state.pulseYear = null;
     state.stickyNotes.clear();
     state.stickyNoteLoading.clear();
+    state.stickyNotePromises.clear();
+    state.stickyEditorOwner = "";
+    state.stickyEditorNoteId = "";
+    state.stickyEditorCanEdit = true;
+    state.stickyEditorLinks = [];
+    state.stickyAttachKind = "";
+    state.stickyAttachItems = [];
+    state.stickyAttachQuery = "";
+    state.stickyAttachLoading = false;
+    state.stickyAttachSeq += 1;
+    clearTimeout(state.stickyAttachTimer);
+    state.notesDeskOwner = "";
+    state.notesDeskArchive = false;
+    state.notesDeskQuery = "";
+    state.notesDeskRemote = null;
+    state.notesDeskRemoteQuery = "";
+    state.notesDeskRemoteArchive = false;
+    state.notesDeskRemoteLoading = false;
+    state.notesDeskRemoteSeq += 1;
+    state.notesDeskMailboxes = [];
+    state.notesDeskCanEdit = true;
+    state.notesDeskTeamCount = 0;
+    clearTimeout(state.notesDeskTimer);
+    state.noteSearchResults = [];
+    state.noteSearchQuery = "";
+    state.noteSearchLoading = false;
+    state.noteSearchSeq += 1;
+    clearInterval(state.uploadMobilePoll);
+    state.uploadMobilePoll = null;
+    state.uploadManagerOpen = false;
+    state.uploadManagerMinimized = false;
+    state.uploadQueue = [];
+    state.uploadWorkerBusy = false;
+    state.uploadMobileSession = null;
+    state.uploadMobileSeen = new Map();
+    state.uploadMobileQrData = "";
+    state.uploadMobileQrSession = "";
+    state.uploadUrlValue = "";
+    const uploadManager = document.getElementById("uploadManager");
+    if (uploadManager) uploadManager.hidden = true;
     try {
       sessionStorage.removeItem(HOME_TABS_KEY);
       Object.keys(sessionStorage).filter((key) => key.startsWith("a8m.sticky.")).forEach((key) => sessionStorage.removeItem(key));
@@ -5971,6 +6063,148 @@ function mailLoadMoreMarkup(page) {
     : "";
 }
 
+function ensureDateJumpUi() {
+  const actions = document.querySelector(".list-actions");
+  if (actions && !document.getElementById("dateJumpBtn")) {
+    actions.insertAdjacentHTML("afterbegin", `<button class="icon-btn" id="dateJumpBtn" type="button" aria-label="Jump to a date" title="Jump to date" aria-haspopup="menu" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></button>`);
+  }
+  if (document.getElementById("dateJumpMenu")) return;
+  const host = document.querySelector(".list-head") || document.querySelector(".list-panel") || document.body;
+  host.insertAdjacentHTML("beforeend", `<div class="date-jump-menu" id="dateJumpMenu" role="menu" aria-label="Jump to date" hidden>
+    <div class="date-jump-presets">
+      <button type="button" role="menuitem" data-date-jump="today">Today</button>
+      <button type="button" role="menuitem" data-date-jump="yesterday">Yesterday</button>
+      <button type="button" role="menuitem" data-date-jump="last-week">Last week</button>
+      <button type="button" role="menuitem" data-date-jump="last-month">Last month</button>
+      <button type="button" role="menuitem" data-date-jump="last-year">Last year</button>
+    </div>
+    <div class="date-jump-custom"><label for="dateJumpDate">Jump to date</label><div><input id="dateJumpDate" type="date" aria-label="Choose a date"><button type="button" data-date-jump-go>Go</button></div></div>
+  </div>`);
+}
+
+function toggleDateJumpMenu(force) {
+  ensureDateJumpUi();
+  const menu = document.getElementById("dateJumpMenu");
+  const button = document.getElementById("dateJumpBtn");
+  if (!menu || !button) return;
+  const open = typeof force === "boolean" ? force : menu.hidden;
+  menu.hidden = !open;
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    const input = document.getElementById("dateJumpDate");
+    if (input && !input.value) input.value = dateKeyInZone(new Date());
+    setTimeout(() => input?.focus(), 30);
+  }
+}
+
+function closeDateJumpMenu() {
+  const menu = document.getElementById("dateJumpMenu");
+  const button = document.getElementById("dateJumpBtn");
+  if (menu) menu.hidden = true;
+  if (button) button.setAttribute("aria-expanded", "false");
+}
+
+function oldestLoadedMailDate() {
+  let oldest = "";
+  for (const thread of computeView()) {
+    const date = new Date(thread.date);
+    if (Number.isNaN(date.getTime())) continue;
+    const key = dateKeyInZone(date);
+    if (key && (!oldest || key < oldest)) oldest = key;
+  }
+  return oldest;
+}
+
+function closestMailGroupHeader(targetDate) {
+  const headers = Array.from(messageList.querySelectorAll("[data-mail-group-head]:not(.is-pinned-group)"));
+  if (!headers.length) return null;
+  let containing = null;
+  let older = null;
+  let olderNewest = "";
+  for (const header of headers) {
+    const oldest = header.getAttribute("data-mail-group-oldest") || "";
+    const newest = header.getAttribute("data-mail-group-newest") || "";
+    if (oldest && newest && targetDate >= oldest && targetDate <= newest) {
+      containing = header;
+      break;
+    }
+    if (newest && newest <= targetDate && newest > olderNewest) {
+      older = header;
+      olderNewest = newest;
+    }
+  }
+  if (containing) return containing;
+  if (older) return older;
+  const newestHeader = headers[0];
+  const newestDate = newestHeader?.getAttribute("data-mail-group-newest") || "";
+  if (newestDate && targetDate >= newestDate) return newestHeader;
+  return headers[headers.length - 1];
+}
+
+async function jumpToMailDate(preset = "", customDate = "") {
+  if (state.task !== "mail") setTask("mail");
+  if (state.query) {
+    showToast("Clear the search to jump by date");
+    return;
+  }
+  const today = dateKeyInZone(new Date());
+  let targetDate = "";
+  if (preset === "today") targetDate = today;
+  else if (preset === "yesterday") targetDate = addDaysToKey(today, -1);
+  else if (preset === "last-week") targetDate = addDaysToKey(startOfWeekKey(today), -7);
+  else if (preset === "last-month") {
+    const now = new Date();
+    targetDate = dateKeyInZone(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  } else if (preset === "last-year") {
+    const now = new Date();
+    targetDate = dateKeyInZone(new Date(now.getFullYear() - 1, 0, 1));
+  } else {
+    targetDate = String(customDate || "").trim();
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+    showToast("Choose a date to jump to");
+    return;
+  }
+  const button = document.getElementById("dateJumpBtn");
+  if (button) button.disabled = true;
+  closeDateJumpMenu();
+  try {
+    let page = currentMailPage();
+    if (!page?.loaded) {
+      await loadMailPage(state.folder, state.filter);
+      renderList({ preserveScroll: true });
+    }
+    let guard = 0;
+    while (guard++ < 40) {
+      page = currentMailPage();
+      const oldest = oldestLoadedMailDate();
+      if (!page?.hasMore || (oldest && oldest <= targetDate)) break;
+      await loadMailPage(state.folder, state.filter);
+      renderList({ preserveScroll: true });
+    }
+    let header = closestMailGroupHeader(targetDate);
+    if (!header) {
+      showToast("No messages are available around that date");
+      return;
+    }
+    const groupKey = header.getAttribute("data-mail-group-head") || "";
+    if (groupKey && state.collapsedMailGroups instanceof Set && state.collapsedMailGroups.has(groupKey)) {
+      state.collapsedMailGroups.delete(groupKey);
+      renderList({ preserveScroll: true });
+      header = closestMailGroupHeader(targetDate);
+    }
+    if (!header) return;
+    const top = messageList.scrollTop + header.getBoundingClientRect().top - messageList.getBoundingClientRect().top - 8;
+    messageList.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    header.classList.add("is-date-jump-target");
+    setTimeout(() => header.classList.remove("is-date-jump-target"), 1800);
+  } catch (error) {
+    showError(error);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function threadActivityMarkup(thread) {
   const bits = [];
   if (thread.repliedAt) {
@@ -6066,7 +6300,13 @@ function mailThreadGroups(threads) {
 
 function mailGroupHeaderMarkup(group) {
   const collapsed = state.collapsedMailGroups instanceof Set && state.collapsedMailGroups.has(group.key);
-  return `<section class="mail-group-head${group.kind === "pinned" ? " is-pinned-group" : ""}${collapsed ? " is-collapsed" : ""}" data-mail-group-head="${esc(group.key)}">
+  const dateKeys = group.threads.map((thread) => {
+    const date = new Date(thread.date);
+    return Number.isNaN(date.getTime()) ? "" : dateKeyInZone(date);
+  }).filter(Boolean).sort();
+  const oldest = dateKeys[0] || "";
+  const newest = dateKeys[dateKeys.length - 1] || "";
+  return `<section class="mail-group-head${group.kind === "pinned" ? " is-pinned-group" : ""}${collapsed ? " is-collapsed" : ""}" data-mail-group-head="${esc(group.key)}" data-mail-group-oldest="${esc(oldest)}" data-mail-group-newest="${esc(newest)}">
     <button type="button" data-mail-group-toggle="${esc(group.key)}" aria-expanded="${collapsed ? "false" : "true"}">
       <svg class="icon mail-group-chevron" aria-hidden="true"><use href="#i-chevron-down"/></svg>
       ${group.kind === "pinned" ? '<svg class="icon mail-group-pin" aria-hidden="true"><use href="#i-pin"/></svg>' : ""}
@@ -6244,6 +6484,8 @@ function ensureStickyListHost() {
 }
 
 function renderStickyListHost() {
+  ensureNotesDeskLauncher();
+  syncNotesDeskLauncher();
   const host = ensureStickyListHost();
   if (!host) return;
   host.innerHTML = stickyNoteHostMarkup("list");
@@ -6252,6 +6494,7 @@ function renderStickyListHost() {
 
 function renderList({ preserveScroll = false, appendOnly = false } = {}) {
   ensureStickyNote(stickyNoteOwnerId());
+  ensureDateJumpUi();
   const previousScroll = preserveScroll ? messageList.scrollTop : 0;
   const threads = computeView();
   const page = currentMailPage();
@@ -6274,6 +6517,7 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
   } else {
     listCount.textContent = `${threads.length}${page.hasMore ? ` of ${pageTotal}` : ""} ${viewUnit(pageTotal)}`;
   }
+  const noteStrip = state.query ? searchNoteStripMarkup() : "";
 
   if (!threads.length) {
     state.renderedThreadIds = new Set();
@@ -6320,7 +6564,7 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
       emptyText = "Messages carrying meeting or calendar invites appear here.";
       emptyIcon = "i-calendar";
     }
-    messageList.innerHTML = `<div class="list-empty">
+    messageList.innerHTML = noteStrip + `<div class="list-empty">
       <div class="list-empty-icon"><svg class="icon" aria-hidden="true"><use href="#${emptyIcon}"/></svg></div>
       <h2>${emptyTitle}</h2>
       <p>${emptyText}</p>
@@ -6331,7 +6575,7 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
     // Date-group headers must be inserted at section boundaries, so a paged
     // append re-renders the grouped list while preserving the scroll offset.
     state.renderedThreadIds = new Set(threads.map((thread) => thread.id));
-    messageList.innerHTML = mailThreadRowsMarkup(threads) + mailLoadMoreMarkup(page);
+    messageList.innerHTML = noteStrip + mailThreadRowsMarkup(threads) + mailLoadMoreMarkup(page);
   }
   renderStickyListHost();
 
@@ -6727,21 +6971,6 @@ function tenantFeatureEnabled(key) {
   return !features || features[key] !== false;
 }
 
-function stickySessionKey(ownerId) {
-  return `a8m.sticky.hidden.${ownerId || state.user?.id || "guest"}`;
-}
-
-function stickySessionHidden(ownerId) {
-  try { return sessionStorage.getItem(stickySessionKey(ownerId)) === "1"; } catch { return false; }
-}
-
-function setStickySessionHidden(ownerId, hidden) {
-  try {
-    if (hidden) sessionStorage.setItem(stickySessionKey(ownerId), "1");
-    else sessionStorage.removeItem(stickySessionKey(ownerId));
-  } catch {}
-}
-
 function restoreHomeTabsState() {
   if (state.homeTabsRestored) return;
   state.homeTabsRestored = true;
@@ -6807,12 +7036,51 @@ function stickyNoteKey(ownerId) {
   return ownerId || state.user?.id || "";
 }
 
-function currentStickyNote(ownerId = stickyNoteOwnerId()) {
+function stickyNoteBoard(ownerId = stickyNoteOwnerId()) {
   return state.stickyNotes.get(stickyNoteKey(ownerId)) || null;
+}
+
+function currentStickyNote(ownerId = stickyNoteOwnerId()) {
+  const board = stickyNoteBoard(ownerId);
+  if (!board) return null;
+  if (board.pinned && !board.pinned.archived) return board.pinned;
+  return (board.notes || []).find((note) => !note.archived) || null;
+}
+
+function stickyNoteById(ownerId, noteId) {
+  const board = stickyNoteBoard(ownerId);
+  return (board?.notes || []).find((note) => note.id === noteId) || null;
 }
 
 function stickyNoteHasContent(note) {
   return Boolean(note && ((note.content || "").trim() || (note.links || []).length));
+}
+
+function normalizeNoteBoard(data) {
+  const notes = Array.isArray(data?.notes) ? data.notes : [];
+  return {
+    notes,
+    pinned: data?.pinned && !data.pinned.archived ? data.pinned : null,
+    activeCount: Number.isFinite(Number(data?.activeCount)) ? Number(data.activeCount) : notes.filter((note) => !note.archived).length,
+    archivedCount: Number.isFinite(Number(data?.archivedCount)) ? Number(data.archivedCount) : notes.filter((note) => note.archived).length,
+    shared: Boolean(data?.shared),
+    team: Boolean(data?.team ?? data?.shared),
+    teamCount: Number.isFinite(Number(data?.teamCount)) ? Number(data.teamCount) : 0,
+    canEdit: data?.canEdit !== false,
+    mailboxes: Array.isArray(data?.mailboxes) ? data.mailboxes : [],
+    owner: data?.owner || null
+  };
+}
+
+function applyNoteBoard(ownerId, data) {
+  const board = normalizeNoteBoard(data);
+  state.stickyNotes.set(stickyNoteKey(ownerId), board);
+  refreshStickyHosts();
+  if (notesDeskOverlay && !notesDeskOverlay.hidden && state.notesDeskQuery.trim()) {
+    clearTimeout(state.notesDeskTimer);
+    runNotesDeskSearch();
+  }
+  return board;
 }
 
 function ensureStickyNote(ownerId = stickyNoteOwnerId()) {
@@ -6820,54 +7088,86 @@ function ensureStickyNote(ownerId = stickyNoteOwnerId()) {
   const key = stickyNoteKey(ownerId);
   if (!key) return Promise.resolve(null);
   if (state.stickyNotes.has(key)) return Promise.resolve(state.stickyNotes.get(key));
-  if (state.stickyNoteLoading.has(key)) return Promise.resolve(null);
+  if (state.stickyNotePromises.has(key)) return state.stickyNotePromises.get(key);
   state.stickyNoteLoading.add(key);
-  const params = ownerId ? `?ownerId=${encodeURIComponent(ownerId)}` : "";
-  return api(`/api/sticky-note${params}`)
+  const params = new URLSearchParams({ archived: "1" });
+  if (ownerId) params.set("ownerId", ownerId);
+  const promise = api(`/api/notes?${params.toString()}`)
     .then((data) => {
-      const note = { ...(data.note || {}), shared: Boolean(data.shared), owner: data.owner || null };
-      state.stickyNotes.set(key, note);
+      const board = normalizeNoteBoard(data);
+      state.stickyNotes.set(key, board);
       refreshStickyHosts();
-      return note;
+      return board;
     })
     .catch(() => null)
-    .finally(() => { state.stickyNoteLoading.delete(key); });
+    .finally(() => {
+      state.stickyNoteLoading.delete(key);
+      state.stickyNotePromises.delete(key);
+    });
+  state.stickyNotePromises.set(key, promise);
+  return promise;
 }
 
 function refreshStickyHosts() {
   $$("[data-sticky-host]").forEach((host) => {
     const surface = host.getAttribute("data-sticky-host");
     host.innerHTML = stickyNoteHostMarkup(surface);
+    host.hidden = !host.innerHTML;
   });
+  ensureNotesDeskLauncher();
+  syncNotesDeskLauncher();
+  syncNotesDeskSettings();
+  if (notesDeskOverlay && !notesDeskOverlay.hidden) renderNotesDesk();
+}
+
+function stickyDeskLauncherMarkup(ownerId) {
+  const board = stickyNoteBoard(ownerId);
+  const active = board?.activeCount || 0;
+  const archived = board?.archivedCount || 0;
+  const total = active + archived;
+  const label = board?.team ? "Team notes" : "Notes";
+  const members = board?.teamCount ? ` · ${board.teamCount} teammate${board.teamCount === 1 ? "" : "s"}` : "";
+  return `<button class="sticky-desk-launcher" type="button" data-sticky-open-desk="${esc(ownerId)}">
+    <span class="sticky-desk-mark" aria-hidden="true">📌</span>
+    <span class="sticky-desk-copy"><b>${label} · ${total}</b><small>${active} active${archived ? ` · ${archived} archived` : ""}${members} · open notes desk</small></span>
+    <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+  </button>`;
 }
 
 function stickyNoteHostMarkup(surface) {
   if (!state.user || !tenantFeatureEnabled("stickyNotes")) return "";
   const ownerId = surface === "calendar" ? "" : stickyNoteOwnerId();
-  if (stickySessionHidden(ownerId)) return "";
-  const note = currentStickyNote(ownerId);
-  if (!note) return "";
-  if (note.enabled === false) return "";
+  const board = stickyNoteBoard(ownerId);
+  if (!board) return "";
+  const active = (board.notes || []).filter((note) => !note.archived);
+  const pinned = board.pinned && !board.pinned.archived ? board.pinned : null;
   if (surface === "list") {
-    if (!stickyNoteHasContent(note)) return "";
     if (state.query) return "";
     const folder = folderDef(state.folder);
     if (state.folder !== "inbox" && !(folder && folder.delegated)) return "";
-    return stickyNoteMarkup(note, { surface, ownerId, compact: false });
+    if (pinned && stickyNoteHasContent(pinned)) {
+      const extra = Math.max(0, active.length - 1);
+      return `<div class="sticky-pinned-stack">${stickyNoteMarkup(pinned, { surface, ownerId })}${extra ? `<button class="sticky-more-chip" type="button" data-sticky-open-desk="${esc(ownerId)}">+${extra} note${extra === 1 ? "" : "s"} in desk</button>` : ""}</div>`;
+    }
+    if (active.length || board.archivedCount) return stickyDeskLauncherMarkup(ownerId);
+    return stickySpawnMarkup(ownerId);
   }
   if (surface === "home") {
-    if (!stickyNoteHasContent(note)) return stickySpawnMarkup(ownerId);
-    return stickyNoteMarkup(note, { surface, ownerId, draggable: true });
+    if (!active.length && !board.archivedCount) return stickySpawnMarkup(ownerId);
+    const visible = active.slice(0, 12);
+    return `<button class="sticky-home-desk-chip" type="button" data-sticky-open-desk="${esc(ownerId)}"><span aria-hidden="true">📌</span>Notes ${active.length} · Desk</button>` +
+      visible.map((note, index) => stickyNoteMarkup(note, { surface, ownerId, draggable: true, index })).join("") +
+      (active.length > visible.length ? `<button class="sticky-more-chip is-home" type="button" data-sticky-open-desk="${esc(ownerId)}">+${active.length - visible.length} more in desk</button>` : "");
   }
   if (surface === "calendar") {
-    if (!stickyNoteHasContent(note)) return "";
-    return stickyNoteMarkup(note, { surface, ownerId, compact: true });
+    if (pinned && stickyNoteHasContent(pinned)) return stickyNoteMarkup(pinned, { surface, ownerId, compact: true });
+    if (active.length || board.archivedCount) return stickyDeskLauncherMarkup(ownerId);
   }
   return "";
 }
 
 function stickySpawnMarkup(ownerId) {
-  return `<button class="sticky-spawn" type="button" data-sticky-create="${esc(ownerId)}"><span aria-hidden="true">📌</span><span><b>Pin a note</b><small>Reminders, links and a few lines, always in reach.</small></span><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>`;
+  return `<button class="sticky-spawn" type="button" data-sticky-create="${esc(ownerId)}"><span aria-hidden="true">📌</span><span><b>New note</b><small>A short reminder, a few links, always in reach.</small></span><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>`;
 }
 
 function stickyPlainText(value) {
@@ -6910,13 +7210,62 @@ function stickyContentMarkup(note) {
     }
     rendered += `<p>${stickyInlineMarkup(line)}</p>`;
   });
-  return rendered || `<p class="sticky-empty-copy">Pin a reminder, a link, or a few lines.</p>`;
+  return rendered || `<p class="sticky-empty-copy">An empty note is still a place to start.</p>`;
+}
+
+function normalizeStickyLink(link) {
+  if (!link || typeof link !== "object") return null;
+  let type = String(link.type || "").toLowerCase();
+  let id = String(link.id || "");
+  if (!type) {
+    if (link.threadId) type = "thread";
+    else if (link.eventId) type = "event";
+    else if (link.fileId) type = "file";
+  }
+  if (!id) {
+    if (type === "thread") id = String(link.threadId || "");
+    else if (type === "event") id = String(link.eventId || "");
+    else if (type === "file") id = String(link.fileId || "");
+  }
+  if (!["thread", "event", "file"].includes(type) || !id) return null;
+  return { ...link, type, id, ...(type === "thread" && !link.threadId ? { threadId: id } : {}) };
+}
+
+function stickyLinkKey(link) {
+  return `${link.type}:${link.id}`;
+}
+
+function stickyLinkIcon(link) {
+  return link.type === "event" ? "i-calendar" : link.type === "file" ? "i-file" : "i-mail";
+}
+
+function stickyLinkTitle(link) {
+  if (link.type === "event") return link.title || "Calendar event";
+  if (link.type === "file") return link.name || "File";
+  return link.subject || "(no subject)";
+}
+
+function stickyLinkWhen(link) {
+  if (link.type === "event") {
+    const start = new Date(link.startAt || link.date || "");
+    if (Number.isNaN(start.getTime())) return "";
+    const day = start.toLocaleDateString([], { month: "short", day: "numeric" });
+    return link.allDay ? day : `${day} · ${start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  }
+  if (link.date) return formatListWhen(link.date);
+  return "";
+}
+
+function stickyLinkSubtitle(link) {
+  if (link.type === "event") return [stickyLinkWhen(link), link.location].filter(Boolean).join(" · ") || link.calendarName || "Calendar";
+  if (link.type === "file") return [link.size || (Number.isFinite(Number(link.sizeBytes)) ? formatBytes(Number(link.sizeBytes)) : ""), link.mime].filter(Boolean).join(" · ") || "Cabinet";
+  return link.fromName || link.fromEmail || "Conversation";
 }
 
 function stickyLinksMarkup(note) {
-  const links = Array.isArray(note.links) ? note.links : [];
+  const links = (Array.isArray(note.links) ? note.links : []).map(normalizeStickyLink).filter(Boolean);
   if (!links.length) return "";
-  return `<div class="sticky-links">${links.map((link) => `<div class="sticky-link-row"><button class="sticky-link" type="button" data-sticky-open-thread="${esc(link.threadId || "")}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span><b>${esc(link.subject || "(no subject)")}</b><small>${esc(link.fromName || link.fromEmail || "Conversation")}</small></span></button><button class="sticky-link-remove" type="button" data-sticky-remove-link="${esc(link.threadId || "")}" aria-label="Remove linked conversation" title="Remove link">×</button></div>`).join("")}</div>`;
+  return `<div class="sticky-links">${links.map((link) => `<div class="sticky-link-row"><button class="sticky-link" type="button" data-sticky-open-${esc(link.type)}="${esc(link.id)}"><svg class="icon" aria-hidden="true"><use href="#${stickyLinkIcon(link)}"/></svg><span><b>${esc(stickyLinkTitle(link))}</b><small>${esc(stickyLinkSubtitle(link))}</small></span></button><button class="sticky-link-remove" type="button" data-sticky-remove-link-key="${esc(stickyLinkKey(link))}" aria-label="Remove attached item" title="Remove attachment">×</button></div>`).join("")}</div>`;
 }
 
 function stickyCollapsedLine(note) {
@@ -6926,28 +7275,32 @@ function stickyCollapsedLine(note) {
     return `<span class="sticky-collapsed-line"><b>${esc(source[0])}</b>${more ? ` — ${more} more line${more === 1 ? "" : "s"}` : ""}</span>`;
   }
   const link = Array.isArray(note.links) ? note.links[0] : null;
-  return link ? `<span class="sticky-collapsed-line"><b>${esc(link.subject || "Linked conversation")}</b></span>` : `<span class="sticky-collapsed-line"><b>Sticky note</b></span>`;
+  return link ? `<span class="sticky-collapsed-line"><b>${esc(link.subject || "Linked conversation")}</b></span>` : `<span class="sticky-collapsed-line"><b>${esc(note.title || "Sticky note")}</b></span>`;
 }
 
-function stickyNoteMarkup(note, { surface = "list", ownerId = "", draggable = false, compact = false } = {}) {
+function stickyNoteMarkup(note, { surface = "list", ownerId = "", draggable = false, compact = false, index = 0 } = {}) {
+  const board = stickyNoteBoard(ownerId);
   const color = ["yellow", "blue", "pink", "green"].includes(note.color) ? note.color : "yellow";
   const collapsed = Boolean(note.collapsed);
-  const sessionPosition = surface === "home" ? stickySessionPosition(ownerId) : null;
-  const position = sessionPosition || (note.position && Number.isFinite(Number(note.position.x)) && Number.isFinite(Number(note.position.y))
-    ? { x: Number(note.position.x), y: Number(note.position.y) } : { x: 0.7, y: 0.14 });
+  const fallbackPosition = { x: Math.max(0.04, 0.7 - (index % 4) * 0.06), y: Math.min(0.86, 0.12 + (index % 6) * 0.09) };
+  const position = note.position && Number.isFinite(Number(note.position.x)) && Number.isFinite(Number(note.position.y))
+    ? { x: Number(note.position.x), y: Number(note.position.y) } : fallbackPosition;
   const style = surface === "home" ? ` style="left:clamp(0px, ${(position.x * 100).toFixed(2)}%, calc(100% - 308px));top:${(position.y * 100).toFixed(2)}%"` : "";
-  const sharedLabel = note.shared ? "Team note" : "Sticky note";
-  const updated = note.shared && note.updatedBy ? `<span class="sticky-shared">Visible to delegates · edited by ${esc(note.updatedBy)}</span>` : "";
-  return `<aside class="sticky-note is-${color}${collapsed ? " is-collapsed" : ""}${surface === "home" ? " sticky-home" : ""}${compact ? " is-compact" : ""}" data-sticky-note data-sticky-owner="${esc(ownerId)}" data-sticky-surface="${esc(surface)}" data-sticky-drop="${esc(ownerId)}"${style}>
+  const shared = Boolean(board?.shared);
+  const sharedLabel = shared ? "Team note" : "Note";
+  const updated = shared && note.updatedBy ? `<span class="sticky-shared">Visible to delegates · edited by ${esc(note.updatedBy)}</span>` : "";
+  const pinAction = note.inboxPinned ? "" : `<button class="sticky-edit sticky-pin-action" type="button" data-sticky-pin="${esc(note.id)}"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>Pin to Inbox</button>`;
+  return `<aside class="sticky-note is-${color}${collapsed ? " is-collapsed" : ""}${surface === "home" ? " sticky-home" : ""}${compact ? " is-compact" : ""}" data-sticky-note data-sticky-id="${esc(note.id)}" data-sticky-owner="${esc(ownerId)}" data-sticky-surface="${esc(surface)}" data-sticky-drop-owner="${esc(ownerId)}" data-sticky-drop-id="${esc(note.id)}"${style}>
     <div class="sticky-note-head"${draggable ? ' data-sticky-drag-handle title="Drag to move"' : ""}>
       <span class="sticky-pin" aria-hidden="true">📌</span>
       <span class="sticky-note-title">${sharedLabel}</span>
-      ${note.shared ? `<span class="sticky-team">Team</span>` : ""}
-      <button class="sticky-icon" type="button" data-sticky-collapse aria-label="${collapsed ? "Expand sticky note" : "Collapse sticky note"}" title="${collapsed ? "Expand" : "Collapse"}"><svg class="icon" aria-hidden="true"><use href="#${collapsed ? "i-chevron-down" : "i-collapse"}"/></svg></button>
-      <span class="sticky-dismiss-wrap"><button class="sticky-icon" type="button" data-sticky-dismiss-toggle aria-label="Dismiss sticky note" title="Dismiss"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button><span class="sticky-dismiss-menu" data-sticky-dismiss-menu hidden><button type="button" data-sticky-hide="session">Hide for now</button><button type="button" data-sticky-hide="permanent">Turn off sticky notes</button></span></span>
+      ${shared ? `<span class="sticky-team">Team</span>` : ""}
+      ${note.inboxPinned ? `<span class="sticky-inbox-badge">Inbox</span>` : ""}
+      <button class="sticky-icon" type="button" data-sticky-collapse aria-label="${collapsed ? "Expand note" : "Collapse note"}" title="${collapsed ? "Expand" : "Collapse"}"><svg class="icon" aria-hidden="true"><use href="#${collapsed ? "i-chevron-down" : "i-collapse"}"/></svg></button>
+      <span class="sticky-dismiss-wrap"><button class="sticky-icon" type="button" data-sticky-dismiss-toggle aria-label="Note actions" title="Note actions"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button><span class="sticky-dismiss-menu" data-sticky-dismiss-menu hidden>${note.inboxPinned ? `<button type="button" data-sticky-unpin>Remove from Inbox</button>` : ""}<button type="button" data-sticky-open-desk="${esc(ownerId)}">Open Notes desk</button><button type="button" data-sticky-archive>Archive note</button></span></span>
     </div>
     <div class="sticky-note-content">${collapsed ? stickyCollapsedLine(note) : `${stickyContentMarkup(note)}${stickyLinksMarkup(note)}`}</div>
-    <div class="sticky-note-foot"><span class="sticky-note-hint">${Array.isArray(note.links) && note.links.length ? "Double-click to edit" : "Drop a conversation here to pin it"}</span>${updated}<button class="sticky-edit" type="button" data-sticky-edit="${esc(ownerId)}"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>Edit</button></div>
+    <div class="sticky-note-foot"><span class="sticky-note-hint">${Array.isArray(note.links) && note.links.length ? "Double-click to edit" : "Drop a conversation here to attach it"}</span>${updated}${note.inboxPinned || surface === "calendar" ? "" : pinAction}<button class="sticky-edit" type="button" data-sticky-edit="${esc(note.id)}"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>Edit</button></div>
   </aside>`;
 }
 
@@ -6961,10 +7314,30 @@ function mailHomeMarkup() {
   }) || todayEvents[0] || null;
   return `<section class="mail-home">
     <div class="home-sticky-layer" data-sticky-host="home">${stickyNoteHostMarkup("home")}</div>
-    <div class="empty-mark"><span class="empty-monogram" aria-hidden="true">${esc(brandInitials(brandName()))}</span></div>
-    <h2>No conversation selected</h2>
-    <p>Select a conversation from the list to open it here. Threads expand in place, with security checks and attachments alongside.</p>
-    <div class="empty-overview">
+    <div class="home-aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+    <div class="home-hero">
+      <div class="home-mail-art" aria-hidden="true">
+        <span class="home-mail-halo"></span>
+        <svg class="home-mail-svg" viewBox="0 0 96 96" fill="none">
+          <rect x="14" y="24" width="68" height="48" rx="12" fill="url(#homeMailFill)" stroke="currentColor" stroke-opacity=".22" stroke-width="1.4"/>
+          <path d="M18 32.5 48 54l30-21.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="m20 66 19-17M76 66 57 49" stroke="currentColor" stroke-opacity=".42" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="75" cy="23" r="7" fill="var(--surface)" stroke="currentColor" stroke-opacity=".26"/>
+          <path d="M72.5 23h5M75 20.5v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <defs><linearGradient id="homeMailFill" x1="14" y1="24" x2="82" y2="72" gradientUnits="userSpaceOnUse"><stop stop-color="var(--accent-soft)"/><stop offset="1" stop-color="color-mix(in srgb, var(--accent) 18%, var(--surface))"/></linearGradient></defs>
+        </svg>
+        <span class="home-mail-spark is-one">✦</span>
+        <span class="home-mail-spark is-two">✧</span>
+      </div>
+      <p class="home-eyebrow">Mail Home</p>
+      <h2>No conversation selected</h2>
+      <p class="home-lead">A quiet moment in your workspace. Pick a conversation, start a new message, or see how your year in email is shaping up.</p>
+      <div class="home-hero-actions">
+        <button class="btn-primary home-compose-btn" type="button" data-home-compose><svg class="icon" aria-hidden="true"><use href="#i-pen"/></svg>Compose</button>
+        <button class="btn-secondary" type="button" data-home-tab="pulse"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Open Pulse</button>
+      </div>
+    </div>
+    <div class="empty-overview home-stats-grid">
       <div class="empty-stat"><span class="empty-stat-value is-number">${unreadInboxCount()}</span><span class="empty-stat-label">unread in Inbox</span></div>
       <div class="empty-stat"><span class="empty-stat-value">${nextEvent ? esc(nextEvent.title) : "No meetings"}</span><span class="empty-stat-label">${nextEvent ? `Today · ${esc(nextEvent.start)}` : "Today"}</span></div>
       <div class="empty-stat"><span class="empty-stat-value empty-protected"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Protected</span><span class="empty-stat-label">SPF · DKIM · DMARC</span></div>
@@ -7118,6 +7491,7 @@ function bindHomeWorkspace() {
     if (event.target.closest("[data-home-search-close]")) { event.preventDefault(); event.stopPropagation(); closeHomeSearchTab(); return; }
     setHomeTab(button.getAttribute("data-home-tab"));
   }));
+  $("[data-home-compose]", readerContent)?.addEventListener("click", () => openCompose());
   $("[data-pulse-search-form]", readerContent)?.addEventListener("submit", (event) => { event.preventDefault(); const input = $("[data-pulse-search-input]", event.currentTarget); openHomeSearch(input?.value || ""); });
   $("[data-home-search-form]", readerContent)?.addEventListener("submit", (event) => { event.preventDefault(); const input = $("input", event.currentTarget); openHomeSearch(input?.value || ""); });
   $("[data-pulse-year]", readerContent)?.addEventListener("change", (event) => { state.pulseYear = Number(event.target.value) || new Date().getFullYear(); state.pulseData = null; state.pulseSelection = ""; persistHomeTabsState(); renderReader(); });
@@ -7176,60 +7550,661 @@ function ensureHomeSearch() {
     });
 }
 
-function stickySessionPositionKey(ownerId) {
-  return `a8m.sticky.position.${ownerId || state.user?.id || "guest"}`;
+
+function ensureNotesDeskLauncher() {
+  const actions = document.querySelector(".list-actions");
+  if (!tenantFeatureEnabled("stickyNotes")) {
+    document.getElementById("notesDeskBtn")?.remove();
+    return;
+  }
+  if (!actions) return;
+  let button = document.getElementById("notesDeskBtn");
+  if (!button) {
+    actions.insertAdjacentHTML("afterbegin", `<button class="icon-btn notes-desk-trigger" id="notesDeskBtn" type="button" aria-label="Open Notes desk" title="Notes desk"><span aria-hidden="true">📌</span><span class="notes-desk-count" id="notesDeskCount" hidden>0</span></button>`);
+    button = document.getElementById("notesDeskBtn");
+    button?.addEventListener("click", () => openNotesDesk(stickyNoteOwnerId()));
+  }
 }
 
-function stickySessionPosition(ownerId) {
+function syncNotesDeskLauncher() {
+  const button = document.getElementById("notesDeskBtn");
+  const count = document.getElementById("notesDeskCount");
+  if (!button) return;
+  if (!tenantFeatureEnabled("stickyNotes")) { button.remove(); return; }
+  const board = stickyNoteBoard(stickyNoteOwnerId());
+  const total = (board?.activeCount || 0) + (board?.archivedCount || 0);
+  button.title = total ? `Notes desk · ${board?.activeCount || 0} active${board?.archivedCount ? ` · ${board.archivedCount} archived` : ""}` : "Notes desk";
+  if (count) {
+    count.textContent = total > 99 ? "99+" : String(total);
+    count.hidden = total === 0;
+  }
+}
+
+function ensureNotesDeskOverlay() {
+  if (notesDeskOverlay && document.body.contains(notesDeskOverlay)) return;
+  if (document.getElementById("notesDeskOverlay")) {
+    notesDeskOverlay = document.getElementById("notesDeskOverlay");
+    return;
+  }
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay notes-desk-overlay" id="notesDeskOverlay" hidden>
+    <div class="dialog notes-desk-dialog" role="dialog" aria-modal="true" aria-labelledby="notesDeskTitle">
+      <div class="dialog-head"><div class="dialog-title-wrap"><span class="dialog-icon notes-desk-mark" aria-hidden="true">📌</span><div><h2 id="notesDeskTitle">Notes desk <span class="notes-desk-team-badge" id="notesDeskTeamBadge" hidden>Team</span></h2><p id="notesDeskSubtitle">All your notes live here. One can sit above the Inbox.</p></div></div><button class="icon-btn" id="notesDeskClose" type="button" aria-label="Close Notes desk"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body">
+        <div class="notes-desk-toolbar">
+          <label class="notes-desk-search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input id="notesDeskSearch" type="search" placeholder="Search every note and attachment" autocomplete="off" aria-label="Search notes"></label>
+          <select class="notes-desk-scope" id="notesDeskScope" aria-label="Note search scope" hidden><option value="all">All mailboxes</option><option value="mailbox">This mailbox</option></select>
+          <div class="notes-desk-tabs" role="tablist"><button class="is-active" type="button" role="tab" data-notes-desk-mode="active">Notes <span id="notesDeskActiveCount">0</span></button><button type="button" role="tab" data-notes-desk-mode="archive">Archive <span id="notesDeskArchiveCount">0</span></button></div>
+          <button class="btn-primary notes-desk-new" id="notesDeskNew" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New note</button>
+        </div>
+        <div class="notes-desk-grid" id="notesDeskGrid"></div>
+      </div>
+    </div>
+  </div>`);
+  notesDeskOverlay = document.getElementById("notesDeskOverlay");
+}
+
+function openNotesDesk(ownerId = stickyNoteOwnerId(), { archive = false, query = "" } = {}) {
+  if (!state.user || !tenantFeatureEnabled("stickyNotes")) return;
+  state.notesDeskOwner = ownerId || "";
+  state.notesDeskArchive = Boolean(archive);
+  state.notesDeskQuery = String(query || "");
+  state.notesDeskRemote = null;
+  state.notesDeskRemoteQuery = "";
+  state.notesDeskRemoteArchive = false;
+  state.notesDeskRemoteLoading = false;
+  state.notesDeskRemoteSeq += 1;
+  ensureNotesDeskOverlay();
+  ensureStickyNote(ownerId).then(() => {
+    const board = stickyNoteBoard(ownerId);
+    state.notesDeskCanEdit = board?.canEdit !== false;
+    state.notesDeskTeamCount = board?.teamCount || 0;
+    if (Array.isArray(board?.mailboxes) && board.mailboxes.length) state.notesDeskMailboxes = board.mailboxes;
+    state.notesDeskScope = (state.notesDeskMailboxes || []).length > 1 ? "all" : "mailbox";
+    renderNotesDesk();
+    notesDeskOverlay.hidden = false;
+    if (state.notesDeskQuery.trim()) runNotesDeskSearch();
+    setTimeout(() => document.getElementById("notesDeskSearch")?.focus(), 40);
+  });
+}
+
+function closeNotesDesk() {
+  if (notesDeskOverlay) notesDeskOverlay.hidden = true;
+  state.notesDeskQuery = "";
+  state.notesDeskRemote = null;
+  state.notesDeskRemoteQuery = "";
+  state.notesDeskRemoteLoading = false;
+  state.notesDeskRemoteSeq += 1;
+}
+
+function notesDeskRemoteActive() {
+  const query = state.notesDeskQuery.trim();
+  return Boolean(query && state.notesDeskRemote && state.notesDeskRemoteQuery === query
+    && state.notesDeskRemoteArchive === state.notesDeskArchive);
+}
+
+async function runNotesDeskSearch() {
+  const query = state.notesDeskQuery.trim();
+  if (!query) {
+    state.notesDeskRemote = null;
+    state.notesDeskRemoteQuery = "";
+    state.notesDeskRemoteLoading = false;
+    state.notesDeskRemoteSeq += 1;
+    renderNotesDesk();
+    return;
+  }
+  const seq = ++state.notesDeskRemoteSeq;
+  const archived = state.notesDeskArchive;
+  const scope = state.notesDeskScope === "mailbox" ? "mailbox" : "all";
+  state.notesDeskRemoteLoading = true;
+  renderNotesDesk();
+  const params = new URLSearchParams({ q: query, scope, archived: archived ? "1" : "0", limit: "100" });
+  if (scope === "mailbox" && state.notesDeskOwner) params.set("ownerId", state.notesDeskOwner);
   try {
-    const raw = sessionStorage.getItem(stickySessionPositionKey(ownerId));
-    if (!raw) return null;
-    const value = JSON.parse(raw);
-    if (Number.isFinite(Number(value.x)) && Number.isFinite(Number(value.y))) return { x: Number(value.x), y: Number(value.y) };
-  } catch {}
-  return null;
+    const data = await api(`/api/notes/search?${params.toString()}`);
+    if (seq !== state.notesDeskRemoteSeq) return;
+    state.notesDeskRemote = data;
+    state.notesDeskRemoteQuery = query;
+    state.notesDeskRemoteArchive = archived;
+    if (Array.isArray(data.mailboxes) && data.mailboxes.length) state.notesDeskMailboxes = data.mailboxes;
+  } catch (error) {
+    if (seq !== state.notesDeskRemoteSeq) return;
+    state.notesDeskRemote = null;
+    showError(error);
+  } finally {
+    if (seq === state.notesDeskRemoteSeq) {
+      state.notesDeskRemoteLoading = false;
+      renderNotesDesk();
+    }
+  }
 }
 
-function setStickySessionPosition(ownerId, position) {
-  try {
-    if (position) sessionStorage.setItem(stickySessionPositionKey(ownerId), JSON.stringify(position));
-    else sessionStorage.removeItem(stickySessionPositionKey(ownerId));
-  } catch {}
+function notesDeskPreview(note) {
+  const lines = String(note.content || "").split("\n").map((line) => stickyPlainText(line)).filter(Boolean);
+  const firstLink = (note.links || []).map(normalizeStickyLink).filter(Boolean)[0];
+  const preview = lines.slice(1).join(" · ") || lines[0] || (firstLink ? stickyLinkTitle(firstLink) : "Empty note");
+  return preview.length > 120 ? `${preview.slice(0, 117)}…` : preview;
 }
 
-async function saveStickyNotePatch(patch, ownerId = stickyNoteOwnerId()) {
+function notesDeskCardMarkup(note) {
+  const color = ["yellow", "blue", "pink", "green"].includes(note.color) ? note.color : "yellow";
+  const links = Array.isArray(note.links) ? note.links.length : 0;
+  const pinned = Boolean(note.inboxPinned && !note.archived);
+  const owner = note.owner || null;
+  const ownerId = owner?.id || state.notesDeskOwner || "";
+  const board = stickyNoteBoard(ownerId);
+  const team = Boolean(note.team ?? note.shared ?? board?.team);
+  const canEdit = note.canEdit !== false && (ownerId === state.notesDeskOwner ? state.notesDeskCanEdit !== false : note.canEdit !== false);
+  const showOwner = Boolean(owner && state.notesDeskScope === "all" && ownerId !== state.notesDeskOwner);
+  const flags = `${team ? `<span class="notes-desk-card-team">Team</span>` : ""}${showOwner ? `<span class="notes-desk-card-owner">${esc(owner.name || owner.email || "Shared mailbox")}</span>` : ""}`;
+  return `<article class="notes-desk-card is-${color}${pinned ? " is-pinned" : ""}${note.archived ? " is-archived" : ""}${team ? " is-team" : ""}">
+    <button class="notes-desk-card-open" type="button" data-notes-desk-open="${esc(note.id)}" data-notes-desk-owner="${esc(ownerId)}">
+      ${flags ? `<span class="notes-desk-card-flags">${flags}</span>` : ""}
+      <strong>${esc(note.title || "Untitled note")}</strong>
+      <span>${esc(notesDeskPreview(note))}</span>
+      <small>${links ? `${links} attached item${links === 1 ? "" : "s"} · ` : ""}${esc(formatRelativeTime(note.updatedAt))}${team && note.updatedBy ? ` · ${esc(note.updatedBy)}` : ""}</small>
+    </button>
+    <div class="notes-desk-card-foot">
+      ${!canEdit ? `<span class="notes-desk-readonly">Read-only</span>` : pinned ? `<span class="notes-desk-pin-badge">Pinned to Inbox</span>` : (note.archived ? `<span>Archived</span>` : `<button class="link-btn" type="button" data-notes-desk-pin="${esc(note.id)}" data-notes-desk-owner="${esc(ownerId)}">Pin to Inbox</button>`)}
+      ${canEdit ? (note.archived ? `<button class="link-btn" type="button" data-notes-desk-restore="${esc(note.id)}" data-notes-desk-owner="${esc(ownerId)}">Restore</button>` : `<button class="link-btn danger-link" type="button" data-notes-desk-archive="${esc(note.id)}" data-notes-desk-owner="${esc(ownerId)}">Archive</button>`) : ""}
+    </div>
+  </article>`;
+}
+
+function renderNotesDesk() {
+  ensureNotesDeskOverlay();
+  const board = stickyNoteBoard(state.notesDeskOwner);
+  const grid = document.getElementById("notesDeskGrid");
+  if (!grid) return;
+  const query = state.notesDeskQuery.trim();
+  const remoteReady = notesDeskRemoteActive();
+  const mailboxCount = Math.max(1, (state.notesDeskMailboxes || []).length);
+  document.getElementById("notesDeskActiveCount").textContent = String(board?.activeCount || 0);
+  document.getElementById("notesDeskArchiveCount").textContent = String(board?.archivedCount || 0);
+  $$("[data-notes-desk-mode]").forEach((button) => {
+    const active = button.getAttribute("data-notes-desk-mode") === "active" ? !state.notesDeskArchive : state.notesDeskArchive;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  const search = document.getElementById("notesDeskSearch");
+  if (search) {
+    if (document.activeElement !== search) search.value = state.notesDeskQuery;
+    search.placeholder = state.notesDeskArchive ? "Search every archived note" : "Search every note and attachment";
+  }
+  const scopeSelect = document.getElementById("notesDeskScope");
+  if (scopeSelect) {
+    scopeSelect.hidden = mailboxCount < 2;
+    scopeSelect.value = state.notesDeskScope;
+  }
+  const team = Boolean(board?.team || (state.notesDeskRemote?.notes || []).some((note) => note.team));
+  const teamBadge = document.getElementById("notesDeskTeamBadge");
+  if (teamBadge) teamBadge.hidden = !team;
+  const owner = board?.owner || (state.notesDeskMailboxes || []).find((mailbox) => mailbox.id === state.notesDeskOwner) || null;
+  const subtitle = document.getElementById("notesDeskSubtitle");
+  if (subtitle) {
+    if (query && remoteReady) {
+      subtitle.textContent = `${state.notesDeskRemote?.count || 0} matching note${state.notesDeskRemote?.count === 1 ? "" : "s"} in the ${state.notesDeskArchive ? "archive" : "desk"}${state.notesDeskScope === "all" && mailboxCount > 1 ? ` across ${mailboxCount} mailboxes` : ""}.`;
+    } else if (query) {
+      subtitle.textContent = `${state.notesDeskRemoteLoading ? "Searching" : "Ready to search"} ${state.notesDeskScope === "all" && mailboxCount > 1 ? "every shared mailbox" : "this mailbox"} — title, body and attached items.`;
+    } else if (team) {
+      const count = board?.teamCount || state.notesDeskTeamCount || 0;
+      subtitle.textContent = `Team desk for ${owner?.name || owner?.email || "this mailbox"}${count ? ` · ${count} teammate${count === 1 ? "" : "s"}` : ""}. One note can sit above the Inbox.`;
+    } else {
+      subtitle.textContent = `Private desk${owner?.name ? ` for ${owner.name}` : ""}. One note can sit above the Inbox.`;
+    }
+  }
+  const newButton = document.getElementById("notesDeskNew");
+  if (newButton) {
+    newButton.hidden = !state.notesDeskCanEdit;
+    newButton.disabled = !state.notesDeskCanEdit;
+  }
+  let notes = [];
+  if (remoteReady) {
+    notes = state.notesDeskRemote?.notes || [];
+  } else {
+    const needle = query.toLowerCase();
+    notes = (board?.notes || []).filter((note) => Boolean(note.archived) === state.notesDeskArchive)
+      .filter((note) => !needle || `${note.title || ""} ${note.content || ""} ${(note.links || []).map((link) => `${stickyLinkTitle(normalizeStickyLink(link) || {})} ${stickyLinkSubtitle(normalizeStickyLink(link) || {})}`).join(" ")}`.toLowerCase().includes(needle))
+      .sort((a, b) => (Number(b.inboxPinned) - Number(a.inboxPinned)) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  }
+  if (!notes.length) {
+    const loading = query && state.notesDeskRemoteLoading && !remoteReady;
+    const title = loading ? "Searching notes…" : query ? "No notes match that search" : state.notesDeskArchive ? "The archive is empty" : "Your desk is clear";
+    const copy = loading
+      ? `Looking through ${state.notesDeskArchive ? "archived notes" : "notes and attachments"}${state.notesDeskScope === "all" && mailboxCount > 1 ? ` in ${mailboxCount} mailboxes` : ""}.`
+      : query ? "Try a different word, or search the archive for older notes."
+        : state.notesDeskArchive ? "Archived notes stay here until you restore them."
+          : "Create a note for a reminder, a decision, or a conversation you need to return to.";
+    grid.innerHTML = `<div class="notes-desk-empty"><span aria-hidden="true">${loading ? "📌" : "📌"}</span><strong>${esc(title)}</strong><p>${esc(copy)}</p>${!query && !state.notesDeskArchive && state.notesDeskCanEdit ? `<button class="btn-primary" type="button" data-notes-desk-new>New note</button>` : ""}</div>`;
+    return;
+  }
+  grid.innerHTML = notes.map(notesDeskCardMarkup).join("");
+}
+
+async function createStickyNoteRecord(ownerId, payload = {}) {
   if (!state.user) return null;
-  const key = stickyNoteKey(ownerId);
-  const body = { ...patch };
-  if (ownerId) body.ownerId = ownerId;
-  const data = await api("/api/sticky-note", { method: "PUT", body });
-  const existing = state.stickyNotes.get(key) || {};
-  state.stickyNotes.set(key, { ...existing, ...(data.note || {}), shared: Boolean(data.shared), owner: existing.owner || null });
-  refreshStickyHosts();
-  return state.stickyNotes.get(key);
+  const params = new URLSearchParams();
+  if (ownerId) params.set("ownerId", ownerId);
+  const data = await api(`/api/notes?${params.toString()}`, { method: "POST", body: { ...payload } });
+  const board = applyNoteBoard(ownerId, data);
+  return (board.notes || []).find((note) => note.id === data.created) || null;
 }
 
-function stickyFromElement(element) {
-  const node = element.closest("[data-sticky-note]");
-  if (!node) return null;
-  const ownerId = node.getAttribute("data-sticky-owner") || "";
-  return { node, ownerId, note: currentStickyNote(ownerId) };
+async function saveStickyNotePatch(patch, ownerId = stickyNoteOwnerId(), noteId = "") {
+  if (!state.user || !noteId) return null;
+  const params = new URLSearchParams();
+  if (ownerId) params.set("ownerId", ownerId);
+  const data = await api(`/api/notes/${encodeURIComponent(noteId)}?${params.toString()}`, { method: "PATCH", body: { ...patch } });
+  applyNoteBoard(ownerId, data);
+  return stickyNoteById(ownerId, noteId);
+}
+
+function noteUndoToast(message, undo) {
+  showToast(message, "Undo", async () => {
+    try {
+      await undo();
+      showToast("Note restored");
+    } catch (error) { showError(error); }
+  });
+}
+
+async function pinStickyNote(ownerId, noteId) {
+  const board = stickyNoteBoard(ownerId);
+  const previous = board?.pinned?.id || "";
+  await saveStickyNotePatch({ inboxPinned: true }, ownerId, noteId);
+  if (previous && previous !== noteId) {
+    noteUndoToast("Pinned to Inbox. The previous note moved to your desk.", () => saveStickyNotePatch({ inboxPinned: true }, ownerId, previous));
+  } else {
+    showToast("Note pinned to Inbox");
+  }
+}
+
+async function unpinStickyNote(ownerId, noteId) {
+  await saveStickyNotePatch({ inboxPinned: false }, ownerId, noteId);
+  showToast("Moved to Notes desk", "Open desk", async () => { openNotesDesk(ownerId); });
+}
+
+async function archiveStickyNote(ownerId, noteId) {
+  await saveStickyNotePatch({ archived: true }, ownerId, noteId);
+  noteUndoToast("Note archived", () => saveStickyNotePatch({ archived: false }, ownerId, noteId));
+  if (notesDeskOverlay && !notesDeskOverlay.hidden) renderNotesDesk();
+}
+
+async function restoreStickyNote(ownerId, noteId) {
+  await saveStickyNotePatch({ archived: false }, ownerId, noteId);
+  showToast("Note restored to your desk");
+  if (notesDeskOverlay && !notesDeskOverlay.hidden) renderNotesDesk();
+}
+
+function ensureNotesDeskEvents() {
+  if (document.__a8mNotesDeskBound) return;
+  document.__a8mNotesDeskBound = true;
+  document.addEventListener("click", (event) => {
+    if (!notesDeskOverlay || notesDeskOverlay.hidden) return;
+    if (event.target === notesDeskOverlay || event.target.closest("#notesDeskClose")) { closeNotesDesk(); return; }
+    if (event.target.closest("#notesDeskNew") || event.target.closest("[data-notes-desk-new]")) {
+      if (state.notesDeskCanEdit) openStickyNoteEditor(state.notesDeskOwner, "");
+      return;
+    }
+    const mode = event.target.closest("[data-notes-desk-mode]");
+    if (mode) {
+      state.notesDeskArchive = mode.getAttribute("data-notes-desk-mode") === "archive";
+      if (state.notesDeskQuery.trim()) runNotesDeskSearch();
+      else renderNotesDesk();
+      return;
+    }
+    const open = event.target.closest("[data-notes-desk-open]");
+    if (open) {
+      openStickyNoteEditor(open.getAttribute("data-notes-desk-owner") || state.notesDeskOwner, open.getAttribute("data-notes-desk-open"));
+      return;
+    }
+    const pin = event.target.closest("[data-notes-desk-pin]");
+    if (pin) { pinStickyNote(pin.getAttribute("data-notes-desk-owner") || state.notesDeskOwner, pin.getAttribute("data-notes-desk-pin")).catch(showError); return; }
+    const archive = event.target.closest("[data-notes-desk-archive]");
+    if (archive) { archiveStickyNote(archive.getAttribute("data-notes-desk-owner") || state.notesDeskOwner, archive.getAttribute("data-notes-desk-archive")).catch(showError); return; }
+    const restore = event.target.closest("[data-notes-desk-restore]");
+    if (restore) { restoreStickyNote(restore.getAttribute("data-notes-desk-owner") || state.notesDeskOwner, restore.getAttribute("data-notes-desk-restore")).catch(showError); return; }
+  });
+  document.addEventListener("input", (event) => {
+    if (event.target.id !== "notesDeskSearch") return;
+    state.notesDeskQuery = event.target.value || "";
+    clearTimeout(state.notesDeskTimer);
+    if (!state.notesDeskQuery.trim()) {
+      state.notesDeskRemote = null;
+      state.notesDeskRemoteQuery = "";
+      state.notesDeskRemoteLoading = false;
+      state.notesDeskRemoteSeq += 1;
+      renderNotesDesk();
+      return;
+    }
+    state.notesDeskTimer = setTimeout(() => runNotesDeskSearch(), 240);
+  });
+  document.addEventListener("change", (event) => {
+    if (event.target.id !== "notesDeskScope") return;
+    state.notesDeskScope = event.target.value === "mailbox" ? "mailbox" : "all";
+    if (state.notesDeskQuery.trim()) runNotesDeskSearch();
+    else renderNotesDesk();
+  });
+}
+
+function noteEditorElements() {
+  const overlay = document.getElementById("stickyNoteEditorOverlay");
+  return {
+    overlay,
+    title: document.getElementById("stickyEditorTitle"),
+    textarea: document.getElementById("stickyNoteEditorText"),
+    pin: document.getElementById("stickyEditorPin"),
+    pinWrap: document.getElementById("stickyEditorPinWrap"),
+    links: document.getElementById("stickyEditorLinks"),
+    archive: document.getElementById("stickyEditorArchive"),
+    attach: document.getElementById("stickyEditorAttach"),
+    attachPicker: document.getElementById("stickyAttachPicker"),
+    attachSearch: document.getElementById("stickyAttachSearch"),
+    attachResults: document.getElementById("stickyAttachResults")
+  };
+}
+
+function stickyEditorLinkRefs() {
+  const seen = new Set();
+  const refs = [];
+  for (const raw of state.stickyEditorLinks || []) {
+    const link = normalizeStickyLink(raw);
+    if (!link || seen.has(stickyLinkKey(link))) continue;
+    seen.add(stickyLinkKey(link));
+    refs.push({ type: link.type, id: link.id });
+    if (refs.length >= 12) break;
+  }
+  return refs;
+}
+
+function renderStickyEditorLinks() {
+  const host = document.getElementById("stickyEditorLinks");
+  if (!host) return;
+  const links = (state.stickyEditorLinks || []).map(normalizeStickyLink).filter(Boolean);
+  host.innerHTML = links.length
+    ? `<span class="sticky-editor-links-label">Attached context</span>${links.map((link) => `<span class="sticky-editor-link is-${esc(link.type)}"><svg class="icon" aria-hidden="true"><use href="#${stickyLinkIcon(link)}"/></svg><span>${esc(stickyLinkTitle(link))}</span>${state.stickyEditorCanEdit ? `<button type="button" data-sticky-editor-remove-link="${esc(stickyLinkKey(link))}" aria-label="Remove ${esc(stickyLinkTitle(link))}" title="Remove attachment">×</button>` : ""}</span>`).join("")}`
+    : `<span class="sticky-editor-links-empty">No conversations, events or files attached yet.</span>`;
+}
+
+function addStickyEditorLink(link) {
+  const normalized = normalizeStickyLink(link);
+  if (!normalized) return;
+  if (!state.stickyEditorLinks.some((item) => stickyLinkKey(normalizeStickyLink(item) || {}) === stickyLinkKey(normalized))) {
+    if (state.stickyEditorLinks.length >= 12) {
+      showToast("A note can carry up to 12 attachments");
+      return;
+    }
+    state.stickyEditorLinks.push(normalized);
+  }
+  renderStickyEditorLinks();
+}
+
+function removeStickyEditorLink(key) {
+  state.stickyEditorLinks = (state.stickyEditorLinks || []).filter((link) => {
+    const normalized = normalizeStickyLink(link);
+    return !normalized || stickyLinkKey(normalized) !== key;
+  });
+  renderStickyEditorLinks();
+}
+
+function stickyAttachKindLabel(kind) {
+  return kind === "event" ? "event" : kind === "file" ? "file" : "conversation";
+}
+
+function renderStickyAttachResults() {
+  const host = document.getElementById("stickyAttachResults");
+  if (!host) return;
+  if (state.stickyAttachLoading) {
+    host.innerHTML = `<div class="sticky-attach-loading"><div class="list-loading-spinner" aria-hidden="true"></div>Loading ${esc(stickyAttachKindLabel(state.stickyAttachKind))}s…</div>`;
+    return;
+  }
+  const items = state.stickyAttachItems || [];
+  if (!items.length) {
+    host.innerHTML = `<div class="sticky-attach-empty">No ${esc(stickyAttachKindLabel(state.stickyAttachKind))}s found.</div>`;
+    return;
+  }
+  host.innerHTML = items.map((item) => `<button class="sticky-attach-item" type="button" data-sticky-attach-pick="${esc(stickyLinkKey(item))}"><svg class="icon" aria-hidden="true"><use href="#${stickyLinkIcon(item)}"/></svg><span><b>${esc(stickyLinkTitle(item))}</b><small>${esc(stickyLinkSubtitle(item))}</small></span><svg class="icon sticky-attach-add" aria-hidden="true"><use href="#i-plus"/></svg></button>`).join("");
+}
+
+async function loadStickyAttachCandidates(kind, query = "") {
+  const ownerId = state.stickyEditorOwner || "";
+  const seq = ++state.stickyAttachSeq;
+  state.stickyAttachKind = kind;
+  state.stickyAttachQuery = query;
+  state.stickyAttachLoading = true;
+  renderStickyAttachResults();
+  const params = new URLSearchParams({ type: kind, q: String(query || "").trim() });
+  if (ownerId) params.set("ownerId", ownerId);
+  try {
+    const data = await api(`/api/notes/attach?${params.toString()}`);
+    if (seq !== state.stickyAttachSeq) return;
+    state.stickyAttachItems = (data.items || []).map(normalizeStickyLink).filter(Boolean);
+  } catch (error) {
+    if (seq !== state.stickyAttachSeq) return;
+    state.stickyAttachItems = [];
+    showError(error);
+  } finally {
+    if (seq === state.stickyAttachSeq) {
+      state.stickyAttachLoading = false;
+      renderStickyAttachResults();
+    }
+  }
+}
+
+function toggleStickyAttachPicker(kind) {
+  const picker = document.getElementById("stickyAttachPicker");
+  const search = document.getElementById("stickyAttachSearch");
+  if (!picker) return;
+  if (!picker.hidden && state.stickyAttachKind === kind) {
+    picker.hidden = true;
+    return;
+  }
+  picker.hidden = false;
+  if (search) { search.value = ""; search.placeholder = `Find a ${stickyAttachKindLabel(kind)}`; }
+  loadStickyAttachCandidates(kind, "");
+}
+
+function closeStickyAttachPicker() {
+  const picker = document.getElementById("stickyAttachPicker");
+  if (picker) picker.hidden = true;
+  state.stickyAttachKind = "";
+  state.stickyAttachItems = [];
+  state.stickyAttachQuery = "";
+  state.stickyAttachLoading = false;
+  state.stickyAttachSeq += 1;
+}
+
+function ensureStickyEditorOverlay() {
+  if (document.getElementById("stickyNoteEditorOverlay")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay sticky-editor-overlay" id="stickyNoteEditorOverlay" hidden>
+    <div class="dialog sticky-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="stickyEditorTitle">
+      <div class="dialog-head"><div class="dialog-title-wrap"><span class="dialog-icon sticky-editor-mark" aria-hidden="true">📌</span><div><h2 id="stickyEditorTitle">New note</h2><p>Keep it short. **bold**, *italic*, [links](https://example.com) and checkbox lists.</p></div></div><button class="icon-btn" type="button" data-sticky-editor-close aria-label="Close note"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body"><textarea id="stickyNoteEditorText" class="sticky-editor-text" rows="7" maxlength="2000" placeholder="Dentist Friday 3pm&#10;- [ ] Send the Q4 deck&#10;Alex is out — route refunds to Sam"></textarea><div class="sticky-editor-colors" role="group" aria-label="Note color"><button type="button" class="sticky-color is-yellow is-active" data-sticky-editor-color="yellow" aria-label="Yellow"></button><button type="button" class="sticky-color is-blue" data-sticky-editor-color="blue" aria-label="Blue"></button><button type="button" class="sticky-color is-pink" data-sticky-editor-color="pink" aria-label="Pink"></button><button type="button" class="sticky-color is-green" data-sticky-editor-color="green" aria-label="Green"></button></div>
+      <label class="sticky-editor-pin" id="stickyEditorPinWrap"><input type="checkbox" id="stickyEditorPin"><span><b>Pin to Inbox</b><small>Only one note sits above the Inbox. The current one moves back to your desk.</small></span></label>
+      <div class="sticky-editor-links" id="stickyEditorLinks"></div>
+      <div class="sticky-editor-attach" id="stickyEditorAttach">
+        <span class="sticky-editor-links-label">Attach context</span>
+        <div class="sticky-editor-attach-actions">
+          <button class="sticky-attach-btn" type="button" data-sticky-attach-open="thread"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>Conversation</button>
+          <button class="sticky-attach-btn" type="button" data-sticky-attach-open="event"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>Event</button>
+          <button class="sticky-attach-btn" type="button" data-sticky-attach-open="file"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>File</button>
+        </div>
+        <div class="sticky-attach-picker" id="stickyAttachPicker" hidden>
+          <label class="sticky-attach-search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input id="stickyAttachSearch" type="search" placeholder="Find something to attach" autocomplete="off"></label>
+          <div class="sticky-attach-results" id="stickyAttachResults"></div>
+        </div>
+      </div>
+      <p class="sticky-editor-hint">Drop conversations onto any note to attach them. Attach events and files from here. Archive instead of clearing when a note has history.</p></div>
+      <div class="dialog-actions"><button class="btn-secondary" type="button" data-sticky-editor-archive id="stickyEditorArchive" hidden><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>Archive</button><button class="btn-secondary" type="button" data-sticky-editor-clear><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Clear</button><span class="sticky-editor-spacer"></span><button class="btn-secondary" type="button" data-sticky-editor-close>Cancel</button><button class="btn-primary" type="button" data-sticky-editor-save><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save note</button></div>
+    </div>
+  </div>`);
+}
+
+function openStickyNoteEditor(ownerId = "", noteId = "") {
+  if (!state.user || !tenantFeatureEnabled("stickyNotes")) return;
+  state.stickyEditorOwner = ownerId || "";
+  state.stickyEditorNoteId = noteId || "";
+  ensureNotesDeskOverlay();
+  ensureStickyEditorOverlay();
+  ensureStickyNote(ownerId).then(() => {
+    const elements = noteEditorElements();
+    if (!elements.overlay || !elements.textarea) return;
+    const board = stickyNoteBoard(ownerId);
+    const note = noteId ? stickyNoteById(ownerId, noteId) : null;
+    const isNew = !noteId;
+    if (noteId && !note) { showToast("That note is no longer available"); return; }
+    const canEdit = board?.canEdit !== false;
+    state.stickyEditorCanEdit = canEdit;
+    elements.title.textContent = isNew ? "New note" : "Edit note";
+    elements.textarea.value = note?.content || "";
+    elements.textarea.readOnly = !canEdit;
+    state.stickyEditorColor = note?.color || "yellow";
+    state.stickyEditorArchived = Boolean(note?.archived);
+    state.stickyEditorPin = note ? Boolean(note.inboxPinned) : !(board?.pinned);
+    state.stickyEditorLinks = (note?.links || []).map(normalizeStickyLink).filter(Boolean);
+    if (elements.pin) { elements.pin.checked = state.stickyEditorPin; elements.pin.disabled = !canEdit; }
+    if (elements.pinWrap) elements.pinWrap.hidden = Boolean(note?.archived) || !canEdit;
+    if (elements.archive) {
+      elements.archive.hidden = isNew || Boolean(note?.archived) || !canEdit;
+      elements.archive.textContent = "Archive";
+    }
+    if (elements.attach) elements.attach.hidden = !canEdit;
+    closeStickyAttachPicker();
+    $$("[data-sticky-editor-color]").forEach((button) => {
+      button.classList.toggle("is-active", button.getAttribute("data-sticky-editor-color") === state.stickyEditorColor);
+      button.disabled = !canEdit;
+    });
+    const saveButton = document.querySelector("[data-sticky-editor-save]");
+    if (saveButton) saveButton.disabled = !canEdit;
+    renderStickyEditorLinks();
+    elements.overlay.hidden = false;
+    setTimeout(() => elements.textarea.focus(), 50);
+  });
+}
+
+function closeStickyEditor() {
+  const overlay = document.getElementById("stickyNoteEditorOverlay");
+  if (overlay) overlay.hidden = true;
+  state.stickyEditorOwner = "";
+  state.stickyEditorNoteId = "";
+  state.stickyEditorArchived = false;
+  state.stickyEditorCanEdit = true;
+  state.stickyEditorLinks = [];
+  closeStickyAttachPicker();
+}
+
+function bindStickyEditorEvents() {
+  if (document.__a8mStickyEditorBound) return;
+  document.__a8mStickyEditorBound = true;
+  document.addEventListener("click", async (event) => {
+    const overlay = document.getElementById("stickyNoteEditorOverlay");
+    if (!overlay || overlay.hidden) return;
+    if (event.target.closest("[data-sticky-editor-close]")) { closeStickyEditor(); return; }
+    const attachOpen = event.target.closest("[data-sticky-attach-open]");
+    if (attachOpen) {
+      event.preventDefault();
+      toggleStickyAttachPicker(attachOpen.getAttribute("data-sticky-attach-open") || "thread");
+      return;
+    }
+    const attachPick = event.target.closest("[data-sticky-attach-pick]");
+    if (attachPick) {
+      event.preventDefault();
+      const key = attachPick.getAttribute("data-sticky-attach-pick") || "";
+      const item = (state.stickyAttachItems || []).find((candidate) => stickyLinkKey(candidate) === key);
+      if (item) {
+        addStickyEditorLink(item);
+        closeStickyAttachPicker();
+      }
+      return;
+    }
+    const removeAttach = event.target.closest("[data-sticky-editor-remove-link]");
+    if (removeAttach) {
+      event.preventDefault();
+      removeStickyEditorLink(removeAttach.getAttribute("data-sticky-editor-remove-link") || "");
+      return;
+    }
+    const color = event.target.closest("[data-sticky-editor-color]");
+    if (color) {
+      state.stickyEditorColor = color.getAttribute("data-sticky-editor-color") || "yellow";
+      $$("[data-sticky-editor-color]").forEach((button) => button.classList.toggle("is-active", button === color));
+      return;
+    }
+    if (event.target.closest("[data-sticky-editor-clear]")) {
+      const textarea = document.getElementById("stickyNoteEditorText");
+      if (textarea) textarea.value = "";
+      return;
+    }
+    if (event.target.closest("[data-sticky-editor-archive]")) {
+      const ownerId = state.stickyEditorOwner;
+      const noteId = state.stickyEditorNoteId;
+      if (!noteId) return;
+      try {
+        await archiveStickyNote(ownerId, noteId);
+        closeStickyEditor();
+      } catch (error) { showError(error); }
+      return;
+    }
+    if (event.target.closest("[data-sticky-editor-save]")) {
+      const ownerId = state.stickyEditorOwner;
+      const noteId = state.stickyEditorNoteId;
+      const elements = noteEditorElements();
+      const button = event.target.closest("[data-sticky-editor-save]");
+      if (!elements.textarea || !button) return;
+      const pin = Boolean(elements.pin?.checked);
+      const board = stickyNoteBoard(ownerId);
+      const previousPinned = board?.pinned?.id || "";
+      const links = stickyEditorLinkRefs();
+      button.disabled = true;
+      try {
+        if (noteId) {
+          await saveStickyNotePatch({ content: elements.textarea.value, color: state.stickyEditorColor || "yellow", inboxPinned: pin, links }, ownerId, noteId);
+        } else {
+          await createStickyNoteRecord(ownerId, { content: elements.textarea.value, color: state.stickyEditorColor || "yellow", inboxPinned: pin, links });
+        }
+        closeStickyEditor();
+        if (pin && previousPinned) {
+          noteUndoToast("Note saved and pinned to Inbox.", () => saveStickyNotePatch({ inboxPinned: true }, ownerId, previousPinned));
+        } else {
+          showToast("Note saved");
+        }
+      } catch (error) { showError(error); }
+      finally { button.disabled = false; }
+    }
+  });
+  document.addEventListener("input", (event) => {
+    if (event.target.id !== "stickyAttachSearch") return;
+    const overlay = document.getElementById("stickyNoteEditorOverlay");
+    if (!overlay || overlay.hidden) return;
+    const value = event.target.value;
+    clearTimeout(state.stickyAttachTimer);
+    state.stickyAttachTimer = setTimeout(() => {
+      if (state.stickyAttachKind) loadStickyAttachCandidates(state.stickyAttachKind, value);
+    }, 220);
+  });
 }
 
 function bindStickyNoteEvents(root = document) {
   if (!root || root.__a8mStickyBound) return;
   root.__a8mStickyBound = true;
+  ensureNotesDeskEvents();
   root.addEventListener("click", (event) => {
     const create = event.target.closest("[data-sticky-create]");
-    if (create) { event.preventDefault(); openStickyNoteEditor(create.getAttribute("data-sticky-create") || ""); return; }
+    if (create) { event.preventDefault(); openStickyNoteEditor(create.getAttribute("data-sticky-create") || "", ""); return; }
+    const openDesk = event.target.closest("[data-sticky-open-desk]");
+    if (openDesk) { event.preventDefault(); openNotesDesk(openDesk.getAttribute("data-sticky-open-desk") || ""); return; }
     const edit = event.target.closest("[data-sticky-edit]");
-    if (edit) { event.preventDefault(); openStickyNoteEditor(edit.getAttribute("data-sticky-edit") || ""); return; }
+    if (edit) { event.preventDefault(); const found = stickyFromElement(edit); if (found) openStickyNoteEditor(found.ownerId, found.noteId); return; }
+    const pin = event.target.closest("[data-sticky-pin]");
+    if (pin) { event.preventDefault(); const found = stickyFromElement(pin); if (found) pinStickyNote(found.ownerId, found.noteId).catch(showError); return; }
+    const unpin = event.target.closest("[data-sticky-unpin]");
+    if (unpin) { event.preventDefault(); const found = stickyFromElement(unpin); if (found) unpinStickyNote(found.ownerId, found.noteId).catch(showError); return; }
+    const archive = event.target.closest("[data-sticky-archive]");
+    if (archive) { event.preventDefault(); const found = stickyFromElement(archive); if (found) archiveStickyNote(found.ownerId, found.noteId).catch(showError); return; }
     const collapse = event.target.closest("[data-sticky-collapse]");
     if (collapse) {
       event.preventDefault();
       const found = stickyFromElement(collapse);
-      if (!found?.note) return;
-      saveStickyNotePatch({ collapsed: !found.note.collapsed }, found.ownerId).catch(showError);
+      if (!found) return;
+      saveStickyNotePatch({ collapsed: !found.note.collapsed }, found.ownerId, found.noteId).catch(showError);
       return;
     }
     const dismissToggle = event.target.closest("[data-sticky-dismiss-toggle]");
@@ -7239,27 +8214,16 @@ function bindStickyNoteEvents(root = document) {
       if (menu) menu.hidden = !menu.hidden;
       return;
     }
-    const hide = event.target.closest("[data-sticky-hide]");
-    if (hide) {
-      event.preventDefault();
-      const found = stickyFromElement(hide);
-      if (!found) return;
-      if (hide.getAttribute("data-sticky-hide") === "permanent") {
-        saveStickyNotePatch({ enabled: false }, found.ownerId).catch(showError);
-        showToast("Sticky notes turned off. Re-enable them in Settings.");
-      } else {
-        setStickySessionHidden(found.ownerId, true);
-        refreshStickyHosts();
-      }
-      return;
-    }
-    const removeLink = event.target.closest("[data-sticky-remove-link]");
+    const removeLink = event.target.closest("[data-sticky-remove-link-key]");
     if (removeLink) {
       event.preventDefault();
       const found = stickyFromElement(removeLink);
-      if (!found?.note) return;
-      const ids = (found.note.links || []).map((link) => link.threadId).filter((id) => id && id !== removeLink.getAttribute("data-sticky-remove-link"));
-      saveStickyNotePatch({ links: ids }, found.ownerId).catch(showError);
+      if (!found) return;
+      const key = removeLink.getAttribute("data-sticky-remove-link-key") || "";
+      const refs = (found.note.links || []).map(normalizeStickyLink).filter(Boolean)
+        .filter((link) => stickyLinkKey(link) !== key)
+        .map((link) => ({ type: link.type, id: link.id }));
+      saveStickyNotePatch({ links: refs }, found.ownerId, found.noteId).catch(showError);
       return;
     }
     const openThread = event.target.closest("[data-sticky-open-thread]");
@@ -7270,6 +8234,18 @@ function bindStickyNoteEvents(root = document) {
       ensureThreadLoaded(threadId).then((loaded) => { if (loaded) selectThread(threadId); });
       return;
     }
+    const openEvent = event.target.closest("[data-sticky-open-event]");
+    if (openEvent) {
+      event.preventDefault();
+      openLinkedCalendarEvent(openEvent.getAttribute("data-sticky-open-event") || "").catch(showError);
+      return;
+    }
+    const openFile = event.target.closest("[data-sticky-open-file]");
+    if (openFile) {
+      event.preventDefault();
+      openLinkedFile(openFile.getAttribute("data-sticky-open-file") || "").catch(showError);
+      return;
+    }
     if (!event.target.closest("[data-sticky-note]")) {
       $$("[data-sticky-dismiss-menu]").forEach((menu) => { menu.hidden = true; });
     }
@@ -7278,20 +8254,20 @@ function bindStickyNoteEvents(root = document) {
     const check = event.target.closest("[data-sticky-check]");
     if (!check) return;
     const found = stickyFromElement(check);
-    if (!found?.note) return;
+    if (!found) return;
     const index = Number(check.getAttribute("data-sticky-check"));
     const lines = String(found.note.content || "").split("\n");
     if (!Number.isInteger(index) || index < 0 || index >= lines.length) return;
     lines[index] = lines[index].replace(/^(\s*[-*]\s+\[)([ xX])(\])/, (_match, pre, _state, post) => `${pre}${check.checked ? "x" : " "}${post}`);
-    saveStickyNotePatch({ content: lines.join("\n") }, found.ownerId).catch(showError);
+    saveStickyNotePatch({ content: lines.join("\n") }, found.ownerId, found.noteId).catch(showError);
   });
   root.addEventListener("dblclick", (event) => {
     if (event.target.closest("[data-sticky-check], a, button")) return;
     const found = stickyFromElement(event.target);
-    if (found) openStickyNoteEditor(found.ownerId);
+    if (found) openStickyNoteEditor(found.ownerId, found.noteId);
   });
   root.addEventListener("dragover", (event) => {
-    const target = event.target.closest("[data-sticky-drop]");
+    const target = event.target.closest("[data-sticky-drop-id]");
     if (!target) return;
     const types = Array.from(event.dataTransfer?.types || []);
     if (!types.includes("application/x-a8m-threads")) return;
@@ -7300,11 +8276,11 @@ function bindStickyNoteEvents(root = document) {
     target.classList.add("is-drop-target");
   });
   root.addEventListener("dragleave", (event) => {
-    const target = event.target.closest("[data-sticky-drop]");
+    const target = event.target.closest("[data-sticky-drop-id]");
     if (target && (!event.relatedTarget || !target.contains(event.relatedTarget))) target.classList.remove("is-drop-target");
   });
   root.addEventListener("drop", (event) => {
-    const target = event.target.closest("[data-sticky-drop]");
+    const target = event.target.closest("[data-sticky-drop-id]");
     if (!target) return;
     const types = Array.from(event.dataTransfer?.types || []);
     if (!types.includes("application/x-a8m-threads")) return;
@@ -7315,7 +8291,7 @@ function bindStickyNoteEvents(root = document) {
       const encoded = event.dataTransfer.getData("application/x-a8m-threads");
       if (encoded) ids = JSON.parse(encoded);
     } catch {}
-    addThreadsToStickyNote(ids, target.getAttribute("data-sticky-owner") || "").catch(showError);
+    addThreadsToStickyNote(ids, target.getAttribute("data-sticky-drop-owner") || "", target.getAttribute("data-sticky-drop-id") || "").catch(showError);
   });
   root.addEventListener("pointerdown", (event) => {
     const handle = event.target.closest("[data-sticky-drag-handle]");
@@ -7326,6 +8302,7 @@ function bindStickyNoteEvents(root = document) {
     if (!layer) return;
     event.preventDefault();
     const ownerId = noteNode.getAttribute("data-sticky-owner") || "";
+    const noteId = noteNode.getAttribute("data-sticky-id") || "";
     const layerRect = layer.getBoundingClientRect();
     const noteRect = noteNode.getBoundingClientRect();
     const offsetX = event.clientX - noteRect.left;
@@ -7342,28 +8319,93 @@ function bindStickyNoteEvents(root = document) {
       const left = Math.max(0, Math.min(layerRect.width - noteRect.width, upEvent.clientX - layerRect.left - offsetX));
       const top = Math.max(0, Math.min(layerRect.height - noteRect.height, upEvent.clientY - layerRect.top - offsetY));
       const position = { x: layerRect.width > 0 ? left / layerRect.width : 0, y: layerRect.height > 0 ? top / layerRect.height : 0 };
-      setStickySessionPosition(ownerId, position);
-      try {
-        await saveStickyNotePatch({ position }, ownerId);
-        setStickySessionPosition(ownerId, null);
-      } catch (error) { showError(error); }
+      try { await saveStickyNotePatch({ position }, ownerId, noteId); }
+      catch (error) { showError(error); }
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   });
 }
 
-async function addThreadsToStickyNote(threadIds, ownerId) {
+function stickyFromElement(element) {
+  const node = element.closest("[data-sticky-note]");
+  if (!node) return null;
+  const ownerId = node.getAttribute("data-sticky-owner") || "";
+  const noteId = node.getAttribute("data-sticky-id") || "";
+  const note = stickyNoteById(ownerId, noteId);
+  return note ? { node, ownerId, noteId, note } : null;
+}
+
+async function addThreadsToStickyNote(threadIds, ownerId, noteId = "") {
   if (!tenantFeatureEnabled("stickyNotes")) return;
   const ids = Array.from(new Set((threadIds || []).filter(Boolean))).slice(0, 12);
   if (!ids.length) return;
   await ensureStickyNote(ownerId);
-  const note = currentStickyNote(ownerId);
+  let note = noteId ? stickyNoteById(ownerId, noteId) : currentStickyNote(ownerId);
+  if (!note) {
+    note = await createStickyNoteRecord(ownerId, { content: "", color: "yellow", inboxPinned: false });
+  }
   if (!note) return;
-  const existing = (note.links || []).map((link) => link.threadId).filter(Boolean);
-  const merged = Array.from(new Set([...existing, ...ids])).slice(0, 12);
-  await saveStickyNotePatch({ links: merged }, ownerId);
-  showToast(`Pinned ${Math.min(ids.length, 12)} conversation${ids.length === 1 ? "" : "s"} to the sticky note`);
+  const existing = (note.links || []).map(normalizeStickyLink).filter(Boolean)
+    .map((link) => ({ type: link.type, id: link.id }));
+  const seen = new Set(existing.map((link) => `${link.type}:${link.id}`));
+  const merged = [...existing];
+  for (const id of ids) {
+    if (seen.has(`thread:${id}`)) continue;
+    seen.add(`thread:${id}`);
+    merged.push({ type: "thread", id });
+    if (merged.length >= 12) break;
+  }
+  await saveStickyNotePatch({ links: merged }, ownerId, note.id);
+  showToast(`Attached ${Math.min(ids.length, 12)} conversation${ids.length === 1 ? "" : "s"} to “${note.title || "your note"}”`);
+}
+
+async function openLinkedCalendarEvent(eventId) {
+  if (!eventId) return;
+  closeNotesDesk();
+  closeStickyEditor();
+  setTask("calendar");
+  let event = (state.calendarEvents || []).find((item) => item.id === eventId);
+  if (!event) {
+    try {
+      const data = await api("/api/calendar/events");
+      state.calendarEvents = data.events || data.calendarEvents || [];
+      renderCalendar();
+      event = state.calendarEvents.find((item) => item.id === eventId);
+    } catch (error) {
+      showError(error);
+      return;
+    }
+  }
+  if (!event) {
+    showToast("That calendar event is no longer available");
+    return;
+  }
+  openEventDialog(event.id, { date: event.date });
+}
+
+async function openLinkedFile(fileId) {
+  if (!fileId) return;
+  closeNotesDesk();
+  closeStickyEditor();
+  setTask("files");
+  let file = (state.files || []).find((item) => item.id === fileId);
+  if (!file) {
+    try {
+      const data = await api("/api/files");
+      state.files = data.files || state.files || [];
+      renderFiles();
+      file = state.files.find((item) => item.id === fileId);
+    } catch (error) {
+      showError(error);
+      return;
+    }
+  }
+  if (!file) {
+    showToast("That file is no longer available in this Cabinet");
+    return;
+  }
+  previewFileRecord(file);
 }
 
 function offerStickySnooze(threads) {
@@ -7371,8 +8413,8 @@ function offerStickySnooze(threads) {
   const first = threads[0];
   const subject = first.subject || "this conversation";
   appConfirm({
-    title: "Add to sticky note?",
-    message: `Pin “${subject}” so it stays visible while you wait for a reply.`,
+    title: "Add to a note?",
+    message: `Attach “${subject}” to a note so it stays close while you wait for a reply.`,
     confirmLabel: "Add to note",
     cancelLabel: "Not now",
     tone: "default",
@@ -7380,104 +8422,24 @@ function offerStickySnooze(threads) {
   }).then((ok) => { if (ok) addThreadsToStickyNote(threads.map((thread) => thread.id), stickyNoteOwnerId()).catch(showError); });
 }
 
-function ensureStickyEditorOverlay() {
-  if (document.getElementById("stickyNoteEditorOverlay")) return;
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay sticky-editor-overlay" id="stickyNoteEditorOverlay" hidden>
-    <div class="dialog sticky-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="stickyEditorTitle">
-      <div class="dialog-head"><div class="dialog-title-wrap"><span class="dialog-icon sticky-editor-mark" aria-hidden="true">📌</span><div><h2 id="stickyEditorTitle">Sticky note</h2><p>One short note for your desk. **bold**, *italic*, [links](https://example.com) and checkbox lists.</p></div></div><button class="icon-btn" type="button" data-sticky-editor-close aria-label="Close sticky note"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
-      <div class="dialog-body"><textarea id="stickyNoteEditorText" class="sticky-editor-text" rows="7" maxlength="2000" placeholder="Dentist Friday 3pm&#10;- [ ] Send the Q4 deck&#10;Alex is out — route refunds to Sam"></textarea><div class="sticky-editor-colors" role="group" aria-label="Sticky note color"><button type="button" class="sticky-color is-yellow is-active" data-sticky-editor-color="yellow" aria-label="Yellow"></button><button type="button" class="sticky-color is-blue" data-sticky-editor-color="blue" aria-label="Blue"></button><button type="button" class="sticky-color is-pink" data-sticky-editor-color="pink" aria-label="Pink"></button><button type="button" class="sticky-color is-green" data-sticky-editor-color="green" aria-label="Green"></button></div><div class="sticky-editor-links" id="stickyEditorLinks"></div><p class="sticky-editor-hint">Keep it short. Drop a conversation on the note to track it with a click-through link.</p></div>
-      <div class="dialog-actions"><button class="btn-secondary" type="button" data-sticky-editor-clear><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Clear</button><span class="sticky-editor-spacer"></span><button class="btn-secondary" type="button" data-sticky-editor-close>Cancel</button><button class="btn-primary" type="button" data-sticky-editor-save><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save note</button></div>
-    </div>
-  </div>`);
-}
-
-function openStickyNoteEditor(ownerId = "") {
-  if (!state.user || !tenantFeatureEnabled("stickyNotes")) return;
-  state.stickyEditorOwner = ownerId || "";
-  ensureStickyEditorOverlay();
-  ensureStickyNote(ownerId).then(() => {
-    const note = currentStickyNote(ownerId);
-    const overlay = document.getElementById("stickyNoteEditorOverlay");
-    const textarea = document.getElementById("stickyNoteEditorText");
-    if (!overlay || !textarea) return;
-    textarea.value = note?.content || "";
-    state.stickyEditorColor = note?.color || "yellow";
-    $$("[data-sticky-editor-color]").forEach((button) => button.classList.toggle("is-active", button.getAttribute("data-sticky-editor-color") === state.stickyEditorColor));
-    const links = document.getElementById("stickyEditorLinks");
-    if (links) links.innerHTML = (note?.links || []).length ? `<span class="sticky-editor-links-label">Pinned conversations</span>${(note.links || []).map((link) => `<button type="button" class="sticky-editor-link" data-sticky-open-thread="${esc(link.threadId || "")}">${esc(link.subject || "Conversation")}</button>`).join("")}` : "";
-    overlay.hidden = false;
-    setTimeout(() => textarea.focus(), 50);
-  });
-}
-
-function closeStickyEditor() {
-  const overlay = document.getElementById("stickyNoteEditorOverlay");
-  if (overlay) overlay.hidden = true;
-  state.stickyEditorOwner = "";
-}
-
-function bindStickyEditorEvents() {
-  if (document.__a8mStickyEditorBound) return;
-  document.__a8mStickyEditorBound = true;
-  document.addEventListener("click", async (event) => {
-    const overlay = document.getElementById("stickyNoteEditorOverlay");
-    if (!overlay || overlay.hidden) return;
-    if (event.target.closest("[data-sticky-editor-close]")) { closeStickyEditor(); return; }
-    const color = event.target.closest("[data-sticky-editor-color]");
-    if (color) {
-      state.stickyEditorColor = color.getAttribute("data-sticky-editor-color") || "yellow";
-      $$("[data-sticky-editor-color]").forEach((button) => button.classList.toggle("is-active", button === color));
-      return;
-    }
-    if (event.target.closest("[data-sticky-editor-clear]")) {
-      const textarea = document.getElementById("stickyNoteEditorText");
-      if (textarea) textarea.value = "";
-      return;
-    }
-    if (event.target.closest("[data-sticky-editor-save]")) {
-      const ownerId = state.stickyEditorOwner;
-      const textarea = document.getElementById("stickyNoteEditorText");
-      const button = event.target.closest("[data-sticky-editor-save]");
-      if (!textarea || !button) return;
-      button.disabled = true;
-      try {
-        await saveStickyNotePatch({ content: textarea.value, color: state.stickyEditorColor || "yellow" }, ownerId);
-        closeStickyEditor();
-        showToast("Sticky note saved");
-      } catch (error) { showError(error); }
-      finally { button.disabled = false; }
-    }
-  });
+function syncNotesDeskSettings() {
+  const count = document.getElementById("notesDeskSettingsCount");
+  const board = stickyNoteBoard("");
+  if (count) count.textContent = board ? `${board.activeCount || 0} active${board.archivedCount ? ` · ${board.archivedCount} archived` : ""}` : "Loading…";
 }
 
 function ensureStickySettingsUi() {
   const existing = document.getElementById("stickyNoteSettingsBlock");
   if (!tenantFeatureEnabled("stickyNotes")) { if (existing) existing.hidden = true; return; }
-  if (existing) existing.hidden = false;
+  if (existing) { existing.hidden = false; syncNotesDeskSettings(); return; }
   const panel = document.querySelector('[data-settings-panel="mail"]');
-  if (!panel || document.getElementById("stickyNoteSettingsBlock")) return;
+  if (!panel) return;
   panel.insertAdjacentHTML("beforeend", `<div class="settings-block" id="stickyNoteSettingsBlock">
-    <div class="settings-block-head"><h3>Sticky note</h3><p>One short desk note, pinned above Inbox and on Mail Home. Shared with delegates when this mailbox is shared.</p></div>
-    <div class="setting-list"><div class="setting-row"><div class="setting-copy"><b>Show sticky note</b><small>Turn the note back on after dismissing it permanently.</small></div><div class="setting-control"><button class="switch" id="stickyNoteEnabledToggle" type="button" role="switch" aria-checked="true" aria-label="Show sticky note"><span></span></button></div></div></div>
+    <div class="settings-block-head"><h3>Notes desk</h3><p>Keep as many notes as you need. One note can sit above Inbox; the rest stay in your desk and on Mail Home.</p></div>
+    <div class="notes-settings-row"><div><b id="notesDeskSettingsCount">Loading…</b><small>Active and archived notes in this mailbox</small></div><button class="btn-secondary" id="notesDeskSettingsBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>Open Notes desk</button></div>
   </div>`);
-  const toggle = document.getElementById("stickyNoteEnabledToggle");
-  if (!toggle) return;
-  const sync = () => {
-    const note = currentStickyNote("");
-    toggle.setAttribute("aria-checked", note?.enabled === false ? "false" : "true");
-    toggle.classList.toggle("is-on", note?.enabled !== false);
-  };
-  ensureStickyNote("").then(sync);
-  toggle.addEventListener("click", async () => {
-    const note = currentStickyNote("");
-    const next = note?.enabled === false;
-    try {
-      await saveStickyNotePatch({ enabled: next }, "");
-      sync();
-      setStickySessionHidden("", false);
-      showToast(next ? "Sticky note is on" : "Sticky note hidden");
-    } catch (error) { showError(error); }
-  });
+  document.getElementById("notesDeskSettingsBtn")?.addEventListener("click", () => openNotesDesk(""));
+  ensureStickyNote("").then(syncNotesDeskSettings);
 }
 
 function ensureCalendarStickyHost() {
@@ -7875,16 +8837,6 @@ function syncCommandBar() {
   });
   const canReplyAll = Boolean(thread && replyAllAvailable(thread));
   $$('.commandbar [data-action="reply-all"]').forEach((button) => { button.hidden = !canReplyAll; });
-  const commandReact = document.getElementById("cmdReact");
-  if (commandReact) {
-    const reactionsOn = tenantFeatureEnabled("reactions");
-    const canReact = Boolean(thread) && threadReactionAllowed(thread);
-    commandReact.hidden = !reactionsOn;
-    commandReact.classList.toggle("is-disabled", !canReact);
-    if (canReact) commandReact.removeAttribute("aria-disabled");
-    else commandReact.setAttribute("aria-disabled", "true");
-    commandReact.setAttribute("title", canReact ? "React to this message" : "Reactions are unavailable for this message");
-  }
 }
 
 function meetingMarkup(message) {
@@ -10024,10 +10976,60 @@ function mergeSearchMessages(results) {
   rebuildIndex();
 }
 
+function searchNoteStripMarkup() {
+  if (!state.query || state.noteSearchQuery !== state.query) return "";
+  const notes = state.noteSearchResults || [];
+  if (!notes.length && !state.noteSearchLoading) return "";
+  const ownerId = notes[0]?.owner?.id || stickyNoteOwnerId();
+  const rows = notes.map((note) => {
+    const owner = note.owner || {};
+    const team = note.team ? "Team · " : "";
+    const ownerLabel = owner.name || owner.email || "";
+    return `<button class="search-note-row" type="button" data-search-note="${esc(note.id)}" data-search-note-owner="${esc(owner.id || "")}">
+      <span class="search-note-mark" aria-hidden="true">${note.archived ? "🗄" : "📌"}</span>
+      <span class="search-note-copy"><b>${esc(note.title || "Untitled note")}</b><small>${esc(notesDeskPreview(note))}</small></span>
+      <span class="search-note-meta">${esc(team)}${esc(ownerLabel)}${note.archived ? " · Archive" : ""}</span>
+    </button>`;
+  }).join("");
+  return `<section class="search-notes-strip" aria-label="Matching notes">
+    <div class="search-notes-head"><span class="search-notes-label"><span aria-hidden="true">📌</span>Notes</span><strong>${state.noteSearchLoading && !notes.length ? "Searching notes…" : `${notes.length} matching note${notes.length === 1 ? "" : "s"}`}</strong><button class="link-btn" type="button" data-open-notes-search="${esc(ownerId)}">Open Notes desk</button></div>
+    ${rows}
+  </section>`;
+}
+
+async function runGlobalNoteSearch(query) {
+  const value = String(query || "").trim();
+  const sequence = ++state.noteSearchSeq;
+  state.noteSearchQuery = value;
+  if (!value) {
+    state.noteSearchResults = [];
+    state.noteSearchLoading = false;
+    return;
+  }
+  state.noteSearchLoading = true;
+  try {
+    const data = await api(`/api/notes/search?q=${encodeURIComponent(value)}&scope=all&limit=6`);
+    if (sequence !== state.noteSearchSeq || state.query !== value) return;
+    state.noteSearchResults = Array.isArray(data.notes) ? data.notes.slice(0, 6) : [];
+  } catch {
+    if (sequence !== state.noteSearchSeq) return;
+    state.noteSearchResults = [];
+  } finally {
+    if (sequence === state.noteSearchSeq) {
+      state.noteSearchLoading = false;
+      if (state.task === "mail" && state.query === value) renderList({ preserveScroll: true });
+    }
+  }
+}
+
 async function runServerSearch(query) {
   const sequence = ++state.searchSeq;
   if (!query || state.task !== "mail") {
     state.searchLoading = false;
+    state.noteSearchResults = [];
+    state.noteSearchQuery = "";
+    state.noteSearchLoading = false;
+    state.noteSearchSeq += 1;
     if (state.task === "mail") {
       state.searchResults = [];
       renderList();
@@ -10036,6 +11038,7 @@ async function runServerSearch(query) {
     return;
   }
   state.searchLoading = true;
+  runGlobalNoteSearch(query);
   try {
     const data = await api("/api/search?q=" + encodeURIComponent(query));
     if (sequence !== state.searchSeq || state.query !== query) return;
@@ -10071,6 +11074,10 @@ function setQuery(value) {
   state.selectedThreadId = null;
   state.expandedThreadId = null;
   state.searchResults = [];
+  state.noteSearchResults = [];
+  state.noteSearchQuery = "";
+  state.noteSearchLoading = false;
+  state.noteSearchSeq += 1;
   state.searchParsed = state.query ? parseQuery(state.query) : null;
   state.searchErrors = [];
   renderList();
@@ -10088,6 +11095,10 @@ function clearSearch() {
   clearTimeout(state.searchTimer);
   state.searchSeq += 1;
   state.searchResults = [];
+  state.noteSearchResults = [];
+  state.noteSearchQuery = "";
+  state.noteSearchLoading = false;
+  state.noteSearchSeq += 1;
   state.searchParsed = null;
   state.searchErrors = [];
   state.searchLoading = false;
@@ -10805,8 +11816,7 @@ function composeEditorToolbar(session) {
     ${button("undo", "↶", "Undo")}${button("redo", "↷", "Redo")}
     <span class="editor-sep"></span>
     <select class="editor-font-select" data-editor-font aria-label="Font family" title="Font family">
-      <option value="">Font</option>
-      <option value="Arial, Helvetica, sans-serif">Arial</option>
+      <option value="Arial, Helvetica, sans-serif" selected>Arial</option>
       <option value="'Segoe UI', Tahoma, sans-serif">Segoe UI</option>
       <option value="Calibri, Candara, sans-serif">Calibri</option>
       <option value="'Helvetica Neue', Helvetica, Arial, sans-serif">Helvetica</option>
@@ -10819,9 +11829,8 @@ function composeEditorToolbar(session) {
       <option value="'Courier New', Courier, monospace">Courier New</option>
     </select>
     <select class="editor-size-select" data-editor-size aria-label="Font size" title="Font size">
-      <option value="">Size</option>
+      <option value="12" selected>12</option>
       <option value="11">11</option>
-      <option value="12">12</option>
       <option value="13">13</option>
       <option value="15">15</option>
       <option value="17">17</option>
@@ -10874,7 +11883,7 @@ function composeTemplate(session) {
   const aiButton = composeAiToolbarButton();
   const lightClass = session.editorLight ? " is-editor-light" : "";
   const bodyField = htmlMode
-    ? `<div class="compose-editor-wrap${lightClass}">${composeEditorToolbar(session)}<div class="compose-editor${session.quoteCollapsed ? " is-quote-collapsed" : ""}" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…">${editorHTML}</div>${composeAiThinkingMarkup(session)}</div>`
+    ? `<div class="compose-editor-wrap${lightClass}">${composeEditorToolbar(session)}<div class="compose-editor${session.quoteCollapsed ? " is-quote-collapsed" : ""}" data-compose-editor contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write a message…" style="font-family:Arial,Helvetica,sans-serif;font-size:12px">${editorHTML}</div>${composeAiThinkingMarkup(session)}</div>`
     : `<div class="compose-editor-wrap${lightClass}"><div class="compose-editor-toolbar"><span class="settings-note" style="margin-right:auto">Plain text</span>${aiButton}${composeMentionToolbarButton()}${composeLightButton(session)}${modeSwitch}</div><textarea class="compose-text" data-compose-field="body" placeholder="Write a message…">${esc(session.body)}</textarea>${composeAiThinkingMarkup(session)}</div>`;
   return `<section class="compose${htmlMode ? " has-html-editor" : ""}" data-compose-id="${esc(session.id)}" role="dialog" aria-label="${esc(title)}">
     <div class="compose-head" data-compose-head>
@@ -15237,6 +16246,7 @@ function renderFileDetail() {
       <button class="btn-primary" data-file-preview="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg>Preview</button>
       <button class="btn-secondary" data-file-download="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</button>
       <button class="btn-secondary" data-file-share="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Share</button>
+      <button class="btn-secondary" data-file-lock="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>${file.locked ? "Unlock link" : "Lock link"}</button>
       <button class="btn-secondary" data-file-send="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Send</button>
       <button class="btn-secondary" data-file-menu="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>More</button>
     </div>
@@ -16067,6 +17077,20 @@ function previewFileRecord(file) {
   });
 }
 
+async function toggleFileLock(fileId) {
+  const file = state.files.find((item) => item.id === fileId);
+  if (!file) return;
+  try {
+    const data = await api(`/api/files/${encodeURIComponent(fileId)}`, { method: "PATCH", body: { locked: !file.locked } });
+    const index = state.files.findIndex((item) => item.id === fileId);
+    if (index >= 0) state.files[index] = data.file;
+    renderFiles();
+    showToast(data.file.locked ? "File link locked — visitors must request access" : "File link unlocked");
+  } catch (error) {
+    showError(error);
+  }
+}
+
 async function toggleFileStar(fileId) {
   const file = state.files.find((item) => item.id === fileId);
   if (!file) return;
@@ -16105,41 +17129,417 @@ function fileToBase64(file) {
   });
 }
 
-async function uploadFiles(files, folderId = state.fileFolderId) {
-  if (uploadBusy || !files || !files.length) return;
-  uploadBusy = true;
-  const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
-  const targetProvider = state.fileProvider !== "all" && storageConnected(state.fileProvider) ? state.fileProvider : "a8m";
-  const targetName = targetProvider === "a8m" ? "Alt8Mail Drive" : (storageProvider(targetProvider)?.name || "connected storage");
-  const targetFolder = fileFolderById(folderId);
-  let uploaded = 0;
-  for (const file of Array.from(files)) {
-    if (file.size > max) {
-      showToast(`${file.name} is larger than ${formatBytes(max)}`);
-      continue;
+function uploadTargetProvider() {
+  return state.fileProvider !== "all" && storageConnected(state.fileProvider) ? state.fileProvider : "a8m";
+}
+
+function uploadTargetLabel(providerId, folderId) {
+  const provider = providerId === "a8m" ? "Alt8Mail Drive" : (storageProvider(providerId)?.name || "Connected storage");
+  const folder = fileFolderById(folderId);
+  return folder ? `${folder.name} · ${provider}` : provider;
+}
+
+function formatUploadTime(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return "<1s";
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function uploadManagerStats() {
+  const items = state.uploadQueue || [];
+  const active = items.filter((item) => item.status === "queued" || item.status === "uploading" || item.status === "preparing").length;
+  const done = items.filter((item) => item.status === "done").length;
+  const failed = items.filter((item) => item.status === "error").length;
+  const mobile = (state.uploadMobileSession?.uploads || []).filter((item) => item.status === "uploading").length;
+  return { active: active + mobile, done, failed, mobile };
+}
+
+function ensureUploadManager() {
+  if (document.getElementById("uploadManager")) return document.getElementById("uploadManager");
+  document.body.insertAdjacentHTML("beforeend", `<section class="upload-manager" id="uploadManager" hidden aria-label="Uploads">
+    <header class="upload-manager-head" data-upload-drag-handle>
+      <span class="upload-manager-mark"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg></span>
+      <div class="upload-manager-title"><strong>Uploads</strong><small id="uploadManagerSummary">Ready</small></div>
+      <button class="upload-manager-btn" type="button" data-upload-minimize aria-label="Minimize uploads" title="Minimize"><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+      <button class="upload-manager-btn" type="button" data-upload-close aria-label="Close uploads" title="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </header>
+    <nav class="upload-manager-tabs" role="tablist" aria-label="Upload source">
+      <button type="button" role="tab" data-upload-tab="computer"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Computer</button>
+      <button type="button" role="tab" data-upload-tab="url"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg>From URL</button>
+      <button type="button" role="tab" data-upload-tab="mobile"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg>From mobile</button>
+    </nav>
+    <div class="upload-manager-body" id="uploadManagerBody"></div>
+  </section>`);
+  const manager = document.getElementById("uploadManager");
+  manager.addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-upload-tab]");
+    if (tab) { state.uploadTab = tab.getAttribute("data-upload-tab"); if (state.uploadTab === "mobile") ensureMobileUploadSession().catch(showError); renderUploadManager(); return; }
+    if (event.target.closest("[data-upload-close]")) { closeUploadManager(); return; }
+    if (event.target.closest("[data-upload-minimize]")) { state.uploadManagerMinimized = !state.uploadManagerMinimized; renderUploadManager(); return; }
+    if (event.target.closest("[data-upload-choose]")) { document.getElementById("uploadManagerInput")?.click(); return; }
+    if (event.target.closest("[data-upload-copy-url]")) {
+      const url = state.uploadMobileSession?.url || "";
+      if (url) copyTextToClipboard(url).then((ok) => showToast(ok ? "Upload link copied" : url)).catch(showError);
+      return;
     }
-    try {
-      const dataBase64 = await fileToBase64(file);
-      const attachment = await api("/api/attachments", {
-        method: "POST",
-        body: { name: file.name, mime: file.type, dataBase64 }
-      });
+    const extend = event.target.closest("[data-upload-extend]");
+    if (extend) { extendMobileUploadSession(Number(extend.getAttribute("data-upload-extend")) || 1).catch(showError); return; }
+    if (event.target.closest("[data-upload-new-session]")) { createMobileUploadSession(true).catch(showError); return; }
+    if (event.target.closest("[data-upload-url-add]")) {
+      const input = document.getElementById("uploadUrlInput");
+      const value = String(input?.value || "").trim();
+      if (!value) { showToast("Enter a file URL"); return; }
+      enqueueUrlImport(value);
+      return;
+    }
+  });
+  manager.addEventListener("change", (event) => {
+    if (event.target.id !== "uploadManagerInput") return;
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (files.length) enqueueCabinetUploads(files, state.uploadTargetFolderId, state.uploadTargetProvider);
+  });
+  manager.addEventListener("input", (event) => {
+    if (event.target.id === "uploadUrlInput") state.uploadUrlValue = event.target.value;
+  });
+  manager.addEventListener("dragover", (event) => {
+    if (!event.target.closest("[data-upload-drop]")) return;
+    event.preventDefault();
+    event.target.closest("[data-upload-drop]")?.classList.add("is-drag");
+  });
+  manager.addEventListener("dragleave", (event) => {
+    if (event.target.closest("[data-upload-drop]")) event.target.closest("[data-upload-drop]")?.classList.remove("is-drag");
+  });
+  manager.addEventListener("drop", (event) => {
+    const drop = event.target.closest("[data-upload-drop]");
+    if (!drop) return;
+    event.preventDefault();
+    drop.classList.remove("is-drag");
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (files.length) enqueueCabinetUploads(files, state.uploadTargetFolderId, state.uploadTargetProvider);
+  });
+  const head = manager.querySelector("[data-upload-drag-handle]");
+  head?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest("button")) return;
+    const rect = manager.getBoundingClientRect();
+    manager.style.left = `${rect.left}px`;
+    manager.style.top = `${rect.top}px`;
+    manager.style.right = "auto";
+    manager.style.bottom = "auto";
+    state.uploadDrag = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    event.preventDefault();
+  });
+  window.addEventListener("pointermove", (event) => {
+    if (!state.uploadDrag) return;
+    const width = manager.offsetWidth;
+    const height = manager.offsetHeight;
+    manager.style.left = `${Math.max(8, Math.min(window.innerWidth - width - 8, event.clientX - state.uploadDrag.offsetX))}px`;
+    manager.style.top = `${Math.max(8, Math.min(window.innerHeight - height - 8, event.clientY - state.uploadDrag.offsetY))}px`;
+  });
+  window.addEventListener("pointerup", () => { state.uploadDrag = null; });
+  return manager;
+}
+
+function openUploadManager(tab = "computer", { files = null, folderId = undefined } = {}) {
+  ensureUploadManager();
+  state.uploadManagerOpen = true;
+  state.uploadManagerMinimized = false;
+  state.uploadTab = tab;
+  if (folderId !== undefined) state.uploadTargetFolderId = folderId || "";
+  state.uploadTargetProvider = uploadTargetProvider();
+  renderUploadManager();
+  const manager = document.getElementById("uploadManager");
+  if (manager) manager.hidden = false;
+  if (tab === "mobile") ensureMobileUploadSession().catch(showError);
+  if (files?.length) enqueueCabinetUploads(files, state.uploadTargetFolderId, state.uploadTargetProvider);
+}
+
+function closeUploadManager() {
+  const stats = uploadManagerStats();
+  if (stats.active > 0) {
+    state.uploadManagerMinimized = true;
+    renderUploadManager();
+    showToast("Uploads continue in the background");
+    return;
+  }
+  state.uploadManagerOpen = false;
+  const manager = document.getElementById("uploadManager");
+  if (manager) manager.hidden = true;
+}
+
+function uploadItemMarkup(item, { mobile = false } = {}) {
+  const progress = Math.max(0, Math.min(100, Number(item.progress) || 0));
+  const start = Number(item.startedAt) || 0;
+  const end = Number(item.endedAt) || (item.status === "uploading" || item.status === "preparing" ? Date.now() : 0);
+  const elapsed = start ? formatUploadTime((end || Date.now()) - start) : "";
+  const statusText = item.status === "done" ? `Done${elapsed ? ` · ${elapsed}` : ""}`
+    : item.status === "error" ? (item.error || "Upload failed")
+      : item.status === "preparing" ? "Preparing…"
+        : item.status === "uploading" ? `Uploading${elapsed ? ` · ${elapsed}` : ""}`
+          : "Queued";
+  return `<div class="upload-item is-${esc(item.status)}${mobile ? " is-mobile" : ""}">
+    <span class="upload-item-icon"><svg class="icon" aria-hidden="true"><use href="#${item.kind === "url" ? "i-link" : mobile ? "i-cloud" : "i-file"}"/></svg></span>
+    <div class="upload-item-main"><div class="upload-item-head"><b>${esc(item.name)}</b><small>${esc(formatBytes(Number(item.size || item.sizeBytes) || 0))}</small></div><div class="upload-bar"><span style="width:${progress}%"></span></div><div class="upload-item-status"><span>${esc(statusText)}</span><strong>${progress}%</strong></div></div>
+  </div>`;
+}
+
+function uploadQueueMarkup() {
+  const items = state.uploadQueue || [];
+  if (!items.length) return `<div class="upload-empty"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><strong>Nothing in this queue yet</strong><span>Files you add appear here with live progress.</span></div>`;
+  return `<div class="upload-queue">${items.map((item) => uploadItemMarkup(item)).join("")}</div>`;
+}
+
+function uploadMobileMarkup() {
+  const session = state.uploadMobileSession;
+  if (!session) return `<div class="upload-empty"><div class="list-loading-spinner" aria-hidden="true"></div><strong>Generating a secure upload link…</strong></div>`;
+  const active = session.active !== false && Date.parse(session.expiresAt || "") > Date.now();
+  const uploads = Array.isArray(session.uploads) ? session.uploads : [];
+  const qr = state.uploadMobileQrData && state.uploadMobileQrSession === session.id
+    ? `<img src="${esc(state.uploadMobileQrData)}" alt="QR code for mobile upload" width="180" height="180">`
+    : `<div class="upload-qr-host" id="uploadMobileQr"></div>`;
+  return `<div class="upload-mobile-card">
+    <div class="upload-qr-frame">${active ? qr : `<div class="upload-qr-expired"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><strong>Link expired</strong><span>Generate a fresh QR code.</span></div>`}</div>
+    <div class="upload-mobile-copy"><strong>${active ? "Scan with your phone" : "QR code expired"}</strong><span>${active ? "Open the camera and scan. The page stays signed in for 60 minutes." : "Start a new session to keep uploading."}</span>
+      <div class="upload-mobile-actions">${active ? `<button class="btn-secondary small" type="button" data-upload-copy-url><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg>Copy link</button>` : ""}<button class="btn-secondary small" type="button" data-upload-new-session><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>New QR</button></div>
+      ${active ? `<div class="upload-expiry"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Expires ${esc(formatRelativeTime(session.expiresAt))}</span><button type="button" data-upload-extend="1">+1 hour</button><button type="button" data-upload-extend="4">+4 hours</button></div>` : ""}
+    </div>
+  </div>
+  ${uploads.length ? `<div class="upload-mobile-list"><div class="upload-mobile-head">From your phone <span>${uploads.length}</span></div>${uploads.map((item) => uploadItemMarkup({ ...item, kind: "mobile", startedAt: Date.parse(item.startedAt || "") || 0, endedAt: item.status === "done" ? Date.parse(item.updatedAt || item.startedAt || "") || Date.now() : 0 }, { mobile: true })).join("")}</div>` : ""}`;
+}
+
+function renderUploadManager() {
+  const manager = ensureUploadManager();
+  if (!manager) return;
+  manager.hidden = !state.uploadManagerOpen;
+  if (!state.uploadManagerOpen) return;
+  manager.classList.toggle("is-minimized", state.uploadManagerMinimized);
+  const stats = uploadManagerStats();
+  const summary = document.getElementById("uploadManagerSummary");
+  if (summary) summary.textContent = stats.active ? `${stats.active} uploading${stats.done ? ` · ${stats.done} done` : ""}${stats.failed ? ` · ${stats.failed} failed` : ""}` : stats.done ? `${stats.done} file${stats.done === 1 ? "" : "s"} uploaded` : "Ready for files";
+  manager.querySelectorAll("[data-upload-tab]").forEach((button) => {
+    const active = button.getAttribute("data-upload-tab") === state.uploadTab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  const body = document.getElementById("uploadManagerBody");
+  if (!body) return;
+  if (state.uploadTab === "url") {
+    body.innerHTML = `<div class="upload-panel"><label class="upload-url-field"><span>File URL</span><input id="uploadUrlInput" type="url" value="${esc(state.uploadUrlValue || "")}" placeholder="https://example.com/report.pdf" autocomplete="off"></label><button class="btn-primary" type="button" data-upload-url-add><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg>Add to Cabinet</button><p class="upload-note">Alt8Mail fetches the file directly into Alt8Mail Drive. Private network addresses are blocked.</p>${uploadQueueMarkup()}</div>`;
+  } else if (state.uploadTab === "mobile") {
+    body.innerHTML = `<div class="upload-panel">${uploadMobileMarkup()}</div>`;
+    renderUploadMobileQr();
+  } else {
+    body.innerHTML = `<div class="upload-panel"><div class="upload-drop" data-upload-drop><span class="upload-drop-icon"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg></span><strong>Drop files here</strong><span>or <button class="link-btn" type="button" data-upload-choose>choose from this device</button></span><small>${esc(uploadTargetLabel(state.uploadTargetProvider, state.uploadTargetFolderId))}</small><input id="uploadManagerInput" type="file" multiple hidden></div>${uploadQueueMarkup()}</div>`;
+  }
+}
+
+function renderUploadMobileQr() {
+  const host = document.getElementById("uploadMobileQr");
+  const session = state.uploadMobileSession;
+  if (!host || !session?.url) return;
+  if (state.uploadMobileQrData && state.uploadMobileQrSession === session.id) return;
+  host.innerHTML = "";
+  if (!window.QRCode) {
+    host.innerHTML = `<a class="upload-qr-fallback" href="${esc(session.url)}" target="_blank" rel="noopener">Open upload page</a>`;
+    return;
+  }
+  try {
+    new window.QRCode(host, { text: session.url, width: 180, height: 180, correctLevel: window.QRCode.CorrectLevel.M, colorDark: "#0b1a2a", colorLight: "#ffffff" });
+    const canvas = host.querySelector("canvas");
+    if (canvas) {
+      state.uploadMobileQrData = canvas.toDataURL("image/png");
+      state.uploadMobileQrSession = session.id;
+    }
+  } catch {
+    host.innerHTML = `<a class="upload-qr-fallback" href="${esc(session.url)}" target="_blank" rel="noopener">Open upload page</a>`;
+  }
+}
+
+function enqueueCabinetUploads(files, folderId = state.fileFolderId, providerId = uploadTargetProvider()) {
+  if (!files?.length) return;
+  if (!state.uploadManagerOpen) openUploadManager("computer", { folderId });
+  const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
+  let queued = 0;
+  for (const file of Array.from(files)) {
+    if (file.size > max) { showToast(`${file.name} is larger than ${formatBytes(max)}`); continue; }
+    state.uploadQueue.push({
+      id: `up_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      kind: "file", name: file.name, size: file.size, progress: 0, status: "queued",
+      startedAt: 0, endedAt: 0, file, folderId: folderId || "", providerId: providerId || "a8m"
+    });
+    queued += 1;
+  }
+  if (queued) {
+    state.uploadTab = "computer";
+    renderUploadManager();
+    processUploadQueue();
+  }
+}
+
+function enqueueUrlImport(url) {
+  if (!state.uploadManagerOpen) openUploadManager("url", { folderId: state.uploadTargetFolderId });
+  state.uploadQueue.push({
+    id: `up_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    kind: "url", name: url.replace(/^https?:\/\//, "").slice(0, 80), size: 0, progress: 0,
+    status: "queued", startedAt: 0, endedAt: 0, url,
+    folderId: state.uploadTargetFolderId || "", providerId: "a8m"
+  });
+  state.uploadUrlValue = "";
+  state.uploadTab = "url";
+  renderUploadManager();
+  processUploadQueue();
+}
+
+function postJSONWithProgress(path, body, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.setRequestHeader("Content-Type", "application/json");
+    if (state.csrf) xhr.setRequestHeader("X-CSRF-Token", state.csrf);
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(event.loaded / event.total); };
+    xhr.onerror = () => reject(new Error("Network error while uploading"));
+    xhr.onload = () => {
+      let payload = null;
+      try { payload = JSON.parse(xhr.responseText || "{}"); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) { resolve(payload); return; }
+      if (xhr.status === 401) handleSessionExpired();
+      const detail = payload?.error || {};
+      reject(new Error(detail.message || `Upload failed (${xhr.status})`));
+    };
+    xhr.send(JSON.stringify(body));
+  });
+}
+
+async function performUploadItem(item) {
+  item.status = "preparing";
+  item.startedAt = Date.now();
+  renderUploadManager();
+  try {
+    if (item.kind === "url") {
+      let progress = 8;
+      const timer = setInterval(() => { progress = Math.min(88, progress + 7); item.progress = progress; renderUploadManager(); }, 320);
+      try {
+        const data = await api("/api/files/import-url", { method: "POST", body: { url: item.url, folderId: item.folderId || "" } });
+        item.fileId = data.file?.id || "";
+        item.name = data.file?.name || item.name;
+        item.size = Number(data.file?.sizeBytes) || item.size;
+      } finally { clearInterval(timer); }
+      item.progress = 100;
+    } else {
+      const dataBase64 = await fileToBase64(item.file);
+      item.status = "uploading";
+      const attachment = await postJSONWithProgress("/api/attachments", {
+        name: item.file.name, mime: item.file.type || "application/octet-stream", dataBase64
+      }, (fraction) => { item.progress = Math.max(2, Math.min(72, Math.round(fraction * 72))); renderUploadManager(); });
+      item.progress = 78;
+      renderUploadManager();
       const created = await api("/api/files", {
         method: "POST",
-        body: { providerId: targetProvider, attachmentId: attachment.attachment.id, folderId: targetProvider === "a8m" ? (folderId || "") : "" }
+        body: { providerId: item.providerId || "a8m", attachmentId: attachment.attachment.id, folderId: item.providerId === "a8m" ? (item.folderId || "") : "" }
       });
-      state.files.unshift(created.file);
-      uploaded += 1;
-    } catch (error) {
-      showError(error);
+      item.fileId = created.file?.id || "";
+      item.size = Number(created.file?.sizeBytes) || item.size;
+      if (created.file && !state.files.some((file) => file.id === created.file.id)) state.files.unshift(created.file);
+      item.progress = 100;
+    }
+    item.status = "done";
+    item.endedAt = Date.now();
+  } catch (error) {
+    item.status = "error";
+    item.error = error.message || "Upload failed";
+    item.endedAt = Date.now();
+  }
+  renderUploadManager();
+}
+
+async function processUploadQueue() {
+  if (state.uploadWorkerBusy) return;
+  state.uploadWorkerBusy = true;
+  let completed = 0;
+  let failed = 0;
+  try {
+    while (true) {
+      const item = state.uploadQueue.find((entry) => entry.status === "queued");
+      if (!item) break;
+      await performUploadItem(item);
+      if (item.status === "done") completed += 1;
+      if (item.status === "error") failed += 1;
+    }
+  } finally {
+    state.uploadWorkerBusy = false;
+    renderUploadManager();
+    if (state.task === "files") refreshCabinet().catch(() => {});
+    if (completed || failed) {
+      const parts = [];
+      if (completed) parts.push(`${completed} uploaded`);
+      if (failed) parts.push(`${failed} failed`);
+      showToast(parts.join(" · "), failed ? "error" : undefined);
     }
   }
-  uploadBusy = false;
-  if (fileUploadInput) fileUploadInput.value = "";
-  if (uploaded) {
-    await refreshCabinet();
-    showToast(`${uploaded} file${uploaded === 1 ? "" : "s"} uploaded to ${targetFolder ? targetFolder.name : targetName}`);
+}
+
+function ensureMobileUploadSession() {
+  return createMobileUploadSession(false);
+}
+
+async function createMobileUploadSession(force = false) {
+  if (!state.user) return;
+  if (!force && state.uploadMobileSession?.active) return state.uploadMobileSession;
+  if (force && state.uploadMobileSession?.id) {
+    await api(`/api/files/upload-sessions/${encodeURIComponent(state.uploadMobileSession.id)}`, { method: "DELETE" }).catch(() => {});
   }
+  const data = await api("/api/files/upload-sessions", { method: "POST", body: { folderId: state.uploadTargetFolderId || "" } });
+  state.uploadMobileSession = data.session;
+  state.uploadMobileSeen = new Map();
+  state.uploadMobileQrData = "";
+  state.uploadMobileQrSession = "";
+  startMobileUploadPoll();
+  renderUploadManager();
+  return state.uploadMobileSession;
+}
+
+function startMobileUploadPoll() {
+  clearInterval(state.uploadMobilePoll);
+  state.uploadMobilePoll = setInterval(() => refreshMobileUploadSession().catch(() => {}), 2200);
+}
+
+async function refreshMobileUploadSession() {
+  const session = state.uploadMobileSession;
+  if (!session?.id) return;
+  const data = await api(`/api/files/upload-sessions/${encodeURIComponent(session.id)}`);
+  state.uploadMobileSession = data.session;
+  let completedNew = false;
+  for (const item of data.session?.uploads || []) {
+    const previous = state.uploadMobileSeen.get(item.id);
+    if (item.status === "done" && previous !== "done") completedNew = true;
+    state.uploadMobileSeen.set(item.id, item.status);
+  }
+  if (state.uploadManagerOpen && state.uploadTab === "mobile") renderUploadManager();
+  if (completedNew) {
+    await refreshCabinet().catch(() => {});
+    showToast("A file arrived from your phone");
+  }
+  if (!data.session?.active || Date.parse(data.session?.expiresAt || "") <= Date.now()) {
+    clearInterval(state.uploadMobilePoll);
+    state.uploadMobilePoll = null;
+  }
+}
+
+async function extendMobileUploadSession(hours = 1) {
+  const session = state.uploadMobileSession;
+  if (!session?.id) return;
+  const data = await api(`/api/files/upload-sessions/${encodeURIComponent(session.id)}/extend`, { method: "POST", body: { hours } });
+  state.uploadMobileSession = data.session;
+  showToast(`Upload link extended by ${hours} hour${hours === 1 ? "" : "s"}`);
+  renderUploadManager();
+}
+
+async function uploadFiles(files, folderId = state.fileFolderId) {
+  if (!files?.length) return;
+  enqueueCabinetUploads(files, folderId, uploadTargetProvider());
 }
 
 /* ============================================================
@@ -16867,7 +18267,8 @@ function calendarMatchesSearch(event) {
   if (!query) return true;
   const haystack = [
     event.title, event.description, event.where, event.organizer, event.organizerName,
-    event.calendarName, ...(event.attendeeList || []).map((attendee) => `${attendee.name} ${attendee.email}`)
+    event.calendarName, ...(event.attendeeList || []).map((attendee) => `${attendee.name} ${attendee.email}`),
+    ...(event.exceptions || []).map((exception) => `${exception.title} ${exception.location}`)
   ].join(" ").toLowerCase();
   return haystack.includes(query);
 }
@@ -16931,15 +18332,53 @@ function calendarOccurrenceKeys(event, startKey, endKey) {
   return keys;
 }
 
+function calendarExceptionOccurrence(event, exception) {
+  return {
+    ...event,
+    title: exception.title || event.title,
+    description: exception.description || "",
+    where: exception.location || "",
+    date: exception.date,
+    start: exception.start,
+    end: exception.end,
+    allDay: Boolean(exception.allDay),
+    timezone: exception.timezone || event.timezone,
+    status: exception.status || "confirmed",
+    sequence: exception.sequence ?? event.sequence,
+    reminderMinutes: exception.reminderMinutes ?? event.reminderMinutes,
+    occurrenceDate: exception.date,
+    occurrenceKey: `${event.id}|${exception.date}|${exception.recurrenceDate}`,
+    recurrenceDate: exception.recurrenceDate,
+    exceptionId: exception.id,
+    recurring: true
+  };
+}
+
 function calendarOccurrences(startKey, endKey, { all = false } = {}) {
   const out = [];
+  const seenExceptions = new Set();
   for (const event of state.calendarEvents || []) {
     if (!all && !calendarIsVisible(event)) continue;
     if (!all && state.calendarHideDeclined && (event.myStatus === "declined" || event.status === "cancelled")) continue;
     if (!all && !calendarMatchesSearch(event)) continue;
+    const exceptions = Array.isArray(event.exceptions) ? event.exceptions : [];
+    const byOrigin = new Map(exceptions.map((exception) => [exception.recurrenceDate, exception]));
     const keys = calendarOccurrenceKeys(event, startKey, endKey);
     for (const key of keys) {
+      const exception = byOrigin.get(key);
+      if (exception) {
+        seenExceptions.add(exception.id);
+        if (exception.status === "cancelled" || exception.date < startKey || exception.date > endKey) continue;
+        out.push(calendarExceptionOccurrence(event, exception));
+        continue;
+      }
       out.push({ ...event, occurrenceDate: key, occurrenceKey: `${event.id}|${key}`, recurring: Boolean(event.recurrenceRule) });
+    }
+    for (const exception of exceptions) {
+      if (seenExceptions.has(exception.id) || exception.status === "cancelled") continue;
+      if (exception.date < startKey || exception.date > endKey) continue;
+      seenExceptions.add(exception.id);
+      out.push(calendarExceptionOccurrence(event, exception));
     }
   }
   out.sort((a, b) => (a.occurrenceDate === b.occurrenceDate ? String(a.start).localeCompare(String(b.start)) : a.occurrenceDate.localeCompare(b.occurrenceDate)));
@@ -17277,6 +18716,168 @@ function calendarRuleForForm(rule) {
   return { value: "", until: "" };
 }
 
+function pollDateKey(value = new Date()) {
+  return dateKey(value);
+}
+
+function defaultPollSlots() {
+  const start = state.calendarSelected || pollDateKey(new Date());
+  const next = addDaysToKey(start, 1);
+  return [
+    { date: start, start: "10:00", end: "11:00" },
+    { date: next, start: "14:00", end: "15:00" }
+  ];
+}
+
+function openCalendarPollDialog() {
+  closeMenus();
+  state.pollDraftSlots = defaultPollSlots();
+  document.getElementById("pollTitle").value = "";
+  document.getElementById("pollInvitees").value = "";
+  document.getElementById("pollError").hidden = true;
+  const zone = state.preferences.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  document.getElementById("pollTimezone").innerHTML = calendarTimezoneOptions(zone);
+  renderPollSlots();
+  calendarPollOverlay.hidden = false;
+  setTimeout(() => document.getElementById("pollTitle").focus(), 40);
+}
+
+function renderPollSlots() {
+  const holder = document.getElementById("pollSlots");
+  if (!holder) return;
+  holder.innerHTML = state.pollDraftSlots.map((slot, index) => `<div class="calendar-poll-slot-row">
+    <label><span>Date</span><input type="date" data-poll-slot-date="${index}" value="${esc(slot.date)}"></label>
+    <label><span>Start</span><input type="time" data-poll-slot-start="${index}" value="${esc(slot.start)}"></label>
+    <label><span>End</span><input type="time" data-poll-slot-end="${index}" value="${esc(slot.end)}"></label>
+    <button class="icon-btn" type="button" data-poll-slot-remove="${index}" aria-label="Remove time option"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </div>`).join("");
+}
+
+function capturePollSlots() {
+  const rows = [...document.querySelectorAll("#pollSlots .calendar-poll-slot-row")];
+  if (!rows.length) return;
+  state.pollDraftSlots = rows.map((row) => ({
+    date: row.querySelector("[data-poll-slot-date]")?.value || "",
+    start: row.querySelector("[data-poll-slot-start]")?.value || "",
+    end: row.querySelector("[data-poll-slot-end]")?.value || ""
+  }));
+}
+
+async function createCalendarPoll() {
+  capturePollSlots();
+  const title = document.getElementById("pollTitle").value.trim();
+  const invitees = document.getElementById("pollInvitees").value.split(/[,;\s]+/).map((value) => value.trim()).filter(Boolean);
+  const timezone = document.getElementById("pollTimezone").value;
+  const slots = state.pollDraftSlots.map((slot) => ({ ...slot }));
+  const error = document.getElementById("pollError");
+  if (!title) { error.textContent = "Add a title for the poll."; error.hidden = false; return; }
+  if (!invitees.length) { error.textContent = "Add at least one invitee."; error.hidden = false; return; }
+  if (slots.some((slot) => !slot.date || !slot.start || !slot.end || slot.end <= slot.start)) {
+    error.textContent = "Each time option needs a valid start and end.";
+    error.hidden = false;
+    return;
+  }
+  const button = document.getElementById("pollCreate");
+  button.disabled = true;
+  try {
+    const data = await api("/api/calendar/polls", {
+      method: "POST",
+      body: { title, inviteeEmails: invitees, timezone, description: "", slots }
+    });
+    calendarPollOverlay.hidden = true;
+    if (data.poll) state.calendarPolls = [data.poll, ...(state.calendarPolls || [])];
+    showToast("Meeting poll created and invitations sent");
+    if (!calendarPollsOverlay.hidden) renderCalendarPolls();
+  } catch (err) {
+    error.textContent = err.message || "Could not create the poll.";
+    error.hidden = false;
+  } finally { button.disabled = false; }
+}
+
+async function openCalendarPolls() {
+  calendarPollsOverlay.hidden = false;
+  const body = document.getElementById("calendarPollsBody");
+  body.innerHTML = `<p class="calendar-polls-empty">Loading meeting polls…</p>`;
+  try {
+    const data = await api("/api/calendar/polls");
+    state.calendarPolls = data.polls || [];
+    renderCalendarPolls();
+  } catch (error) {
+    body.innerHTML = `<p class="calendar-polls-empty">${esc(error.message || "Could not load meeting polls.")}</p>`;
+  }
+}
+
+function pollStatusLabel(status) {
+  return status === "scheduled" ? "Scheduled" : status === "closed" ? "Closed" : status === "cancelled" ? "Cancelled" : "Collecting responses";
+}
+
+function renderCalendarPolls() {
+  const body = document.getElementById("calendarPollsBody");
+  if (!body) return;
+  const polls = state.calendarPolls || [];
+  if (!polls.length) {
+    body.innerHTML = `<div class="calendar-polls-empty"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><strong>No meeting polls yet</strong><span>Ask external guests for availability, then schedule the best slot in one click.</span><button class="btn-primary" type="button" data-poll-new>Create a poll</button></div>`;
+    return;
+  }
+  body.innerHTML = polls.map((poll) => {
+    const invitees = Array.isArray(poll.invitees) ? poll.invitees : [];
+    const responded = invitees.filter((invitee) => invitee.respondedAt).length;
+    const slots = Array.isArray(poll.slots) ? poll.slots : [];
+    return `<section class="calendar-poll-card">
+      <header><div><h3>${esc(poll.title)}</h3><span>${invitees.length} invitee${invitees.length === 1 ? "" : "s"} · ${responded} responded</span></div><span class="calendar-poll-status is-${esc(poll.status)}">${esc(pollStatusLabel(poll.status))}</span></header>
+      <div class="calendar-poll-options">
+        ${slots.map((slot) => `<div class="calendar-poll-option">
+          <div><strong>${esc(slot.date)} · ${esc(slot.start)}–${esc(slot.end)}</strong><span>${Number(slot.yes || 0)} yes · ${Number(slot.maybe || 0)} maybe · ${Number(slot.no || 0)} no</span></div>
+          ${poll.status === "open" || poll.status === "closed" ? `<button class="btn-secondary" type="button" data-poll-schedule="${esc(poll.id)}" data-poll-slot="${esc(slot.id)}">Schedule</button>` : `<span class="calendar-poll-selected">${poll.selectedSlotId === slot.id ? "Scheduled slot" : ""}</span>`}
+        </div>`).join("")}
+      </div>
+      <footer><span>${esc(poll.timezone || "UTC")}</span><div>
+        ${poll.status === "open" ? `<button class="link-btn" type="button" data-poll-close="${esc(poll.id)}">Close poll</button>` : ""}
+        <button class="link-btn danger-link" type="button" data-poll-delete="${esc(poll.id)}">Delete</button>
+      </div></footer>
+    </section>`;
+  }).join("");
+}
+
+async function scheduleCalendarPoll(pollId, slotId) {
+  const confirmed = await appConfirm({
+    title: "Schedule this time?",
+    message: "Calendar invitations will be sent to every poll invitee.",
+    confirmLabel: "Schedule event"
+  });
+  if (!confirmed) return;
+  try {
+    const data = await api(`/api/calendar/polls/${encodeURIComponent(pollId)}/schedule`, {
+      method: "POST", body: { slotId }
+    });
+    calendarPollsOverlay.hidden = true;
+    await refreshCalendarData();
+    if (data.event) {
+      state.calendarSelected = data.event.date;
+      openEventDialog(data.event.id, { date: data.event.date });
+    }
+    showToast("Event scheduled from the poll");
+  } catch (error) { showError(error); }
+}
+
+async function closeCalendarPoll(pollId) {
+  try {
+    await api(`/api/calendar/polls/${encodeURIComponent(pollId)}/close`, { method: "POST", body: {} });
+    await openCalendarPolls();
+    showToast("Poll closed");
+  } catch (error) { showError(error); }
+}
+
+async function deleteCalendarPoll(pollId) {
+  if (!(await appConfirm({ title: "Delete this poll?", message: "The signed guest links stop working.", confirmLabel: "Delete poll", tone: "danger" }))) return;
+  try {
+    await api(`/api/calendar/polls/${encodeURIComponent(pollId)}`, { method: "DELETE" });
+    state.calendarPolls = (state.calendarPolls || []).filter((poll) => poll.id !== pollId);
+    renderCalendarPolls();
+    showToast("Poll deleted");
+  } catch (error) { showError(error); }
+}
+
 function openEventDialog(eventId = null, options = {}) {
   hideNotify();
   closeMenus();
@@ -17287,38 +18888,63 @@ function openEventDialog(eventId = null, options = {}) {
   state.eventEditingId = calendarEditingId;
   state.eventAttendees = (event?.attendeeList || []).map((attendee) => ({ ...attendee }));
   state.eventAttachments = (event?.attachments || []).map((file) => ({ ...file }));
+  state.eventResources = (event?.resourceList || []).map((resource) => ({ ...resource }));
   state.eventCalendarId = event?.calendarId || state.calendarActiveId || "default";
-  const date = options.date || event?.date || state.calendarSelected || dateKey(new Date());
+  const requestedDate = options.date || event?.date || "";
+  const exception = event?.recurrenceRule ? (event.exceptions || []).find((item) =>
+    (requestedDate && (item.recurrenceDate === requestedDate || item.date === requestedDate)) ||
+    (!requestedDate && item.recurrenceDate === event.date)) : null;
+  const display = exception ? {
+    ...event,
+    title: exception.title || event.title,
+    description: exception.description || "",
+    where: exception.location || "",
+    date: exception.date,
+    start: exception.start,
+    end: exception.end,
+    allDay: Boolean(exception.allDay),
+    timezone: exception.timezone || event.timezone,
+    status: exception.status || "confirmed",
+    reminderMinutes: exception.reminderMinutes ?? event.reminderMinutes
+  } : event;
+  state.eventOccurrenceDate = exception?.recurrenceDate || requestedDate || event?.date || "";
+  state.eventEditScope = event?.recurrenceRule ? (exception || requestedDate ? "occurrence" : "series") : "series";
+  const date = exception?.date || options.date || event?.date || state.calendarSelected || dateKey(new Date());
   if (options.time) {
     const [hour, minute] = String(options.time).split(":").map(Number);
     const end = new Date(0, 0, 0, hour, minute + 30);
     document.getElementById("eventStart").value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
     document.getElementById("eventEnd").value = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
   } else {
-    document.getElementById("eventStart").value = event?.start || "10:00";
-    document.getElementById("eventEnd").value = event?.end || "10:30";
+    document.getElementById("eventStart").value = display?.start || "10:00";
+    document.getElementById("eventEnd").value = display?.end || "10:30";
   }
   document.getElementById("eventDialogEyebrow").textContent = event ? (event.invited ? "Invitation" : "Edit event") : "New event";
   document.getElementById("eventDialogTitle").textContent = event ? (event.invited ? "Meeting invitation" : "Edit event") : options.invite ? "Invite people to a meeting" : "Schedule an event";
-  document.getElementById("eventName").value = event?.title || options.title || "";
+  document.getElementById("eventName").value = display?.title || options.title || "";
   document.getElementById("eventDate").value = date;
-  document.getElementById("eventWhere").value = event?.where || "";
-  document.getElementById("eventMeetingUrl").value = event?.meetingUrl || "";
-  document.getElementById("eventDescription").value = event?.description || "";
-  document.getElementById("eventAllDay").checked = Boolean(event?.allDay);
-  document.getElementById("eventReminder").value = String(event?.reminderMinutes ?? 15);
-  document.getElementById("eventTransparency").value = event?.transparency || "busy";
-  document.getElementById("eventColorSelect").value = event?.color || "#0f6cbd";
-  document.getElementById("eventColorSelect").style.setProperty("--event-color", event?.color || "#0f6cbd");
+  document.getElementById("eventWhere").value = display?.where || "";
+  document.getElementById("eventMeetingUrl").value = display?.meetingUrl || "";
+  document.getElementById("eventDescription").value = display?.description || "";
+  document.getElementById("eventAllDay").checked = Boolean(display?.allDay);
+  document.getElementById("eventReminder").value = String(display?.reminderMinutes ?? 15);
+  document.getElementById("eventTransparency").value = display?.transparency || "busy";
+  document.getElementById("eventColorSelect").value = display?.color || "#0f6cbd";
+  document.getElementById("eventColorSelect").style.setProperty("--event-color", display?.color || "#0f6cbd");
   const titleMark = document.getElementById("eventColorMark");
-  if (titleMark) titleMark.style.background = event?.color || "#0f6cbd";
+  if (titleMark) titleMark.style.background = display?.color || "#0f6cbd";
   const calendarDot = document.getElementById("eventCalendarDot");
-  if (calendarDot) calendarDot.style.background = event?.color || "#0f6cbd";
+  if (calendarDot) calendarDot.style.background = display?.color || "#0f6cbd";
   const ruleState = calendarRuleForForm(event?.recurrenceRule || "");
   document.getElementById("eventRecurrence").value = ruleState.value;
   document.getElementById("eventUntil").value = ruleState.until || "";
   document.getElementById("eventUntilWrap").hidden = !ruleState.value;
-  const zone = event?.timezone || state.preferences.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const scopeWrap = document.getElementById("eventScopeWrap");
+  if (scopeWrap) {
+    scopeWrap.hidden = !event?.recurrenceRule;
+    document.getElementById("eventScope").value = state.eventEditScope;
+  }
+  const zone = display?.timezone || state.preferences.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   document.getElementById("eventTimezone").innerHTML = calendarTimezoneOptions(zone);
   const editableCalendars = (state.calendars || []).filter((calendar) => calCanEdit(calendar));
   if (!editableCalendars.some((calendar) => calendar.id === state.eventCalendarId)) {
@@ -17326,8 +18952,11 @@ function openEventDialog(eventId = null, options = {}) {
   }
   document.getElementById("eventCalendarSelect").innerHTML = editableCalendars.map((calendar) => `<option value="${esc(calendar.id)}"${calendar.id === state.eventCalendarId ? " selected" : ""}>${esc(calendar.name)}${calendar.shared ? ` · ${esc(calendar.ownerName || "shared")}` : ""}</option>`).join("");
   const canEdit = !event || (event.canEdit !== false && !event.invited);
+  const scopeWrapEditable = document.getElementById("eventScopeWrap");
+  if (scopeWrapEditable) scopeWrapEditable.hidden = !event?.recurrenceRule || !canEdit;
   document.getElementById("eventDelete").hidden = !event;
-  document.getElementById("eventDelete").textContent = event?.invited && !canEdit ? "Decline invitation" : "Delete";
+  document.getElementById("eventDelete").textContent = event?.invited && !canEdit ? "Decline invitation" :
+    (event?.recurrenceRule && state.eventEditScope === "occurrence" ? "Cancel this event" : "Delete");
   document.getElementById("eventSave").disabled = !canEdit;
   document.getElementById("eventAllDay").disabled = !canEdit;
   document.getElementById("eventName").readOnly = !canEdit;
@@ -17337,12 +18966,20 @@ function openEventDialog(eventId = null, options = {}) {
   document.getElementById("eventDate").disabled = !canEdit;
   document.getElementById("eventStart").disabled = !canEdit;
   document.getElementById("eventEnd").disabled = !canEdit;
-  document.getElementById("eventRecurrence").disabled = !canEdit;
+  document.getElementById("eventRecurrence").disabled = !canEdit || state.eventEditScope === "occurrence";
   document.getElementById("eventCalendarSelect").disabled = !canEdit;
   document.getElementById("eventColorSelect").disabled = !canEdit;
   state.eventRsvpStatus = event?.myStatus || "needs-action";
   renderEventRsvp();
+  renderEventGuestPanel();
   renderEventAttendees();
+  renderEventResources();
+  if (!Array.isArray(state.calendarResources) || state.calendarResources.length === 0) {
+    api("/api/calendar/resources").then((data) => {
+      state.calendarResources = data.resources || [];
+      renderEventResources();
+    }).catch(() => {});
+  }
   renderEventAttachments();
   updateEventTimeFields();
   updateEventPreview();
@@ -17355,8 +18992,13 @@ function closeEventDialog() {
   calendarEditingId = null;
   calendarEditingPayload = null;
   state.eventEditingId = null;
+  state.eventOccurrenceDate = "";
+  state.eventEditScope = "series";
   state.eventAttendees = [];
   state.eventAttachments = [];
+  state.eventResources = [];
+  const guestPanel = document.getElementById("eventGuestPanel");
+  if (guestPanel) { guestPanel.hidden = true; guestPanel.innerHTML = ""; }
   document.getElementById("eventAttendeeSuggest").hidden = true;
 }
 
@@ -17384,6 +19026,155 @@ function renderEventAttendees() {
   }).join("");
   const count = document.getElementById("eventPreviewNote");
   if (count) count.textContent = state.eventAttendees.length ? `${state.eventAttendees.length} attendee${state.eventAttendees.length === 1 ? "" : "s"} will be invited.` : "Times are shown in the event time zone.";
+  renderEventGuestPanel();
+}
+
+function renderEventGuestPanel() {
+  const holder = document.getElementById("eventGuestPanel");
+  if (!holder) return;
+  const event = calendarEditingPayload;
+  if (!event || event.invited || event.canEdit === false) {
+    holder.hidden = true;
+    holder.innerHTML = "";
+    return;
+  }
+  const organizer = String(event.organizer || "").toLowerCase();
+  const guests = (state.eventAttendees || []).filter((attendee) => !attendee.organizer &&
+    String(attendee.email || "").toLowerCase() !== organizer);
+  if (!guests.length) {
+    holder.hidden = true;
+    holder.innerHTML = "";
+    return;
+  }
+  const sequence = Number(event.sequence || 0);
+  const statusOf = (guest) => {
+    const value = String(guest.status || "needs-action");
+    return ["accepted", "tentative", "declined"].includes(value) ? value : "needs-action";
+  };
+  const labelFor = (status) => status === "accepted" ? "Accepted" : status === "tentative" ? "Maybe" : status === "declined" ? "Declined" : "No response";
+  const counts = { accepted: 0, tentative: 0, declined: 0, "needs-action": 0 };
+  guests.forEach((guest) => { counts[statusOf(guest)] += 1; });
+  const awaiting = guests.filter((guest) => statusOf(guest) === "needs-action" ||
+    Number(guest.lastResponseSequence ?? -1) < sequence);
+  const proposals = Array.isArray(event.proposals) ? event.proposals : [];
+  const senderEmail = String(event.senderEmail || "").toLowerCase();
+  const delegated = senderEmail && senderEmail !== organizer;
+  const initials = (guest) => esc(initialsFrom(guest.name || String(guest.email || "?").split("@")[0]));
+  holder.hidden = false;
+  holder.innerHTML = `<div class="event-guest-head">
+      <div><strong>Guest responses</strong><span>${guests.length} guest${guests.length === 1 ? "" : "s"} · sequence ${sequence}${delegated ? ` · sent by ${esc(event.senderName || event.senderEmail)}` : ""}</span></div>
+      ${awaiting.length ? `<button class="link-btn event-resend-btn" type="button" data-event-resend>Resend to ${awaiting.length} waiting</button>` : `<span class="event-guest-complete"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Everyone responded</span>`}
+    </div>
+    <div class="event-guest-summary">
+      ${["accepted", "tentative", "declined", "needs-action"].map((status) => `<span class="event-guest-count is-${status}"><b>${counts[status]}</b>${labelFor(status)}</span>`).join("")}
+    </div>
+    ${event.rsvpAnalytics ? (() => {
+      const analytics = event.rsvpAnalytics;
+      const avg = Number(analytics.averageResponseMinutes || 0);
+      const avgLabel = avg >= 60 ? `${(avg / 60).toFixed(1)}h` : `${Math.round(avg)}m`;
+      return `<div class="event-analytics">
+        <div class="event-analytics-head"><strong>RSVP analytics</strong><span>${analytics.total} guests</span></div>
+        <div class="event-analytics-stats">
+          <span><b>${Number(analytics.responseRate || 0).toFixed(1)}%</b> responded</span>
+          <span><b>${avg > 0 ? avgLabel : "—"}</b> average response</span>
+          <span><b>${Number(analytics.delivered || 0)}/${Number(analytics.total || 0)}</b> delivered${analytics.failed ? ` · ${analytics.failed} failed` : ""}</span>
+        </div>
+        ${(analytics.domains || []).length ? `<details class="event-analytics-domains"><summary>By domain</summary>${analytics.domains.map((domain) => `<div><span>${esc(domain.domain)}</span><span>${Number(domain.responded || 0)}/${Number(domain.total || 0)} replied · ${Number(domain.delivered || 0)} delivered</span></div>`).join("")}</details>` : ""}
+      </div>`;
+    })() : ""}
+    <div class="event-guest-list">
+      ${guests.map((guest) => {
+        const status = statusOf(guest);
+        const stale = Number(guest.lastResponseSequence ?? -1) >= 0 && Number(guest.lastResponseSequence) < sequence;
+        return `<div class="event-guest-row">
+          <span class="event-attendee-avatar" style="--attendee:${colorForString(guest.email)}">${initials(guest)}</span>
+          <div class="event-guest-copy"><strong>${esc(guest.name || displayNameFromEmail(guest.email))}</strong><span>${esc(guest.email)}</span>
+            ${stale ? `<small class="event-guest-stale">Awaiting response on the updated time</small>` : guest.respondedAt ? `<small>Replied ${esc(formatRelativeTime(guest.respondedAt))}</small>` : ""}
+          </div>
+          <span class="event-guest-status is-${status}">${labelFor(status)}</span>
+        </div>`;
+      }).join("")}
+    </div>
+    ${(event.resourceList || []).length ? `<div class="event-resource-summary"><svg class="icon" aria-hidden="true"><use href="#i-location"/></svg><span>Booked: ${event.resourceList.map((resource) => esc(resource.name)).join(" · ")}</span></div>` : ""}
+    ${proposals.length ? `<div class="event-proposals">
+      <div class="event-proposals-head"><strong>Proposed times</strong><span>${proposals.length} waiting for your decision</span></div>
+      ${proposals.map((proposal) => `<div class="event-proposal-row">
+        <div class="event-proposal-time"><strong>${esc(proposal.date)} · ${esc(proposal.start)}–${esc(proposal.end)}</strong><span>${esc(proposal.timezone || "")}</span></div>
+        <div class="event-proposal-copy"><strong>${esc(proposal.attendeeName || displayNameFromEmail(proposal.attendeeEmail))}</strong><span>${esc(proposal.attendeeEmail)}</span>${proposal.note ? `<small>${esc(proposal.note)}</small>` : ""}</div>
+        <div class="event-proposal-actions"><button type="button" class="btn-secondary" data-proposal-decline="${esc(proposal.id)}">Decline</button><button type="button" class="btn-primary" data-proposal-accept="${esc(proposal.id)}">Accept</button></div>
+      </div>`).join("")}
+    </div>` : ""}`;
+}
+
+async function decideCalendarProposal(proposalId, decision) {
+  const id = calendarEditingId;
+  if (!id || !proposalId) return;
+  const action = decision === "accept" ? "accept" : "decline";
+  const confirmed = await appConfirm({
+    title: action === "accept" ? "Accept the proposed time?" : "Decline the proposed time?",
+    message: action === "accept" ? "The event will move and updated invitations will be sent to every guest." : "The original time stays in place and the guest will be told.",
+    confirmLabel: action === "accept" ? "Accept time" : "Decline time",
+    tone: action === "accept" ? undefined : "danger"
+  });
+  if (!confirmed) return;
+  try {
+    const data = await api(`/api/calendar/events/${encodeURIComponent(id)}/proposals/${encodeURIComponent(proposalId)}/${action}`, { method: "POST", body: {} });
+    if (data.event) {
+      calendarEditingPayload = data.event;
+      state.eventAttendees = (data.event.attendeeList || []).map((attendee) => ({ ...attendee }));
+      state.eventRsvpStatus = data.event.myStatus || state.eventRsvpStatus;
+      const index = state.calendarEvents.findIndex((event) => event.id === id);
+      if (index >= 0) state.calendarEvents[index] = data.event;
+    }
+    renderEventGuestPanel();
+    renderEventAttendees();
+    showToast(action === "accept" ? "Proposed time accepted — guests are being notified" : "Proposed time declined");
+  } catch (error) { showError(error); }
+}
+
+async function resendEventInvites() {
+  const id = calendarEditingId;
+  if (!id) return;
+  const button = document.querySelector("[data-event-resend]");
+  if (button) button.disabled = true;
+  try {
+    const data = await api(`/api/calendar/events/${encodeURIComponent(id)}/resend`, { method: "POST", body: {} });
+    if (data.event) {
+      calendarEditingPayload = data.event;
+      state.eventAttendees = (data.event.attendeeList || []).map((attendee) => ({ ...attendee }));
+      const index = state.calendarEvents.findIndex((event) => event.id === id);
+      if (index >= 0) state.calendarEvents[index] = data.event;
+    }
+    renderEventGuestPanel();
+    renderEventAttendees();
+    showToast(data.resent ? `Invitation resent to ${data.resent} guest${data.resent === 1 ? "" : "s"}` : "Everyone has already responded");
+  } catch (error) { showError(error); }
+  finally { if (button) button.disabled = false; }
+}
+
+function renderEventResources() {
+  const holder = document.getElementById("eventResourceChips");
+  const select = document.getElementById("eventResourceSelect");
+  if (!holder || !select) return;
+  const locked = document.getElementById("eventSave").disabled;
+  const selected = state.eventResources || [];
+  holder.innerHTML = selected.length ? selected.map((resource, index) => `<span class="event-resource-chip">
+    <svg class="icon" aria-hidden="true"><use href="#i-location"/></svg>
+    <span><strong>${esc(resource.name || resource.email)}</strong>${resource.location ? `<small>${esc(resource.location)}</small>` : ""}</span>
+    ${locked ? "" : `<button type="button" data-event-resource-remove="${index}" aria-label="Remove ${esc(resource.name || resource.email)}"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>`}
+  </span>`).join("") : `<span class="event-resource-empty">No room or resource booked</span>`;
+  const chosen = new Set(selected.map((resource) => resource.id));
+  const options = (state.calendarResources || []).filter((resource) => !chosen.has(resource.id));
+  select.innerHTML = `<option value="">Add a room or resource…</option>` + options.map((resource) =>
+    `<option value="${esc(resource.id)}">${esc(resource.name)}${resource.location ? ` · ${esc(resource.location)}` : ""}${resource.capacity ? ` · seats ${Number(resource.capacity)}` : ""}</option>`).join("");
+  select.disabled = locked || options.length === 0;
+}
+
+function addEventResource(resourceId) {
+  const resource = (state.calendarResources || []).find((item) => item.id === resourceId);
+  if (!resource) return;
+  state.eventResources = [...(state.eventResources || []), { ...resource }];
+  renderEventResources();
 }
 
 function addEventAttendee(email, name = "") {
@@ -17491,6 +19282,8 @@ async function saveEvent() {
   if (!title) { showToast("Add an event title"); document.getElementById("eventName").focus(); return; }
   if (!date) { showToast("Choose a date"); return; }
   if (!allDay && (!start || !end || end <= start)) { showToast("End time must be after the start time"); return; }
+  const occurrenceEdit = Boolean(calendarEditingId && state.eventEditScope === "occurrence" &&
+    calendarEditingPayload?.recurrenceRule && state.eventOccurrenceDate);
   const payload = {
     title, date, start, end, allDay, where, description, timezone, color, calendarId,
     meetingUrl, recurrenceRule: eventFormRecurrence(),
@@ -17498,7 +19291,9 @@ async function saveEvent() {
     transparency: document.getElementById("eventTransparency").value,
     attendeeEmails: state.eventAttendees.map((attendee) => attendee.email),
     attendeeNames: Object.fromEntries(state.eventAttendees.map((attendee) => [attendee.email, attendee.name || ""])),
-    attachmentIds: state.eventAttachments.map((file) => file.id)
+    attachmentIds: state.eventAttachments.map((file) => file.id),
+    resourceIds: (state.eventResources || []).map((resource) => resource.id),
+    ...(occurrenceEdit ? { scope: "occurrence", occurrenceDate: state.eventOccurrenceDate } : {})
   };
   const button = document.getElementById("eventSave");
   button.disabled = true;
@@ -17511,10 +19306,27 @@ async function saveEvent() {
     state.calendarSelected = date;
     state.calendarYear = selected.getUTCFullYear();
     state.calendarMonth = selected.getUTCMonth();
+    const savedEvent = data.event;
+    const savedOrganizer = String(savedEvent?.organizer || "").toLowerCase();
+    const guestCount = (savedEvent?.attendeeList || state.eventAttendees || []).filter((attendee) =>
+      !attendee.organizer && String(attendee.email || "").toLowerCase() !== savedOrganizer).length;
     closeEventDialog();
     await refreshCalendarData();
-    showToast(editingId ? "Event updated" : state.eventAttendees.length ? "Event created and invitations queued" : "Event added to calendar");
-    if (data.event?.id) state.calendarSelected = data.event.date || date;
+    if (savedEvent?.id && guestCount > 0) {
+      const holdMs = Math.max(5, Number(state.undoSendSeconds) || 8) * 1000;
+      showToast(editingId ? "Updated invitations are queued" : "Invitations are queued", "Undo", async () => {
+        const undo = await api(`/api/calendar/events/${encodeURIComponent(savedEvent.id)}/invitations`, { method: "DELETE" });
+        setTimeout(() => showToast(undo?.cancelled ? "Invitations cancelled" : "Invitations were already on their way"), 0);
+      }, {
+        duration: holdMs,
+        countdownAt: new Date(Date.now() + holdMs).toISOString(),
+        sentMessage: "Invitations sent"
+      });
+    } else {
+      showToast(editingId ? "Event updated" : "Event added to calendar");
+    }
+    if (occurrenceEdit) state.calendarSelected = date;
+    else if (savedEvent?.id) state.calendarSelected = savedEvent.date || date;
     renderCalendar();
   } catch (error) { showError(error); }
   finally { button.disabled = false; }
@@ -17527,14 +19339,21 @@ async function deleteCalendarEvent(id) {
     await rsvpCalendarEvent("declined");
     return;
   }
-  if (!(await appConfirm({ title: "Delete this event?", message: event?.recurrenceRule ? "The entire recurring series will be removed. Invitees receive a cancellation." : "The event will be removed and invitees receive a cancellation.", confirmLabel: "Delete event", tone: "danger" }))) return;
+  const occurrenceOnly = Boolean(event?.recurrenceRule && state.eventEditScope === "occurrence" && state.eventOccurrenceDate);
+  if (!(await appConfirm({
+    title: occurrenceOnly ? "Cancel this occurrence?" : "Delete this event?",
+    message: occurrenceOnly ? "Only this occurrence will be cancelled. The rest of the series stays in place." :
+      event?.recurrenceRule ? "The entire recurring series will be removed. Invitees receive a cancellation." : "The event will be removed and invitees receive a cancellation.",
+    confirmLabel: occurrenceOnly ? "Cancel occurrence" : "Delete event", tone: "danger"
+  }))) return;
   try {
-    await api(`/api/calendar/events/${encodeURIComponent(id)}`, { method: "DELETE" });
-    state.calendarEvents = state.calendarEvents.filter((item) => item.id !== id);
+    const suffix = occurrenceOnly ? `?scope=occurrence&occurrenceDate=${encodeURIComponent(state.eventOccurrenceDate)}` : "";
+    await api(`/api/calendar/events/${encodeURIComponent(id)}${suffix}`, { method: "DELETE" });
+    if (!occurrenceOnly) state.calendarEvents = state.calendarEvents.filter((item) => item.id !== id);
     closeEventDialog();
     await refreshCalendarData();
     renderCalendar();
-    showToast("Event deleted");
+    showToast(occurrenceOnly ? "Occurrence cancelled" : "Event deleted");
   } catch (error) { showError(error); }
 }
 
@@ -17544,7 +19363,48 @@ function renderEventRsvp() {
   const event = calendarEditingPayload;
   if (!event?.invited) { holder.hidden = true; holder.innerHTML = ""; return; }
   holder.hidden = false;
-  holder.innerHTML = `<div><strong>Going?</strong><span>Your response is visible to the organizer.</span></div><div class="event-rsvp-actions">${[["accepted", "Accept"], ["tentative", "Tentative"], ["declined", "Decline"]].map(([value, label]) => `<button type="button" class="event-rsvp-btn is-${value}${state.eventRsvpStatus === value ? " is-selected" : ""}" data-event-rsvp="${value}">${label}</button>`).join("")}</div>`;
+  holder.innerHTML = `<div><strong>Going?</strong><span>Your response is visible to the organizer.</span></div><div class="event-rsvp-actions">${[["accepted", "Accept"], ["tentative", "Tentative"], ["declined", "Decline"]].map(([value, label]) => `<button type="button" class="event-rsvp-btn is-${value}${state.eventRsvpStatus === value ? " is-selected" : ""}" data-event-rsvp="${value}">${label}</button>`).join("")}</div>
+    <details class="event-propose"><summary>Propose a new time</summary>
+      <form data-event-propose>
+        <div class="event-propose-grid">
+          <label>Date<input type="date" name="date" value="${esc(event.date || "")}" required></label>
+          <label>Start<input type="time" name="start" value="${esc(event.start || "")}" required></label>
+          <label>End<input type="time" name="end" value="${esc(event.end || "")}" required></label>
+          <label>Time zone<input type="text" name="timezone" value="${esc(event.timezone || "UTC")}" required></label>
+          <label class="event-propose-note">Note<textarea name="note" maxlength="500" placeholder="Optional note for the organizer"></textarea></label>
+        </div>
+        <button class="btn-secondary" type="submit">Send proposed time</button>
+      </form>
+    </details>`;
+}
+
+async function proposeCalendarTime(form) {
+  const id = calendarEditingId;
+  if (!id) return;
+  const fields = new FormData(form);
+  const button = form.querySelector("button[type=submit]");
+  if (button) button.disabled = true;
+  try {
+    const data = await api(`/api/calendar/events/${encodeURIComponent(id)}/counter`, {
+      method: "POST",
+      body: {
+        date: fields.get("date"), start: fields.get("start"), end: fields.get("end"),
+        timezone: fields.get("timezone"), note: fields.get("note"),
+        occurrenceDate: state.eventOccurrenceDate || ""
+      }
+    });
+    if (data.event) {
+      calendarEditingPayload = data.event;
+      state.eventAttendees = (data.event.attendeeList || []).map((attendee) => ({ ...attendee }));
+      state.eventRsvpStatus = data.event.myStatus || state.eventRsvpStatus;
+      const index = state.calendarEvents.findIndex((event) => event.id === id);
+      if (index >= 0) state.calendarEvents[index] = data.event;
+    }
+    renderEventRsvp();
+    renderEventGuestPanel();
+    showToast("Your proposed time was sent to the organizer");
+  } catch (error) { showError(error); }
+  finally { if (button) button.disabled = false; }
 }
 
 async function rsvpCalendarEvent(status) {
@@ -17571,6 +19431,7 @@ async function refreshCalendarData() {
     state.calendarEvents = data.events || [];
     state.calendars = data.calendars || state.calendars;
     state.calendarSubscriptions = data.subscriptions || state.calendarSubscriptions;
+    if (data.resources) state.calendarResources = data.resources;
     if (data.addressBooks) state.addressBooks = data.addressBooks;
     if (!state.calendars.some((calendar) => calendar.id === state.calendarActiveId)) {
       state.calendarActiveId = state.calendars.find((calendar) => calendar.isDefault)?.id || state.calendars[0]?.id || "default";
@@ -17605,6 +19466,7 @@ function applyCalendarPayload(data) {
   if (data.calendars) state.calendars = data.calendars;
   if (data.events || data.calendarEvents) state.calendarEvents = data.events || data.calendarEvents || [];
   if (data.subscriptions) state.calendarSubscriptions = data.subscriptions;
+  if (data.resources) state.calendarResources = data.resources;
   if (!state.calendars.some((calendar) => calendar.id === state.calendarActiveId)) {
     state.calendarActiveId = state.calendars.find((calendar) => calendar.isDefault)?.id || state.calendars[0]?.id || "default";
   }
@@ -18171,10 +20033,43 @@ function setupCalendarInteractions() {
     calNewMenu.hidden = true;
     const kind = button.getAttribute("data-cal-new");
     if (kind === "holiday") openCalendarAdd("holidays");
+    else if (kind === "poll") openCalendarPollDialog();
     else openEventDialog(null, { invite: kind === "invite" });
   });
   document.addEventListener("click", (event) => {
     if (calNewMenu && !calNewMenu.hidden && !event.target.closest("#calNewMenu") && !event.target.closest("#calNew")) calNewMenu.hidden = true;
+  });
+  document.getElementById("calPollsBtn")?.addEventListener("click", openCalendarPolls);
+  document.getElementById("calendarPollClose")?.addEventListener("click", () => { calendarPollOverlay.hidden = true; });
+  document.getElementById("pollCancel")?.addEventListener("click", () => { calendarPollOverlay.hidden = true; });
+  document.getElementById("pollCreate")?.addEventListener("click", createCalendarPoll);
+  document.getElementById("pollAddSlot")?.addEventListener("click", () => {
+    capturePollSlots();
+    if (state.pollDraftSlots.length >= 20) { showToast("A poll can have up to 20 time options"); return; }
+    const last = state.pollDraftSlots[state.pollDraftSlots.length - 1];
+    state.pollDraftSlots.push({ date: addDaysToKey(last?.date || pollDateKey(new Date()), 1), start: last?.start || "10:00", end: last?.end || "11:00" });
+    renderPollSlots();
+  });
+  document.getElementById("pollSlots")?.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-poll-slot-remove]");
+    if (!remove) return;
+    capturePollSlots();
+    if (state.pollDraftSlots.length <= 1) { showToast("Keep at least one time option"); return; }
+    state.pollDraftSlots.splice(Number(remove.getAttribute("data-poll-slot-remove")), 1);
+    renderPollSlots();
+  });
+  document.getElementById("pollSlots")?.addEventListener("input", capturePollSlots);
+  calendarPollOverlay?.addEventListener("click", (event) => { if (event.target === calendarPollOverlay) calendarPollOverlay.hidden = true; });
+  document.getElementById("calendarPollsClose")?.addEventListener("click", () => { calendarPollsOverlay.hidden = true; });
+  calendarPollsOverlay?.addEventListener("click", (event) => {
+    if (event.target === calendarPollsOverlay) { calendarPollsOverlay.hidden = true; return; }
+    if (event.target.closest("[data-poll-new]")) { calendarPollsOverlay.hidden = true; openCalendarPollDialog(); return; }
+    const schedule = event.target.closest("[data-poll-schedule]");
+    if (schedule) { scheduleCalendarPoll(schedule.getAttribute("data-poll-schedule"), schedule.getAttribute("data-poll-slot")); return; }
+    const close = event.target.closest("[data-poll-close]");
+    if (close) { closeCalendarPoll(close.getAttribute("data-poll-close")); return; }
+    const remove = event.target.closest("[data-poll-delete]");
+    if (remove) { deleteCalendarPoll(remove.getAttribute("data-poll-delete")); return; }
   });
 
   calendarAddOverlay?.addEventListener("click", (event) => {
@@ -18259,12 +20154,29 @@ function setupCalendarInteractions() {
     if (copy) { copyTextToClipboard(copy.getAttribute("data-copy-cal-url")).then((ok) => showToast(ok ? "Calendar feed link copied" : copy.getAttribute("data-copy-cal-url"))); return; }
   });
 
+  eventOverlay?.addEventListener("submit", (event) => {
+    if (event.target.matches("[data-event-propose]")) {
+      event.preventDefault();
+      proposeCalendarTime(event.target);
+    }
+  });
   eventOverlay?.addEventListener("input", (event) => {
     if (event.target.id === "eventAttendeeInput") { renderEventAttendeeSuggest(); return; }
     if (["eventName", "eventDate", "eventStart", "eventEnd", "eventColorSelect", "eventRecurrence", "eventUntil", "eventTimezone"].includes(event.target.id)) updateEventPreview();
   });
   eventOverlay?.addEventListener("change", (event) => {
     if (event.target.id === "eventAllDay") { updateEventTimeFields(); updateEventPreview(); return; }
+    if (event.target.id === "eventResourceSelect") {
+      addEventResource(event.target.value);
+      event.target.value = "";
+      return;
+    }
+    if (event.target.id === "eventScope") {
+      state.eventEditScope = event.target.value;
+      document.getElementById("eventRecurrence").disabled = event.target.value === "occurrence";
+      document.getElementById("eventDelete").textContent = event.target.value === "occurrence" ? "Cancel this event" : "Delete";
+      return;
+    }
     if (event.target.id === "eventRecurrence") { document.getElementById("eventUntilWrap").hidden = !event.target.value; document.getElementById("eventUntil").value = event.target.value ? (document.getElementById("eventUntil").value || "") : ""; updateEventPreview(); return; }
     if (["eventDate", "eventStart", "eventEnd", "eventColorSelect", "eventUntil", "eventTimezone"].includes(event.target.id)) updateEventPreview();
   });
@@ -18297,8 +20209,15 @@ function setupCalendarInteractions() {
     }
     const removeAttach = event.target.closest("[data-event-attachment-remove]");
     if (removeAttach) { state.eventAttachments.splice(Number(removeAttach.getAttribute("data-event-attachment-remove")), 1); renderEventAttachments(); return; }
+    const removeResource = event.target.closest("[data-event-resource-remove]");
+    if (removeResource) { state.eventResources.splice(Number(removeResource.getAttribute("data-event-resource-remove")), 1); renderEventResources(); return; }
     const rsvp = event.target.closest("[data-event-rsvp]");
     if (rsvp) { rsvpCalendarEvent(rsvp.getAttribute("data-event-rsvp")); return; }
+    if (event.target.closest("[data-event-resend]")) { resendEventInvites(); return; }
+    const acceptProposal = event.target.closest("[data-proposal-accept]");
+    if (acceptProposal) { decideCalendarProposal(acceptProposal.getAttribute("data-proposal-accept"), "accept"); return; }
+    const declineProposal = event.target.closest("[data-proposal-decline]");
+    if (declineProposal) { decideCalendarProposal(declineProposal.getAttribute("data-proposal-decline"), "decline"); return; }
   });
 
   document.getElementById("eventClose")?.addEventListener("click", closeEventDialog);
@@ -18740,6 +20659,7 @@ function notificationIconName(kind) {
   if (kind === "quota") return "i-alert";
   if (kind === "mention") return "i-at";
   if (kind === "assignment") return "i-users";
+  if (kind === "file_access_request") return "i-lock";
   return "i-bell";
 }
 
@@ -18848,14 +20768,14 @@ function buildNotifications() {
     const id = "server:" + notification.id;
     add({
       id,
-      kind: notification.kind === "mention" ? "mention" : notification.kind === "assignment" ? "assignment" : "system",
+      kind: notification.kind === "mention" ? "mention" : notification.kind === "assignment" ? "assignment" : notification.kind === "calendar" ? "calendar" : "system",
       title: notification.title || "Workspace notification",
       body: notification.body || "",
       detail: notification.detail || "",
       time: notification.createdAt,
       unread: !notification.readAt && !state.dismissedNotifications.has(id),
       action: {
-        type: notification.kind === "mention" ? "mention" : notification.kind === "assignment" ? "assignment" : "security",
+        type: notification.kind === "mention" ? "mention" : notification.kind === "assignment" ? "assignment" : notification.kind === "calendar" ? "calendar" : "security",
         threadId: notification.threadId,
         messageId: notification.messageId,
         ownerId: notification.ownerId
@@ -19032,6 +20952,12 @@ function handleNotificationAction(id) {
     }
   } else if (item.action?.type === "calendar") {
     setTask("calendar");
+    if (item.action?.threadId) {
+      setTimeout(() => {
+        const event = (state.calendarEvents || []).find((entry) => entry.id === item.action.threadId);
+        if (event) openEventDialog(event.id, { date: event.date });
+      }, 280);
+    }
   } else if (item.action?.type === "account") {
     openSettings("account");
   } else {
@@ -19351,7 +21277,7 @@ function handleFeatureClick(event) {
   if (storageDisconnect) { event.preventDefault(); disconnectStorage(storageDisconnect.getAttribute("data-storage-disconnect")); return true; }
   const storageSync = target.closest("[data-storage-sync]");
   if (storageSync) { event.preventDefault(); syncStorage(storageSync.getAttribute("data-storage-sync")); return true; }
-  if (target.closest("#uploadFileBtn") || target.closest("[data-cabinet-upload]")) { event.preventDefault(); fileUploadInput.click(); return true; }
+  if (target.closest("#uploadFileBtn") || target.closest("[data-cabinet-upload]")) { event.preventDefault(); openUploadManager("computer", { folderId: state.fileFolderId }); return true; }
   if (target.closest("#newFolderBtn") || target.closest("#sidebarNewFolder") || target.closest("[data-new-folder]")) { event.preventDefault(); openFolderDialog(); return true; }
   const fileViewButton = target.closest("[data-file-view]");
   if (fileViewButton) { event.preventDefault(); state.fileView = fileViewButton.getAttribute("data-file-view"); persistCabinetView(); renderFiles(); return true; }
@@ -19425,6 +21351,8 @@ function handleFeatureClick(event) {
   }
   const fileShare = target.closest("[data-file-share]");
   if (fileShare) { event.preventDefault(); openShareDialog(fileShare.getAttribute("data-file-share")); return true; }
+  const fileLock = target.closest("[data-file-lock]");
+  if (fileLock) { event.preventDefault(); toggleFileLock(fileLock.getAttribute("data-file-lock")); return true; }
   const fileDelete = target.closest("[data-file-delete]");
   if (fileDelete) { event.preventDefault(); deleteFile(fileDelete.getAttribute("data-file-delete")); return true; }
   if (target.closest("[data-file-back]")) {
@@ -19658,6 +21586,20 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     const target = event.target;
 
+    const searchNote = target.closest("[data-search-note]");
+    if (searchNote) {
+      event.preventDefault();
+      const ownerId = searchNote.getAttribute("data-search-note-owner") || "";
+      openStickyNoteEditor(ownerId, searchNote.getAttribute("data-search-note") || "");
+      return;
+    }
+    const openNotesSearch = target.closest("[data-open-notes-search]");
+    if (openNotesSearch) {
+      event.preventDefault();
+      openNotesDesk(openNotesSearch.getAttribute("data-open-notes-search") || "", { query: state.query });
+      return;
+    }
+
     if (handleFeatureClick(event)) return;
 
     // Compose layer is handled separately.
@@ -19791,6 +21733,15 @@ function bindEvents() {
     if (taskButton) { event.preventDefault(); setTask(taskButton.getAttribute("data-task")); return; }
     const folderButton = target.closest("button[data-folder]");
     if (folderButton) { event.preventDefault(); setFolder(folderButton.getAttribute("data-folder")); return; }
+    if (target.closest("#dateJumpBtn")) { event.preventDefault(); toggleDateJumpMenu(); return; }
+    const dateJump = target.closest("[data-date-jump]");
+    if (dateJump) { event.preventDefault(); jumpToMailDate(dateJump.getAttribute("data-date-jump")); return; }
+    if (target.closest("[data-date-jump-go]")) {
+      event.preventDefault();
+      jumpToMailDate("", document.getElementById("dateJumpDate")?.value || "");
+      return;
+    }
+    if (!target.closest("#dateJumpMenu") && !target.closest("#dateJumpBtn")) closeDateJumpMenu();
     const filterButton = target.closest("button[data-filter]");
     if (filterButton) { event.preventDefault(); setFilter(filterButton.getAttribute("data-filter")); return; }
     const clearFilters = target.closest("[data-clear-filters]");

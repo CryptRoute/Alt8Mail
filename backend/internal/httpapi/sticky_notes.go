@@ -92,12 +92,16 @@ func (s *Server) stickyNoteFor(ctx context.Context, owner userRecord) map[string
 	return normalizeStickyNote(prefs["stickyNote"])
 }
 
-func (s *Server) stickyNoteShared(ctx context.Context, owner userRecord) bool {
-	var shared bool
+func (s *Server) stickyNoteTeamCount(ctx context.Context, owner userRecord) int {
+	var count int
 	_ = s.store.DB.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM public.mailbox_delegates WHERE tenant_id=$1 AND owner_user_id=$2)
-	`, owner.TenantID, owner.ID).Scan(&shared)
-	return shared
+		SELECT count(*) FROM public.mailbox_delegates WHERE tenant_id=$1 AND owner_user_id=$2
+	`, owner.TenantID, owner.ID).Scan(&count)
+	return count
+}
+
+func (s *Server) stickyNoteShared(ctx context.Context, owner userRecord) bool {
+	return s.stickyNoteTeamCount(ctx, owner) > 0
 }
 
 func (s *Server) stickyNoteResponse(ctx context.Context, owner userRecord, note map[string]any) map[string]any {
@@ -110,6 +114,11 @@ func (s *Server) stickyNoteResponse(ctx context.Context, owner userRecord, note 
 func (s *Server) registerStickyNoteRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sticky-note", s.requireUser(s.getStickyNote))
 	mux.HandleFunc("PUT /api/sticky-note", s.requireUser(s.putStickyNote))
+	mux.HandleFunc("GET /api/notes", s.requireUser(s.getStickyNotes))
+	mux.HandleFunc("GET /api/notes/search", s.requireUser(s.searchStickyNotes))
+	mux.HandleFunc("GET /api/notes/attach", s.requireUser(s.getStickyNoteAttachCandidates))
+	mux.HandleFunc("POST /api/notes", s.requireUser(s.createStickyNote))
+	mux.HandleFunc("PATCH /api/notes/{id}", s.requireUser(s.patchStickyNote))
 }
 
 func (s *Server) getStickyNote(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +202,7 @@ func (s *Server) putStickyNote(w http.ResponseWriter, r *http.Request) {
 		note["position"] = map[string]any{"x": clampStickyPosition(body.Position.X), "y": clampStickyPosition(body.Position.Y)}
 	}
 	if body.Links != nil {
-		links, err := s.buildStickyNoteLinks(r.Context(), owner, *body.Links)
+		links, err := s.buildStickyNoteLinks(r.Context(), owner, threadLinkRefs(*body.Links))
 		if err != nil {
 			writeFromError(w, err)
 			return
@@ -227,38 +236,4 @@ func (s *Server) putStickyNote(w http.ResponseWriter, r *http.Request) {
 	}
 	s.insertAudit(sess.User, "sticky_note.updated", target, detail, clientIP(r), sanitizeUserAgent(r.UserAgent()))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "note": note, "shared": s.stickyNoteShared(r.Context(), owner)})
-}
-
-func (s *Server) buildStickyNoteLinks(ctx context.Context, owner userRecord, threadIDs []string) ([]any, error) {
-	links := []any{}
-	seen := map[string]bool{}
-	for _, rawID := range threadIDs {
-		threadID := strings.TrimSpace(rawID)
-		if threadID == "" || seen[threadID] || len(links) >= 12 {
-			continue
-		}
-		seen[threadID] = true
-		var subject, fromName, fromEmail string
-		var sentAt time.Time
-		err := s.store.DB.QueryRow(ctx, `
-			SELECT COALESCE(NULLIF(subject,''), '(no subject)'),
-			       COALESCE(NULLIF(from_name,''), from_email::text), from_email::text, max(sent_at)
-			FROM public.mail_messages
-			WHERE user_id=$1 AND thread_id=$2
-			GROUP BY subject, from_name, from_email
-			ORDER BY max(sent_at) DESC LIMIT 1
-		`, owner.ID, threadID).Scan(&subject, &fromName, &fromEmail, &sentAt)
-		if err != nil {
-			continue
-		}
-		links = append(links, map[string]any{
-			"threadId": threadID, "subject": truncate(subject, 240),
-			"fromName": truncate(fromName, 120), "fromEmail": truncate(fromEmail, 320),
-			"date": sentAt.UTC().Format(time.RFC3339),
-		})
-	}
-	if len(threadIDs) > 0 && len(links) == 0 {
-		return nil, fail(http.StatusBadRequest, "STICKY_LINK", "That conversation is no longer available")
-	}
-	return links, nil
 }

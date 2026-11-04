@@ -66,6 +66,7 @@ type fetchedMail struct {
 	BodyText               string
 	BodyHTML               string
 	Attachments            []parsedMailAttachment
+	CalendarParts          []parsedCalendarPart
 	Auth                   map[string]any
 	External               bool
 	Unsubscribe            map[string]any
@@ -78,6 +79,11 @@ type parsedMailAttachment struct {
 	ContentID   string
 	Disposition string
 	Data        []byte
+}
+
+type parsedCalendarPart struct {
+	Method string
+	Data   []byte
 }
 
 func (s *Server) mailTLSConfig(serverName string) (*tls.Config, error) {
@@ -317,6 +323,9 @@ func (s *Server) checkNewInboxForUser(ctx context.Context, user userRecord) (int
 	if err != nil {
 		return 0, fmt.Errorf("save new INBOX mail: %w", err)
 	}
+	if applied := s.processInboundCalendarReplies(ctx, user, fetched); applied > 0 {
+		s.logger.Info("calendar replies applied", "user", user.Email, "count", applied)
+	}
 	return imported, nil
 }
 
@@ -536,6 +545,9 @@ func (s *Server) syncUserMailbox(ctx context.Context, user userRecord) (map[stri
 		s.recordSyncFailure(ctx, user, err)
 		return nil, fmt.Errorf("save mailbox state: %w", err)
 	}
+	if applied := s.processInboundCalendarReplies(ctx, user, fetched); applied > 0 {
+		s.logger.Info("calendar replies applied", "user", user.Email, "count", applied)
+	}
 	return map[string]any{
 		"account": user.Email, "lastSyncAt": nowISO(), "folderCount": folderCount,
 		"imported": imported, "updated": updated, "removed": removed, "fetched": len(fetched),
@@ -738,6 +750,7 @@ func parseIMAPMessage(message *imap.Message, raw []byte, folder string) fetchedM
 		fetched.BodyText = sanitizeMailText(parsedBody.text.String())
 		fetched.BodyHTML = sanitizeMailText(parsedBody.html.String())
 		fetched.Attachments = parsedBody.attachments
+		fetched.CalendarParts = parsedBody.calendarParts
 		applyAuthenticationResults(&fetched, parsed.Header.Get("Authentication-Results"))
 		fetched.Unsubscribe = parseListUnsubscribe(parsed.Header.Get("List-Unsubscribe"), parsed.Header.Get("List-Unsubscribe-Post"))
 		if parsedDate, err := mail.ParseDate(parsed.Header.Get("Date")); err == nil {
@@ -766,9 +779,10 @@ func parseIMAPMessage(message *imap.Message, raw []byte, folder string) fetchedM
 }
 
 type parsedBody struct {
-	text        strings.Builder
-	html        strings.Builder
-	attachments []parsedMailAttachment
+	text          strings.Builder
+	html          strings.Builder
+	attachments   []parsedMailAttachment
+	calendarParts []parsedCalendarPart
 }
 
 func walkMIMEPart(headers textproto.MIMEHeader, body io.Reader, result *parsedBody, depth int) error {
@@ -822,6 +836,28 @@ func walkMIMEPart(headers textproto.MIMEHeader, body io.Reader, result *parsedBo
 		return nil
 	}
 	isAttachment := strings.EqualFold(disposition, "attachment") || fileName != ""
+	calendarMedia := mediaType == "text/calendar" || mediaType == "application/ics" ||
+		mediaType == "application/calendar" || strings.EqualFold(filepath.Ext(fileName), ".ics")
+	if calendarMedia {
+		data, _ := io.ReadAll(io.LimitReader(reader, maxAttachmentSize+1))
+		if len(data) > maxAttachmentSize {
+			return nil
+		}
+		method := strings.ToUpper(strings.TrimSpace(params["method"]))
+		result.calendarParts = append(result.calendarParts, parsedCalendarPart{Method: method, Data: data})
+		if isAttachment {
+			name := safeFileName(fileName)
+			if name == "" {
+				name = "invite.ics"
+			}
+			result.attachments = append(result.attachments, parsedMailAttachment{
+				Name: name, MIMEType: "text/calendar",
+				ContentID:   sanitizeMailText(strings.Trim(headers.Get("Content-Id"), "<>")),
+				Disposition: disposition, Data: data,
+			})
+		}
+		return nil
+	}
 	if isAttachment {
 		data, _ := io.ReadAll(io.LimitReader(reader, maxAttachmentSize+1))
 		if len(data) > maxAttachmentSize {

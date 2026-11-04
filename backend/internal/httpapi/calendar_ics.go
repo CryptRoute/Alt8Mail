@@ -16,12 +16,153 @@ import (
 	"time"
 )
 
+type parsedCalendarAttendee struct {
+	Email    string
+	Name     string
+	PartStat string
+	Role     string
+	RSVP     bool
+}
+
 type parsedCalendarEvent struct {
 	UID, Title, Description, Location, Timezone, RecurrenceRule, Status, Organizer, Transparency string
-	StartsAt, EndsAt                                                                             time.Time
+	StartsAt, EndsAt, RecurrenceID                                                               time.Time
 	AllDay                                                                                       bool
 	Sequence                                                                                     int
 	Attendees                                                                                    []string
+	AttendeeDetails                                                                              []parsedCalendarAttendee
+}
+
+func calendarEventLocation(event map[string]any) *time.Location {
+	name := stateString(event, "timezone")
+	if name == "" || strings.EqualFold(name, "UTC") || strings.EqualFold(name, "Etc/UTC") {
+		return time.UTC
+	}
+	if normalized := normalizeTZID(name); normalized != "" {
+		if location, err := time.LoadLocation(normalized); err == nil {
+			return location
+		}
+	}
+	return time.UTC
+}
+
+func calendarEventZoneName(event map[string]any) string {
+	location := calendarEventLocation(event)
+	if location == time.UTC {
+		return "UTC"
+	}
+	return location.String()
+}
+
+// icsObservances emits the offset changes around the event's year. Clients need
+// a VTIMEZONE when a DTSTART carries TZID; without it, Outlook in particular
+// treats the wall-clock time as floating or UTC and moves the meeting.
+func icsObservances(zoneName string, firstYear, lastYear int) []string {
+	location, err := time.LoadLocation(zoneName)
+	if err != nil || location == time.UTC {
+		return nil
+	}
+	type observance struct {
+		at        time.Time
+		from, to  int
+		daylight  bool
+		nameAfter string
+	}
+	if firstYear == 0 {
+		firstYear = time.Now().Year()
+	}
+	if lastYear < firstYear {
+		lastYear = firstYear
+	}
+	changes := []observance{}
+	cursor := time.Date(firstYear-1, time.December, 31, 0, 0, 0, 0, time.UTC)
+	end := time.Date(lastYear+2, time.January, 2, 0, 0, 0, 0, time.UTC)
+	_, previousOffset := cursor.In(location).Zone()
+	for cursor.Before(end) {
+		next := cursor.Add(24 * time.Hour)
+		_, nextOffset := next.In(location).Zone()
+		if nextOffset != previousOffset {
+			// Refine the transition hour within the day.
+			low, high := cursor, next
+			for high.Sub(low) > time.Minute {
+				mid := low.Add(high.Sub(low) / 2)
+				_, midOffset := mid.In(location).Zone()
+				if midOffset == previousOffset {
+					low = mid
+				} else {
+					high = mid
+				}
+			}
+			at := high.Truncate(time.Minute)
+			_, newOffset := at.In(location).Zone()
+			name := ""
+			if after := at.Add(time.Hour).In(location); after.Year() >= 0 {
+				name, _ = after.Zone()
+			}
+			changes = append(changes, observance{
+				at: at, from: previousOffset, to: newOffset,
+				daylight: newOffset > previousOffset, nameAfter: name,
+			})
+			previousOffset = newOffset
+		}
+		cursor = next
+	}
+	if len(changes) == 0 {
+		// A zone without transitions in this window still needs one observance.
+		_, offset := time.Date(firstYear, time.January, 1, 12, 0, 0, 0, location).Zone()
+		changes = append(changes, observance{
+			at:   time.Date(firstYear, time.January, 1, 0, 0, 0, 0, time.UTC),
+			from: offset, to: offset, nameAfter: zoneName,
+		})
+	}
+	out := []string{}
+	for _, change := range changes {
+		kind := "STANDARD"
+		if change.daylight {
+			kind = "DAYLIGHT"
+		}
+		localStart := change.at.Add(time.Duration(change.from) * time.Second)
+		offset := func(seconds int) string {
+			sign := "+"
+			if seconds < 0 {
+				sign = "-"
+				seconds = -seconds
+			}
+			return fmt.Sprintf("%s%02d%02d", sign, seconds/3600, (seconds%3600)/60)
+		}
+		out = append(out, "BEGIN:"+kind,
+			"DTSTART:"+localStart.Format("20060102T150405"),
+			"TZOFFSETFROM:"+offset(change.from),
+			"TZOFFSETTO:"+offset(change.to),
+			"TZNAME:"+icsEscape(firstNonEmpty(change.nameAfter, zoneName)),
+			"END:"+kind)
+	}
+	return out
+}
+
+func writeICSVTIMEZONE(out *strings.Builder, zoneName string, firstYear, lastYear int) {
+	if zoneName == "" || strings.EqualFold(zoneName, "UTC") {
+		return
+	}
+	line := func(value string) {
+		out.WriteString(icsFold(value))
+		out.WriteString("\r\n")
+	}
+	line("BEGIN:VTIMEZONE")
+	line("TZID:" + icsEscape(zoneName))
+	if firstYear == 0 {
+		firstYear = time.Now().Year()
+	}
+	if lastYear < firstYear {
+		lastYear = firstYear
+	}
+	if lastYear-firstYear > 10 {
+		lastYear = firstYear + 10
+	}
+	for _, observance := range icsObservances(zoneName, firstYear, lastYear) {
+		line(observance)
+	}
+	line("END:VTIMEZONE")
 }
 
 func icsEscape(value string) string {
@@ -100,15 +241,37 @@ func calendarEventICS(event map[string]any, method string, publicURL string) str
 	if err != nil {
 		ends = starts.Add(time.Hour)
 	}
+	zone := calendarEventLocation(event)
+	zoneName := calendarEventZoneName(event)
+	localStart := starts.In(zone)
+	localEnd := ends.In(zone)
 	line("BEGIN:VEVENT")
 	line("UID:" + icsEscape(uid))
 	line("DTSTAMP:" + icsUTC(time.Now()))
 	if allDay {
-		line("DTSTART;VALUE=DATE:" + starts.UTC().Format("20060102"))
-		line("DTEND;VALUE=DATE:" + ends.AddDate(0, 0, 1).UTC().Format("20060102"))
-	} else {
+		line("DTSTART;VALUE=DATE:" + localStart.Format("20060102"))
+		line("DTEND;VALUE=DATE:" + localEnd.AddDate(0, 0, 1).Format("20060102"))
+	} else if zone == time.UTC {
 		line("DTSTART:" + icsUTC(starts))
 		line("DTEND:" + icsUTC(ends))
+	} else {
+		line("DTSTART;TZID=" + icsParameterValue(zoneName) + ":" + localStart.Format("20060102T150405"))
+		line("DTEND;TZID=" + icsParameterValue(zoneName) + ":" + localEnd.Format("20060102T150405"))
+	}
+	recurrenceID := stateString(event, "recurrenceId")
+	if recurrenceID != "" {
+		if parsed, err := time.Parse(time.RFC3339, recurrenceID); err == nil {
+			recurrenceZoneName := firstNonEmpty(stateString(event, "recurrenceTimezone"), zoneName)
+			recurrenceZone := calendarEventLocation(map[string]any{"timezone": recurrenceZoneName})
+			original := parsed.In(recurrenceZone)
+			if recurrenceAllDay := stateBool(event, "recurrenceAllDay"); recurrenceAllDay {
+				line("RECURRENCE-ID;VALUE=DATE:" + original.Format("20060102"))
+			} else if recurrenceZone == time.UTC {
+				line("RECURRENCE-ID:" + icsUTC(parsed))
+			} else {
+				line("RECURRENCE-ID;TZID=" + icsParameterValue(recurrenceZoneName) + ":" + original.Format("20060102T150405"))
+			}
+		}
 	}
 	line("SUMMARY:" + icsEscape(stateString(event, "title")))
 	if description := stateString(event, "description"); description != "" {
@@ -122,15 +285,20 @@ func calendarEventICS(event map[string]any, method string, publicURL string) str
 	if organizer != "" {
 		line("ORGANIZER" + icsParameter("CN", organizerName) + ":mailto:" + organizer)
 	}
+	if sender := strings.ToLower(strings.TrimSpace(stateString(event, "senderEmail"))); sender != "" && sender != organizer {
+		line("SENDER" + icsParameter("CN", stateString(event, "senderName")) + ":mailto:" + sender)
+	}
+	responseRequested := stateBool(event, "responseRequested")
 	for _, attendee := range stateSlice(event, "attendeeList") {
 		entry, ok := attendee.(map[string]any)
 		if !ok {
 			continue
 		}
-		email := stateString(entry, "email")
+		email := strings.ToLower(strings.TrimSpace(stateString(entry, "email")))
 		if email == "" {
 			continue
 		}
+		isOrganizer := stateBool(entry, "organizer") || strings.EqualFold(email, organizer)
 		status := "NEEDS-ACTION"
 		switch stateString(entry, "status") {
 		case "accepted":
@@ -140,7 +308,38 @@ func calendarEventICS(event map[string]any, method string, publicURL string) str
 		case "tentative":
 			status = "TENTATIVE"
 		}
-		line("ATTENDEE" + icsParameter("CN", stateString(entry, "name")) + ";CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=" + status + ";RSVP=TRUE:mailto:" + email)
+		role := strings.ToUpper(strings.TrimSpace(stateString(entry, "role")))
+		if role == "" {
+			role = "REQ-PARTICIPANT"
+		}
+		if isOrganizer {
+			role = "CHAIR"
+			status = "ACCEPTED"
+		}
+		rsvp := responseRequested && !isOrganizer && method == "REQUEST"
+		line("ATTENDEE" + icsParameter("CN", stateString(entry, "name")) +
+			";CUTYPE=INDIVIDUAL;ROLE=" + role +
+			";PARTSTAT=" + status +
+			";RSVP=" + map[bool]string{true: "TRUE", false: "FALSE"}[rsvp] + ":mailto:" + email)
+	}
+	resourceNames := []string{}
+	for _, raw := range stateSlice(event, "resourceList") {
+		resource := calendarResourceMap(raw)
+		if resource == nil {
+			continue
+		}
+		email := strings.ToLower(strings.TrimSpace(stateString(resource, "email")))
+		if email == "" {
+			continue
+		}
+		name := stateString(resource, "name")
+		line("ATTENDEE" + icsParameter("CN", name) + ";CUTYPE=RESOURCE;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=FALSE:mailto:" + email)
+		if name != "" {
+			resourceNames = append(resourceNames, icsEscape(name))
+		}
+	}
+	if len(resourceNames) > 0 {
+		line("RESOURCES:" + strings.Join(resourceNames, ","))
 	}
 	if rule := stateString(event, "recurrenceRule"); rule != "" {
 		line("RRULE:" + strings.TrimPrefix(rule, "RRULE:"))
@@ -185,7 +384,71 @@ func icsParameter(name, value string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
 	}
-	return ";" + name + "=" + strings.ReplaceAll(strings.ReplaceAll(icsEscape(value), ";", ","), "\n", " ")
+	return ";" + name + "=" + icsParameterValue(value)
+}
+
+func icsParameterValue(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(icsEscape(value), ";", ","), "\n", " ")
+}
+
+func calendarResourceMap(raw any) map[string]any {
+	switch value := raw.(type) {
+	case map[string]any:
+		return value
+	case calendarResourcePublic:
+		return map[string]any{
+			"id": value.ID, "name": value.Name, "email": value.Email, "kind": value.Kind,
+			"location": value.Location, "capacity": value.Capacity, "status": value.Status,
+		}
+	}
+	return nil
+}
+
+func calendarExceptionMap(raw any) map[string]any {
+	switch value := raw.(type) {
+	case map[string]any:
+		return value
+	case calendarExceptionPublic:
+		return map[string]any{
+			"id": value.ID, "recurrenceId": value.RecurrenceID, "recurrenceDate": value.RecurrenceDate,
+			"title": value.Title, "description": value.Description, "location": value.Location,
+			"startsAt": value.StartsAt, "endsAt": value.EndsAt, "date": value.Date,
+			"start": value.Start, "end": value.End, "allDay": value.AllDay,
+			"timezone": value.Timezone, "status": value.Status, "sequence": value.Sequence,
+			"reminderMinutes": value.ReminderMinutes,
+		}
+	}
+	return nil
+}
+
+func expandCalendarEvents(events []map[string]any) []map[string]any {
+	expanded := make([]map[string]any, 0, len(events))
+	for _, event := range events {
+		expanded = append(expanded, event)
+		for _, raw := range stateSlice(event, "exceptions") {
+			override := calendarExceptionMap(raw)
+			if override == nil {
+				continue
+			}
+			copy := deepCopyMap(event)
+			for _, key := range []string{"id", "recurrenceId", "title", "description",
+				"startsAt", "endsAt", "allDay", "timezone", "status", "sequence", "reminderMinutes"} {
+				if value, exists := override[key]; exists {
+					copy[key] = value
+				}
+			}
+			copy["where"] = stateString(override, "location")
+			copy["date"] = stateString(override, "date")
+			copy["start"] = stateString(override, "start")
+			copy["end"] = stateString(override, "end")
+			copy["recurrenceRule"] = ""
+			copy["exceptions"] = nil
+			copy["recurrenceTimezone"] = stateString(event, "timezone")
+			copy["recurrenceAllDay"] = stateBool(event, "allDay")
+			expanded = append(expanded, copy)
+		}
+	}
+	return expanded
 }
 
 func buildCalendarICS(calendarName string, events []map[string]any, method string, publicURL string) string {
@@ -202,7 +465,44 @@ func buildCalendarICS(calendarName string, events []map[string]any, method strin
 	if method != "" {
 		line("METHOD:" + method)
 	}
+	feedURL := ""
 	for _, event := range events {
+		if value := stateString(event, "feedUrl"); value != "" {
+			feedURL = value
+			break
+		}
+	}
+	if feedURL != "" {
+		line("SOURCE;VALUE=URI:" + icsEscape(feedURL))
+	}
+	expanded := expandCalendarEvents(events)
+	zones := map[string][2]int{}
+	for _, event := range expanded {
+		zoneName := calendarEventZoneName(event)
+		if zoneName == "" || strings.EqualFold(zoneName, "UTC") {
+			continue
+		}
+		year := time.Now().Year()
+		if starts, err := time.Parse(time.RFC3339, stateString(event, "startsAt")); err == nil {
+			year = starts.In(calendarEventLocation(event)).Year()
+		}
+		window, ok := zones[zoneName]
+		if !ok {
+			zones[zoneName] = [2]int{year, year}
+		} else {
+			if year < window[0] {
+				window[0] = year
+			}
+			if year > window[1] {
+				window[1] = year
+			}
+			zones[zoneName] = window
+		}
+	}
+	for zoneName, window := range zones {
+		writeICSVTIMEZONE(&out, zoneName, window[0], window[1])
+	}
+	for _, event := range expanded {
 		out.WriteString(calendarEventICS(event, method, publicURL))
 	}
 	line("END:VCALENDAR")
@@ -210,84 +510,11 @@ func buildCalendarICS(calendarName string, events []map[string]any, method strin
 }
 
 func icsInviteEmail(event map[string]any, method string, publicURL string) string {
-	if method == "CANCEL" {
-		return buildCalendarICS("Alt8Mail invitation", []map[string]any{event}, "CANCEL", publicURL)
+	method = strings.ToUpper(strings.TrimSpace(method))
+	if method == "" {
+		method = "REQUEST"
 	}
-	return buildCalendarICS("Alt8Mail invitation", []map[string]any{event}, "REQUEST", publicURL)
-}
-
-// sendCalendarInvites sends a best-effort MIME invitation to every attendee.
-// Calendar mutations must never fail because a mailbox is offline, so errors
-// are logged and the in-app invitation remains available.
-func (s *Server) sendCalendarInvites(ctx context.Context, organizer userRecord, eventID, method string) {
-	events, err := s.loadCalendarEvents(ctx, organizer)
-	if err != nil {
-		return
-	}
-	for _, event := range events {
-		if stateString(event, "id") == eventID {
-			s.sendCalendarInvitePayload(ctx, organizer, event, method)
-			return
-		}
-	}
-}
-
-func (s *Server) sendCalendarInvitePayload(ctx context.Context, organizer userRecord, event map[string]any, method string) {
-	if len(stateSlice(event, "attendeeList")) == 0 {
-		return
-	}
-	recipients := []string{}
-	for _, attendee := range stateSlice(event, "attendeeList") {
-		entry, ok := attendee.(map[string]any)
-		if !ok {
-			continue
-		}
-		email := strings.ToLower(strings.TrimSpace(stateString(entry, "email")))
-		if email == "" || email == strings.ToLower(organizer.Email) {
-			continue
-		}
-		recipients = append(recipients, email)
-	}
-	if len(recipients) == 0 {
-		return
-	}
-	title := stateString(event, "title")
-	subject := "Invitation: " + title
-	if method == "CANCEL" {
-		subject = "Cancelled: " + title
-	}
-	when := stateString(event, "date") + " " + stateString(event, "start") + "–" + stateString(event, "end")
-	body := fmt.Sprintf("%s\n\n%s\n%s\n\nOrganizer: %s\n", title, when,
-		firstNonEmpty(stateString(event, "where"), "No location"), organizer.Email)
-	if method == "CANCEL" {
-		body = "This event has been cancelled.\n\n" + body
-	}
-	ics := icsInviteEmail(event, method, s.cfg.PublicURL)
-	item := map[string]any{
-		"from":        map[string]any{"name": organizer.Name, "email": organizer.Email},
-		"to":          peopleForEmails(recipients),
-		"subject":     subject,
-		"bodyText":    body,
-		"bodyHtml":    textToHTML(body),
-		"trustedHtml": true,
-	}
-	raw, err := buildMIMEMessage(item, fmt.Sprintf("<%s@%s>", newID("calinvite"), s.cfg.MailDomain),
-		[]outboundAttachment{{Name: "invite.ics", MIMEType: "text/calendar; charset=UTF-8; method=" + method, Data: []byte(ics)}})
-	if err != nil {
-		s.logger.Warn("calendar invite MIME build failed", "err", err, "event", stateString(event, "id"))
-		return
-	}
-	if err := s.submitSMTPMessage(organizer.Email, recipients, raw); err != nil {
-		s.logger.Warn("calendar invite delivery failed", "err", err, "event", stateString(event, "id"))
-	}
-}
-
-func peopleForEmails(emails []string) []any {
-	people := make([]any, 0, len(emails))
-	for _, email := range emails {
-		people = append(people, map[string]any{"name": "", "email": email})
-	}
-	return people
+	return buildCalendarICS("Alt8Mail invitation", []map[string]any{event}, method, publicURL)
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +605,16 @@ func parseICSTime(value string, params map[string]string) (time.Time, bool, erro
 }
 
 func parseICS(data []byte) ([]parsedCalendarEvent, error) {
+	return parseICSDocument(data, false)
+}
+
+// parseICSReplies keeps events that carry UID/SEQUENCE/PARTSTAT but omit
+// DTSTART, which is common in short iTIP REPLY messages.
+func parseICSReplies(data []byte) ([]parsedCalendarEvent, error) {
+	return parseICSDocument(data, true)
+}
+
+func parseICSDocument(data []byte, allowMissingStart bool) ([]parsedCalendarEvent, error) {
 	lines := unfoldICS(data)
 	events := []parsedCalendarEvent{}
 	var current *parsedCalendarEvent
@@ -418,6 +655,8 @@ func parseICS(data []byte) ([]parsedCalendarEvent, error) {
 					}
 					events = append(events, *current)
 				}
+			} else if allowMissingStart && current.UID != "" {
+				events = append(events, *current)
 			}
 			current = nil
 			continue
@@ -452,14 +691,24 @@ func parseICS(data []byte) ([]parsedCalendarEvent, error) {
 				current.Status = status
 			}
 		case "ORGANIZER":
-			current.Organizer = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "mailto:"))
+			current.Organizer = strings.ToLower(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), "mailto:"))
 		case "ATTENDEE":
-			email := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "mailto:"))
+			email := strings.ToLower(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), "mailto:"))
 			if calendarEmailPattern.MatchString(email) {
 				current.Attendees = append(current.Attendees, email)
+				current.AttendeeDetails = append(current.AttendeeDetails, parsedCalendarAttendee{
+					Email: email, Name: icsUnescape(params["CN"]),
+					PartStat: strings.ToUpper(strings.TrimSpace(params["PARTSTAT"])),
+					Role:     strings.ToUpper(strings.TrimSpace(params["ROLE"])),
+					RSVP:     strings.EqualFold(strings.TrimSpace(params["RSVP"]), "TRUE"),
+				})
 			}
 		case "SEQUENCE":
 			current.Sequence, _ = strconv.Atoi(strings.TrimSpace(value))
+		case "RECURRENCE-ID":
+			if parsed, _, err := parseICSTime(value, params); err == nil {
+				current.RecurrenceID = parsed.UTC()
+			}
 		case "TRANSP":
 			if strings.EqualFold(strings.TrimSpace(value), "TRANSPARENT") {
 				current.Transparency = "free"

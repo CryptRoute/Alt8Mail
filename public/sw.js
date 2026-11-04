@@ -1,21 +1,21 @@
 /* Alt8Mail — offline app shell.
    API calls are always network-only; mailbox data is never cached here. */
-const VERSION = "2026.11.04-11";
+const VERSION = "2026.11.04-16";
 const CACHE = `a8m-shell-${VERSION}`;
 const SHELL = [
   "/",
-  "/styles.css?v=0.20.29",
-  "/features.css?v=0.20.29",
-  "/workspace.css?v=0.20.29",
-  "/cabinet-calendar.css?v=0.20.29",
-  "/features-0.7.css?v=0.20.29",
-  "/onboarding.css?v=0.20.29",
-  "/email-ui.css?v=0.20.29",
+  "/styles.css?v=0.21.0",
+  "/features.css?v=0.21.0",
+  "/workspace.css?v=0.21.0",
+  "/cabinet-calendar.css?v=0.21.0",
+  "/features-0.7.css?v=0.21.0",
+  "/onboarding.css?v=0.21.0",
+  "/email-ui.css?v=0.21.0",
   "/vendor/typo.js",
   "/vendor/qrcode.min.js",
   "/vendor/en_US.aff",
   "/vendor/en_US.dic",
-  "/app.js?v=0.20.29",
+  "/app.js?v=0.21.0",
   "/search.mjs",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
@@ -110,6 +110,12 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) return;
 
   if (request.mode === "navigate") {
+    // Public share and upload pages are not part of the webmail shell. Never
+    // let one of them replace the cached `/` entry.
+    if (url.pathname.startsWith("/upload/") || url.pathname.startsWith("/files/s/")) {
+      event.respondWith(fetch(request));
+      return;
+    }
     event.respondWith(
       fetch(request, { cache: "no-store" })
         .then((response) => {

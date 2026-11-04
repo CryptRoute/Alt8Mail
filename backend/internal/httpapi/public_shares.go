@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,12 +13,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type publicShare struct {
 	contentFile
+	ShareID     string
 	OwnerName   string
 	TenantID    string
 	TenantName  string
@@ -24,6 +28,7 @@ type publicShare struct {
 	Access      string
 	ExpiresAt   time.Time
 	Recipient   string
+	Locked      bool
 }
 
 func (s *Server) loadPublicShare(ctx context.Context, token string, touch bool) (publicShare, error) {
@@ -32,7 +37,7 @@ func (s *Server) loadPublicShare(ctx context.Context, token string, touch bool) 
 		SELECT f.id, f.provider_id, f.external_id, f.name, f.mime, f.path, f.description,
 		       f.size_bytes, f.storage_key, COALESCE(f.attachment_id,''), f.external_url,
 		       f.starred, f.locked, f.version, f.previewable, f.checksum, f.metadata,
-		       f.created_at, f.updated_at, f.user_id::text,
+		       f.created_at, f.updated_at, f.user_id::text, s.id,
 		       u.name, u.tenant_id::text, t.name,
 		       COALESCE(t.settings->'branding'->>'primaryColor', '#0f6cbd'),
 		       s.access, s.expires_at, s.recipient_email::text
@@ -45,7 +50,7 @@ func (s *Server) loadPublicShare(ctx context.Context, token string, touch bool) 
 		&share.ID, &share.ProviderID, &share.ExternalID, &share.Name, &share.MIME, &share.Path,
 		&share.Description, &share.SizeBytes, &share.StorageKey, &share.AttachmentID,
 		&share.ExternalURL, &share.Starred, &share.Locked, &share.Version, &share.Previewable,
-		&share.Checksum, &share.Metadata, &share.CreatedAt, &share.UpdatedAt, &share.OwnerID,
+		&share.Checksum, &share.Metadata, &share.CreatedAt, &share.UpdatedAt, &share.OwnerID, &share.ShareID,
 		&share.OwnerName, &share.TenantID, &share.TenantName, &share.TenantColor,
 		&share.Access, &share.ExpiresAt, &share.Recipient,
 	)
@@ -61,19 +66,169 @@ func (s *Server) loadPublicShare(ctx context.Context, token string, touch bool) 
 	return share, nil
 }
 
+func (s *Server) shareAccessKey() []byte {
+	sum := sha256.Sum256([]byte("alt8mail-share-access\x00" + s.cfg.SessionSecret + "\x00" + s.cfg.CSRFSecret))
+	return sum[:]
+}
+
+func (s *Server) shareAccessCookieName(token string) string {
+	sum := sha256.Sum256([]byte("share-cookie\x00" + token))
+	return "a8m_share_" + hex.EncodeToString(sum[:8])
+}
+
+func (s *Server) shareAccessValue(share publicShare, email string) string {
+	expires := time.Now().Add(12 * time.Hour).Unix()
+	payload := strings.ToLower(strings.TrimSpace(email)) + "|" + strconv.FormatInt(expires, 10)
+	mac := hmac.New(sha256.New, s.shareAccessKey())
+	mac.Write([]byte(share.ShareID + "\x00" + payload))
+	return base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + hex.EncodeToString(mac.Sum(nil))))
+}
+
+func (s *Server) setShareAccessCookie(w http.ResponseWriter, token string, share publicShare, email string) {
+	http.SetCookie(w, &http.Cookie{
+		Name: s.shareAccessCookieName(token), Value: s.shareAccessValue(share, email),
+		Path: "/", HttpOnly: true, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteLaxMode,
+		Expires: time.Now().Add(12 * time.Hour), MaxAge: 12 * 60 * 60,
+	})
+}
+
+func (s *Server) shareAccessEmail(r *http.Request, token string, share publicShare) (string, bool) {
+	cookie, err := r.Cookie(s.shareAccessCookieName(token))
+	if err != nil || cookie.Value == "" {
+		return "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cookie.Value)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.Split(string(raw), "|")
+	if len(parts) != 3 {
+		return "", false
+	}
+	email, expiresRaw, signature := parts[0], parts[1], parts[2]
+	expires, err := strconv.ParseInt(expiresRaw, 10, 64)
+	if err != nil || time.Now().Unix() > expires {
+		return "", false
+	}
+	payload := email + "|" + expiresRaw
+	mac := hmac.New(sha256.New, s.shareAccessKey())
+	mac.Write([]byte(share.ShareID + "\x00" + payload))
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(expected), []byte(signature)) {
+		return "", false
+	}
+	if share.Recipient != "" && !strings.EqualFold(email, share.Recipient) {
+		return "", false
+	}
+	return email, true
+}
+
+func maskShareEmail(email string) string {
+	email = strings.TrimSpace(email)
+	at := strings.LastIndex(email, "@")
+	if at <= 0 {
+		return "recipient"
+	}
+	local := email[:at]
+	if len(local) > 2 {
+		local = local[:1] + strings.Repeat("•", len(local)-2) + local[len(local)-1:]
+	} else if len(local) == 2 {
+		local = local[:1] + "•"
+	}
+	return local + email[at:]
+}
+
+func (s *Server) shareVisibleToRequester(r *http.Request, token string, share publicShare) bool {
+	if share.Locked {
+		return false
+	}
+	if share.Recipient == "" {
+		return true
+	}
+	_, ok := s.shareAccessEmail(r, token, share)
+	return ok
+}
+
+func (s *Server) touchPublicShare(ctx context.Context, token string) {
+	_, _ = s.store.DB.Exec(ctx, `
+		UPDATE file_shares SET access_count = access_count + 1, last_accessed_at = now()
+		WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
+	`, hashShareToken(token))
+}
+
+func shareGateTemplate(tenantName, brandColor, fileName, recipient, token, errorText string, status int, w http.ResponseWriter) {
+	if tenantName == "" {
+		tenantName = "Alt8Mail"
+	}
+	if brandColor == "" {
+		brandColor = "#0f6cbd"
+	}
+	data := map[string]any{
+		"TenantName": tenantName, "BrandColor": template.CSS(safeBrandColor(brandColor)),
+		"FileName": fileName, "Recipient": maskShareEmail(recipient), "Token": token,
+		"Error": errorText, "Status": status,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	if status != 0 {
+		w.WriteHeader(status)
+	}
+	_ = shareGatePage.Execute(w, data)
+}
+
+func shareLockedTemplate(tenantName, brandColor, fileName, token, errorText string, sent bool, status int, w http.ResponseWriter) {
+	if tenantName == "" {
+		tenantName = "Alt8Mail"
+	}
+	if brandColor == "" {
+		brandColor = "#0f6cbd"
+	}
+	data := map[string]any{
+		"TenantName": tenantName, "BrandColor": template.CSS(safeBrandColor(brandColor)),
+		"FileName": fileName, "Token": token, "Error": errorText, "Sent": sent,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	if status != 0 {
+		w.WriteHeader(status)
+	}
+	_ = shareLockedPage.Execute(w, data)
+}
+
+var shareGatePage = template.Must(template.New("share-gate").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Confirm access · {{.TenantName}}</title><style>
+:root{color-scheme:light dark;--brand:{{.BrandColor}};--ink:#132033;--muted:#667085;--line:#e2e8f0;--surface:#fff;--bg:#f6f8fc}
+@media(prefers-color-scheme:dark){:root{--ink:#eef3f9;--muted:#98a5b8;--line:#29364b;--surface:#101827;--bg:#070b12}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0,#dbeafe66,transparent 42%),var(--bg);color:var(--ink);font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.card{width:min(500px,100%);background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:0 24px 60px #0f172a16;padding:26px}.mark{width:42px;height:42px;border-radius:13px;background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:800;margin-bottom:16px}.eyebrow{color:var(--brand);font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}h1{font-size:23px;letter-spacing:-.03em;margin:6px 0 7px}p{color:var(--muted);font-size:13px;margin:0 0 17px}label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px}input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:inherit;font-size:14px}button{width:100%;margin-top:11px;padding:11px;border:0;border-radius:9px;background:var(--brand);color:#fff;font:inherit;font-weight:750;cursor:pointer}.error{margin:0 0 13px;padding:9px 10px;border-radius:8px;background:#fee2e2;color:#991b1b;font-size:12px}.foot{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.name{font-weight:700;color:var(--ink)}
+</style></head><body><main class="card"><span class="mark">A8</span><p class="eyebrow">Secure file share</p><h1>Confirm it's you on this device</h1><p><span class="name">{{.FileName}}</span> was shared specifically with <strong>{{.Recipient}}</strong>. Enter that email address to continue.</p>{{if .Error}}<div class="error">{{.Error}}</div>{{end}}<form method="post" action="/files/s/{{.Token}}/verify"><label for="shareEmail">Shared with email</label><input id="shareEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com"><button type="submit">Confirm and open file</button></form><p class="foot">This device stays confirmed for 12 hours or until the link expires. Do not forward this link if the sender asked you to keep it private.</p></main></body></html>`))
+
+var shareLockedPage = template.Must(template.New("share-locked").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Request access · {{.TenantName}}</title><style>
+:root{color-scheme:light dark;--brand:{{.BrandColor}};--ink:#132033;--muted:#667085;--line:#e2e8f0;--surface:#fff;--bg:#f6f8fc}
+@media(prefers-color-scheme:dark){:root{--ink:#eef3f9;--muted:#98a5b8;--line:#29364b;--surface:#101827;--bg:#070b12}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0,#dbeafe66,transparent 42%),var(--bg);color:var(--ink);font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.card{width:min(500px,100%);background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:0 24px 60px #0f172a16;padding:26px}.mark{width:42px;height:42px;border-radius:13px;background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:800;margin-bottom:16px}.eyebrow{color:var(--brand);font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}h1{font-size:23px;letter-spacing:-.03em;margin:6px 0 7px}p{color:var(--muted);font-size:13px;margin:0 0 17px}label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin:10px 0 5px}input,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:inherit;font-size:14px;resize:vertical}button{width:100%;margin-top:11px;padding:11px;border:0;border-radius:9px;background:var(--brand);color:#fff;font:inherit;font-weight:750;cursor:pointer}.error{margin:0 0 13px;padding:9px 10px;border-radius:8px;background:#fee2e2;color:#991b1b;font-size:12px}.success{margin:0 0 13px;padding:10px 11px;border-radius:9px;background:#dcfce7;color:#166534;font-size:12px}.foot{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.name{font-weight:700;color:var(--ink)}
+</style></head><body><main class="card"><span class="mark">A8</span><p class="eyebrow">Access approval</p><h1>This file is locked</h1><p><span class="name">{{.FileName}}</span> is protected. Ask the owner for access by leaving your email and a short note.</p>{{if .Sent}}<div class="success">Your request was sent. The owner has been notified and can unlock the file or share it again.</div>{{else}}{{if .Error}}<div class="error">{{.Error}}</div>{{end}}<form method="post" action="/files/s/{{.Token}}/request-access"><label for="requestEmail">Your email</label><input id="requestEmail" name="email" type="email" autocomplete="email" required placeholder="you@example.com"><label for="requestMessage">Note to the owner (optional)</label><textarea id="requestMessage" name="message" rows="3" maxlength="500" placeholder="Why do you need access?"></textarea><button type="submit">Request access</button></form>{{end}}<p class="foot">The owner sees this request in Alt8Mail notifications. Sharing a file again or unlocking it will let this link open.</p></main></body></html>`))
+
 func (s *Server) publicShareMetadata(w http.ResponseWriter, r *http.Request) {
 	share, err := s.loadPublicShare(r.Context(), r.PathValue("token"), false)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "SHARE_NOT_FOUND", "This share link is invalid or has expired")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	verified := s.shareVisibleToRequester(r, r.PathValue("token"), share)
+	response := map[string]any{
 		"name": share.Name, "mime": share.MIME, "sizeBytes": share.SizeBytes,
 		"previewable": share.Previewable, "access": share.Access,
 		"expiresAt": share.ExpiresAt.UTC().Format(time.RFC3339),
 		"sharedBy":  share.OwnerName, "organization": share.TenantName,
-		"downloadUrl": "/api/public/shares/" + r.PathValue("token") + "/content?download=1",
-	})
+		"locked": share.Locked, "requiresEmail": share.Recipient != "", "verified": verified,
+	}
+	if verified {
+		response["downloadUrl"] = "/api/public/shares/" + r.PathValue("token") + "/content?download=1"
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) publicShareContent(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +236,16 @@ func (s *Server) publicShareContent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusNotFound, "SHARE_NOT_FOUND", "This share link is invalid or has expired")
 		return
+	}
+	if share.Locked {
+		writeError(w, http.StatusForbidden, "SHARE_LOCKED", "This file is locked until the owner approves access")
+		return
+	}
+	if share.Recipient != "" {
+		if _, ok := s.shareAccessEmail(r, r.PathValue("token"), share); !ok {
+			writeError(w, http.StatusForbidden, "SHARE_EMAIL_REQUIRED", "Confirm the recipient email on this device first")
+			return
+		}
 	}
 	s.serveFileContent(w, r, share.contentFile, share.OwnerID, share.TenantID)
 }
@@ -125,11 +290,23 @@ input[type=file]{max-width:100%;color:var(--muted)}
 </div></main></body></html>`))
 
 func (s *Server) publicSharePage(w http.ResponseWriter, r *http.Request) {
-	share, err := s.loadPublicShare(r.Context(), r.PathValue("token"), true)
+	token := r.PathValue("token")
+	share, err := s.loadPublicShare(r.Context(), token, false)
 	if err != nil {
 		http.Error(w, "This share link is invalid or has expired.", http.StatusNotFound)
 		return
 	}
+	if share.Locked {
+		shareLockedTemplate(share.TenantName, share.TenantColor, share.Name, token, "", false, http.StatusOK, w)
+		return
+	}
+	if share.Recipient != "" {
+		if _, ok := s.shareAccessEmail(r, token, share); !ok {
+			shareGateTemplate(share.TenantName, share.TenantColor, share.Name, share.Recipient, token, "", http.StatusOK, w)
+			return
+		}
+	}
+	s.touchPublicShare(r.Context(), token)
 	data := map[string]any{
 		"Name": share.Name, "TenantName": share.TenantName, "TenantColor": share.TenantColor,
 		"SizeLabel": formatBytes(share.SizeBytes), "ExpiresLabel": share.ExpiresAt.UTC().Format("2 Jan 2006"),
@@ -159,6 +336,10 @@ func (s *Server) publicShareReplace(w http.ResponseWriter, r *http.Request) {
 	share, err := s.loadPublicShare(r.Context(), r.PathValue("token"), false)
 	if err != nil {
 		http.Error(w, "This share link is invalid or has expired.", http.StatusNotFound)
+		return
+	}
+	if share.Locked || !s.shareVisibleToRequester(r, r.PathValue("token"), share) {
+		http.Error(w, "This file is locked or needs recipient confirmation.", http.StatusForbidden)
 		return
 	}
 	if share.Access != "edit" {
@@ -233,4 +414,66 @@ func (s *Server) publicShareReplace(w http.ResponseWriter, r *http.Request) {
 		VALUES ($1,$2,'Guest link','file.share_updated',$3,'File replaced through an edit share link')
 	`, share.TenantID, share.OwnerID, name)
 	http.Redirect(w, r, "/files/s/"+r.PathValue("token")+"?updated=1", http.StatusSeeOther)
+}
+
+func (s *Server) publicShareVerifyEmail(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	share, err := s.loadPublicShare(r.Context(), token, false)
+	if err != nil {
+		http.Error(w, "This share link is invalid or has expired.", http.StatusNotFound)
+		return
+	}
+	if share.Locked {
+		shareLockedTemplate(share.TenantName, share.TenantColor, share.Name, token, "", false, http.StatusOK, w)
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	if share.Recipient == "" {
+		http.Redirect(w, r, "/files/s/"+token, http.StatusSeeOther)
+		return
+	}
+	if !calendarEmailPattern.MatchString(email) || !strings.EqualFold(email, share.Recipient) {
+		shareGateTemplate(share.TenantName, share.TenantColor, share.Name, share.Recipient, token,
+			"That email does not match the person this file was shared with.", http.StatusForbidden, w)
+		return
+	}
+	s.setShareAccessCookie(w, token, share, email)
+	http.Redirect(w, r, "/files/s/"+token, http.StatusSeeOther)
+}
+
+func (s *Server) publicShareRequestAccess(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	share, err := s.loadPublicShare(r.Context(), token, false)
+	if err != nil {
+		http.Error(w, "This share link is invalid or has expired.", http.StatusNotFound)
+		return
+	}
+	if !share.Locked {
+		http.Redirect(w, r, "/files/s/"+token, http.StatusSeeOther)
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	if !calendarEmailPattern.MatchString(email) {
+		shareLockedTemplate(share.TenantName, share.TenantColor, share.Name, token,
+			"Enter a valid email address so the owner can identify you.", false, http.StatusBadRequest, w)
+		return
+	}
+	message := truncate(strings.TrimSpace(r.FormValue("message")), 500)
+	if _, err := s.store.DB.Exec(r.Context(), `
+		INSERT INTO public.file_share_access_requests
+		  (id, share_id, file_id, tenant_id, owner_user_id, requester_email, message)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+	`, newID("shareacq"), share.ShareID, share.ID, share.TenantID, share.OwnerID, email, message); err != nil {
+		shareLockedTemplate(share.TenantName, share.TenantColor, share.Name, token,
+			"The request could not be saved. Try again in a moment.", false, http.StatusInternalServerError, w)
+		return
+	}
+	_, _ = s.store.DB.Exec(r.Context(), `
+		INSERT INTO public.mail_notifications
+		  (id, tenant_id, user_id, kind, title, body, detail, actor_name, actor_email, owner_user_id)
+		VALUES ($1,$2,$3,'file_access_request',$4,$5,$6,$7,$8,$3)
+	`, newID("notification"), share.TenantID, share.OwnerID,
+		"Access requested: "+truncate(share.Name, 180),
+		truncate(email, 320), truncate(message, 500), truncate(email, 120), email)
+	shareLockedTemplate(share.TenantName, share.TenantColor, share.Name, token, "", true, http.StatusOK, w)
 }

@@ -705,6 +705,7 @@ func (s *Server) StartWorkers(ctx context.Context) {
 	go s.reactionDispatchWorker(ctx)
 	go s.reactionRuleWorker(ctx)
 	go s.siemWorker(ctx)
+	go s.calendarInviteWorker(ctx)
 	if s.mailSyncConfigured() {
 		go func() {
 			ticker := time.NewTicker(15 * time.Second)

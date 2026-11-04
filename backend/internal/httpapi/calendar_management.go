@@ -763,20 +763,101 @@ func (s *Server) rsvpCalendarEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "RSVP_STATUS", "Choose accepted, tentative or declined")
 		return
 	}
-	result, err := s.store.DB.Exec(r.Context(), `
-		UPDATE calendar_attendees a
-		SET status=$3, note=$4, responded_at=now()
+	var eventUID, title, organizerEmail, tenantID string
+	var sequence int
+	err := s.store.DB.QueryRow(r.Context(), `
+		SELECT e.uid, e.title, e.organizer_email::text, e.tenant_id::text, e.sequence
 		FROM calendar_events e
-		WHERE a.event_id=e.id AND a.event_id=$1 AND lower(a.email)=lower($2)
-	`, id, sess.User.Email, status, truncate(strings.TrimSpace(body.Note), 500))
-	if err != nil || result.RowsAffected() == 0 {
+		JOIN calendar_attendees a ON a.event_id=e.id
+		WHERE e.id=$1 AND lower(a.email)=lower($2)
+	`, id, sess.User.Email).Scan(&eventUID, &title, &organizerEmail, &tenantID, &sequence)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "RSVP_NOT_FOUND", "You are not invited to this event")
 		return
 	}
+	organizerID := ""
+	if organizerEmail != "" {
+		_ = s.store.DB.QueryRow(r.Context(), `
+			SELECT id::text FROM users WHERE tenant_id=$1 AND lower(email)=lower($2) AND deleted_at IS NULL
+		`, tenantID, organizerEmail).Scan(&organizerID)
+	}
+	result, err := s.store.DB.Exec(r.Context(), `
+		UPDATE calendar_attendees a
+		SET status=$3, note=$4, responded_at=now(),
+		    last_response_sequence=$5, last_response_at=now()
+		FROM calendar_events e
+		WHERE a.event_id=e.id AND e.id=$1 AND e.sequence=$5
+		  AND lower(a.email)=lower($2) AND a.last_response_sequence <= $5
+	`, id, sess.User.Email, status, truncate(strings.TrimSpace(body.Note), 500), sequence)
+	if err != nil || result.RowsAffected() == 0 {
+		writeError(w, http.StatusConflict, "RSVP_STALE", "This invitation changed. Open the newest invitation and respond again")
+		return
+	}
+	_, _ = s.store.DB.Exec(r.Context(), `
+		INSERT INTO calendar_invite_replies
+		(event_id, tenant_id, event_uid, attendee_email, sequence, partstat, method, dedup_key, source, applied, detail)
+		VALUES ($1,$2,$3,$4,$5,$6,'REPLY',$7,'app',true,$8)
+		ON CONFLICT (event_id, dedup_key) DO NOTHING
+	`, id, tenantID, eventUID, sess.User.Email, sequence, strings.ToUpper(status), newID("rsvp"), "In-app response")
 	s.recordWorkspaceAudit(r.Context(), sess, "calendar.rsvp", id, "RSVP "+status)
+	if organizerID != "" && organizerID != sess.User.ID {
+		if organizer, lookupErr := s.userByID(r.Context(), organizerID); lookupErr == nil {
+			s.insertAudit(organizer, "calendar.rsvp-received", title,
+				fmt.Sprintf("Guest %s responded %s · sequence %d · in-app", sess.User.Email, status, sequence),
+				clientIP(r), sanitizeUserAgent(r.UserAgent()))
+		}
+	}
 	s.publishRealtime("calendar")
 	event, _ := s.loadCalendarEvent(r.Context(), sess.User, id)
+	if event != nil && status != "needs-action" {
+		attendee := sess.User
+		go s.sendCalendarReplyEmail(context.Background(), attendee, event, status)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "event": event})
+}
+
+func (s *Server) resendCalendarInvites(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	id := r.PathValue("id")
+	event, err := s.loadCalendarEvent(r.Context(), sess.User, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "Event not found")
+		return
+	}
+	access := stateString(event, "access")
+	if access != "owner" && access != "edit" {
+		writeError(w, http.StatusForbidden, "EVENT_ACCESS", "Only the organizer or a calendar editor can resend invitations")
+		return
+	}
+	if stateString(event, "status") == "cancelled" {
+		writeError(w, http.StatusConflict, "EVENT_CANCELLED", "This event has been cancelled")
+		return
+	}
+	filtered := []any{}
+	waiting := []string{}
+	for _, raw := range stateSlice(event, "attendeeList") {
+		entry, ok := raw.(map[string]any)
+		if !ok || stateBool(entry, "organizer") {
+			continue
+		}
+		email := stateString(entry, "email")
+		if email == "" || stateString(entry, "status") != "needs-action" {
+			continue
+		}
+		filtered = append(filtered, entry)
+		waiting = append(waiting, email)
+	}
+	if len(filtered) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "resent": 0, "waiting": []string{}, "event": event})
+		return
+	}
+	copyEvent := deepCopyMap(event)
+	copyEvent["attendeeList"] = filtered
+	s.sendCalendarInvitePayload(context.Background(), sess.User, copyEvent, "REQUEST")
+	s.recordWorkspaceAudit(r.Context(), sess, "calendar.invites.resent", stateString(event, "title"),
+		fmt.Sprintf("Resent invitation to %d guest(s) awaiting a response", len(filtered)))
+	event, _ = s.loadCalendarEvent(r.Context(), sess.User, id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "resent": len(filtered), "waiting": waiting, "event": event})
 }
 
 func (s *Server) getCalendarShares(w http.ResponseWriter, r *http.Request) {

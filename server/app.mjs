@@ -203,6 +203,7 @@ export async function createApp(options = {}) {
   if (!db.attachments) db.attachments = {};
   if (!Array.isArray(db.tasks)) db.tasks = [];
   if (!Array.isArray(db.files)) db.files = [];
+  if (!Array.isArray(db.uploadSessions)) db.uploadSessions = [];
   if (!Array.isArray(db.storageProviders)) db.storageProviders = [];
   if (!Array.isArray(db.signatures)) db.signatures = [];
   if (!db.signatures.length) {
@@ -1060,17 +1061,159 @@ export async function createApp(options = {}) {
 
   function calendarEventPayload(event) {
     const date = String(event.date || "");
+    const sequence = Number(event.sequence) || 0;
+    const attendeeList = (Array.isArray(event.attendeeList) ? event.attendeeList
+      : (Array.isArray(event.attendeeEmails) ? event.attendeeEmails.filter(Boolean).map((email) => ({
+          email: String(email).toLowerCase(), name: String(event.attendeeNames?.[email] || ""),
+          status: "needs-action", organizer: false, role: "REQ-PARTICIPANT", rsvp: true,
+          lastInviteSequence: sequence, lastResponseSequence: -1, respondedAt: ""
+        })) : [])).map((guest) => ({ ...guest, lastDeliveryStatus: guest.lastDeliveryStatus || "sent" }));
     return {
       calendarId: "default", calendarName: "Calendar", calendarColor: "#0f6cbd",
       calendarKind: "personal", timezone: "UTC", allDay: false, recurrenceRule: "",
       status: "confirmed", visibility: "default", organizer: db.user.email,
-      organizerName: db.user.name, attendeeList: [], attendees: Number(event.attendees) || 1,
-      attachments: [], reminderMinutes: 15, transparency: "busy", canEdit: true,
-      owned: true, access: "owner", invited: false, myStatus: "", responseRequested: true,
-      createdAt: event.createdAt || nowIso(), updatedAt: event.updatedAt || nowIso(),
+      organizerName: db.user.name, attachments: [], reminderMinutes: 15, transparency: "busy",
+      canEdit: true, owned: true, access: "owner", invited: false, myStatus: "",
+      responseRequested: true, createdAt: event.createdAt || nowIso(), updatedAt: event.updatedAt || nowIso(),
       startsAt: `${date}T${event.start || "09:00"}:00Z`, endsAt: `${date}T${event.end || "10:00"}:00Z`,
-      ...event
+      ...event,
+      sequence,
+      attendeeList,
+      exceptions: Array.isArray(event.exceptions) ? event.exceptions : [],
+      proposals: Array.isArray(event.proposals) ? event.proposals : [],
+      resourceList: Array.isArray(event.resourceList) ? event.resourceList
+        : (Array.isArray(event.resourceIds) ? calendarResourceList().filter((resource) => event.resourceIds.includes(resource.id)) : []),
+      senderEmail: String(event.senderEmail || ""), senderName: String(event.senderName || ""),
+      rsvpAnalytics: calendarRSVPAnalytics(attendeeList.filter((guest) => !guest.organizer)),
+      attendees: attendeeList.length || Number(event.attendees) || 0
     };
+  }
+
+  function calendarRSVPAnalytics(guests) {
+    if (guests.length <= 10) return null;
+    const responded = guests.filter((guest) => ["accepted", "tentative", "declined"].includes(guest.status)).length;
+    const delivered = guests.filter((guest) => guest.lastDeliveryStatus === "sent").length;
+    const failed = guests.filter((guest) => guest.lastDeliveryStatus === "failed").length;
+    const domains = new Map();
+    guests.forEach((guest) => {
+      const domain = String(guest.email || "").split("@")[1] || "unknown";
+      const item = domains.get(domain) || { domain, total: 0, responded: 0, delivered: 0, failed: 0 };
+      item.total += 1;
+      if (["accepted", "tentative", "declined"].includes(guest.status)) item.responded += 1;
+      if (guest.lastDeliveryStatus === "sent") item.delivered += 1;
+      if (guest.lastDeliveryStatus === "failed") item.failed += 1;
+      domains.set(domain, item);
+    });
+    return {
+      total: guests.length, responded, delivered, failed,
+      responseRate: Math.round(responded * 1000 / guests.length) / 10,
+      averageResponseMinutes: 0,
+      domains: [...domains.values()].map((item) => ({
+        ...item, responseRate: Math.round(item.responded * 1000 / item.total) / 10
+      })).sort((a, b) => a.domain.localeCompare(b.domain))
+    };
+  }
+
+  function noteTitle(content) {
+    const line = String(content || "").split("\n").map((value) => value.trim())
+      .find((value) => value && !/^[-*]\s*\[[ xX]\]\s*$/.test(value));
+    return line ? line.replace(/^[-*]\s*(\[[ xX]\]\s*)?/, "").slice(0, 90) : "Untitled note";
+  }
+
+  function normalizeMockNoteLink(link) {
+    if (!link) return null;
+    if (typeof link === "string") return { type: "thread", id: link, threadId: link };
+    if (typeof link !== "object") return null;
+    let type = String(link.type || "").toLowerCase();
+    let linkId = String(link.id || "");
+    if (!type) {
+      if (link.threadId) type = "thread";
+      else if (link.eventId) type = "event";
+      else if (link.fileId) type = "file";
+    }
+    if (!linkId) {
+      if (type === "thread") linkId = String(link.threadId || "");
+      else if (type === "event") linkId = String(link.eventId || "");
+      else if (type === "file") linkId = String(link.fileId || "");
+    }
+    if (!["thread", "event", "file"].includes(type) || !linkId) return null;
+    return { ...link, type, id: linkId };
+  }
+
+  function mockNoteLink(link) {
+    const normalized = normalizeMockNoteLink(link);
+    if (!normalized) return null;
+    if (normalized.type === "thread") {
+      const latest = db.messages.filter((message) => (message.threadId || message.id) === normalized.id)
+        .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))[0];
+      if (!latest) return null;
+      return {
+        type: "thread", id: normalized.id, threadId: normalized.id,
+        subject: latest.subject || "(no subject)",
+        fromName: latest.from?.name || latest.from?.email || "",
+        fromEmail: latest.from?.email || "",
+        date: latest.date
+      };
+    }
+    if (normalized.type === "event") {
+      const event = db.calendarEvents.find((item) => item.id === normalized.id);
+      if (!event) return null;
+      const date = String(event.date || "");
+      return {
+        type: "event", id: event.id, title: event.title || "Calendar event",
+        startAt: event.startsAt || `${date}T${event.start || "09:00"}:00Z`,
+        endAt: event.endsAt || `${date}T${event.end || "10:00"}:00Z`,
+        allDay: Boolean(event.allDay), location: event.where || "",
+        calendarName: "Calendar", status: event.status || "confirmed", date
+      };
+    }
+    const file = db.files.find((item) => item.id === normalized.id);
+    if (!file) return null;
+    return {
+      type: "file", id: file.id, name: file.name, mime: file.mime,
+      sizeBytes: Number(file.sizeBytes) || 0, size: file.size || formatBytes(Number(file.sizeBytes) || 0),
+      folderId: file.folderId || "", date: file.modifiedAt || nowIso()
+    };
+  }
+
+  function mockNoteLinks(links) {
+    const result = [];
+    const seen = new Set();
+    for (const link of Array.isArray(links) ? links : []) {
+      const normalized = mockNoteLink(link);
+      if (!normalized) continue;
+      const key = `${normalized.type}:${normalized.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(normalized);
+      if (result.length >= 12) break;
+    }
+    return result;
+  }
+
+  function noteBoard(notes, includeArchived = true) {
+    const all = Array.isArray(notes) ? notes : [];
+    for (const note of all) note.links = mockNoteLinks(note.links);
+    const active = all.filter((note) => !note.archived);
+    const pinned = active.find((note) => note.inboxPinned) || null;
+    const team = Boolean(db.notesTeam);
+    return {
+      notes: includeArchived ? all : active,
+      pinned,
+      activeCount: active.length,
+      archivedCount: all.filter((note) => note.archived).length,
+      shared: team, team, teamCount: team ? 1 : 0, canEdit: true,
+      mailboxes: [{ id: db.user.id, name: db.user.name, email: db.user.email, initials: db.user.initials, color: db.user.color, canEdit: true, self: true }],
+      owner: { id: db.user.id, name: db.user.name, email: db.user.email, initials: db.user.initials, color: db.user.color }
+    };
+  }
+
+  function calendarResourceList() {
+    return [
+      { id: "room-a", name: "Conference Room A", email: "room-a@a8m.example", kind: "room", location: "Head office", capacity: 8 },
+      { id: "board-room", name: "Board Room", email: "board-room@a8m.example", kind: "room", location: "Executive floor", capacity: 16 },
+      { id: "projector", name: "Portable projector", email: "projector@a8m.example", kind: "equipment", location: "IT cupboard", capacity: 0 }
+    ];
   }
 
   function calendarList() {
@@ -1412,6 +1555,128 @@ export async function createApp(options = {}) {
       }
       if (pathname === "/api/dlp/check" && req.method === "POST") {
         sendJson(res, 200, mockDlpEvaluate(await readJson(req)));
+        return;
+      }
+      if (pathname === "/api/notes" && req.method === "GET") {
+        const archived = new URL(req.url, "http://localhost").searchParams.get("archived") === "1";
+        sendJson(res, 200, noteBoard(db.stickyNotes || [], archived));
+        return;
+      }
+      if (pathname === "/api/notes" && req.method === "POST") {
+        const body = await readJson(req);
+        const notes = db.stickyNotes || [];
+        if (notes.length >= 100) throw new ApiError(400, "STICKY_NOTE_LIMIT", "You can keep up to 100 notes in this mailbox");
+        const content = String(body.content || "").replace(/[ \t\r\n]+$/, "");
+        if (content.length > 2000) throw new ApiError(400, "STICKY_NOTE", "Keep each sticky note under 2,000 characters");
+        const color = String(body.color || "yellow").toLowerCase();
+        if (!["yellow", "blue", "pink", "green"].includes(color)) throw new ApiError(400, "STICKY_NOTE_COLOR", "Choose a valid sticky-note color");
+        let pinned = body.inboxPinned === undefined ? !notes.some((note) => !note.archived && note.inboxPinned) : Boolean(body.inboxPinned);
+        if (pinned) notes.forEach((note) => { if (!note.archived) note.inboxPinned = false; });
+        const note = {
+          id: id("note"), title: noteTitle(content), content, color, collapsed: false,
+          inboxPinned: pinned, archived: false,
+          position: { x: Math.max(0.04, 0.7 - (notes.length % 4) * 0.06), y: Math.min(0.85, 0.12 + (notes.length % 6) * 0.09) },
+          links: mockNoteLinks(body.links), updatedBy: db.user.name, updatedAt: nowIso(), createdAt: nowIso(), revision: 0
+        };
+        db.stickyNotes = [note, ...notes];
+        addAudit(req, "sticky_note.created", note.title, "Created a sticky note");
+        await store.save();
+        const result = noteBoard(db.stickyNotes);
+        result.created = note.id;
+        sendJson(res, 201, result);
+        return;
+      }
+      if (pathname === "/api/notes/search" && req.method === "GET") {
+        const url = new URL(req.url, "http://localhost");
+        const query = String(url.searchParams.get("q") || "").trim().slice(0, 200);
+        const archivedParam = String(url.searchParams.get("archived") || "").toLowerCase();
+        const archived = ["1", "true", "archived"].includes(archivedParam) ? true : ["0", "false", "active"].includes(archivedParam) ? false : null;
+        const ownerId = String(url.searchParams.get("ownerId") || "");
+        const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit")) || 50));
+        noteBoard(db.stickyNotes || []);
+        const needle = query.toLowerCase();
+        let notes = (db.stickyNotes || []).filter((note) => archived === null || Boolean(note.archived) === archived);
+        if (ownerId && ownerId !== db.user.id) notes = [];
+        if (needle) notes = notes.filter((note) => `${note.title || ""} ${note.content || ""} ${JSON.stringify(note.links || [])}`.toLowerCase().includes(needle));
+        notes = notes.slice().sort((a, b) => (Number(b.inboxPinned) - Number(a.inboxPinned)) || String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, limit);
+        const owner = { id: db.user.id, name: db.user.name, email: db.user.email, initials: db.user.initials, color: db.user.color };
+        const team = Boolean(db.notesTeam);
+        sendJson(res, 200, {
+          query, scope: url.searchParams.get("scope") === "all" ? "all" : "mailbox", count: notes.length,
+          notes: notes.map((note) => ({ ...note, owner, team, teamCount: team ? 1 : 0, canEdit: true })),
+          mailboxes: [{ ...owner, canEdit: true, self: true }]
+        });
+        return;
+      }
+      if (pathname === "/api/notes/attach" && req.method === "GET") {
+        const url = new URL(req.url, "http://localhost");
+        const kind = String(url.searchParams.get("type") || "").toLowerCase();
+        const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
+        let items = [];
+        if (kind === "thread") {
+          const seen = new Set();
+          const ids = [];
+          for (const message of db.messages) {
+            const threadId = message.threadId || message.id;
+            if (!threadId || seen.has(threadId)) continue;
+            seen.add(threadId);
+            ids.push(threadId);
+          }
+          items = ids.map((threadId) => mockNoteLink({ type: "thread", id: threadId })).filter(Boolean);
+        } else if (kind === "event") {
+          items = db.calendarEvents.map((event) => mockNoteLink({ type: "event", id: event.id })).filter(Boolean);
+        } else if (kind === "file") {
+          items = db.files.map((file) => mockNoteLink({ type: "file", id: file.id })).filter(Boolean);
+        } else {
+          throw new ApiError(400, "STICKY_LINK_TYPE", "Choose conversations, events or files");
+        }
+        if (query) {
+          items = items.filter((item) => `${item.subject || ""} ${item.title || ""} ${item.name || ""} ${item.fromName || ""} ${item.fromEmail || ""} ${item.location || ""} ${item.mime || ""}`.toLowerCase().includes(query));
+        }
+        sendJson(res, 200, { type: kind, items: items.slice(0, 40) });
+        return;
+      }
+      const noteMatch = pathname.match(/^\/api\/notes\/([A-Za-z0-9_-]{1,100})$/);
+      if (noteMatch && req.method === "PATCH") {
+        const body = await readJson(req);
+        const notes = db.stickyNotes || [];
+        const note = notes.find((item) => item.id === noteMatch[1]);
+        if (!note) throw new ApiError(404, "STICKY_NOTE_NOT_FOUND", "Sticky note not found");
+        const nextArchived = body.archived !== undefined ? Boolean(body.archived) : Boolean(note.archived);
+        if (body.inboxPinned && nextArchived) throw new ApiError(400, "STICKY_NOTE_STATE", "Restore the note before pinning it");
+        if (body.content !== undefined) {
+          const content = String(body.content || "").replace(/[ \t\r\n]+$/, "");
+          if (content.length > 2000) throw new ApiError(400, "STICKY_NOTE", "Keep each sticky note under 2,000 characters");
+          note.content = content;
+          note.title = noteTitle(content);
+        }
+        if (body.color !== undefined) {
+          const color = String(body.color || "").toLowerCase();
+          if (!["yellow", "blue", "pink", "green"].includes(color)) throw new ApiError(400, "STICKY_NOTE_COLOR", "Choose a valid sticky-note color");
+          note.color = color;
+        }
+        if (body.collapsed !== undefined) note.collapsed = Boolean(body.collapsed);
+        if (body.position && Number.isFinite(Number(body.position.x)) && Number.isFinite(Number(body.position.y))) {
+          note.position = { x: Math.max(0, Math.min(1, Number(body.position.x))), y: Math.max(0, Math.min(1, Number(body.position.y))) };
+        }
+        if (Array.isArray(body.links)) note.links = mockNoteLinks(body.links);
+        if (body.archived !== undefined) {
+          note.archived = Boolean(body.archived);
+          if (note.archived) note.inboxPinned = false;
+        }
+        if (body.inboxPinned !== undefined) {
+          if (body.inboxPinned && note.archived) throw new ApiError(400, "STICKY_NOTE_STATE", "Restore the note before pinning it");
+          note.inboxPinned = Boolean(body.inboxPinned);
+          if (note.inboxPinned) notes.forEach((item) => { if (item.id !== note.id && !item.archived) item.inboxPinned = false; });
+        }
+        note.updatedBy = db.user.name;
+        note.updatedAt = nowIso();
+        note.revision = Number(note.revision || 0) + 1;
+        addAudit(req, note.archived ? "sticky_note.archived" : "sticky_note.updated", note.title, "Updated a sticky note");
+        await store.save();
+        const result = noteBoard(notes);
+        result.updated = note.id;
+        sendJson(res, 200, result);
         return;
       }
       if (pathname === "/api/sticky-note" && req.method === "GET") {
@@ -1927,14 +2192,77 @@ export async function createApp(options = {}) {
         sendJson(res, 201, { file: record });
         return;
       }
+      const uploadSessionPayload = (session) => ({
+        id: session.id, providerId: "a8m", folderId: session.folderId || "",
+        expiresAt: session.expiresAt, createdAt: session.createdAt,
+        uploads: session.uploads || [], active: !session.revokedAt && Date.parse(session.expiresAt) > Date.now(),
+        ...(session.url ? { url: session.url } : {})
+      });
+      if (pathname === "/api/files/upload-sessions" && req.method === "POST") {
+        const body = await readJson(req);
+        const token = randomBytes(16).toString("base64url");
+        const session = {
+          id: id("uplink"), token, folderId: String(body.folderId || ""),
+          createdAt: nowIso(), expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          uploads: [], url: `https://${req.headers.host || "mail.a8m.example"}/upload/${token}`
+        };
+        db.uploadSessions.unshift(session);
+        await store.save();
+        sendJson(res, 201, { session: uploadSessionPayload(session) });
+        return;
+      }
+      const uploadSessionMatch = pathname.match(/^\/api\/files\/upload-sessions\/([A-Za-z0-9_-]{1,100})$/);
+      if (uploadSessionMatch && req.method === "GET") {
+        const session = db.uploadSessions.find((item) => item.id === uploadSessionMatch[1]);
+        if (!session) throw new ApiError(404, "UPLOAD_SESSION", "Upload session not found");
+        sendJson(res, 200, { session: uploadSessionPayload(session) });
+        return;
+      }
+      const uploadExtendMatch = pathname.match(/^\/api\/files\/upload-sessions\/([A-Za-z0-9_-]{1,100})\/extend$/);
+      if (uploadExtendMatch && req.method === "POST") {
+        const session = db.uploadSessions.find((item) => item.id === uploadExtendMatch[1]);
+        if (!session) throw new ApiError(404, "UPLOAD_SESSION", "Upload session not found");
+        const body = await readJson(req);
+        const hours = Math.max(1, Math.min(24, Number(body.hours) || 1));
+        session.expiresAt = new Date(Math.max(Date.now(), Date.parse(session.expiresAt)) + hours * 3600 * 1000).toISOString();
+        session.url = session.url || `https://${req.headers.host || "mail.a8m.example"}/upload/${session.token}`;
+        await store.save();
+        sendJson(res, 200, { session: uploadSessionPayload(session) });
+        return;
+      }
+      if (uploadSessionMatch && req.method === "DELETE") {
+        const session = db.uploadSessions.find((item) => item.id === uploadSessionMatch[1]);
+        if (!session) throw new ApiError(404, "UPLOAD_SESSION", "Upload session not found");
+        session.revokedAt = nowIso();
+        await store.save();
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      if (pathname === "/api/files/import-url" && req.method === "POST") {
+        const body = await readJson(req);
+        const source = String(body.url || "").trim();
+        if (!/^https?:\/\//i.test(source)) throw new ApiError(400, "IMPORT_URL", "Enter a valid http or https URL");
+        let fileName = "download";
+        try { fileName = decodeURIComponent(new URL(source).pathname.split("/").filter(Boolean).pop() || "download"); } catch {}
+        const record = createFileRecord({
+          name: fileName, mime: "application/octet-stream", sizeBytes: 2048, providerId: "a8m",
+          path: "Imports", description: `Imported from ${source.slice(0, 300)}`
+        });
+        db.files.unshift(record);
+        addAudit(req, "file.imported_url", record.name, `Imported from ${source.slice(0, 300)}`);
+        await store.save();
+        sendJson(res, 201, { file: record });
+        return;
+      }
       const fileMatch = pathname.match(/^\/api\/files\/([A-Za-z0-9_-]{1,100})$/);
       if (fileMatch && req.method === "PATCH") {
         const file = findFile(fileMatch[1]);
         if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
         const body = await readJson(req);
         if (typeof body.starred === "boolean") file.starred = body.starred;
+        if (typeof body.locked === "boolean") file.locked = body.locked;
         if (body.description !== undefined) file.description = String(body.description).slice(0, 500);
-        addAudit(req, "file.updated", file.name, "File metadata updated");
+        addAudit(req, "file.updated", file.name, body.locked !== undefined ? (body.locked ? "File link locked" : "File link unlocked") : "File metadata updated");
         await store.save();
         sendJson(res, 200, { file });
         return;
@@ -1946,15 +2274,17 @@ export async function createApp(options = {}) {
         const body = await readJson(req);
         const access = body.access === "edit" ? "edit" : "view";
         const expiresDays = Math.max(1, Math.min(90, Number(body.expiresDays) || 7));
+        const recipientEmail = String(body.recipientEmail || "").trim().toLowerCase();
         const token = randomBytes(15).toString("base64url");
         const expiresAt = new Date(Date.now() + expiresDays * 24 * 3600 * 1000).toISOString();
         if (!Array.isArray(file.shares)) file.shares = [];
-        file.shares.push({ token, access, expiresAt, createdAt: nowIso() });
-        if (!file.sharedWith.includes("External link")) file.sharedWith.push("External link");
+        file.shares.push({ token, access, expiresAt, createdAt: nowIso(), recipientEmail });
+        if (recipientEmail && !file.sharedWith.includes(recipientEmail)) file.sharedWith.push(recipientEmail);
+        if (!recipientEmail && !file.sharedWith.includes("External link")) file.sharedWith.push("External link");
         addAudit(req, "file.shared", file.name, `External ${access} link · expires in ${expiresDays} days`);
         await store.save();
         sendJson(res, 200, {
-          share: { url: `https://files.a8m.example/s/${token}`, access, expiresAt, expiresDays }
+          share: { url: `https://files.a8m.example/s/${token}`, access, expiresAt, expiresDays, recipientEmail }
         });
         return;
       }
@@ -3176,6 +3506,14 @@ export async function createApp(options = {}) {
         return;
       }
 
+      if (pathname === "/api/dev/notes-team" && req.method === "POST" && allowDevOutbox) {
+        const body = await readJson(req);
+        db.notesTeam = Boolean(body.team);
+        await store.save();
+        sendJson(res, 200, { team: db.notesTeam, teamCount: db.notesTeam ? 1 : 0 });
+        return;
+      }
+
       if (pathname === "/api/dev/reset" && req.method === "POST" && allowReset) {
         for (const timer of sendTimers.values()) clearTimeout(timer);
         sendTimers.clear();
@@ -3185,6 +3523,7 @@ export async function createApp(options = {}) {
         if (!db.user.id) db.user.id = "user_demo_avery";
         if (!db.user.preferences) db.user.preferences = {};
         if (!db.user.security) db.user.security = { twoFactor: { enabled: false } };
+        db.notesTeam = false;
         ensureCollaborationSeed();
         invalidateIndex();
         addAudit(req, "demo.reset", "Demo workspace", "Mailbox and audit data reset to seed");
@@ -3239,11 +3578,79 @@ export async function createApp(options = {}) {
         return;
       }
 
+      if (pathname === "/api/calendar/resources" && req.method === "GET") {
+        sendJson(res, 200, { resources: calendarResourceList(), count: 3 });
+        return;
+      }
+      if (pathname === "/api/calendar/polls" && req.method === "GET") {
+        sendJson(res, 200, { polls: db.calendarPolls || [], count: (db.calendarPolls || []).length });
+        return;
+      }
+      if (pathname === "/api/calendar/polls" && req.method === "POST") {
+        const body = await readJson(req);
+        const timezone = String(body.timezone || "UTC");
+        const poll = {
+          id: id("poll"), title: String(body.title || "Meeting poll").slice(0, 240),
+          description: String(body.description || ""), timezone, status: "open",
+          selectedSlotId: "", eventId: "", createdAt: nowIso(),
+          slots: (Array.isArray(body.slots) ? body.slots : []).map((slot) => ({
+            id: id("pollslot"), date: String(slot.date || ""), start: String(slot.start || ""),
+            end: String(slot.end || ""), yes: 0, maybe: 0, no: 0
+          })),
+          invitees: (Array.isArray(body.inviteeEmails) ? body.inviteeEmails : []).map((email) => ({
+            email: String(email).toLowerCase(), name: String(body.inviteeNames?.[email] || ""), respondedAt: ""
+          }))
+        };
+        db.calendarPolls = [poll, ...(db.calendarPolls || [])];
+        addAudit(req, "calendar.poll.created", poll.title, "Meeting poll created");
+        await store.save();
+        sendJson(res, 201, { poll });
+        return;
+      }
+      const calendarPollMatch = pathname.match(/^\/api\/calendar\/polls\/([A-Za-z0-9_-]{1,100})(\/close|\/schedule)?$/);
+      if (calendarPollMatch) {
+        const poll = (db.calendarPolls || []).find((item) => item.id === calendarPollMatch[1]);
+        if (!poll) throw new ApiError(404, "POLL_NOT_FOUND", "Poll not found");
+        if (calendarPollMatch[2] === "/close" && req.method === "POST") {
+          poll.status = "closed";
+          addAudit(req, "calendar.poll.closed", poll.title, "Meeting poll closed");
+          await store.save();
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+        if (calendarPollMatch[2] === "/schedule" && req.method === "POST") {
+          const body = await readJson(req);
+          const slot = (poll.slots || []).find((item) => item.id === body.slotId);
+          if (!slot) throw new ApiError(400, "POLL_SLOT", "Choose a time option");
+          const record = calendarEventPayload({
+            id: id("cal"), date: slot.date, start: slot.start, end: slot.end,
+            title: poll.title, description: poll.description, timezone: poll.timezone,
+            attendeeEmails: (poll.invitees || []).map((invitee) => invitee.email),
+            reminderMinutes: 15, createdAt: nowIso(), updatedAt: nowIso()
+          });
+          db.calendarEvents.push(record);
+          poll.status = "scheduled";
+          poll.selectedSlotId = slot.id;
+          poll.eventId = record.id;
+          addAudit(req, "calendar.poll.scheduled", poll.title, "Meeting poll scheduled");
+          await store.save();
+          sendJson(res, 200, { ok: true, eventId: record.id, event: record });
+          return;
+        }
+        if (req.method === "DELETE") {
+          db.calendarPolls = (db.calendarPolls || []).filter((item) => item.id !== poll.id);
+          addAudit(req, "calendar.poll.deleted", poll.title, "Meeting poll deleted");
+          await store.save();
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+      }
       if (pathname === "/api/calendar/events" && req.method === "GET") {
         const events = db.calendarEvents.map(calendarEventPayload);
         sendJson(res, 200, {
           events, calendarEvents: events, count: events.length,
-          calendars: calendarList(), subscriptions: [], addressBooks: addressBookList()
+          calendars: calendarList(), subscriptions: [], addressBooks: addressBookList(),
+          resources: calendarResourceList()
         });
         return;
       }
@@ -3257,6 +3664,7 @@ export async function createApp(options = {}) {
           where: String(body.where || ""), description: String(body.description || ""),
           color: String(body.color || "#0f6cbd"),
           attendeeEmails: Array.isArray(body.attendeeEmails) ? body.attendeeEmails : [],
+          resourceIds: Array.isArray(body.resourceIds) ? body.resourceIds : [],
           reminderMinutes: Number(body.reminderMinutes) || 15,
           recurrenceRule: String(body.recurrenceRule || ""),
           createdAt: nowIso(), updatedAt: nowIso()
@@ -3267,7 +3675,56 @@ export async function createApp(options = {}) {
         sendJson(res, 201, { event: record });
         return;
       }
-      const calendarEventMatch = pathname.match(/^\/api\/calendar\/events\/([A-Za-z0-9_-]{1,100})(\/rsvp)?$/);
+      const calendarCounterMatch = pathname.match(/^\/api\/calendar\/events\/([A-Za-z0-9_-]{1,100})\/counter$/);
+      if (calendarCounterMatch && req.method === "POST") {
+        const event = db.calendarEvents.find((item) => item.id === calendarCounterMatch[1]);
+        if (!event) throw new ApiError(404, "NOT_FOUND", "Event not found");
+        const body = await readJson(req);
+        const proposal = {
+          id: id("calprop"), attendeeEmail: db.user.email, attendeeName: db.user.name,
+          proposedStartsAt: `${body.date || event.date}T${body.start || event.start}:00Z`,
+          proposedEndsAt: `${body.date || event.date}T${body.end || event.end}:00Z`,
+          date: String(body.date || event.date), start: String(body.start || event.start),
+          end: String(body.end || event.end), timezone: String(body.timezone || "UTC"),
+          note: String(body.note || ""), sequence: Number(event.sequence) || 0,
+          status: "pending", source: "app", createdAt: nowIso()
+        };
+        event.proposals = [proposal, ...(Array.isArray(event.proposals) ? event.proposals : [])];
+        event.attendeeList = (event.attendeeList || []).map((guest) => ({
+          ...guest, status: guest.email?.toLowerCase() === db.user.email.toLowerCase() ? "tentative" : guest.status
+        }));
+        event.updatedAt = nowIso();
+        addAudit(req, "calendar.counter.proposed", event.title, "Proposed a new time");
+        await store.save();
+        sendJson(res, 200, { ok: true, proposalId: proposal.id, event: calendarEventPayload(event) });
+        return;
+      }
+      const calendarProposalMatch = pathname.match(/^\/api\/calendar\/events\/([A-Za-z0-9_-]{1,100})\/proposals\/([A-Za-z0-9_-]{1,100})\/(accept|decline)$/);
+      if (calendarProposalMatch && req.method === "POST") {
+        const event = db.calendarEvents.find((item) => item.id === calendarProposalMatch[1]);
+        if (!event) throw new ApiError(404, "NOT_FOUND", "Event not found");
+        const proposal = (event.proposals || []).find((item) => item.id === calendarProposalMatch[2]);
+        if (!proposal) throw new ApiError(404, "PROPOSAL_NOT_FOUND", "Proposal not found");
+        if (calendarProposalMatch[3] === "accept") {
+          event.date = proposal.date;
+          event.start = proposal.start;
+          event.end = proposal.end;
+          event.timezone = proposal.timezone;
+          event.sequence = (Number(event.sequence) || 0) + 1;
+          event.attendeeList = (event.attendeeList || []).map((guest) => ({
+            ...guest, status: guest.email?.toLowerCase() === proposal.attendeeEmail.toLowerCase() ? "accepted" : "needs-action"
+          }));
+          addAudit(req, "calendar.counter.accepted", event.title, `Accepted ${proposal.attendeeEmail}'s proposed time`);
+        } else {
+          addAudit(req, "calendar.counter.declined", event.title, `Declined ${proposal.attendeeEmail}'s proposed time`);
+        }
+        event.proposals = (event.proposals || []).filter((item) => item.id !== proposal.id);
+        event.updatedAt = nowIso();
+        await store.save();
+        sendJson(res, 200, { ok: true, event: calendarEventPayload(event), sequence: Number(event.sequence) || 0 });
+        return;
+      }
+      const calendarEventMatch = pathname.match(/^\/api\/calendar\/events\/([A-Za-z0-9_-]{1,100})(\/rsvp|\/resend|\/invitations)?$/);
       if (calendarEventMatch) {
         const event = db.calendarEvents.find((item) => item.id === calendarEventMatch[1]);
         if (!event) throw new ApiError(404, "NOT_FOUND", "Event not found");
@@ -3280,13 +3737,76 @@ export async function createApp(options = {}) {
           sendJson(res, 200, { ok: true, event: calendarEventPayload(event) });
           return;
         }
+        if (calendarEventMatch[2] === "/resend" && req.method === "POST") {
+          const sequence = Number(event.sequence) || 0;
+          const attendeeList = Array.isArray(event.attendeeList) ? event.attendeeList : [];
+          const waiting = attendeeList.filter((guest) => !guest.organizer && guest.status === "needs-action");
+          waiting.forEach((guest) => { guest.lastInviteSequence = sequence; });
+          event.attendeeList = attendeeList;
+          event.updatedAt = nowIso();
+          addAudit(req, "calendar.invites.resent", event.title, `Resent invitation to ${waiting.length} guest(s)`);
+          await store.save();
+          sendJson(res, 200, { ok: true, resent: waiting.length, event: calendarEventPayload(event) });
+          return;
+        }
+        if (calendarEventMatch[2] === "/invitations" && req.method === "DELETE") {
+          const cancelled = (Array.isArray(event.attendeeList) ? event.attendeeList.length : 0) ? 1 : 0;
+          event.updatedAt = nowIso();
+          addAudit(req, "calendar.invites.undone", event.title, "Queued invitations cancelled");
+          await store.save();
+          sendJson(res, 200, { ok: true, cancelled });
+          return;
+        }
         if (req.method === "PATCH") {
           const body = await readJson(req);
+          if (body.scope === "occurrence" && event.recurrenceRule) {
+            const recurrenceDate = String(body.occurrenceDate || event.date);
+            const previous = (event.exceptions || []).find((item) => item.recurrenceDate === recurrenceDate);
+            const exception = {
+              id: previous?.id || id("calexc"), recurrenceDate,
+              title: String(body.title ?? previous?.title ?? event.title),
+              description: String(body.description ?? previous?.description ?? event.description ?? ""),
+              location: String(body.where ?? previous?.location ?? event.where ?? ""),
+              date: String(body.date || previous?.date || recurrenceDate),
+              start: String(body.start || previous?.start || event.start),
+              end: String(body.end || previous?.end || event.end),
+              allDay: Boolean(body.allDay ?? previous?.allDay ?? event.allDay),
+              timezone: String(body.timezone || previous?.timezone || event.timezone || "UTC"),
+              status: String(body.status || previous?.status || "confirmed"),
+              sequence: (Number(event.sequence) || 0) + 1,
+              reminderMinutes: Number(body.reminderMinutes ?? previous?.reminderMinutes ?? event.reminderMinutes ?? 15)
+            };
+            event.sequence = exception.sequence;
+            event.exceptions = [...(event.exceptions || []).filter((item) => item.recurrenceDate !== recurrenceDate), exception];
+            event.updatedAt = nowIso();
+            addAudit(req, "calendar.occurrence.updated", event.title, `Occurrence ${recurrenceDate} updated`);
+            await store.save();
+            sendJson(res, 200, { event: calendarEventPayload(event), sequence: event.sequence, scope: "occurrence" });
+            return;
+          }
           for (const key of ["title", "date", "start", "end", "where", "description", "color", "timezone", "recurrenceRule", "meetingUrl"]) {
             if (body[key] !== undefined) event[key] = String(body[key]);
           }
           if (body.allDay !== undefined) event.allDay = Boolean(body.allDay);
           if (body.reminderMinutes !== undefined) event.reminderMinutes = Number(body.reminderMinutes) || 0;
+          if (Array.isArray(body.resourceIds)) {
+            event.resourceIds = body.resourceIds;
+            event.resourceList = calendarResourceList().filter((resource) => body.resourceIds.includes(resource.id));
+          }
+          if (Array.isArray(body.attendeeEmails)) {
+            const sequence = (Number(event.sequence) || 0) + 1;
+            event.sequence = sequence;
+            event.attendeeList = body.attendeeEmails.filter(Boolean).map((email) => ({
+              email: String(email).toLowerCase(), name: String(body.attendeeNames?.[email] || ""),
+              status: "needs-action", organizer: false, role: "REQ-PARTICIPANT", rsvp: true,
+              lastInviteSequence: -1, lastResponseSequence: -1, respondedAt: ""
+            }));
+          } else {
+            event.sequence = (Number(event.sequence) || 0) + 1;
+            (event.attendeeList || []).forEach((guest) => {
+              if (!guest.organizer) guest.status = "needs-action";
+            });
+          }
           event.updatedAt = nowIso();
           addAudit(req, "calendar.updated", event.title, "Event updated");
           await store.save();
@@ -3294,10 +3814,31 @@ export async function createApp(options = {}) {
           return;
         }
         if (req.method === "DELETE") {
+          const requestUrl = new URL(req.url, "http://localhost");
+          if (requestUrl.searchParams.get("scope") === "occurrence" && event.recurrenceRule) {
+            const recurrenceDate = requestUrl.searchParams.get("occurrenceDate") || event.date;
+            const sequence = (Number(event.sequence) || 0) + 1;
+            const previous = (event.exceptions || []).find((item) => item.recurrenceDate === recurrenceDate);
+            event.sequence = sequence;
+            event.exceptions = [...(event.exceptions || []).filter((item) => item.recurrenceDate !== recurrenceDate), {
+              id: previous?.id || id("calexc"), recurrenceDate,
+              title: previous?.title || event.title, description: previous?.description || event.description || "",
+              location: previous?.location || event.where || "", date: previous?.date || recurrenceDate,
+              start: previous?.start || event.start, end: previous?.end || event.end,
+              allDay: Boolean(previous?.allDay ?? event.allDay), timezone: previous?.timezone || event.timezone || "UTC",
+              status: "cancelled", sequence, reminderMinutes: previous?.reminderMinutes ?? event.reminderMinutes ?? 15
+            }];
+            event.updatedAt = nowIso();
+            addAudit(req, "calendar.occurrence.updated", event.title, `Occurrence ${recurrenceDate} cancelled`);
+            await store.save();
+            sendJson(res, 200, { ok: true, event: calendarEventPayload(event), sequence, scope: "occurrence" });
+            return;
+          }
+          const sequence = (Number(event.sequence) || 0) + 1;
           db.calendarEvents = db.calendarEvents.filter((item) => item.id !== event.id);
           addAudit(req, "calendar.deleted", event.title, "Event removed");
           await store.save();
-          sendJson(res, 200, { ok: true });
+          sendJson(res, 200, { ok: true, sequence });
           return;
         }
       }

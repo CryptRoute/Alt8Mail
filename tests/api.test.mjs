@@ -405,10 +405,42 @@ test("storage connectors and enterprise files: connect, share, star and remove",
   assert.match(shared.body.share.url, /^https:\/\/files\.a8m\.example\/s\//);
   assert.equal(shared.body.share.access, "edit");
   assert.equal(shared.body.share.expiresDays, 14);
+  const recipientShare = await client.request("/api/files/file_roadmap/share", {
+    method: "POST",
+    body: { access: "view", expiresDays: 2, recipientEmail: "reviewer@example.com" }
+  });
+  assert.equal(recipientShare.body.share.recipientEmail, "reviewer@example.com");
+  const locked = await client.request("/api/files/file_roadmap", {
+    method: "PATCH",
+    body: { locked: true }
+  });
+  assert.equal(locked.status, 200);
+  assert.equal(locked.body.file.locked, true);
+  const session = await client.request("/api/files/upload-sessions", {
+    method: "POST", body: { folderId: "" }
+  });
+  assert.equal(session.status, 201);
+  assert.match(session.body.session.url, /\/upload\//);
+  assert.equal(session.body.session.active, true);
+  assert.deepEqual(session.body.session.uploads, []);
+  const sessionId = session.body.session.id;
+  const extendedSession = await client.request(`/api/files/upload-sessions/${encodeURIComponent(sessionId)}/extend`, {
+    method: "POST", body: { hours: 1 }
+  });
+  assert.equal(extendedSession.status, 200);
+  assert.ok(Date.parse(extendedSession.body.session.expiresAt) > Date.parse(session.body.session.expiresAt));
+  const fetchedSession = await client.request(`/api/files/upload-sessions/${encodeURIComponent(sessionId)}`);
+  assert.equal(fetchedSession.status, 200);
+  assert.equal(fetchedSession.body.session.id, sessionId);
+  const imported = await client.request("/api/files/import-url", {
+    method: "POST", body: { url: "https://example.com/brief.txt", folderId: "" }
+  });
+  assert.equal(imported.status, 201);
+  assert.equal(imported.body.file.name, "brief.txt");
 
   const removed = await client.request("/api/files/file_dropbox_recap", { method: "DELETE" });
   assert.equal(removed.status, 200);
-  assert.equal((await client.request("/api/files")).body.files.length, 13);
+  assert.equal((await client.request("/api/files")).body.files.length, 14);
 
   const disconnected = await client.request("/api/storage/dropbox/disconnect", { method: "POST", body: {} });
   assert.equal(disconnected.body.provider.connected, false);
@@ -1265,28 +1297,83 @@ test("phase 5: pulse analytics, emoji catalog, sticky notes and reaction guardra
   assert.ok("sent" in review.body.monthly[0] && "received" in review.body.monthly[0]);
   assert.ok(Array.isArray(review.body.weekly));
 
-  const emptyNote = await client.request("/api/sticky-note");
-  assert.equal(emptyNote.status, 200);
-  assert.equal(emptyNote.body.note.color, "yellow");
-  assert.equal(emptyNote.body.note.enabled, true);
-  const savedNote = await client.request("/api/sticky-note", {
-    method: "PUT",
+  const emptyNotes = await client.request("/api/notes?archived=1");
+  assert.equal(emptyNotes.status, 200);
+  assert.equal(emptyNotes.body.notes.length, 0);
+  const noteEvent = (await client.request("/api/calendar/events")).body.events[0];
+  const noteFile = (await client.request("/api/files")).body.files[0];
+  const firstNote = await client.request("/api/notes", {
+    method: "POST",
+    body: { content: "Dentist Friday **3pm**\n- [ ] Send the Q4 deck", color: "pink" }
+  });
+  assert.equal(firstNote.status, 201);
+  assert.equal(firstNote.body.notes.length, 1);
+  assert.equal(firstNote.body.pinned.id, firstNote.body.created);
+  assert.equal(firstNote.body.notes[0].color, "pink");
+  const firstId = firstNote.body.created;
+  const secondNote = await client.request("/api/notes", {
+    method: "POST",
+    body: { content: "Q4 launch checklist", color: "blue", inboxPinned: false }
+  });
+  assert.equal(secondNote.status, 201);
+  assert.equal(secondNote.body.activeCount, 2);
+  assert.equal(secondNote.body.pinned.id, firstId);
+  const secondId = secondNote.body.created;
+  assert.equal(secondNote.body.notes.find((note) => note.id === secondId).inboxPinned, false);
+  const swapped = await client.request(`/api/notes/${encodeURIComponent(secondId)}`, {
+    method: "PATCH", body: { inboxPinned: true }
+  });
+  assert.equal(swapped.body.pinned.id, secondId);
+  assert.equal(swapped.body.notes.find((note) => note.id === firstId).inboxPinned, false);
+  const pinned = await client.request(`/api/notes/${encodeURIComponent(firstId)}`, {
+    method: "PATCH",
     body: {
-      content: "Dentist Friday **3pm**\n- [ ] Send the Q4 deck",
-      color: "pink",
-      links: ["N2Acmhe6TzJMY7c6L5yRfg"],
-      position: { x: 0.2, y: 0.3 }
+      contentType: "ignored",
+      links: ["N2Acmhe6TzJMY7c6L5yRfg", { type: "event", id: noteEvent.id }, { type: "file", id: noteFile.id }],
+      position: { x: 0.2, y: 0.3 }, collapsed: true
     }
   });
-  assert.equal(savedNote.status, 200);
-  assert.equal(savedNote.body.note.color, "pink");
-  assert.equal(savedNote.body.note.links.length, 1);
-  assert.equal(savedNote.body.note.links[0].threadId, "N2Acmhe6TzJMY7c6L5yRfg");
-  const collapsed = await client.request("/api/sticky-note", { method: "PUT", body: { collapsed: true } });
-  assert.equal(collapsed.body.note.collapsed, true);
-  const reread = await client.request("/api/sticky-note");
-  assert.equal(reread.body.note.content.includes("Dentist Friday"), true);
-  assert.equal(reread.body.note.links.length, 1);
+  const contextLinks = pinned.body.notes.find((note) => note.id === firstId).links;
+  assert.equal(contextLinks.length, 3);
+  assert.deepEqual(contextLinks.map((link) => link.type).sort(), ["event", "file", "thread"]);
+  assert.ok(contextLinks.every((link) => link.id));
+  assert.equal(contextLinks.find((link) => link.type === "event").title, noteEvent.title);
+  assert.equal(contextLinks.find((link) => link.type === "file").name, noteFile.name);
+  assert.equal(pinned.body.notes.find((note) => note.id === firstId).position.x, 0.2);
+  assert.equal(pinned.body.notes.find((note) => note.id === firstId).collapsed, true);
+  const archived = await client.request(`/api/notes/${encodeURIComponent(firstId)}`, {
+    method: "PATCH", body: { archived: true }
+  });
+  assert.equal(archived.body.archivedCount, 1);
+  assert.equal(archived.body.activeCount, 1);
+  assert.equal(archived.body.notes.find((note) => note.id === firstId).archived, true);
+  const archivedPin = await client.request(`/api/notes/${encodeURIComponent(firstId)}`, {
+    method: "PATCH", body: { archived: true, inboxPinned: true }
+  });
+  assert.equal(archivedPin.status, 400);
+  assert.equal(archivedPin.body.error.code, "STICKY_NOTE_STATE");
+  const stillArchived = await client.request("/api/notes?archived=1");
+  assert.equal(stillArchived.body.notes.find((note) => note.id === firstId).archived, true);
+  assert.equal(stillArchived.body.notes.find((note) => note.id === firstId).inboxPinned, false);
+  const archivedSearch = await client.request("/api/notes/search?q=Dentist&archived=1&scope=all");
+  assert.equal(archivedSearch.status, 200);
+  assert.ok(archivedSearch.body.notes.some((note) => note.id === firstId && note.archived === true));
+  const activeSearch = await client.request("/api/notes/search?q=Dentist&archived=0");
+  assert.equal(activeSearch.body.notes.length, 0);
+  const launchSearch = await client.request("/api/notes/search?q=launch&scope=all");
+  assert.ok(launchSearch.body.notes.some((note) => note.id === secondId));
+  assert.equal(launchSearch.body.mailboxes.length, 1);
+  const attachThreads = await client.request("/api/notes/attach?type=thread");
+  assert.ok(attachThreads.body.items.length > 0);
+  const attachEvents = await client.request("/api/notes/attach?type=event");
+  assert.ok(attachEvents.body.items.some((item) => item.id === noteEvent.id));
+  const attachFiles = await client.request("/api/notes/attach?type=file");
+  assert.ok(attachFiles.body.items.some((item) => item.id === noteFile.id));
+  const restored = await client.request(`/api/notes/${encodeURIComponent(firstId)}`, {
+    method: "PATCH", body: { archived: false }
+  });
+  assert.equal(restored.body.archivedCount, 0);
+  assert.equal(restored.body.notes.find((note) => note.id === firstId).archived, false);
 
   const freshEmoji = await client.request("/api/messages/m16/reaction", {
     method: "POST", body: { emoji: "😀", visibility: "private", semantic: "happiness" }
@@ -1307,6 +1394,208 @@ test("phase 5: pulse analytics, emoji catalog, sticky notes and reaction guardra
   });
   assert.equal(sentReaction.status, 400);
   assert.equal(sentReaction.body.error.code, "REACTION_UNAVAILABLE");
+});
+
+test("calendar invitations: stable sequence, guest responses, resend and undo", async () => {
+  const created = await client.request("/api/calendar/events", {
+    method: "POST",
+    body: {
+      title: "Architecture review",
+      date: "2026-11-05",
+      start: "10:00",
+      end: "11:00",
+      timezone: "UTC",
+      attendeeEmails: ["elena.vasquez@a8m.example", "marcus.reid@a8m.example"],
+      attendeeNames: { "elena.vasquez@a8m.example": "Elena Vasquez" }
+    }
+  });
+  assert.equal(created.status, 201);
+  const event = created.body.event;
+  assert.equal(event.sequence, 0);
+  assert.equal(event.attendeeList.length, 2);
+  assert.equal(event.attendeeList[0].status, "needs-action");
+  assert.equal(event.attendeeList[0].lastResponseSequence, -1);
+
+  const listed = await client.request("/api/calendar/events");
+  assert.equal(listed.status, 200);
+  assert.ok(listed.body.events.some((item) => item.id === event.id));
+
+  const resent = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}/resend`, {
+    method: "POST", body: {}
+  });
+  assert.equal(resent.status, 200);
+  assert.equal(resent.body.resent, 2);
+  assert.ok(resent.body.event.attendeeList.every((guest) => guest.lastInviteSequence === 0));
+
+  const updated = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}`, {
+    method: "PATCH", body: { title: "Architecture review — updated", start: "11:00", end: "12:00" }
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.event.sequence, 1);
+  assert.ok(updated.body.event.attendeeList.every((guest) => guest.status === "needs-action"));
+
+  const resendNonResponders = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}/resend`, {
+    method: "POST", body: {}
+  });
+  assert.equal(resendNonResponders.status, 200);
+  assert.equal(resendNonResponders.body.resent, 2);
+
+  const undone = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}/invitations`, {
+    method: "DELETE"
+  });
+  assert.equal(undone.status, 200);
+  assert.equal(undone.body.cancelled, 1);
+
+  const deleted = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}`, {
+    method: "DELETE"
+  });
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.sequence, 2);
+});
+
+test("phase 2 calendar: recurrence exceptions and proposed times", async () => {
+  const created = await client.request("/api/calendar/events", {
+    method: "POST",
+    body: {
+      title: "Phase 2 planning",
+      date: "2026-11-04",
+      start: "09:00",
+      end: "10:00",
+      timezone: "UTC",
+      recurrenceRule: "FREQ=WEEKLY;BYDAY=WE",
+      attendeeEmails: ["elena.vasquez@a8m.example"]
+    }
+  });
+  assert.equal(created.status, 201);
+  const event = created.body.event;
+  assert.equal(event.sequence, 0);
+
+  const occurrence = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}`, {
+    method: "PATCH",
+    body: {
+      scope: "occurrence",
+      occurrenceDate: "2026-11-11",
+      title: "Phase 2 planning — moved",
+      date: "2026-11-11",
+      start: "11:00",
+      end: "12:00",
+      timezone: "UTC"
+    }
+  });
+  assert.equal(occurrence.status, 200);
+  assert.equal(occurrence.body.sequence, 1);
+  assert.equal(occurrence.body.event.sequence, 1);
+  assert.equal(occurrence.body.event.exceptions.length, 1);
+  assert.equal(occurrence.body.event.exceptions[0].title, "Phase 2 planning — moved");
+  assert.equal(occurrence.body.event.exceptions[0].start, "11:00");
+
+  const cancelled = await client.request(
+    `/api/calendar/events/${encodeURIComponent(event.id)}?scope=occurrence&occurrenceDate=2026-11-18`,
+    { method: "DELETE" }
+  );
+  assert.equal(cancelled.status, 200);
+  assert.equal(cancelled.body.sequence, 2);
+  assert.equal(cancelled.body.event.exceptions.length, 2);
+  assert.ok(cancelled.body.event.exceptions.some((exception) => exception.status === "cancelled"));
+
+  const counter = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}/counter`, {
+    method: "POST",
+    body: { date: "2026-11-11", start: "14:00", end: "15:00", timezone: "UTC", note: "Later works better" }
+  });
+  assert.equal(counter.status, 200);
+  assert.equal(counter.body.event.proposals.length, 1);
+  assert.equal(counter.body.event.proposals[0].note, "Later works better");
+  const proposalId = counter.body.proposalId;
+
+  const accepted = await client.request(
+    `/api/calendar/events/${encodeURIComponent(event.id)}/proposals/${encodeURIComponent(proposalId)}/accept`,
+    { method: "POST", body: {} }
+  );
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.body.event.proposals.length, 0);
+  assert.equal(accepted.body.event.date, "2026-11-11");
+  assert.equal(accepted.body.event.start, "14:00");
+  assert.equal(accepted.body.sequence, 3);
+
+  const another = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}/counter`, {
+    method: "POST",
+    body: { date: "2026-11-11", start: "16:00", end: "17:00", timezone: "UTC" }
+  });
+  assert.equal(another.body.event.proposals.length, 1);
+  const declined = await client.request(
+    `/api/calendar/events/${encodeURIComponent(event.id)}/proposals/${encodeURIComponent(another.body.proposalId)}/decline`,
+    { method: "POST", body: {} }
+  );
+  assert.equal(declined.status, 200);
+  assert.equal(declined.body.event.proposals.length, 0);
+  assert.equal(declined.body.event.sequence, 3);
+
+  const removed = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}`, { method: "DELETE" });
+  assert.equal(removed.status, 200);
+});
+
+test("phase 3 calendar: resources, analytics and meeting polls", async () => {
+  const attendees = Array.from({ length: 11 }, (_, index) => `guest${index + 1}@${index % 2 ? "partner.example" : "a8m.example"}`);
+  const created = await client.request("/api/calendar/events", {
+    method: "POST",
+    body: {
+      title: "Large steering committee",
+      date: "2026-11-12",
+      start: "09:00",
+      end: "10:00",
+      timezone: "UTC",
+      attendeeEmails: attendees,
+      resourceIds: ["room-a", "projector"]
+    }
+  });
+  assert.equal(created.status, 201);
+  const event = created.body.event;
+  assert.equal(event.resourceList.length, 2);
+  assert.ok(event.resourceList.some((resource) => resource.name === "Conference Room A"));
+  assert.equal(event.rsvpAnalytics.total, 11);
+  assert.equal(event.rsvpAnalytics.delivered, 11);
+  assert.ok(event.rsvpAnalytics.domains.some((domain) => domain.domain === "partner.example"));
+
+  const resources = await client.request("/api/calendar/resources");
+  assert.equal(resources.status, 200);
+  assert.ok(resources.body.resources.length >= 3);
+
+  const poll = await client.request("/api/calendar/polls", {
+    method: "POST",
+    body: {
+      title: "Partner kickoff",
+      timezone: "UTC",
+      inviteeEmails: ["partner@example.com", "client@example.com"],
+      slots: [
+        { date: "2026-11-13", start: "09:00", end: "10:00" },
+        { date: "2026-11-13", start: "14:00", end: "15:00" }
+      ]
+    }
+  });
+  assert.equal(poll.status, 201);
+  assert.equal(poll.body.poll.slots.length, 2);
+  assert.equal(poll.body.poll.invitees.length, 2);
+
+  const polls = await client.request("/api/calendar/polls");
+  assert.equal(polls.status, 200);
+  assert.ok(polls.body.polls.some((item) => item.id === poll.body.poll.id));
+
+  const scheduled = await client.request(`/api/calendar/polls/${encodeURIComponent(poll.body.poll.id)}/schedule`, {
+    method: "POST", body: { slotId: poll.body.poll.slots[0].id }
+  });
+  assert.equal(scheduled.status, 200);
+  assert.equal(scheduled.body.event.title, "Partner kickoff");
+  assert.equal(scheduled.body.event.start, "09:00");
+
+  const after = await client.request("/api/calendar/polls");
+  const scheduledPoll = after.body.polls.find((item) => item.id === poll.body.poll.id);
+  assert.equal(scheduledPoll.status, "scheduled");
+  assert.equal(scheduledPoll.selectedSlotId, poll.body.poll.slots[0].id);
+
+  const removedEvent = await client.request(`/api/calendar/events/${encodeURIComponent(event.id)}`, { method: "DELETE" });
+  assert.equal(removedEvent.status, 200);
+  const removedPoll = await client.request(`/api/calendar/polls/${encodeURIComponent(poll.body.poll.id)}`, { method: "DELETE" });
+  assert.equal(removedPoll.status, 200);
 });
 
 test("data persists across an application restart", async () => {

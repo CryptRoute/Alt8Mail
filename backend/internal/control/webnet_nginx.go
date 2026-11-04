@@ -274,6 +274,7 @@ func webNetWebmailLocations(upstream string) string {
 	builder.WriteString(nginxProxyLocation("^~ /.well-known/carddav", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("= /.well-known/mta-sts.txt", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /files/s/", upstream, "", ""))
+	builder.WriteString(nginxProxyLocation("^~ /upload/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /api/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /system/api/", upstream, "/api/", ""))
 	builder.WriteString("    location = /admin { return 404; }\n")

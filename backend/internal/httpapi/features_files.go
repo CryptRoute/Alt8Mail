@@ -36,6 +36,7 @@ type filePatchBody struct {
 	Description *string `json:"description"`
 	Name        *string `json:"name"`
 	FolderID    *string `json:"folderId"`
+	Locked      *bool   `json:"locked"`
 }
 
 type fileShareBody struct {
@@ -362,6 +363,10 @@ func (s *Server) patchFile(w http.ResponseWriter, r *http.Request) {
 	if body.Starred != nil {
 		updates = append(updates, fmt.Sprintf("starred=$%d", len(args)+1))
 		args = append(args, *body.Starred)
+	}
+	if body.Locked != nil {
+		updates = append(updates, fmt.Sprintf("locked=$%d", len(args)+1))
+		args = append(args, *body.Locked)
 	}
 	if body.Description != nil {
 		updates = append(updates, fmt.Sprintf("description=$%d", len(args)+1))
