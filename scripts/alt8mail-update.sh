@@ -399,7 +399,7 @@ systemctl daemon-reload
 
 # Install the Redis-backed multimap rules once. Existing administrator rules
 # are preserved; the Alt8Mail block is appended only when it is absent.
-log "installing Rspamd threat-intelligence rules"
+log "installing Rspamd threat-intelligence and local-domain rules"
 MULTIMAP_CONF=/etc/rspamd/local.d/multimap.conf
 install -d -m 0755 /etc/rspamd/local.d
 if [[ ! -e "$MULTIMAP_CONF" ]]; then
@@ -408,7 +408,21 @@ elif ! grep -q 'A8M_REPORTED_SENDER' "$MULTIMAP_CONF"; then
   printf '\n# Alt8Mail threat-intelligence rules\n' >> "$MULTIMAP_CONF"
   cat "$TARGET_RELEASE/deploy/rspamd/multimap.conf" >> "$MULTIMAP_CONF"
 fi
+if ! grep -q 'A8M_LOCAL_DOMAIN_SPOOF' "$MULTIMAP_CONF"; then
+  awk '/^# Domains hosted by this Alt8Mail instance/{copy=1} copy{print}' \
+    "$TARGET_RELEASE/deploy/rspamd/multimap.conf" >> "$MULTIMAP_CONF"
+fi
 chmod 0644 "$MULTIMAP_CONF"
+SETTINGS_CONF=/etc/rspamd/local.d/settings.conf
+if [[ ! -e "$SETTINGS_CONF" ]]; then
+  install -m 0644 "$TARGET_RELEASE/deploy/rspamd/settings.conf" "$SETTINGS_CONF"
+elif ! grep -q 'a8m_authenticated_submission' "$SETTINGS_CONF"; then
+  printf '\n# Alt8Mail local-domain guard\n' >> "$SETTINGS_CONF"
+  cat "$TARGET_RELEASE/deploy/rspamd/settings.conf" >> "$SETTINGS_CONF"
+fi
+chmod 0644 "$SETTINGS_CONF"
+touch /var/lib/rspamd/local_domains.map
+chown _rspamd:_rspamd /var/lib/rspamd/local_domains.map 2>/dev/null || true
 if command -v rspamadm >/dev/null 2>&1; then
   if rspamadm configtest >/var/log/alt8mail-rspamd-configtest.log 2>&1; then
     systemctl try-reload-or-restart rspamd || log "WARNING: Rspamd reload failed after installing threat-intelligence rules"
@@ -417,6 +431,13 @@ if command -v rspamadm >/dev/null 2>&1; then
   fi
 else
   systemctl try-reload-or-restart rspamd || log "WARNING: Rspamd reload failed after installing threat-intelligence rules"
+fi
+
+# Keep public share, upload and calendar pages reachable when an older nginx
+# site predates those routes. The helper backs out on nginx -t failure.
+if [[ -f "$TARGET_RELEASE/scripts/alt8mail-ensure-nginx-routes.sh" ]]; then
+  bash "$TARGET_RELEASE/scripts/alt8mail-ensure-nginx-routes.sh" \
+    || log "WARNING: could not install missing public nginx routes"
 fi
 
 UPDATE_ACTIVE=1

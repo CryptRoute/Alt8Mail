@@ -1255,7 +1255,7 @@
 /* Notes desk — multi-note foundation */
 .notes-desk-trigger { position: relative; }
 .notes-desk-trigger > span:first-child { font-size: .8rem; line-height: 1; }
-.notes-desk-count { position: absolute; top: -3px; right: -3px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: .46rem; font-weight: 800; line-height: 13px; text-align: center; }
+.notes-desk-count { position: absolute; top: -3px; right: -3px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: .46rem; font-weight: 800; line-height: 13px; text-align: center; }
 .sticky-pinned-stack { display: grid; gap: 4px; }
 .sticky-more-chip { justify-self: start; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font: inherit; font-size: .52rem; font-weight: 700; padding: 3px 8px; cursor: pointer; }
 .sticky-more-chip:hover { border-color: var(--accent); color: var(--accent); }
@@ -1383,8 +1383,11 @@
 .date-jump-custom { margin-top: 6px; padding-top: 7px; border-top: 1px solid var(--border); }
 .date-jump-custom > label { display: block; margin-bottom: 5px; color: var(--text-3); font-size: .52rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .date-jump-custom > div { display: flex; gap: 5px; }
-.date-jump-custom input { flex: 1; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; font-size: .62rem; }
-.date-jump-custom button { padding: 0 12px; border: 0; border-radius: 7px; background: var(--accent); color: var(--accent-ink); font: inherit; font-size: .62rem; font-weight: 700; cursor: pointer; }
+.date-jump-custom input { flex: 1; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; font-size: .62rem; color-scheme: light; }
+.date-jump-custom input::-webkit-calendar-picker-indicator { opacity: .72; cursor: pointer; }
+:root[data-theme="dark"] .date-jump-custom input { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .date-jump-custom input { color-scheme: dark; } }
+.date-jump-custom button { padding: 0 12px; border: 0; border-radius: 7px; background: var(--accent); color: var(--on-accent); font: inherit; font-size: .62rem; font-weight: 700; cursor: pointer; }
 .mail-group-head.is-date-jump-target { animation: mail-date-jump-flash 1.8s ease-out; }
 @keyframes mail-date-jump-flash { 0%, 18% { background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); } 100% { background: transparent; box-shadow: none; } }
 @media (max-width: 640px) { .date-jump-menu { right: 10px; left: 10px; width: auto; } }
@@ -1429,7 +1432,7 @@
 @keyframes upload-manager-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
 .upload-manager-head { display: flex; align-items: center; gap: 9px; padding: 11px 12px; border-bottom: 1px solid var(--border); background: linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 76%, var(--surface)), var(--surface)); cursor: grab; touch-action: none; }
 .upload-manager-head:active { cursor: grabbing; }
-.upload-manager-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--accent); color: var(--accent-ink); flex: none; }
+.upload-manager-mark { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--accent); color: var(--on-accent); flex: none; }
 .upload-manager-mark .icon { width: 15px; height: 15px; }
 .upload-manager-title { flex: 1; min-width: 0; }
 .upload-manager-title strong { display: block; font-size: .72rem; letter-spacing: -.01em; }

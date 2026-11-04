@@ -1209,11 +1209,7 @@ export async function createApp(options = {}) {
   }
 
   function calendarResourceList() {
-    return [
-      { id: "room-a", name: "Conference Room A", email: "room-a@a8m.example", kind: "room", location: "Head office", capacity: 8 },
-      { id: "board-room", name: "Board Room", email: "board-room@a8m.example", kind: "room", location: "Executive floor", capacity: 16 },
-      { id: "projector", name: "Portable projector", email: "projector@a8m.example", kind: "equipment", location: "IT cupboard", capacity: 0 }
-    ];
+    return Array.isArray(db.calendarResources) ? db.calendarResources : [];
   }
 
   function calendarList() {
@@ -3398,8 +3394,7 @@ export async function createApp(options = {}) {
         });
         return;
       }
-      const trustMatch = pathname.match(/^\/api\/messages\/([A-Za-z0-9_-]{1,100})\/trust$/);
-      if (trustMatch && req.method === "GET") {
+      const trustMatch = pathname.match(/^\/api\/messages\/([A-Za-z0-9_-]{1,100})\/trust$/);      if (trustMatch && req.method === "GET") {
         const message = findMessage(trustMatch[1]);
         if (!message) throw new ApiError(404, "NOT_FOUND", "Message not found");
         const auth = message.auth || {};
@@ -3436,6 +3431,14 @@ export async function createApp(options = {}) {
         addAudit(req, trusted ? "trust.marked" : "trust.unmarked", email, `${trusted ? "Trusted" : "Removed trust for"} external sender`);
         await store.save();
         sendJson(res, 200, { ok: true, sender: email, trusted });
+        return;
+      }
+
+      const calendarCardMatch = pathname.match(/^\/api\/messages\/([A-Za-z0-9_-]{1,100})\/calendar-card$/);
+      if (calendarCardMatch && req.method === "GET") {
+        const message = findMessage(calendarCardMatch[1]);
+        if (!message) throw new ApiError(404, "NOT_FOUND", "Message not found");
+        sendJson(res, 200, { calendar: message.calendarCard || null });
         return;
       }
 
@@ -3579,7 +3582,23 @@ export async function createApp(options = {}) {
       }
 
       if (pathname === "/api/calendar/resources" && req.method === "GET") {
-        sendJson(res, 200, { resources: calendarResourceList(), count: 3 });
+        sendJson(res, 200, { resources: calendarResourceList(), count: calendarResourceList().length });
+        return;
+      }
+      if (pathname === "/api/calendar/resources" && req.method === "POST") {
+        const body = await readJson(req);
+        const name = String(body.name || "").trim();
+        if (!name) throw new ApiError(400, "RESOURCE_NAME", "Give the room or resource a name");
+        const kind = ["room", "equipment", "other"].includes(String(body.kind || "")) ? String(body.kind) : "room";
+        const resource = {
+          id: id("room"), name: name.slice(0, 120), kind,
+          email: `${kind}-${id("r").slice(-8)}@resources.local`,
+          location: String(body.location || "").slice(0, 160),
+          capacity: Math.max(0, Math.min(10000, Number(body.capacity) || 0))
+        };
+        db.calendarResources = [...calendarResourceList(), resource];
+        await store.save();
+        sendJson(res, 201, { resource, resources: calendarResourceList() });
         return;
       }
       if (pathname === "/api/calendar/polls" && req.method === "GET") {

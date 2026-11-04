@@ -845,17 +845,22 @@ func walkMIMEPart(headers textproto.MIMEHeader, body io.Reader, result *parsedBo
 		}
 		method := strings.ToUpper(strings.TrimSpace(params["method"]))
 		result.calendarParts = append(result.calendarParts, parsedCalendarPart{Method: method, Data: data})
-		if isAttachment {
-			name := safeFileName(fileName)
-			if name == "" {
-				name = "invite.ics"
-			}
-			result.attachments = append(result.attachments, parsedMailAttachment{
-				Name: name, MIMEType: "text/calendar",
-				ContentID:   sanitizeMailText(strings.Trim(headers.Get("Content-Id"), "<>")),
-				Disposition: disposition, Data: data,
-			})
+		// Persist every calendar part, even inline ones without a filename.
+		// Gmail and Outlook both rely on an inline text/calendar body, and the
+		// webmail needs the stored copy to render the invitation card later.
+		name := safeFileName(fileName)
+		if name == "" {
+			name = "invite.ics"
 		}
+		calendarDisposition := disposition
+		if !isAttachment {
+			calendarDisposition = "inline"
+		}
+		result.attachments = append(result.attachments, parsedMailAttachment{
+			Name: name, MIMEType: "text/calendar",
+			ContentID:   sanitizeMailText(strings.Trim(headers.Get("Content-Id"), "<>")),
+			Disposition: calendarDisposition, Data: data,
+		})
 		return nil
 	}
 	if isAttachment {

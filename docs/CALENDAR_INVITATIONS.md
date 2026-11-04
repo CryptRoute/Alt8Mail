@@ -85,8 +85,30 @@ The IMAP fetch path captures every `text/calendar`, `application/ics` and
 5. A reply at the current sequence updates `PARTSTAT`, `last_response_sequence`
    and `last_response_at`, records the reply and notifies the organizer.
 
+Google Calendar can also deliver a proposed time as a `METHOD:REQUEST` whose
+`DTSTART` differs from the organizer's event. Alt8Mail treats that as a counter
+proposal when the sender is an attendee on the event, and ignores a REQUEST
+whose time is identical (an invitation echo). The event's current `SEQUENCE`
+is authoritative when recording a proposal; a client that omits or carries an
+older sequence in the counter cannot make the proposal stale.
+
 `calendar_invite_replies` uses a dedup key over the Message-ID, UID, attendee,
 sequence and response so an IMAP rescan cannot apply the same reply twice.
+
+## Reader card, calendar dock and external invites
+
+- Every message carrying a `text/calendar` part is marked with a calendar badge
+  in the list. The reader renders the parsed invite/response/proposal card
+  (title, date tile, current vs proposed time, guest states, RSVP or
+  accept/decline actions) immediately below the message header. The raw
+  `invite.ics` attachment is folded into the card for iTIP messages.
+- Pending guest proposals appear in a floating dock above the workspace. The
+  organizer can accept or keep the original time without opening the source
+  email; accepting updates the event and notifies every guest.
+- A received invitation from an external organizer offers **Add to Calendar**.
+  The import path stores the event and guests in the signed-in user's default
+  calendar; later RSVP actions update the local copy and send `METHOD:REPLY`
+  to the external organizer.
 
 When an Alt8Mail user is invited by an external organizer, accepting, declining
 or marking Maybe also sends a `METHOD:REPLY` message back to that organizer.
@@ -102,9 +124,11 @@ guest is moved to `TENTATIVE` for the current sequence.
   `text/calendar; method=COUNTER` message with the same stable UID, current
   `SEQUENCE`, the attendee as `PARTSTAT=TENTATIVE`, and the proposed
   `DTSTART`/`DTEND`.
-- An external client's `METHOD:COUNTER` is parsed on inbound sync under the same
-  sender/UID/sequence checks as `REPLY`. A COUNTER with an old or future
-  sequence is ignored.
+- An external client's `METHOD:COUNTER` (and the REQUEST-shaped proposals some
+  clients send) is parsed on inbound sync. The sender must match an attendee,
+  the ICS organizer must match the local organizer and the proposed time must
+  differ from the event on record. The event's current sequence is used for the
+  proposal, so a client-side sequence mismatch does not drop the request.
 - The organizer guest panel lists proposed times with the guest note. Accepting
   moves the event (or creates a recurrence exception when the counter names an
   occurrence), bumps `SEQUENCE` and sends updated invitations. Declining keeps
@@ -190,8 +214,11 @@ the calendar owner is `ORGANIZER` and the acting user is `SENDER`.
 
 ## Rooms and resources
 
-- `calendar_resources` provides tenant rooms/equipment; standard defaults are
-  created on first use.
+- Every account owns its own rooms and equipment. The webmail event dialog
+  offers **Add a room or resource**; the row is saved to that account and is
+  not visible to other users in the tenant.
+- Early releases seeded tenant-wide defaults; migration
+  `0043_calendar_user_resources.sql` deactivates those unowned rows.
 - Booked resources are stored in `calendar_event_resources` and emitted as
   `ATTENDEE;CUTYPE=RESOURCE` plus a `RESOURCES:` property.
 - Resource addresses never receive SMTP invitations.
@@ -229,7 +256,9 @@ editors. It shows:
 | `PATCH` | `/api/calendar/events/{id}` with `scope=occurrence` | Edit one recurrence occurrence |
 | `DELETE` | `/api/calendar/events/{id}?scope=occurrence&occurrenceDate=...` | Cancel one occurrence |
 | `GET`/`POST` | `/calendar/rsvp/{token}` | Public tokenized response/proposal page |
-| `GET`/`POST` | `/api/calendar/resources` | List or create rooms/resources |
+| `GET` | `/api/messages/{id}/calendar-card` | Parsed invitation, response or proposal for the reader card |
+| `POST` | `/api/messages/{id}/calendar-import` | Add a received invitation to the signed-in user's calendar |
+| `GET`/`POST` | `/api/calendar/resources` | List or create the account's own rooms/resources |
 | `GET`/`POST` | `/api/calendar/polls` | List or create meeting polls |
 | `POST` | `/api/calendar/polls/{id}/close` | Close a poll |
 | `POST` | `/api/calendar/polls/{id}/schedule` | Turn a poll slot into an event |

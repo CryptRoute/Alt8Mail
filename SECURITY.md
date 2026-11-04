@@ -55,6 +55,10 @@ acknowledge the report, reproduce it, and coordinate disclosure and a fix.
 - Web uploads and guest-share replacements are scanned with ClamAV INSTREAM
   when configured; scanner failure fails closed. Mail is scanned by
   Rspamd/ClamAV before LMTP delivery.
+- Inbound mail whose MIME `From` domain is hosted by this Alt8Mail instance is
+  rejected when SPF, DKIM and DMARC do not produce an aligned pass. The local
+  domain map is generated from `mail_domains`; authenticated submission and
+  locally injected mail are excluded so outbound signing can run afterwards.
 - MTA-STS verification fetches only public IPs, requires HTTPS, does not follow
   redirects and ignores environment proxies.
 - Guest share tokens are hashed server-side; expiry, revocation and edit access

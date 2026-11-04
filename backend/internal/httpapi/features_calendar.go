@@ -149,7 +149,7 @@ func (s *Server) getCalendarEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subscriptions, _ := s.loadCalendarSubscriptions(r.Context(), sess.User.ID)
-	resources, _ := s.loadCalendarResources(r.Context(), sess.User.TenantID)
+	resources, _ := s.loadCalendarResources(r.Context(), sess.User.TenantID, sess.User.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events": events, "calendarEvents": events, "count": len(events),
 		"calendars": calendars, "subscriptions": subscriptions,
@@ -561,7 +561,7 @@ func (s *Server) createCalendarEvent(w http.ResponseWriter, r *http.Request) {
 		err = s.replaceCalendarAttendees(r.Context(), tx, id, attendees, record.AttendeeNames, organizerUser, record.Organizer, false)
 	}
 	if err == nil {
-		err = s.replaceCalendarEventResources(r.Context(), tx, id, sess.User.TenantID, body.ResourceIDs, record.StartsAt, record.EndsAt)
+		err = s.replaceCalendarEventResources(r.Context(), tx, id, sess.User.TenantID, sess.User.ID, body.ResourceIDs, record.StartsAt, record.EndsAt)
 	}
 	if err != nil {
 		writeFromError(w, err)
@@ -665,7 +665,7 @@ func (s *Server) updateCalendarEvent(w http.ResponseWriter, r *http.Request) {
 		err = s.replaceCalendarAttendees(r.Context(), tx, id, attendees, record.AttendeeNames, organizerUser, record.Organizer, true)
 	}
 	if err == nil {
-		err = s.replaceCalendarEventResources(r.Context(), tx, id, sess.User.TenantID, body.ResourceIDs, record.StartsAt, record.EndsAt)
+		err = s.replaceCalendarEventResources(r.Context(), tx, id, sess.User.TenantID, sess.User.ID, body.ResourceIDs, record.StartsAt, record.EndsAt)
 	}
 	if err != nil {
 		writeFromError(w, err)
@@ -1178,7 +1178,7 @@ func (s *Server) calendarAttachmentSnapshots(ctx context.Context, userID string,
 // replaceCalendarAttendees always records the organizer. On a new event it
 // keeps existing responses; on an update every guest response is reset to
 // NEEDS-ACTION because the invitation SEQUENCE has advanced.
-func (s *Server) replaceCalendarEventResources(ctx context.Context, tx pgx.Tx, eventID, tenantID string, resourceIDs []string, startsAt, endsAt time.Time) error {
+func (s *Server) replaceCalendarEventResources(ctx context.Context, tx pgx.Tx, eventID, tenantID, userID string, resourceIDs []string, startsAt, endsAt time.Time) error {
 	if resourceIDs == nil {
 		rows, err := tx.Query(ctx, `SELECT resource_id FROM calendar_event_resources WHERE event_id=$1`, eventID)
 		if err != nil {
@@ -1216,8 +1216,10 @@ func (s *Server) replaceCalendarEventResources(ctx context.Context, tx pgx.Tx, e
 	found := map[string]resourceRow{}
 	rows, err := tx.Query(ctx, `
 		SELECT id, name, email::text FROM calendar_resources
-		WHERE tenant_id=$1 AND active=true AND id = ANY($2::text[])
-	`, tenantID, unique)
+		WHERE tenant_id=$1 AND id = ANY($2::text[])
+		  AND ((created_by=$3 AND active=true)
+		       OR id IN (SELECT resource_id FROM calendar_event_resources WHERE event_id=$4))
+	`, tenantID, unique, userID, eventID)
 	if err != nil {
 		return err
 	}

@@ -967,6 +967,7 @@ const state = {
   calendarMiniMonth: null,
   calendarRealtime: null,
   calendarRefreshTimer: null,
+  calendarDockDismissed: new Set(),
   eventAttendees: [],
   eventAttachments: [],
   eventResources: [],
@@ -3701,6 +3702,8 @@ async function logout() {
     state.pushError = "";
     try { state.calendarRealtime?.close(); } catch {}
     state.calendarRealtime = null;
+    state.calendarDockDismissed = new Set();
+    document.getElementById("calendarProposalDock")?.remove();
     state.people = [];
     state.aliases = [];
     state.sieve = null;
@@ -3843,6 +3846,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.capabilities = data.capabilities || [];
   state.calendars = data.calendars || [];
   state.calendarSubscriptions = data.calendarSubscriptions || [];
+  renderCalendarProposalDock();
   state.addressBooks = data.addressBooks || [];
   state.fileFolders = data.fileFolders || [];
   if (data.storageQuota) state.storageQuota = data.storageQuota;
@@ -4957,9 +4961,16 @@ function messageMentionsMe(message) {
   return haystack.includes(`@${me}`) || (local.length > 2 && haystack.includes(`@${local}`));
 }
 
+function isCalendarAttachment(file) {
+  const mime = String(file?.mime || "").toLowerCase();
+  const name = String(file?.name || "").toLowerCase();
+  return mime.startsWith("text/calendar") || mime === "application/ics" ||
+    mime === "application/calendar" || name.endsWith(".ics");
+}
+
 function messageHasCalendarInvite(message) {
   if (message.event && typeof message.event === "object") return true;
-  return (message.attachments || []).some((file) => String(file?.mime || file?.type || "").toLowerCase().startsWith("text/calendar"));
+  return (message.attachments || []).some(isCalendarAttachment);
 }
 
 function inboxViewIndividual() {
@@ -6066,7 +6077,7 @@ function mailLoadMoreMarkup(page) {
 function ensureDateJumpUi() {
   const actions = document.querySelector(".list-actions");
   if (actions && !document.getElementById("dateJumpBtn")) {
-    actions.insertAdjacentHTML("afterbegin", `<button class="icon-btn" id="dateJumpBtn" type="button" aria-label="Jump to a date" title="Jump to date" aria-haspopup="menu" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></button>`);
+    actions.insertAdjacentHTML("afterbegin", `<button class="icon-btn" id="dateJumpBtn" type="button" aria-label="Jump to a date" title="Jump to date" aria-haspopup="menu" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-curve-down-left"/></svg></button>`);
   }
   if (document.getElementById("dateJumpMenu")) return;
   const host = document.querySelector(".list-head") || document.querySelector(".list-panel") || document.body;
@@ -6341,7 +6352,8 @@ function threadRowMarkup(thread) {
   const { rep, person, label } = threadRowDisplay(thread);
   const selected = thread.id === state.selectedThreadId;
   const checked = state.selectedIds.has(thread.id);
-  const hasFiles = thread.hasAttachments;
+  const hasCalendar = (thread.messages || []).some(messageHasCalendarInvite);
+  const hasFiles = (thread.messages || []).some((message) => (message.attachments || []).some((file) => !isCalendarAttachment(file)));
   const unread = thread.unreadCount > 0;
   const safeId = esc(thread.id);
   const threadCount = thread.count > 1 ? `<span class="msg-thread-count" title="${thread.count} messages in conversation">${thread.count}</span>` : "";
@@ -6355,6 +6367,7 @@ function threadRowMarkup(thread) {
           <div class="msg-top">
             <span class="msg-from">${esc(label)}</span>
             ${threadCount}
+            ${hasCalendar ? `<span class="msg-tag msg-calendar-tag" title="Calendar invitation or update" aria-label="Calendar invitation or update"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span>` : ""}
             ${hasFiles ? `<span class="msg-tag" title="Has attachments"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></span>` : ""}
             ${thread.flagged ? '<span class="msg-flag" title="Flagged for follow-up" aria-label="Flagged for follow-up"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg></span>' : ""}
             ${thread.snoozeReturned ? `<span class="msg-snooze" title="Snoozed · returned ${esc(formatDateTimeFull(thread.snoozeReturnAt))}" aria-label="Snoozed message"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></span>` : ""}
@@ -6794,6 +6807,11 @@ function blockedImagesBanner(message, imagesAllowed) {
   return `<div class="email-image-blocked"><svg class="icon" aria-hidden="true"><use href="#i-shield-alert"/></svg><div><strong>Images are blocked</strong><span>Load remote images through the Alt8Mail privacy proxy for this message.</span></div><button class="btn-secondary small" data-show-images="${esc(message.id)}" type="button">Show images</button></div>`;
 }
 
+function calendarCardSlotMarkup(message) {
+  if (!message || !messageHasCalendarInvite(message)) return "";
+  return `<div class="cal-mail-slot" data-calendar-card-slot="${esc(message.id)}" hidden></div>`;
+}
+
 function threadMessageMarkup(message, expanded) {
   const spamMessage = message.folder === "spam";
   const imagesAllowed = !spamMessage && (state.preferences.autoLoadImages !== false || state.imageOverrides.has(message.id));
@@ -6826,6 +6844,7 @@ function threadMessageMarkup(message, expanded) {
         <button class="trust-details" data-trust-explain="${esc(message.id)}" type="button">${spamMessage ? "Why is this junk?" : "Why is this safe?"}</button>
         <button class="trust-details" data-details="${esc(message.id)}" type="button">Message details</button>
       </div>
+      ${calendarCardSlotMarkup(message)}
       ${unsubscribeMarkup(message)}
       ${activityBits.length ? `<div class="thread-activity-line">${activityBits.join("")}</div>` : ""}
       <div class="email-body${imagesAllowed ? "" : " images-blocked"}">${safeEmailHtml(message.bodyHtml || `<p>${esc(message.snippet || "")}</p>`, { message, allowImages: imagesAllowed })}</div>
@@ -7333,7 +7352,7 @@ function mailHomeMarkup() {
       <h2>No conversation selected</h2>
       <p class="home-lead">A quiet moment in your workspace. Pick a conversation, start a new message, or see how your year in email is shaping up.</p>
       <div class="home-hero-actions">
-        <button class="btn-primary home-compose-btn" type="button" data-home-compose><svg class="icon" aria-hidden="true"><use href="#i-pen"/></svg>Compose</button>
+        <button class="btn-primary home-compose-btn" type="button" data-home-compose><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>Compose</button>
         <button class="btn-secondary" type="button" data-home-tab="pulse"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Open Pulse</button>
       </div>
     </div>
@@ -8518,6 +8537,7 @@ function renderReader({ preserveScroll = false } = {}) {
           <span class="thread-meta-chip">${thread.count} message${thread.count === 1 ? "" : "s"}</span>
           ${threadReadMinutes ? `<span class="thread-meta-chip"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>${esc(readingTimeLabel(threadReadMinutes))}</span>` : ""}
           ${threadReactionSummaryMarkup(thread)}
+          ${thread.messages.some(messageHasCalendarInvite) ? '<span class="thread-meta-chip is-calendar"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>Calendar</span>' : ""}
           ${unread ? `<span class="thread-meta-chip is-unread">${unread} unread</span>` : ""}
           ${thread.flagged ? '<span class="thread-meta-chip is-flagged"><svg class="icon" aria-hidden="true"><use href="#i-flag"/></svg>Follow-up</span>' : ""}
           ${thread.pinned ? '<span class="thread-meta-chip is-pinned"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg>Pinned</span>' : ""}
@@ -8551,6 +8571,7 @@ function renderReader({ preserveScroll = false } = {}) {
   syncCommandBar();
   updateAiReaderUi();
   updateDocumentTitle();
+  hydrateMessageCalendarCards();
   requestAnimationFrame(() => { readerScroll.scrollTop = preserveScroll ? scrollTop : 0; });
 }
 
@@ -8571,11 +8592,357 @@ function updateAiReaderUi() {
   });
 }
 
-function commitmentKindLabel(kind) {
-  return kind === "deadline" ? "Deadline" : kind === "request" ? "Request" : "Promise";
+function calendarCardZone(calendar) {
+  const zone = String(calendar?.timezone || calendar?.eventTimezone || "");
+  if (zone) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: zone }).format(new Date());
+      return zone;
+    } catch {}
+  }
+  return currentTimeZone() || "UTC";
 }
 
-function readerAiCardMarkup(thread) {
+function calendarCardDateTile(calendar) {
+  const raw = calendar?.startsAt || calendar?.eventStartsAt;
+  if (!raw) return null;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: calendarCardZone(calendar) }).formatToParts(date);
+    return {
+      month: parts.find((part) => part.type === "month")?.value || "",
+      day: parts.find((part) => part.type === "day")?.value || ""
+    };
+  } catch {
+    return { month: date.toLocaleString(undefined, { month: "short" }), day: String(date.getDate()) };
+  }
+}
+
+function formatCalendarCardRange(startsAt, endsAt, timezone, allDay) {
+  if (!startsAt) return "Time to be confirmed";
+  const start = new Date(startsAt);
+  if (Number.isNaN(start.getTime())) return "Time to be confirmed";
+  const zone = timezone && (() => { try { new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(start); return timezone; } catch { return undefined; } })();
+  const options = zone ? { timeZone: zone } : {};
+  try {
+    if (allDay) {
+      return new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric", ...options }).format(start) + " · All day";
+    }
+    const end = endsAt ? new Date(endsAt) : null;
+    const validEnd = end && !Number.isNaN(end.getTime()) ? end : null;
+    const sameDay = validEnd && new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", ...options }).format(start) ===
+      new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", ...options }).format(validEnd);
+    const dateText = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", ...options }).format(start);
+    const startTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", ...options }).format(start);
+    const endTime = validEnd ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", ...options }).format(validEnd) : "";
+    const suffix = zone ? ` (${zone})` : "";
+    if (sameDay) return `${dateText} · ${startTime}${endTime ? ` – ${endTime}` : ""}${suffix}`;
+    const endDate = validEnd ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", ...options }).format(validEnd) : "";
+    return `${dateText} ${startTime}${endTime ? ` – ${endDate} ${endTime}` : ""}${suffix}`;
+  } catch {
+    return start.toLocaleString();
+  }
+}
+
+function calendarGuestStatusLabel(status) {
+  const value = String(status || "").toLowerCase();
+  if (value === "accepted") return "Yes";
+  if (value === "tentative") return "Maybe";
+  if (value === "declined") return "No";
+  return "Awaiting";
+}
+
+function calendarMailCardGuests(calendar) {
+  const attendees = Array.isArray(calendar?.attendees) ? calendar.attendees : [];
+  const guests = attendees.filter((attendee) => !attendee.organizer &&
+    normalizeEmail(attendee.email) !== normalizeEmail(calendar.organizer));
+  if (!guests.length) return "";
+  const shown = guests.slice(0, 5);
+  return `<div class="cal-mail-guests">${shown.map((guest) => {
+    const status = String(guest.status || "needs-action").toLowerCase();
+    return `<span class="cal-mail-guest is-${esc(status)}" title="${esc(guest.email || "")}">
+      <span class="cal-mail-guest-dot" aria-hidden="true"></span>${esc(guest.name || guest.email || "Guest")}
+      <small>${esc(calendarGuestStatusLabel(status))}</small>
+    </span>`;
+  }).join("")}${guests.length > shown.length ? `<span class="cal-mail-guest is-more">+${guests.length - shown.length}</span>` : ""}</div>`;
+}
+
+function calendarMailCardMarkup(calendar) {
+  const kind = String(calendar?.kind || "invitation");
+  const role = String(calendar?.role || "other");
+  const cancelled = kind === "cancelled" || calendar?.status === "cancelled" || calendar?.eventStatus === "cancelled";
+  const proposal = calendar?.proposal || null;
+  const organizer = calendar?.organizerName || calendar?.organizer || "the organizer";
+  const title = proposal && calendar?.eventTitle ? calendar.eventTitle : calendar?.title || "Calendar event";
+  const proposedWhen = formatCalendarCardRange(calendar?.startsAt, calendar?.endsAt, calendarCardZone(calendar), Boolean(calendar?.allDay));
+  const currentWhen = calendar?.eventStartsAt
+    ? formatCalendarCardRange(calendar.eventStartsAt, calendar.eventEndsAt, calendar.eventTimezone || calendarCardZone(calendar), Boolean(calendar?.allDay))
+    : "";
+  const tile = calendarCardDateTile(calendar);
+  let eyebrow = "Calendar invitation";
+  let badge = role === "organizer" ? "Organizer" : role === "attendee" ? "Guest" : "Calendar";
+  if (proposal) {
+    eyebrow = role === "organizer" ? "New time proposed" : "Proposal sent";
+    badge = "Action needed";
+  } else if (kind === "response") {
+    eyebrow = "Guest response";
+    badge = calendarGuestStatusLabel(calendar.responseStatus);
+  } else if (kind === "cancelled" || cancelled) {
+    eyebrow = "Meeting cancelled";
+    badge = "Cancelled";
+  } else if (role === "organizer") {
+    eyebrow = Number(calendar?.sequence || 0) > 0 ? "Updated invitation sent" : "Invitation sent";
+  } else if (Number(calendar?.sequence || 0) > 0) {
+    eyebrow = "Updated calendar invitation";
+  }
+
+  const responseName = calendar?.fromEmail || "The guest";
+  const responseBanner = kind === "response"
+    ? `<div class="cal-mail-response is-${esc(String(calendar.responseStatus || "needs-action").toLowerCase())}">
+        <svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>
+        <span><strong>${esc(responseName)}</strong> responded <b>${esc(calendarGuestStatusLabel(calendar.responseStatus))}</b>. Your calendar has been updated.</span>
+      </div>`
+    : "";
+  const changeBlock = proposal && currentWhen
+    ? `<div class="cal-mail-change">
+        <div class="cal-mail-change-col"><span>Current time</span><strong>${esc(currentWhen)}</strong></div>
+        <span class="cal-mail-change-arrow" aria-hidden="true"><svg class="icon"><use href="#i-chevron-right"/></svg></span>
+        <div class="cal-mail-change-col is-new"><span>Proposed by ${esc(proposal.attendeeName || proposal.attendeeEmail || "guest")}</span><strong>${esc(formatCalendarCardRange(proposal.startsAt, proposal.endsAt, proposal.timezone || calendarCardZone(calendar), false))}</strong></div>
+      </div>${proposal.note ? `<p class="cal-mail-proposal-note">“${esc(proposal.note)}”</p>` : ""}`
+    : `<div class="cal-mail-when-row"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><strong>${esc(proposedWhen)}</strong></div>`;
+
+  const actions = [];
+  if (kind === "proposal" && role === "organizer" && proposal) {
+    actions.push(`<button class="btn-primary small" type="button" data-cal-card-proposal-accept="${esc(proposal.id)}"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Accept new time</button>`);
+    actions.push(`<button class="btn-secondary small" type="button" data-cal-card-proposal-decline="${esc(proposal.id)}">Keep original time</button>`);
+  } else if (kind === "proposal" && calendar?.proposalUnavailable) {
+    actions.push(`<button class="btn-secondary small" type="button" data-cal-card-open>Review in Calendar</button>`);
+  }
+  if (kind === "invitation" && role === "attendee" && calendar?.canRespond && !cancelled) {
+    const status = String(calendar.myStatus || "").toLowerCase();
+    actions.push(`<button class="btn-primary small cal-mail-rsvp${status === "accepted" ? " is-selected" : ""}" type="button" data-cal-card-rsvp="accepted">Yes, I'll attend</button>`);
+    actions.push(`<button class="btn-secondary small cal-mail-rsvp${status === "tentative" ? " is-selected" : ""}" type="button" data-cal-card-rsvp="tentative">Maybe</button>`);
+    actions.push(`<button class="btn-secondary small cal-mail-rsvp${status === "declined" ? " is-selected" : ""}" type="button" data-cal-card-rsvp="declined">No, I can't</button>`);
+  } else if (kind === "invitation" && role === "attendee" && !calendar?.canOpenEvent && !cancelled) {
+    actions.push(`<button class="btn-primary small" type="button" data-cal-card-import><svg class="icon" aria-hidden="true"><use href="#i-calendar-plus"/></svg>Add to Calendar</button>`);
+  }
+  if (calendar?.canOpenEvent) {
+    actions.push(`<button class="btn-secondary small" type="button" data-cal-card-open><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>Open in Calendar</button>`);
+  }
+  const responseHint = kind === "response"
+    ? `<p class="cal-mail-footnote">The response was applied automatically. Open the event to review every guest.</p>`
+    : kind === "proposal"
+      ? `<p class="cal-mail-footnote">Nothing changes until you accept the proposed time.</p>`
+      : role === "attendee" && calendar?.eventId
+        ? `<p class="cal-mail-footnote">Your response is saved to the event and sent to ${esc(organizer)}.</p>`
+        : role === "attendee" && !calendar?.eventId
+          ? `<p class="cal-mail-footnote">Add the invitation to your calendar to respond and see it with your other events.</p>`
+          : `<p class="cal-mail-footnote">This card is read from the calendar file attached to the message.</p>`;
+
+  const whereRow = calendar?.location
+    ? `<div class="cal-mail-where-row"><svg class="icon" aria-hidden="true"><use href="#i-location"/></svg><span>${esc(calendar.location)}</span></div>`
+    : "";
+  const organizerRow = calendar?.organizer
+    ? `<div class="cal-mail-organizer-row"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg><span>${esc(organizer)}${calendar.organizer && calendar.organizerName ? ` · ${esc(calendar.organizer)}` : ""}</span></div>`
+    : "";
+
+  return `<div class="cal-mail-card is-${esc(kind)}${cancelled ? " is-cancelled" : ""}">
+    <div class="cal-mail-card-rail" aria-hidden="true"></div>
+    <div class="cal-mail-card-body">
+      <div class="cal-mail-card-head">
+        <span class="cal-mail-card-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span>
+        <div class="cal-mail-card-heading"><span class="cal-mail-eyebrow">${esc(eyebrow)}</span><strong class="cal-mail-title">${esc(title)}</strong></div>
+        <span class="cal-mail-badge${cancelled ? " is-cancelled" : proposal ? " is-action" : ""}">${esc(badge)}</span>
+      </div>
+      <div class="cal-mail-card-main">
+        ${tile ? `<div class="cal-mail-date-tile"><span>${esc(tile.month)}</span><b>${esc(tile.day)}</b></div>` : ""}
+        <div class="cal-mail-card-details">
+          ${changeBlock}
+          ${whereRow}
+          ${organizerRow}
+        </div>
+      </div>
+      ${responseBanner}
+      ${calendarMailCardGuests(calendar)}
+      ${actions.length ? `<div class="cal-mail-actions">${actions.join("")}</div>` : ""}
+      ${responseHint}
+    </div>
+  </div>`;
+}
+
+async function hydrateMessageCalendarCards() {
+  const slots = Array.from(document.querySelectorAll("[data-calendar-card-slot]"));
+  await Promise.all(slots.map((slot) => hydrateCalendarCardSlot(slot)));
+}
+
+async function hydrateCalendarCardSlot(slot) {
+  const messageId = slot?.getAttribute("data-calendar-card-slot");
+  if (!messageId) return;
+  const article = slot.closest(".thread-msg");
+  try {
+    const data = await api(`/api/messages/${encodeURIComponent(messageId)}/calendar-card`);
+    const calendar = data?.calendar;
+    if (!calendar) { slot.remove(); return; }
+    calendar.messageId = messageId;
+    slot.innerHTML = calendarMailCardMarkup(calendar);
+    slot.hidden = false;
+    bindCalendarMailCard(slot, calendar);
+    if (article && calendar.method) {
+      article.querySelectorAll(".attach-item[data-calendar-attachment]").forEach((item) => item.remove());
+      const box = article.querySelector(".attachments");
+      if (box && !box.querySelector(".attach-item")) box.remove();
+    }
+  } catch {
+    slot.remove();
+  }
+}
+
+function bindCalendarMailCard(slot, calendar) {
+  slot.querySelectorAll("[data-cal-card-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (calendar?.eventId) openLinkedCalendarEvent(calendar.eventId);
+      else showToast("This invitation is not linked to an Alt8Mail calendar");
+    });
+  });
+  slot.querySelectorAll("[data-cal-card-rsvp]").forEach((button) => {
+    button.addEventListener("click", () => respondFromCalendarCard(calendar?.eventId, button.getAttribute("data-cal-card-rsvp"), slot));
+  });
+  slot.querySelectorAll("[data-cal-card-import]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!calendar?.messageId) return;
+      button.disabled = true;
+      try {
+        const data = await api(`/api/messages/${encodeURIComponent(calendar.messageId)}/calendar-import`, { method: "POST", body: {} });
+        await refreshCalendarData().catch(() => {});
+        if (data?.event?.id) {
+          showToast(data.alreadyPresent ? "This invitation is already in your calendar" : "Invitation added to your calendar");
+          openLinkedCalendarEvent(data.event.id);
+        } else {
+          showToast("This invitation is already in your calendar");
+          hydrateCalendarCardSlot(slot);
+        }
+      } catch (error) {
+        showError(error);
+        button.disabled = false;
+      }
+    });
+  });
+  slot.querySelectorAll("[data-cal-card-proposal-accept]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const ok = await decideCalendarProposal(button.getAttribute("data-cal-card-proposal-accept"), "accept", calendar?.eventId);
+      if (ok) hydrateCalendarCardSlot(slot);
+    });
+  });
+  slot.querySelectorAll("[data-cal-card-proposal-decline]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const ok = await decideCalendarProposal(button.getAttribute("data-cal-card-proposal-decline"), "decline", calendar?.eventId);
+      if (ok) hydrateCalendarCardSlot(slot);
+    });
+  });
+}
+
+async function respondFromCalendarCard(eventId, status, slot) {
+  if (!eventId || !status) return;
+  const buttons = Array.from(slot.querySelectorAll("[data-cal-card-rsvp]"));
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const data = await api(`/api/calendar/events/${encodeURIComponent(eventId)}/rsvp`, { method: "POST", body: { status } });
+    if (data.event) {
+      const index = (state.calendarEvents || []).findIndex((event) => event.id === eventId);
+      if (index >= 0) state.calendarEvents[index] = data.event;
+    }
+    showToast(status === "accepted" ? "Invitation accepted" : status === "declined" ? "Invitation declined" : "Marked as tentative");
+    await refreshCalendarData().catch(() => {});
+    hydrateCalendarCardSlot(slot);
+  } catch (error) {
+    showError(error);
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+function pendingCalendarProposals() {
+  const items = [];
+  for (const event of state.calendarEvents || []) {
+    if (String(event.status || "").toLowerCase() === "cancelled") continue;
+    for (const proposal of event.proposals || []) {
+      if (String(proposal.status || "pending") !== "pending") continue;
+      if (state.calendarDockDismissed.has(proposal.id)) continue;
+      items.push({ event, proposal });
+    }
+  }
+  return items;
+}
+
+function renderCalendarProposalDock() {
+  const existing = document.getElementById("calendarProposalDock");
+  const items = pendingCalendarProposals();
+  if (!items.length) {
+    existing?.remove();
+    return;
+  }
+  let dock = existing;
+  if (!dock) {
+    dock = document.createElement("aside");
+    dock.id = "calendarProposalDock";
+    dock.className = "cal-proposal-dock";
+    dock.setAttribute("aria-live", "polite");
+    dock.setAttribute("aria-label", "Calendar time proposals");
+    document.body.appendChild(dock);
+  }
+  dock.innerHTML = `<div class="cal-proposal-dock-head">
+      <div class="cal-proposal-dock-heading"><span>Calendar</span><strong>${items.length === 1 ? "A guest proposed a new time" : `${items.length} guests proposed new times`}</strong></div>
+      <button class="cal-proposal-dock-close" type="button" data-cal-dock-close aria-label="Dismiss proposals"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="cal-proposal-dock-list">${items.map(({ event, proposal }) => {
+      const name = proposal.attendeeName || proposal.attendeeEmail || "A guest";
+      const initials = initialsFrom(name);
+      return `<article class="cal-proposal-float" data-cal-proposal-event="${esc(event.id)}">
+        <div class="cal-proposal-float-head">
+          <span class="cal-proposal-float-avatar" style="--proposal:${colorForString(proposal.attendeeEmail || name)}">${esc(initials || "?")}</span>
+          <div><strong>${esc(name)}</strong><span>proposed a new time</span></div>
+        </div>
+        <div class="cal-proposal-float-title">${esc(event.title || "Calendar event")}</div>
+        <div class="cal-proposal-float-times">
+          <div><span>Now</span><strong>${esc(formatCalendarCardRange(event.startsAt, event.endsAt, event.timezone || calendarCardZone(event), Boolean(event.allDay)))}</strong></div>
+          <div class="is-new"><span>Proposed</span><strong>${esc(formatCalendarCardRange(proposal.proposedStartsAt, proposal.proposedEndsAt, proposal.timezone || event.timezone, false))}</strong></div>
+        </div>
+        ${proposal.note ? `<p class="cal-proposal-float-note">“${esc(proposal.note)}”</p>` : ""}
+        <div class="cal-proposal-float-actions">
+          <button class="btn-primary small" type="button" data-cal-proposal-accept="${esc(proposal.id)}">Accept</button>
+          <button class="btn-secondary small" type="button" data-cal-proposal-decline="${esc(proposal.id)}">Keep original</button>
+          <button class="link-btn" type="button" data-cal-proposal-open="${esc(event.id)}">Open event</button>
+        </div>
+      </article>`;
+    }).join("")}</div>`;
+  dock.onclick = async (event) => {
+    const close = event.target.closest("[data-cal-dock-close]");
+    if (close) {
+      for (const item of items) state.calendarDockDismissed.add(item.proposal.id);
+      renderCalendarProposalDock();
+      return;
+    }
+    const open = event.target.closest("[data-cal-proposal-open]");
+    if (open) { openLinkedCalendarEvent(open.getAttribute("data-cal-proposal-open")); return; }
+    const accept = event.target.closest("[data-cal-proposal-accept]");
+    if (accept) {
+      const item = items.find((entry) => entry.proposal.id === accept.getAttribute("data-cal-proposal-accept"));
+      if (item) await decideCalendarProposal(item.proposal.id, "accept", item.event.id);
+      renderCalendarProposalDock();
+      return;
+    }
+    const decline = event.target.closest("[data-cal-proposal-decline]");
+    if (decline) {
+      const item = items.find((entry) => entry.proposal.id === decline.getAttribute("data-cal-proposal-decline"));
+      if (item) await decideCalendarProposal(item.proposal.id, "decline", item.event.id);
+      renderCalendarProposalDock();
+    }
+  };
+}
+
+function commitmentKindLabel(kind) {
+  return kind === "deadline" ? "Deadline" : kind === "request" ? "Request" : "Promise";
+}function readerAiCardMarkup(thread) {
   const result = state.aiReader;
   if (!state.ai?.enabled || !result || result.threadId !== thread.id) return "";
   if (result.kind === "commitments") {
@@ -8868,7 +9235,7 @@ function attachmentMarkup(files, message = null) {
       ${messageId && !blocked && !message?.delegateOwnerId ? `<button class="link-btn attach-save-all" data-save-all-attachments="${esc(messageId)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg>Save all to Cabinet</button>` : ""}
     </div>
     <div class="attach-grid">
-      ${files.map((file) => `<div class="attach-item">
+      ${files.map((file) => `<div class="attach-item"${isCalendarAttachment(file) ? ' data-calendar-attachment="1"' : ""}>
         <button class="attach${blocked ? " is-blocked" : ""}" data-attachment="${esc(file.name)}" data-file-id="${esc(file.id || "")}" data-file-type="${esc(file.type)}" data-file-size="${esc(file.size || formatBytes(file.sizeBytes))}" data-file-mime="${esc(file.mime || "")}" data-file-url="${esc(file.contentUrl || "")}" data-file-previewable="${file.previewable ? "true" : "false"}" type="button"${blocked ? ` aria-label="Attachment blocked while this message is in Junk"` : ""}>
           <span class="attach-badge" data-type="${esc(file.type)}">${esc(file.type)}</span>
           <span class="attach-info"><span class="attach-name">${esc(file.name)}</span><span class="attach-size">${blocked ? "Blocked in Junk" : esc(file.size || formatBytes(file.sizeBytes))}</span></span>
@@ -18445,6 +18812,7 @@ function calendarEventChip(event, { showTime = true, draggable = true } = {}) {
 
 function renderCalendar() {
   if (!calMain) return;
+  renderCalendarProposalDock();
   if (!state.calendars.length) {
     calMain.innerHTML = `<div class="cal-loading"><span class="passkey-spinner" aria-hidden="true"></span>Loading calendars…</div>`;
     return;
@@ -19106,9 +19474,9 @@ function renderEventGuestPanel() {
     </div>` : ""}`;
 }
 
-async function decideCalendarProposal(proposalId, decision) {
-  const id = calendarEditingId;
-  if (!id || !proposalId) return;
+async function decideCalendarProposal(proposalId, decision, eventId = "") {
+  const id = eventId || calendarEditingId;
+  if (!id || !proposalId) return false;
   const action = decision === "accept" ? "accept" : "decline";
   const confirmed = await appConfirm({
     title: action === "accept" ? "Accept the proposed time?" : "Decline the proposed time?",
@@ -19116,7 +19484,7 @@ async function decideCalendarProposal(proposalId, decision) {
     confirmLabel: action === "accept" ? "Accept time" : "Decline time",
     tone: action === "accept" ? undefined : "danger"
   });
-  if (!confirmed) return;
+  if (!confirmed) return false;
   try {
     const data = await api(`/api/calendar/events/${encodeURIComponent(id)}/proposals/${encodeURIComponent(proposalId)}/${action}`, { method: "POST", body: {} });
     if (data.event) {
@@ -19128,8 +19496,11 @@ async function decideCalendarProposal(proposalId, decision) {
     }
     renderEventGuestPanel();
     renderEventAttendees();
+    renderCalendarProposalDock();
+    if (state.task === "calendar") renderCalendar();
     showToast(action === "accept" ? "Proposed time accepted — guests are being notified" : "Proposed time declined");
-  } catch (error) { showError(error); }
+    return true;
+  } catch (error) { showError(error); return false; }
 }
 
 async function resendEventInvites() {
@@ -19165,7 +19536,7 @@ function renderEventResources() {
   </span>`).join("") : `<span class="event-resource-empty">No room or resource booked</span>`;
   const chosen = new Set(selected.map((resource) => resource.id));
   const options = (state.calendarResources || []).filter((resource) => !chosen.has(resource.id));
-  select.innerHTML = `<option value="">Add a room or resource…</option>` + options.map((resource) =>
+  select.innerHTML = `<option value="">${options.length ? "Add a room or resource…" : "No saved rooms yet — use +"}</option>` + options.map((resource) =>
     `<option value="${esc(resource.id)}">${esc(resource.name)}${resource.location ? ` · ${esc(resource.location)}` : ""}${resource.capacity ? ` · seats ${Number(resource.capacity)}` : ""}</option>`).join("");
   select.disabled = locked || options.length === 0;
 }
@@ -19175,6 +19546,81 @@ function addEventResource(resourceId) {
   if (!resource) return;
   state.eventResources = [...(state.eventResources || []), { ...resource }];
   renderEventResources();
+}
+
+function ensureCalendarResourceDialog() {
+  let overlay = document.getElementById("calendarResourceOverlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.id = "calendarResourceOverlay";
+  overlay.hidden = true;
+  overlay.innerHTML = `<div class="dialog resource-dialog" role="dialog" aria-modal="true" aria-labelledby="calendarResourceTitle">
+    <div class="dialog-head"><div><p class="eyebrow">Calendar</p><h2 id="calendarResourceTitle">New room or resource</h2><p class="dialog-note">Saved to your account and ready the next time you schedule.</p></div><button class="icon-btn" type="button" data-resource-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div class="dialog-body">
+      <label class="form-field"><span>Name</span><input id="calendarResourceName" maxlength="120" placeholder="e.g. Focus room"></label>
+      <div class="field-row">
+        <label class="form-field"><span>Type</span><select id="calendarResourceKind"><option value="room">Room</option><option value="equipment">Equipment</option><option value="other">Other</option></select></label>
+        <label class="form-field"><span>Seats <em>optional</em></span><input id="calendarResourceCapacity" type="number" min="0" max="10000" value="0"></label>
+      </div>
+      <label class="form-field"><span>Location <em>optional</em></span><input id="calendarResourceLocation" maxlength="160" placeholder="e.g. 2nd floor · East wing"></label>
+      <p class="resource-dialog-hint">Rooms and resources are visible only in your account. Their internal addresses never receive email.</p>
+      <p class="resource-dialog-error" id="calendarResourceError" hidden></p>
+    </div>
+    <div class="dialog-foot"><button class="btn-secondary" type="button" data-resource-cancel>Cancel</button><button class="btn-primary" type="button" id="calendarResourceSave">Add resource</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest("[data-resource-close], [data-resource-cancel]")) closeCalendarResourceDialog();
+  });
+  document.getElementById("calendarResourceSave")?.addEventListener("click", saveCalendarResource);
+  document.getElementById("calendarResourceName")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); saveCalendarResource(); }
+  });
+  return overlay;
+}
+
+function openCalendarResourceDialog() {
+  const overlay = ensureCalendarResourceDialog();
+  const error = document.getElementById("calendarResourceError");
+  document.getElementById("calendarResourceName").value = "";
+  document.getElementById("calendarResourceKind").value = "room";
+  document.getElementById("calendarResourceCapacity").value = "0";
+  document.getElementById("calendarResourceLocation").value = "";
+  if (error) { error.hidden = true; error.textContent = ""; }
+  overlay.hidden = false;
+  setTimeout(() => document.getElementById("calendarResourceName")?.focus(), 40);
+}
+
+function closeCalendarResourceDialog() {
+  const overlay = document.getElementById("calendarResourceOverlay");
+  if (overlay) overlay.hidden = true;
+}
+
+async function saveCalendarResource() {
+  const name = String(document.getElementById("calendarResourceName")?.value || "").trim();
+  const kind = String(document.getElementById("calendarResourceKind")?.value || "room");
+  const location = String(document.getElementById("calendarResourceLocation")?.value || "").trim();
+  const capacity = Math.max(0, Math.min(10000, Number(document.getElementById("calendarResourceCapacity")?.value) || 0));
+  const error = document.getElementById("calendarResourceError");
+  const button = document.getElementById("calendarResourceSave");
+  if (!name) {
+    if (error) { error.textContent = "Give the room or resource a name."; error.hidden = false; }
+    return;
+  }
+  if (button) button.disabled = true;
+  try {
+    const data = await api("/api/calendar/resources", { method: "POST", body: { name, kind, location, capacity } });
+    if (Array.isArray(data.resources)) state.calendarResources = data.resources;
+    if (data.resource) addEventResource(data.resource.id);
+    renderEventResources();
+    closeCalendarResourceDialog();
+    showToast(`${data.resource?.name || name} is now available in your events`);
+  } catch (err) {
+    if (error) { error.textContent = err?.message || "Could not save the room or resource."; error.hidden = false; }
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function addEventAttendee(email, name = "") {
@@ -19436,6 +19882,7 @@ async function refreshCalendarData() {
     if (!state.calendars.some((calendar) => calendar.id === state.calendarActiveId)) {
       state.calendarActiveId = state.calendars.find((calendar) => calendar.isDefault)?.id || state.calendars[0]?.id || "default";
     }
+    renderCalendarProposalDock();
     if (state.task === "calendar") renderCalendar();
     return data;
   } catch (error) {
@@ -19470,6 +19917,7 @@ function applyCalendarPayload(data) {
   if (!state.calendars.some((calendar) => calendar.id === state.calendarActiveId)) {
     state.calendarActiveId = state.calendars.find((calendar) => calendar.isDefault)?.id || state.calendars[0]?.id || "default";
   }
+  renderCalendarProposalDock();
   renderCalendar();
 }
 
@@ -19904,6 +20352,16 @@ function setupCalendarInteractions() {
       return;
     }
   });
+  calendarView.addEventListener("dblclick", (event) => {
+    const target = event.target;
+    if (target.closest("button, a, input, textarea, select, [data-edit-event]")) return;
+    const monthCell = target.closest(".cal-month-cell[data-cal-date]");
+    if (!monthCell) return;
+    event.preventDefault();
+    const date = monthCell.getAttribute("data-cal-date");
+    selectCalendarDate(date);
+    openEventDialog(null, { date });
+  });
   calendarView.addEventListener("change", (event) => {
     const visibility = event.target.closest("[data-calendar-visibility]");
     if (visibility) toggleCalendarVisibility(visibility.getAttribute("data-calendar-visibility"), visibility.checked);
@@ -20211,6 +20669,7 @@ function setupCalendarInteractions() {
     if (removeAttach) { state.eventAttachments.splice(Number(removeAttach.getAttribute("data-event-attachment-remove")), 1); renderEventAttachments(); return; }
     const removeResource = event.target.closest("[data-event-resource-remove]");
     if (removeResource) { state.eventResources.splice(Number(removeResource.getAttribute("data-event-resource-remove")), 1); renderEventResources(); return; }
+    if (event.target.closest("#eventResourceAdd")) { openCalendarResourceDialog(); return; }
     const rsvp = event.target.closest("[data-event-rsvp]");
     if (rsvp) { rsvpCalendarEvent(rsvp.getAttribute("data-event-rsvp")); return; }
     if (event.target.closest("[data-event-resend]")) { resendEventInvites(); return; }
@@ -20782,9 +21241,13 @@ function buildNotifications() {
       }
     });
   }
+  const priority = (item) => item.kind === "mention" || item.kind === "assignment" ? 0
+    : item.kind === "security" ? 1
+    : item.kind === "calendar" ? 3
+    : 2;
   return items
     .map((item) => ({ ...item, unread: !state.dismissedNotifications.has(item.id) && item.unread !== false }))
-    .sort((a, b) => Date.parse(b.time || 0) - Date.parse(a.time || 0));
+    .sort((a, b) => priority(a) - priority(b) || Date.parse(b.time || 0) - Date.parse(a.time || 0));
 }
 
 function notificationRowMarkup(item, compact = true) {

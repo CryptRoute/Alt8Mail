@@ -672,6 +672,8 @@
 .msg .pin-btn.is-pinned { color: var(--accent-ink); }
 .msg .pin-btn.is-pinned svg { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
 .thread-meta-chip.is-pinned { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 28%, transparent); background: var(--accent-soft); }
+.thread-meta-chip.is-calendar { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 28%, transparent); background: var(--accent-soft); }
+.thread-meta-chip.is-calendar svg { width: 11px; height: 11px; }
 .thread-meta-chip.is-pinned svg { width: 11px; height: 11px; fill: color-mix(in srgb, var(--accent) 22%, transparent); }
 .thread-footer.is-individual { justify-content: flex-end; }
 .tool-btn.tool-report:hover { color: var(--danger); background: var(--danger-soft); }

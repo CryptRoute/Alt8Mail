@@ -36,12 +36,17 @@ func main() {
 		cronCommand()
 	case "doctor":
 		doctorCommand()
+	case "ensure-mail-guard":
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		if err := control.EnsureMailGuard(logger); err != nil {
+			logger.Warn("local-domain mail guard could not be installed", "err", err)
+		}
 	case "notify":
 		notifyCommand()
 	case "version", "-version", "--version":
 		fmt.Println(version)
 	default:
-		fmt.Fprintln(os.Stderr, "usage: alt8mail-control [serve|admin|cron run <id>|doctor|notify <event> [json]]")
+		fmt.Fprintln(os.Stderr, "usage: alt8mail-control [serve|admin|cron run <id>|doctor|ensure-mail-guard|notify <event> [json]]")
 		os.Exit(2)
 	}
 }

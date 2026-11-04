@@ -23,6 +23,6 @@ ProtectControlGroups=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictNamespaces=true
 LockPersonality=true
-ReadWritePaths=/var/lib/rspamd/dkim
+ReadWritePaths=/var/lib/rspamd
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
 AmbientCapabilities=

@@ -425,8 +425,17 @@ elif ! grep -q 'A8M_REPORTED_SENDER' "$MULTIMAP_CONF"; then
   cat "$SOURCE_DIR/deploy/rspamd/multimap.conf" >> "$MULTIMAP_CONF"
 fi
 chmod 0644 "$MULTIMAP_CONF"
-touch /var/lib/rspamd/dkim/selectors.map
+SETTINGS_CONF=/etc/rspamd/local.d/settings.conf
+if [[ ! -e "$SETTINGS_CONF" ]]; then
+  install -m 0644 "$SOURCE_DIR/deploy/rspamd/settings.conf" "$SETTINGS_CONF"
+elif ! grep -q 'a8m_authenticated_submission' "$SETTINGS_CONF"; then
+  printf '\n# Alt8Mail local-domain guard\n' >> "$SETTINGS_CONF"
+  cat "$SOURCE_DIR/deploy/rspamd/settings.conf" >> "$SETTINGS_CONF"
+fi
+chmod 0644 "$SETTINGS_CONF"
+touch /var/lib/rspamd/dkim/selectors.map /var/lib/rspamd/local_domains.map
 chown -R _rspamd:_rspamd /var/lib/rspamd/dkim 2>/dev/null || true
+chown _rspamd:_rspamd /var/lib/rspamd/local_domains.map 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Release and application configuration
@@ -526,6 +535,7 @@ ALT8MAIL_ADMIN_URL=https://$MAIL_HOSTNAME/admin/
 ALT8MAIL_ADMIN_SESSION_HOURS=8
 ALT8MAIL_DKIM_DIR=/var/lib/rspamd/dkim
 ALT8MAIL_DKIM_SELECTOR_MAP=/var/lib/rspamd/dkim/selectors.map
+ALT8MAIL_LOCAL_DOMAINS_MAP=/var/lib/rspamd/local_domains.map
 ALT8MAIL_CLAMAV_ADDR=/var/run/clamav/clamd.ctl
 ALT8MAIL_IMPORT_SCAN=true
 ALT8MAIL_IMPORT_SCAN_MAX_MB=24

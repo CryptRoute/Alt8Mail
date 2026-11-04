@@ -16,6 +16,7 @@ func (s *Server) Start(ctx context.Context) {
 	s.reconcileRebootState(ctx)
 	s.reconcileAppUpdateJobs(ctx)
 	go s.reconcileWebNetAtStartup(ctx)
+	go s.ensurePublicNginxRoutes(ctx)
 
 	logIngestor := newLogIngestor(s)
 	logIngestor.Start(ctx)

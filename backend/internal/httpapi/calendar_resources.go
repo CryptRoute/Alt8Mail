@@ -7,44 +7,16 @@ import (
 	"strings"
 )
 
-func (s *Server) ensureDefaultCalendarResources(ctx context.Context, tenantID string) error {
-	var count int
-	if err := s.store.DB.QueryRow(ctx, `SELECT count(*) FROM calendar_resources WHERE tenant_id=$1`, tenantID).Scan(&count); err != nil || count > 0 {
-		return err
-	}
-	var domain string
-	_ = s.store.DB.QueryRow(ctx, `
-		SELECT domain::text FROM mail_domains WHERE tenant_id=$1
-		ORDER BY is_primary DESC, domain LIMIT 1
-	`, tenantID).Scan(&domain)
-	domain = firstNonEmpty(strings.TrimSpace(domain), "alt8mail.local")
-	defaults := []struct {
-		name, local, kind, location string
-		capacity                    int
-	}{
-		{"Conference Room A", "room-a", "room", "Head office", 8},
-		{"Board Room", "board-room", "room", "Executive floor", 16},
-		{"Portable projector", "projector", "equipment", "IT cupboard", 0},
-	}
-	for _, item := range defaults {
-		_, _ = s.store.DB.Exec(ctx, `
-			INSERT INTO calendar_resources (id, tenant_id, name, email, kind, location, capacity)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)
-			ON CONFLICT (tenant_id, email) DO NOTHING
-		`, newID("room"), tenantID, item.name, item.local+"@"+domain, item.kind, item.location, item.capacity)
-	}
-	return nil
-}
-
-func (s *Server) loadCalendarResources(ctx context.Context, tenantID string) ([]calendarResourcePublic, error) {
-	if err := s.ensureDefaultCalendarResources(ctx, tenantID); err != nil {
-		return nil, err
-	}
+// loadCalendarResources returns the rooms and resources the user has added to
+// their own account. The tenant-wide seed list used by early releases is not
+// inherited by new accounts.
+func (s *Server) loadCalendarResources(ctx context.Context, tenantID, userID string) ([]calendarResourcePublic, error) {
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT id, name, email::text, kind, location, capacity
-		FROM calendar_resources WHERE tenant_id=$1 AND active=true
+		FROM calendar_resources
+		WHERE tenant_id=$1 AND created_by=$2 AND active=true
 		ORDER BY kind, name
-	`, tenantID)
+	`, tenantID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +33,7 @@ func (s *Server) loadCalendarResources(ctx context.Context, tenantID string) ([]
 
 func (s *Server) getCalendarResources(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
-	resources, err := s.loadCalendarResources(r.Context(), sess.User.TenantID)
+	resources, err := s.loadCalendarResources(r.Context(), sess.User.TenantID, sess.User.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "CALENDAR", "Could not load rooms and resources")
 		return
@@ -99,6 +71,14 @@ func (s *Server) createCalendarResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "RESOURCE_EMAIL", "Enter a valid resource address")
 		return
 	}
+	var existingOwner string
+	if err := s.store.DB.QueryRow(r.Context(), `
+		SELECT COALESCE(created_by::text, '') FROM calendar_resources
+		WHERE tenant_id=$1 AND email=$2
+	`, sess.User.TenantID, email).Scan(&existingOwner); err == nil && existingOwner != "" && existingOwner != sess.User.ID {
+		writeError(w, http.StatusConflict, "RESOURCE_EMAIL", "That address already belongs to another room or resource")
+		return
+	}
 	if body.Capacity < 0 || body.Capacity > 10000 {
 		writeError(w, http.StatusBadRequest, "RESOURCE_CAPACITY", "Capacity must be between 0 and 10000")
 		return
@@ -116,7 +96,7 @@ func (s *Server) createCalendarResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.recordWorkspaceAudit(r.Context(), sess, "calendar.resource.saved", name, "Room/resource saved")
-	resources, _ := s.loadCalendarResources(r.Context(), sess.User.TenantID)
+	resources, _ := s.loadCalendarResources(r.Context(), sess.User.TenantID, sess.User.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"resource": map[string]any{
 		"id": id, "name": name, "email": email, "kind": kind,
 		"location": body.Location, "capacity": body.Capacity,

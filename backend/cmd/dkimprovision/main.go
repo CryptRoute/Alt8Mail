@@ -81,6 +81,7 @@ func main() {
 	}
 
 	selectorMap := map[string]string{}
+	localDomains := []string{}
 	created, updated := 0, 0
 	for _, row := range domains {
 		row.domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(row.domain)), ".")
@@ -93,6 +94,7 @@ func main() {
 			logger.Warn("DKIM domain rejected", "domain", row.domain)
 			continue
 		}
+		localDomains = append(localDomains, row.domain)
 		if !selectorPattern.MatchString(row.selector) {
 			_ = updateDomainKeyError(ctx, st, row.id, "selector is not safe for a DKIM key path")
 			logger.Warn("DKIM selector rejected", "domain", row.domain, "selector", row.selector)
@@ -139,12 +141,21 @@ func main() {
 		logger.Error("DKIM selector map write failed", "path", cfg.DKIMSelectorMap, "err", err)
 		os.Exit(1)
 	}
-	if created > 0 || mapChanged {
+	// The configured mail domain and hostname are always local even if a row is
+	// missing during early provisioning.
+	localDomains = append(localDomains, cfg.MailDomain, cfg.MailHostname)
+	localMapChanged, err := writeLocalDomainsMap(cfg.LocalDomainsMap, localDomains)
+	if err != nil {
+		logger.Error("local domain map write failed", "path", cfg.LocalDomainsMap, "err", err)
+		os.Exit(1)
+	}
+	if created > 0 || mapChanged || localMapChanged {
 		if err := reloadRspamd(); err != nil {
 			logger.Warn("Rspamd reload failed", "err", err)
 		}
 	}
-	logger.Info("DKIM provisioning pass complete", "domains", len(selectorMap), "created", created, "existing", updated, "map_changed", mapChanged)
+	logger.Info("DKIM provisioning pass complete", "domains", len(selectorMap), "local_domains", len(localDomains),
+		"created", created, "existing", updated, "map_changed", mapChanged, "local_map_changed", localMapChanged)
 }
 
 type dkimFileOwner struct {
@@ -282,13 +293,39 @@ func writeSelectorMap(path string, selectors map[string]string) (bool, error) {
 	if len(lines) > 0 {
 		content = strings.Join(lines, "\n") + "\n"
 	}
+	return writeMapContent(path, content)
+}
+
+// writeLocalDomainsMap publishes the domains hosted by this Alt8Mail instance
+// so Rspamd can reject spoofed mail that claims to come from them without an
+// aligned SPF/DKIM/DMARC result.
+func writeLocalDomainsMap(path string, domains []string) (bool, error) {
+	seen := map[string]bool{}
+	lines := make([]string, 0, len(domains))
+	for _, domain := range domains {
+		domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+		if domain == "" || seen[domain] {
+			continue
+		}
+		seen[domain] = true
+		lines = append(lines, domain)
+	}
+	sort.Strings(lines)
+	content := ""
+	if len(lines) > 0 {
+		content = strings.Join(lines, "\n") + "\n"
+	}
+	return writeMapContent(path, content)
+}
+
+func writeMapContent(path, content string) (bool, error) {
 	if current, err := os.ReadFile(path); err == nil && string(current) == content {
 		return false, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return false, err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".selectors-*")
+	temp, err := os.CreateTemp(filepath.Dir(path), ".a8m-map-*")
 	if err != nil {
 		return false, err
 	}

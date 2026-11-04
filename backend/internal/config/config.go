@@ -19,6 +19,7 @@ type Config struct {
 	MaildirBase       string
 	DKIMDir           string
 	DKIMSelectorMap   string
+	LocalDomainsMap   string
 	PublicDir         string
 	UploadDir         string
 	DatabaseURL       string
@@ -98,6 +99,7 @@ func Load() (Config, error) {
 		MaildirBase:           env("ALT8MAIL_MAILDIR_BASE", "/var/vmail"),
 		DKIMDir:               dkimDir,
 		DKIMSelectorMap:       env("ALT8MAIL_DKIM_SELECTOR_MAP", filepath.Join(dkimDir, "selectors.map")),
+		LocalDomainsMap:       env("ALT8MAIL_LOCAL_DOMAINS_MAP", "/var/lib/rspamd/local_domains.map"),
 		PublicDir:             env("ALT8MAIL_PUBLIC_DIR", "./public"),
 		UploadDir:             env("ALT8MAIL_UPLOAD_DIR", "./data/uploads"),
 		RedisAddr:             env("ALT8MAIL_REDIS_ADDR", "127.0.0.1:6379"),

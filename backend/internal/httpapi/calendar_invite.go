@@ -346,6 +346,7 @@ func calendarInviteRequestHTML(labels calendarInviteStrings, event map[string]an
 	if !calendarHexPattern.MatchString(color) {
 		color = "#0f6cbd"
 	}
+	month, day := calendarInviteDateTile(event)
 	var detail strings.Builder
 	detail.WriteString(calendarInviteDetailRow(labels.WhenLabel, when))
 	if where != "" {
@@ -353,7 +354,8 @@ func calendarInviteRequestHTML(labels calendarInviteStrings, event map[string]an
 	}
 	detail.WriteString(calendarInviteDetailRow(labels.OrganizerLabel, organizerLabel+" · "+organizerEmail))
 	if meeting != "" {
-		detail.WriteString(calendarInviteDetailRow(labels.JoinLabel, meeting))
+		detail.WriteString(`<tr><td valign="top" style="padding:4px 14px 10px 0;color:#7a8797;font-size:13px;white-space:nowrap">` + html.EscapeString(labels.JoinLabel) +
+			`</td><td style="padding:4px 0 10px;font-size:14px;line-height:1.45"><a href="` + html.EscapeString(meeting) + `" style="color:` + color + `;text-decoration:none;font-weight:600">` + html.EscapeString(meeting) + `</a></td></tr>`)
 	}
 	if onBehalf {
 		detail.WriteString(calendarInviteDetailRow(labels.SentBy, senderLabel+" · "+senderEmail))
@@ -361,7 +363,9 @@ func calendarInviteRequestHTML(labels calendarInviteStrings, event map[string]an
 	description := truncate(stateString(event, "description"), 2000)
 	descriptionHTML := ""
 	if description != "" {
-		descriptionHTML = `<div style="margin:18px 0 0;padding-top:18px;border-top:1px solid #e5eaf2;color:#3e4c5f;font-size:14px;line-height:1.65;white-space:pre-wrap">` + html.EscapeString(description) + `</div>`
+		descriptionHTML = `<div style="margin:18px 0 0;padding:16px 18px;border:1px solid #e3e9f2;border-radius:12px;background:#fbfcfe">
+<p style="margin:0 0 6px;color:#8a97a7;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">Agenda</p>
+<div style="color:#3e4c5f;font-size:14px;line-height:1.65;white-space:pre-wrap">` + html.EscapeString(description) + `</div></div>`
 	}
 	buttons := ""
 	note := ""
@@ -373,7 +377,7 @@ func calendarInviteRequestHTML(labels calendarInviteStrings, event map[string]an
 		button := func(response, label, background string) string {
 			return `<a href="` + escaped + `?response=` + response + `" style="display:inline-block;margin:0 8px 8px 0;padding:12px 18px;border-radius:9px;background:` + background + `;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600">` + html.EscapeString(label) + `</a>`
 		}
-		buttons = `<div style="margin:22px 0 6px">` +
+		buttons = `<div style="margin:24px 0 6px">` +
 			button("accepted", labels.YesButton, color) +
 			button("tentative", labels.MaybeButton, "#5b6675") +
 			button("declined", labels.NoButton, "#a94452") +
@@ -381,19 +385,39 @@ func calendarInviteRequestHTML(labels calendarInviteStrings, event map[string]an
 	}
 	feedHTML := ""
 	if feedURL != "" {
-		feedHTML = `<p style="margin:14px 0 0;font-size:12px;line-height:1.55"><a href="` + html.EscapeString(feedURL) + `" style="color:#3d6b9a;text-decoration:none">` + html.EscapeString(labels.FeedLabel) + `</a></p>`
+		feedHTML = `<p style="margin:16px 0 0;font-size:12px;line-height:1.55"><a href="` + html.EscapeString(feedURL) + `" style="color:#3d6b9a;text-decoration:none">` + html.EscapeString(labels.FeedLabel) + `</a></p>`
 	}
-	return `<!doctype html><html lang="` + labels.Lang + `" dir="` + labels.Dir + `"><body style="margin:0;padding:0;background:#f2f5fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#17212f;direction:` + labels.Dir + `">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fa;padding:28px 12px"><tr><td align="center">
+	dateTile := ""
+	if month != "" {
+		dateTile = `<td valign="top" width="72" style="padding:0 16px 0 0">
+<table role="presentation" cellpadding="0" cellspacing="0"><tr><td align="center" width="68" height="74" style="width:68px;height:74px;background:#f1f6fc;border:1px solid #dbe6f4;border-radius:13px">
+<div style="color:` + color + `;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;line-height:1.3;padding-top:10px">` + html.EscapeString(month) + `</div>
+<div style="color:#17212f;font-size:27px;font-weight:700;line-height:1.15">` + html.EscapeString(day) + `</div>
+</td></tr></table></td>`
+	}
+	return `<!doctype html><html lang="` + labels.Lang + `" dir="` + labels.Dir + `"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head><body style="margin:0;padding:0;background:#eef2f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#17212f;direction:` + labels.Dir + `">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f8;padding:30px 12px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border:1px solid #dfe6f0;border-radius:16px;overflow:hidden">
-<tr><td style="height:5px;background:` + color + `"></td></tr>
-<tr><td style="padding:30px 32px 28px">
-<p style="margin:0 0 8px;color:` + color + `;font-size:11px;font-weight:700;letter-spacing:.11em;text-transform:uppercase">` + html.EscapeString(labels.Eyebrow) + `</p>
-<h1 style="margin:0 0 8px;font-size:24px;line-height:1.3;color:#17212f">` + title + `</h1>
-` + note + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0 0">` + detail.String() + `</table>` + descriptionHTML + buttons + feedHTML + `
+<tr><td style="height:6px;background:` + color + `"></td></tr>
+<tr><td style="padding:26px 30px 30px">
+<p style="margin:0 0 14px;color:#7a8797;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase">Alt8Mail Calendar</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>` + dateTile + `<td valign="top">
+<p style="margin:0 0 6px;color:` + color + `;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase">` + html.EscapeString(labels.Eyebrow) + `</p>
+<h1 style="margin:0;font-size:25px;line-height:1.28;color:#17212f">` + title + `</h1>
+</td></tr></table>
+` + note + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 0;background:#f8fafd;border:1px solid #e2e8f1;border-radius:12px"><tr><td style="padding:14px 16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">` + detail.String() + `</table></td></tr></table>` + descriptionHTML + buttons + feedHTML + `
 <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5eaf2;color:#7a8797;font-size:12px;line-height:1.55">` + html.EscapeString(labels.AttachedNote) + `</div>
 <div style="margin-top:8px;color:#9aa6b5;font-size:11px">` + html.EscapeString(labels.Footer) + `</div>
 </td></tr></table></td></tr></table></body></html>`
+}
+
+func calendarInviteDateTile(event map[string]any) (string, string) {
+	start, err := time.Parse(time.RFC3339, stateString(event, "startsAt"))
+	if err != nil {
+		return "", ""
+	}
+	local := start.In(calendarEventLocation(event))
+	return local.Format("Jan"), local.Format("2")
 }
 
 func calendarInviteDetailRow(label, value string) string {

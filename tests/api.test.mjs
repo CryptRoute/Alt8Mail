@@ -1536,6 +1536,16 @@ test("phase 2 calendar: recurrence exceptions and proposed times", async () => {
 
 test("phase 3 calendar: resources, analytics and meeting polls", async () => {
   const attendees = Array.from({ length: 11 }, (_, index) => `guest${index + 1}@${index % 2 ? "partner.example" : "a8m.example"}`);
+  const room = await client.request("/api/calendar/resources", {
+    method: "POST",
+    body: { name: "Conference Room A", kind: "room", location: "Head office", capacity: 8 }
+  });
+  assert.equal(room.status, 201);
+  const projector = await client.request("/api/calendar/resources", {
+    method: "POST",
+    body: { name: "Portable projector", kind: "equipment", location: "IT cupboard", capacity: 0 }
+  });
+  assert.equal(projector.status, 201);
   const created = await client.request("/api/calendar/events", {
     method: "POST",
     body: {
@@ -1545,7 +1555,7 @@ test("phase 3 calendar: resources, analytics and meeting polls", async () => {
       end: "10:00",
       timezone: "UTC",
       attendeeEmails: attendees,
-      resourceIds: ["room-a", "projector"]
+      resourceIds: [room.body.resource.id, projector.body.resource.id]
     }
   });
   assert.equal(created.status, 201);
@@ -1558,7 +1568,8 @@ test("phase 3 calendar: resources, analytics and meeting polls", async () => {
 
   const resources = await client.request("/api/calendar/resources");
   assert.equal(resources.status, 200);
-  assert.ok(resources.body.resources.length >= 3);
+  assert.ok(resources.body.resources.some((resource) => resource.id === room.body.resource.id));
+  assert.ok(resources.body.resources.some((resource) => resource.name === "Portable projector"));
 
   const poll = await client.request("/api/calendar/polls", {
     method: "POST",

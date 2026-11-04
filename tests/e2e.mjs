@@ -597,6 +597,11 @@ try {
   equal(await page.eval("document.querySelectorAll('.cal-month-cell').length"), 42, "calendar month renders a full six-week grid");
   check(await page.eval("document.querySelectorAll('.agenda-event, .cal-empty').length > 0"), "agenda renders selected-day events");
   await page.screenshot(path.join(artifacts, "15-calendar.png"));
+  await page.eval("(() => { const cell = document.querySelector('.cal-month-cell[data-cal-date]'); cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true; })()");
+  await page.waitFor(() => !document.getElementById("eventOverlay").hidden, 3000);
+  check(await page.eval("document.getElementById('eventDate').value !== ''"), "double-clicking a month day opens New event");
+  await page.click("#eventCancel");
+  await sleep(200);
   await page.click("#calNew");
   await sleep(250);
   await page.setValue("#eventName", "Calendar invitation check");
@@ -626,7 +631,12 @@ try {
   await page.click("#eventAttendeeInput");
   await page.setValue("#eventAttendeeInput", "elena.vasquez@a8m.example");
   await page.pressKey("Enter");
-  await page.setValue("#eventResourceSelect", "room-a");
+  await page.click("#eventResourceAdd");
+  await page.waitFor(() => !document.getElementById("calendarResourceOverlay").hidden, 3000);
+  await page.setValue("#calendarResourceName", "Conference Room A");
+  await page.click("#calendarResourceSave");
+  await page.waitFor(() => document.getElementById("calendarResourceOverlay").hidden, 5000);
+  check(await page.eval("(document.getElementById('eventResourceChips')?.textContent || '').includes('Conference Room A')"), "a user-created room is added to the event");
   await page.click("#eventSave");
   await page.waitFor(() => document.getElementById("eventOverlay").hidden, 6000);
   await sleep(350);

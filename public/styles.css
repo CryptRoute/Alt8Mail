@@ -1403,6 +1403,7 @@ svg.icon {
   flex: none;
 }
 .msg-tag svg { width: 14px; height: 14px; }
+.msg-tag.msg-calendar-tag { color: var(--accent-ink); }
 .star-btn {
   width: 24px;
   height: 24px;

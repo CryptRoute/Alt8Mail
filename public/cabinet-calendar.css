@@ -925,3 +925,140 @@
 .cabinet-provider-copy .usage-bar { height: 2px; margin-top: 2px; }
 .cabinet-provider .storage-status { flex: none; }
 .cabinet-provider .link-btn { font-size: 0.5625rem; flex: none; }
+
+/* ---------- Calendar card inside the mail reader ---------- */
+.cal-mail-slot { margin: 12px 0 14px; }
+.cal-mail-slot[hidden] { display: none !important; }
+.cal-mail-card {
+  --cal-accent: var(--accent);
+  display: flex;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--cal-accent) 26%, var(--border));
+  border-radius: 15px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--cal-accent) 8%, var(--surface)), var(--surface) 62%);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--cal-accent) 9%, transparent);
+}
+.cal-mail-card.is-proposal { --cal-accent: #b7791f; }
+.cal-mail-card.is-response { --cal-accent: #2f7d5b; }
+.cal-mail-card.is-cancelled { --cal-accent: #a94452; background: linear-gradient(135deg, color-mix(in srgb, #a94452 7%, var(--surface)), var(--surface) 62%); }
+.cal-mail-card-rail { width: 4px; flex: none; background: var(--cal-accent); }
+.cal-mail-card-body { flex: 1; min-width: 0; padding: 14px 16px 13px; }
+.cal-mail-card-head { display: flex; align-items: flex-start; gap: 10px; }
+.cal-mail-card-icon {
+  width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 10px;
+  background: color-mix(in srgb, var(--cal-accent) 14%, var(--surface));
+  color: var(--cal-accent);
+}
+.cal-mail-card-icon .icon { width: 17px; height: 17px; }
+.cal-mail-card-heading { flex: 1; min-width: 0; }
+.cal-mail-eyebrow { display: block; margin-bottom: 2px; color: var(--cal-accent); font-size: 0.54rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.cal-mail-title { display: block; color: var(--text); font-size: 0.92rem; line-height: 1.32; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.cal-mail-badge {
+  flex: none; padding: 3px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--cal-accent) 12%, transparent);
+  color: var(--cal-accent); font-size: 0.5rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+}
+.cal-mail-badge.is-cancelled { background: color-mix(in srgb, #a94452 13%, transparent); color: #a94452; }
+.cal-mail-badge.is-action { background: color-mix(in srgb, #b7791f 16%, transparent); color: #8a5a12; }
+.cal-mail-card-main { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px; }
+.cal-mail-date-tile {
+  width: 52px; height: 56px; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--cal-accent) 22%, var(--border));
+  border-radius: 11px; background: color-mix(in srgb, var(--cal-accent) 9%, var(--surface));
+}
+.cal-mail-date-tile span { color: var(--cal-accent); font-size: 0.48rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.cal-mail-date-tile b { color: var(--text); font-size: 1.2rem; line-height: 1.1; font-weight: 760; }
+.cal-mail-card-details { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.cal-mail-when-row, .cal-mail-where-row, .cal-mail-organizer-row { display: flex; align-items: flex-start; gap: 7px; color: var(--text-2); font-size: 0.66rem; line-height: 1.45; }
+.cal-mail-when-row strong { color: var(--text); font-weight: 680; }
+.cal-mail-when-row .icon, .cal-mail-where-row .icon, .cal-mail-organizer-row .icon { width: 13px; height: 13px; flex: none; margin-top: 1px; color: var(--text-3); }
+.cal-mail-change { display: grid; grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1fr); align-items: center; gap: 6px; }
+.cal-mail-change-col { min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
+.cal-mail-change-col span { display: block; margin-bottom: 2px; color: var(--text-3); font-size: 0.48rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.cal-mail-change-col strong { display: block; color: var(--text-2); font-size: 0.61rem; line-height: 1.35; font-weight: 620; overflow-wrap: anywhere; }
+.cal-mail-change-col.is-new { border-color: color-mix(in srgb, #b7791f 34%, var(--border)); background: color-mix(in srgb, #b7791f 7%, var(--surface)); }
+.cal-mail-change-col.is-new span { color: #9a6414; }
+.cal-mail-change-col.is-new strong { color: var(--text); }
+.cal-mail-change-arrow { display: grid; place-items: center; color: #b7791f; }
+.cal-mail-change-arrow .icon { width: 14px; height: 14px; }
+.cal-mail-proposal-note { margin: 1px 0 0; padding: 7px 10px; border-radius: 8px; background: color-mix(in srgb, #b7791f 7%, transparent); color: var(--text-2); font-size: 0.61rem; line-height: 1.45; font-style: italic; }
+.cal-mail-response { display: flex; align-items: flex-start; gap: 8px; margin-top: 11px; padding: 9px 11px; border-radius: 9px; font-size: 0.64rem; line-height: 1.45; background: var(--surface-2); color: var(--text-2); }
+.cal-mail-response .icon { width: 14px; height: 14px; flex: none; margin-top: 1px; }
+.cal-mail-response.is-accepted { background: color-mix(in srgb, #2f7d5b 10%, var(--surface)); color: #286347; }
+.cal-mail-response.is-declined { background: color-mix(in srgb, #a94452 10%, var(--surface)); color: #8a3946; }
+.cal-mail-response.is-tentative { background: color-mix(in srgb, #b7791f 10%, var(--surface)); color: #765817; }
+.cal-mail-response b { font-weight: 800; }
+.cal-mail-guests { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.cal-mail-guest { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 3px 7px 3px 5px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 0.55rem; line-height: 1.3; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cal-mail-guest small { color: var(--text-3); font-size: 0.48rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.cal-mail-guest-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--text-3); }
+.cal-mail-guest.is-accepted .cal-mail-guest-dot { background: #2f7d5b; }
+.cal-mail-guest.is-tentative .cal-mail-guest-dot { background: #b7791f; }
+.cal-mail-guest.is-declined .cal-mail-guest-dot { background: #a94452; }
+.cal-mail-guest.is-more { padding-inline: 8px; color: var(--text-3); font-weight: 700; }
+.cal-mail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 13px; }
+.cal-mail-actions .btn-primary, .cal-mail-actions .btn-secondary { min-height: 29px; padding: 5px 12px; font-size: 0.6rem; border-radius: 7px; }
+.cal-mail-rsvp.is-selected { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
+.cal-mail-footnote { margin: 9px 0 0; color: var(--text-3); font-size: 0.53rem; line-height: 1.45; }
+.cal-mail-unlinked { color: var(--text-3); font-size: 0.6rem; }
+@media (max-width: 700px) {
+  .cal-mail-card-main { gap: 9px; }
+  .cal-mail-change { grid-template-columns: 1fr; }
+  .cal-mail-change-arrow { display: none; }
+  .cal-mail-badge { display: none; }
+}
+
+/* ---------- Floating guest-proposal dock ---------- */
+.cal-proposal-dock {
+  position: fixed; right: 20px; bottom: calc(var(--status-h, 24px) + 20px);
+  z-index: 79; width: min(390px, calc(100vw - 24px));
+  max-height: min(62vh, 560px); display: flex; flex-direction: column;
+  border: 1px solid color-mix(in srgb, #b7791f 28%, var(--border));
+  border-radius: 16px; background: var(--surface); box-shadow: 0 22px 60px rgba(15, 23, 42, .22);
+  overflow: hidden;
+}
+.cal-proposal-dock-head { display: flex; align-items: center; gap: 10px; padding: 12px 13px; background: linear-gradient(135deg, color-mix(in srgb, #b7791f 12%, var(--surface)), var(--surface)); border-bottom: 1px solid var(--border); }
+.cal-proposal-dock-heading { flex: 1; min-width: 0; }
+.cal-proposal-dock-heading span { display: block; color: #9a6414; font-size: 0.5rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.cal-proposal-dock-heading strong { display: block; color: var(--text); font-size: 0.76rem; line-height: 1.3; }
+.cal-proposal-dock-close { width: 27px; height: 27px; flex: none; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--text-3); cursor: pointer; }
+.cal-proposal-dock-close:hover { background: var(--row-hover); color: var(--text); }
+.cal-proposal-dock-close .icon { width: 14px; height: 14px; }
+.cal-proposal-dock-list { overflow: auto; padding: 9px; display: flex; flex-direction: column; gap: 8px; }
+.cal-proposal-float { padding: 11px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.cal-proposal-float-head { display: flex; align-items: center; gap: 8px; }
+.cal-proposal-float-avatar { width: 29px; height: 29px; flex: none; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--proposal, var(--accent)) 18%, var(--surface)); color: var(--proposal, var(--accent)); font-size: 0.56rem; font-weight: 800; }
+.cal-proposal-float-head > div { min-width: 0; }
+.cal-proposal-float-head strong { display: block; color: var(--text); font-size: 0.67rem; line-height: 1.3; }
+.cal-proposal-float-head span { display: block; color: var(--text-3); font-size: 0.53rem; line-height: 1.3; }
+.cal-proposal-float-title { margin-top: 7px; color: var(--text-2); font-size: 0.63rem; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.cal-proposal-float-times { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 8px; }
+.cal-proposal-float-times > div { padding: 6px 8px; border-radius: 8px; background: var(--surface-2); }
+.cal-proposal-float-times span { display: block; color: var(--text-3); font-size: 0.45rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.cal-proposal-float-times strong { display: block; margin-top: 1px; color: var(--text-2); font-size: 0.54rem; line-height: 1.35; font-weight: 620; }
+.cal-proposal-float-times .is-new { background: color-mix(in srgb, #b7791f 8%, var(--surface)); }
+.cal-proposal-float-times .is-new strong { color: var(--text); }
+.cal-proposal-float-note { margin: 7px 0 0; color: var(--text-2); font-size: 0.55rem; line-height: 1.4; font-style: italic; }
+.cal-proposal-float-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 9px; }
+.cal-proposal-float-actions .btn-primary, .cal-proposal-float-actions .btn-secondary { min-height: 27px; padding: 4px 10px; font-size: 0.55rem; border-radius: 7px; }
+.cal-proposal-float-actions .link-btn { font-size: 0.54rem; }
+@media (max-width: 640px) {
+  .cal-proposal-dock { right: 12px; left: 12px; width: auto; bottom: calc(var(--status-h, 24px) + 12px); max-height: 55vh; }
+}
+
+/* ---------- User-owned rooms and resources ---------- */
+.event-resource-picker { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.event-resource-picker select { flex: 1; min-width: 0; }
+.event-resource-add {
+  width: 24px; height: 24px; flex: none; display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--text-2); cursor: pointer;
+}
+.event-resource-add:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: var(--accent-soft); color: var(--accent-ink); }
+.event-resource-add .icon { width: 12px; height: 12px; }
+.resource-dialog { width: min(460px, calc(100vw - 28px)); }
+.resource-dialog .dialog-body { display: grid; gap: 11px; }
+.resource-dialog .form-field span { font-size: 0.62rem; }
+.resource-dialog .form-field input, .resource-dialog .form-field select { font-size: 0.66rem; }
+.resource-dialog-hint { margin: 0; color: var(--text-3); font-size: 0.58rem; line-height: 1.5; }
+.resource-dialog-error { margin: 0; color: #a94452; font-size: 0.6rem; line-height: 1.45; }

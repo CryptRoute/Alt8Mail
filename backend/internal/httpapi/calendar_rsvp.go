@@ -92,6 +92,9 @@ type calendarRSVPPageData struct {
 	Color            string
 	Status           string
 	Selected         string
+	SelectedLabel    string
+	Pending          bool
+	Prompt           string
 	Error            string
 	Notice           string
 	CanRespond       bool
@@ -103,6 +106,9 @@ type calendarRSVPPageData struct {
 	ProposedStart    string
 	ProposedEnd      string
 	ProposedTimezone string
+	DateMonth        string
+	DateDay          string
+	TimeZone         string
 }
 
 var calendarRSVPPageTemplate = template.Must(template.New("rsvp").Parse(`<!doctype html>
@@ -110,37 +116,82 @@ var calendarRSVPPageTemplate = template.Must(template.New("rsvp").Parse(`<!docty
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
 <title>{{.Title}} · Alt8Mail Calendar</title>
 <style>
-:root{color-scheme:light dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#eef2f8;color:#17212f;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:grid;place-items:center;padding:24px 16px}
-.card{width:min(640px,100%);background:#fff;border:1px solid #dce4ef;border-radius:18px;overflow:hidden;box-shadow:0 20px 60px rgba(23,33,47,.12)}
-.accent{height:6px;background:var(--accent,#0f6cbd)}.inner{padding:30px 32px 32px}
-.eyebrow{margin:0 0 8px;color:var(--accent,#0f6cbd);font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
-h1{margin:0 0 18px;font-size:26px;line-height:1.28;letter-spacing:-.02em}
-.meta{display:grid;gap:8px;margin:0 0 20px}.row{display:grid;grid-template-columns:88px 1fr;gap:12px;font-size:14px;line-height:1.5}.row dt{color:#718096;font-weight:600}.row dd{margin:0;color:#253346;overflow-wrap:anywhere}
-.desc{padding-top:18px;margin-top:4px;border-top:1px solid #e3e9f1;white-space:pre-wrap;font-size:14px;line-height:1.65;color:#435166}
-.actions{display:flex;flex-wrap:wrap;gap:9px;margin:24px 0 8px}.actions button{border:1px solid transparent;border-radius:10px;padding:12px 18px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+:root{color-scheme:light dark}*{box-sizing:border-box}
+body{margin:0;min-height:100vh;padding:38px 16px;background:radial-gradient(circle at 8% 0%,rgba(15,108,189,.15),transparent 36%),radial-gradient(circle at 94% 100%,rgba(47,125,91,.12),transparent 34%),#edf2f9;color:#17212f;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;display:grid;place-items:center;position:relative}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(23,33,47,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(23,33,47,.035) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(180deg,rgba(0,0,0,.6),transparent 78%)}
+.shell{width:min(660px,100%);position:relative}
+.brand{display:flex;align-items:center;gap:9px;margin:0 0 11px 3px;color:#5a6879;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.brand-mark{width:24px;height:24px;display:grid;place-items:center;border-radius:7px;background:var(--accent,#0f6cbd);color:#fff;box-shadow:0 5px 14px color-mix(in srgb,var(--accent,#0f6cbd) 30%,transparent)}
+.brand-mark svg{width:14px;height:14px}
+.card{background:#fff;border:1px solid #dce4ef;border-radius:20px;overflow:hidden;box-shadow:0 26px 70px rgba(23,33,47,.15)}
+.accent{height:6px;background:linear-gradient(90deg,var(--accent,#0f6cbd),color-mix(in srgb,var(--accent,#0f6cbd) 55%,#7fb0d9))}
+.inner{padding:28px 30px 30px}
+.eyebrow{margin:0 0 12px;color:var(--accent,#0f6cbd);font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
+.event-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:20px}
+.date-tile{width:70px;height:76px;flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid color-mix(in srgb,var(--accent,#0f6cbd) 22%,#dce4ef);border-radius:14px;background:linear-gradient(160deg,color-mix(in srgb,var(--accent,#0f6cbd) 12%,#fff),#fff)}
+.date-tile span{color:var(--accent,#0f6cbd);font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.date-tile b{color:#17212f;font-size:29px;line-height:1.05;font-weight:760}
+.event-heading{flex:1;min-width:0;padding-top:3px}
+h1{margin:0 0 8px;font-size:25px;line-height:1.25;letter-spacing:-.025em;overflow-wrap:anywhere}
+.event-status{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+.pill.answered{background:color-mix(in srgb,var(--accent,#0f6cbd) 12%,#fff);color:var(--accent,#0f6cbd)}
+.pill.cancelled{background:#fff0f2;color:#8a3946}
+.pill.neutral{background:#eef2f7;color:#5a6879}
+.notice{margin:0 0 18px;padding:12px 14px;border-radius:11px;font-size:13px;line-height:1.55;display:flex;gap:8px;align-items:flex-start}
+.notice svg{width:15px;height:15px;flex:none;margin-top:1px}
+.notice.warn{background:#fff7e6;border:1px solid #f0dfb0;color:#765817}
+.notice.bad{background:#fff0f2;border:1px solid #f0c7cf;color:#8a3946}
+.notice.ok{background:#edf7f1;border:1px solid #c5e3d2;color:#286347}
+.meta{display:grid;gap:2px;margin:0 0 20px;padding:14px 16px;border:1px solid #e2e8f1;border-radius:13px;background:#fafbfd}
+.row{display:grid;grid-template-columns:96px 1fr;gap:12px;padding:5px 0;font-size:14px;line-height:1.5}
+.row dt{color:#718096;font-weight:650}
+.row dd{margin:0;color:#253346;overflow-wrap:anywhere}
+.row dd a{color:var(--accent,#0f6cbd);text-decoration:none}
+.desc{padding:16px 0 0;margin-top:2px;border-top:1px solid #e3e9f1;white-space:pre-wrap;font-size:14px;line-height:1.65;color:#435166}
+.actions-label{margin:22px 0 8px;color:#718096;font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase}
+.actions{display:flex;flex-wrap:wrap;gap:9px;margin:0 0 8px}
+.actions button{border:1px solid transparent;border-radius:11px;padding:12px 18px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:transform .12s ease,box-shadow .12s ease}
+.actions button svg{width:15px;height:15px}
+.actions button:hover:not(:disabled){transform:translateY(-1px)}
 .yes{background:var(--accent,#0f6cbd);color:#fff}.maybe{background:#5a6678;color:#fff}.no{background:#a94452;color:#fff}
-.actions button[aria-pressed="true"]{outline:3px solid #cfe0f5;outline-offset:2px}.actions button:disabled{opacity:.5;cursor:not-allowed}
-.hint{margin:10px 0 0;color:#718096;font-size:12px;line-height:1.55}.notice{margin:0 0 18px;padding:12px 14px;border-radius:10px;font-size:13px;line-height:1.55}
-.notice.warn{background:#fff7e6;border:1px solid #f0dfb0;color:#765817}.notice.bad{background:#fff0f2;border:1px solid #f0c7cf;color:#8a3946}.notice.ok{background:#edf7f1;border:1px solid #c5e3d2;color:#286347}
-.footer{margin-top:22px;padding-top:16px;border-top:1px solid #e3e9f1;color:#8592a3;font-size:12px;line-height:1.55}
-.propose{margin-top:16px;border-top:1px solid #e3e9f1;padding-top:14px}.propose summary{cursor:pointer;color:#435166;font-size:13px;font-weight:700}
-.propose-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:12px}.propose label{display:flex;flex-direction:column;gap:4px;color:#718096;font-size:11px;font-weight:600}
+.actions button.is-selected{outline:3px solid color-mix(in srgb,var(--accent,#0f6cbd) 32%,#fff);outline-offset:2px;box-shadow:0 8px 20px rgba(23,33,47,.15)}
+.actions button:disabled{opacity:.5;cursor:not-allowed}
+.hint{margin:10px 0 0;color:#718096;font-size:12px;line-height:1.55}
+.propose{margin-top:18px;border-top:1px solid #e3e9f1;padding-top:14px}
+.propose summary{cursor:pointer;color:#435166;font-size:13px;font-weight:700}
+.propose-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:12px}
+.propose label{display:flex;flex-direction:column;gap:4px;color:#718096;font-size:11px;font-weight:600}
 .propose input,.propose textarea{width:100%;border:1px solid #d6dfea;border-radius:8px;padding:9px 10px;font:inherit;font-size:13px;background:#fff;color:#17212f}
-.propose textarea{grid-column:1/-1;min-height:64px;resize:vertical}.propose button{margin-top:10px;border:1px solid #c9d4e2;border-radius:9px;background:#f6f8fb;color:#253346;padding:10px 16px;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
-@media(prefers-color-scheme:dark){body{background:#10151d;color:#e8edf5}.card{background:#19202a;border-color:#2c3644}.row dd{color:#d5deea}.row dt,.hint,.footer{color:#94a1b2}.desc{color:#b9c5d4;border-color:#2c3644}.footer{border-color:#2c3644}}
-</style></head><body><main class="card" style="--accent:{{.Color}}"><div class="accent"></div><div class="inner">
+.propose textarea{grid-column:1/-1;min-height:64px;resize:vertical}
+.propose button{margin-top:10px;border:1px solid #c9d4e2;border-radius:9px;background:#f6f8fb;color:#253346;padding:10px 16px;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.footer{margin-top:22px;padding-top:16px;border-top:1px solid #e3e9f1;color:#8592a3;font-size:11px;line-height:1.6}
+@media(max-width:520px){.inner{padding:22px 18px 24px}.event-head{gap:12px}.date-tile{width:58px;height:64px}.date-tile b{font-size:24px}h1{font-size:21px}.row{grid-template-columns:1fr;gap:1px}.actions button{flex:1;justify-content:center}}
+@media(prefers-color-scheme:dark){body{background:radial-gradient(circle at 8% 0%,rgba(15,108,189,.2),transparent 38%),radial-gradient(circle at 94% 100%,rgba(47,125,91,.14),transparent 36%),#10151d;color:#e8edf5}body::before{background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px)}.card{background:#19202a;border-color:#2c3644}.date-tile{border-color:#334054;background:linear-gradient(160deg,#223043,#19202a)}.date-tile b{color:#e8edf5}.row dd{color:#d5deea}.row dt,.hint,.footer{color:#94a1b2}.meta{background:#1d2531;border-color:#2c3644}.desc{color:#b9c5d4;border-color:#2c3644}.footer{border-color:#2c3644}.pill.answered{background:#203247;color:#8fbdec}.pill.neutral{background:#242d3a;color:#aab7c8}}
+</style></head><body><div class="shell"><div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M8 3v4M16 3v4M3.5 9.5h17"/></svg></span>Alt8Mail Calendar</div>
+<main class="card" style="--accent:{{.Color}}"><div class="accent"></div><div class="inner">
 <p class="eyebrow">{{if .Cancelled}}Meeting cancelled{{else if .Updated}}Updated invitation{{else}}Calendar invitation{{end}}</p>
-<h1>{{.Title}}</h1>
-{{if .Error}}<div class="notice bad">{{.Error}}</div>{{end}}
-{{if .Notice}}<div class="notice ok">{{.Notice}}</div>{{end}}
-{{if .Stale}}<div class="notice warn">This invitation was updated after this link was sent. Open the newest invitation email to respond to the current time.</div>{{end}}
+<div class="event-head">
+  {{if .DateMonth}}<div class="date-tile"><span>{{.DateMonth}}</span><b>{{.DateDay}}</b></div>{{end}}
+  <div class="event-heading">
+    <h1>{{.Title}}</h1>
+    <div class="event-status"><span class="pill {{if .Cancelled}}cancelled{{else if .Pending}}neutral{{else if .Selected}}answered{{else}}neutral{{end}}">{{if .Cancelled}}Cancelled{{else if .Pending}}Confirm your response{{else if .Selected}}You chose {{.SelectedLabel}}{{else}}Your response is requested{{end}}</span></div>
+  </div>
+</div>
+{{if .Error}}<div class="notice bad"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5"/><circle cx="12" cy="16.2" r=".9" fill="currentColor" stroke="none"/></svg><span>{{.Error}}</span></div>{{end}}
+{{if .Notice}}<div class="notice ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m8.2 12.2 2.6 2.6 5.2-5.4"/></svg><span>{{.Notice}}</span></div>{{end}}
+{{if .Prompt}}<div class="notice warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="8.5"/></svg><span>{{.Prompt}}</span></div>{{end}}
+{{if .Stale}}<div class="notice warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5"/><circle cx="12" cy="16.2" r=".9" fill="currentColor" stroke="none"/></svg><span>This invitation was updated after this link was sent. Open the newest invitation email to respond to the current time.</span></div>{{end}}
 <dl class="meta"><div class="row"><dt>When</dt><dd>{{.When}}</dd></div>{{if .Where}}<div class="row"><dt>Where</dt><dd>{{.Where}}</dd></div>{{end}}{{if .Meeting}}<div class="row"><dt>Join</dt><dd><a href="{{.Meeting}}" rel="noreferrer">{{.Meeting}}</a></dd></div>{{end}}<div class="row"><dt>Organizer</dt><dd>{{.Organizer}}</dd></div></dl>
 {{if .Description}}<div class="desc">{{.Description}}</div>{{end}}
-{{if .CanRespond}}<form method="post" action="{{.Token}}"><div class="actions">
-<button class="yes" type="submit" name="response" value="accepted" aria-pressed="{{if eq .Selected "accepted"}}true{{else}}false{{end}}" {{if .Stale}}disabled{{end}}>Yes, I'll attend</button>
-<button class="maybe" type="submit" name="response" value="tentative" aria-pressed="{{if eq .Selected "tentative"}}true{{else}}false{{end}}" {{if .Stale}}disabled{{end}}>Maybe</button>
-<button class="no" type="submit" name="response" value="declined" aria-pressed="{{if eq .Selected "declined"}}true{{else}}false{{end}}" {{if .Stale}}disabled{{end}}>No, I can't</button>
-</div><p class="hint">Your response is sent to the organizer. You can change it from a newer invitation at any time.</p></form>
+{{if .CanRespond}}<form method="post" action="{{.Token}}">
+<p class="actions-label">Can you make it?</p>
+<div class="actions">
+<button class="yes{{if eq .Selected "accepted"}} is-selected{{end}}" type="submit" name="response" value="accepted" aria-pressed="{{if eq .Selected "accepted"}}true{{else}}false{{end}}" {{if .Stale}}disabled{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Yes, I'll attend</button>
+<button class="maybe{{if eq .Selected "tentative"}} is-selected{{end}}" type="submit" name="response" value="tentative" aria-pressed="{{if eq .Selected "tentative"}}true{{else}}false{{end}}" {{if .Stale}}disabled{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="8"/></svg>Maybe</button>
+<button class="no{{if eq .Selected "declined"}} is-selected{{end}}" type="submit" name="response" value="declined" aria-pressed="{{if eq .Selected "declined"}}true{{else}}false{{end}}" {{if .Stale}}disabled{{end}}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg>No, I can't</button>
+</div>
+<p class="hint">Your response is saved instantly and can be changed any time from this page. The organizer sees it on their Alt8Mail calendar.</p></form>
 <details class="propose"><summary>Propose a new time</summary>
 <form method="post" action="{{.Token}}"><input type="hidden" name="action" value="propose">
 <div class="propose-grid">
@@ -152,7 +203,7 @@ h1{margin:0 0 18px;font-size:26px;line-height:1.28;letter-spacing:-.02em}
 </div><button type="submit">Send proposed time</button></form></details>
 {{end}}
 <div class="footer">Signed for {{.Organizer}} by Alt8Mail Calendar. This page does not show the event to anyone without the signed link.</div>
-</div></main></body></html>`))
+</div></main></div></body></html>`))
 
 func rsvpStatusLabel(status string) string {
 	switch strings.ToLower(status) {
@@ -162,6 +213,18 @@ func rsvpStatusLabel(status string) string {
 		return "tentative"
 	case "declined":
 		return "declined"
+	}
+	return ""
+}
+
+func calendarRSVPSelectedLabel(status string) string {
+	switch strings.ToLower(status) {
+	case "accepted":
+		return "Yes, I'll attend"
+	case "tentative":
+		return "Maybe"
+	case "declined":
+		return "No, I can't"
 	}
 	return ""
 }
@@ -335,11 +398,23 @@ func (s *Server) calendarRSVPPage(w http.ResponseWriter, r *http.Request, code i
 	data.ProposedStart = localStart.Format("15:04")
 	data.ProposedEnd = localEnd.Format("15:04")
 	data.ProposedTimezone = firstNonEmpty(eventZone, "UTC")
+	data.DateMonth = localStart.Format("Jan")
+	data.DateDay = localStart.Format("2")
+	data.TimeZone = firstNonEmpty(eventZone, "UTC")
 	data.Updated = sequence > 0
 	data.Cancelled = status == "cancelled"
-	data.Selected = rsvpStatusLabel(data.Selected)
-	if data.Selected == "" {
-		data.Selected = rsvpStatusLabel(attendeeStatus)
+	querySelection := rsvpStatusLabel(data.Selected)
+	savedSelection := rsvpStatusLabel(attendeeStatus)
+	if querySelection != "" {
+		data.Selected = querySelection
+		data.SelectedLabel = calendarRSVPSelectedLabel(querySelection)
+		if querySelection != savedSelection {
+			data.Pending = true
+			data.Prompt = "Press the highlighted response below to send it. You can change your choice at any time from this page."
+		}
+	} else {
+		data.Selected = savedSelection
+		data.SelectedLabel = calendarRSVPSelectedLabel(savedSelection)
 	}
 	data.Stale = sequence != claims.Sequence
 	data.CanRespond = !data.Cancelled && !data.Stale
