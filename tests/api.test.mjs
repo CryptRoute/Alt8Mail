@@ -416,7 +416,7 @@ test("storage connectors and enterprise files: connect, share, star and remove",
   });
   assert.equal(locked.status, 200);
   assert.equal(locked.body.file.locked, true);
-  const session = await client.request("/api/files/upload-sessions", {
+  const session = await client.request("/api/upload-sessions", {
     method: "POST", body: { folderId: "" }
   });
   assert.equal(session.status, 201);
@@ -424,12 +424,12 @@ test("storage connectors and enterprise files: connect, share, star and remove",
   assert.equal(session.body.session.active, true);
   assert.deepEqual(session.body.session.uploads, []);
   const sessionId = session.body.session.id;
-  const extendedSession = await client.request(`/api/files/upload-sessions/${encodeURIComponent(sessionId)}/extend`, {
+  const extendedSession = await client.request(`/api/upload-sessions/${encodeURIComponent(sessionId)}/extend`, {
     method: "POST", body: { hours: 1 }
   });
   assert.equal(extendedSession.status, 200);
   assert.ok(Date.parse(extendedSession.body.session.expiresAt) > Date.parse(session.body.session.expiresAt));
-  const fetchedSession = await client.request(`/api/files/upload-sessions/${encodeURIComponent(sessionId)}`);
+  const fetchedSession = await client.request(`/api/upload-sessions/${encodeURIComponent(sessionId)}`);
   assert.equal(fetchedSession.status, 200);
   assert.equal(fetchedSession.body.session.id, sessionId);
   const imported = await client.request("/api/files/import-url", {

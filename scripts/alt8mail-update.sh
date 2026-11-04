@@ -295,6 +295,60 @@ switch_release() {
   ln -sfn "$target/bin/alt8mail-control" "$CONTROL_LINK"
 }
 
+apply_restored_database_owners() {
+  runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q <<'SQL'
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+    EXECUTE format('ALTER TABLE public.%I OWNER TO a8m_app', r.tablename);
+  END LOOP;
+  FOR r IN SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public' LOOP
+    EXECUTE format('ALTER SEQUENCE public.%I OWNER TO a8m_app', r.sequence_name);
+  END LOOP;
+END $$;
+SQL
+}
+
+restore_database_dump() {
+  local dump="$1" release="$2" stamp old_database restore_log
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  old_database="a8m_pre_rollback_${stamp}"
+  restore_log="/tmp/a8m-rollback-restore-${stamp}.log"
+  runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -q -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'a8m' AND pid <> pg_backend_pid();" >/dev/null
+  if ! runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -q -c \
+      "ALTER DATABASE a8m RENAME TO \"$old_database\""; then
+    log "could not detach the current a8m database for restore"
+    return 1
+  fi
+  if ! runuser -u postgres -- createdb -O a8m_app a8m; then
+    runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -q -c \
+      "ALTER DATABASE \"$old_database\" RENAME TO a8m" || true
+    return 1
+  fi
+  # Restoring into an empty database avoids pg_restore --clean dependency
+  # failures when the failed update created tables that reference old ones.
+  if runuser -u postgres -- pg_restore --no-owner --no-privileges \
+      --single-transaction --exit-on-error -d a8m "$dump" >"$restore_log" 2>&1; then
+    if apply_restored_database_owners && [[ -f "$release/deploy/postgresql/grants.sql" ]] \
+        && runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q \
+          -f "$release/deploy/postgresql/grants.sql"; then
+      log "database restored into a fresh a8m; previous database retained as $old_database"
+      return 0
+    fi
+    log "database restored, but ownership/grants failed; see $restore_log"
+  else
+    log "database restore failed; see $restore_log"
+  fi
+  # Never leave the application pointing at a half-restored database.
+  runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -q -c \
+    "DROP DATABASE IF EXISTS a8m WITH (FORCE)" || true
+  runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -q -c \
+    "ALTER DATABASE \"$old_database\" RENAME TO a8m" || true
+  return 1
+}
+
 rollback() {
   local reason="$1"
   local restored=0 restore_copy
@@ -310,7 +364,7 @@ rollback() {
   switch_release "$OLD_TARGET"
   restore_copy="/tmp/a8m-restore-$$.dump"
   if install -m 0600 -o postgres -g postgres "$BACKUP_DIR/database.dump" "$restore_copy"; then
-    if runuser -u postgres -- pg_restore --clean --if-exists -d a8m "$restore_copy"; then
+    if restore_database_dump "$restore_copy" "$OLD_TARGET"; then
       restored=1
     fi
   fi

@@ -2198,7 +2198,7 @@ export async function createApp(options = {}) {
         uploads: session.uploads || [], active: !session.revokedAt && Date.parse(session.expiresAt) > Date.now(),
         ...(session.url ? { url: session.url } : {})
       });
-      if (pathname === "/api/files/upload-sessions" && req.method === "POST") {
+      if (pathname === "/api/upload-sessions" && req.method === "POST") {
         const body = await readJson(req);
         const token = randomBytes(16).toString("base64url");
         const session = {
@@ -2211,14 +2211,14 @@ export async function createApp(options = {}) {
         sendJson(res, 201, { session: uploadSessionPayload(session) });
         return;
       }
-      const uploadSessionMatch = pathname.match(/^\/api\/files\/upload-sessions\/([A-Za-z0-9_-]{1,100})$/);
+      const uploadSessionMatch = pathname.match(/^\/api\/upload-sessions\/([A-Za-z0-9_-]{1,100})$/);
       if (uploadSessionMatch && req.method === "GET") {
         const session = db.uploadSessions.find((item) => item.id === uploadSessionMatch[1]);
         if (!session) throw new ApiError(404, "UPLOAD_SESSION", "Upload session not found");
         sendJson(res, 200, { session: uploadSessionPayload(session) });
         return;
       }
-      const uploadExtendMatch = pathname.match(/^\/api\/files\/upload-sessions\/([A-Za-z0-9_-]{1,100})\/extend$/);
+      const uploadExtendMatch = pathname.match(/^\/api\/upload-sessions\/([A-Za-z0-9_-]{1,100})\/extend$/);
       if (uploadExtendMatch && req.method === "POST") {
         const session = db.uploadSessions.find((item) => item.id === uploadExtendMatch[1]);
         if (!session) throw new ApiError(404, "UPLOAD_SESSION", "Upload session not found");

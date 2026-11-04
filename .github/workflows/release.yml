@@ -18,6 +18,11 @@ jobs:
           go-version-file: backend/go.mod
           cache: true
           cache-dependency-path: backend/go.sum
+      - name: Run backend tests
+        run: |
+          cd backend
+          go test ./...
+          go vet ./...
       - name: Build release bundle
         run: |
           version="${GITHUB_REF_NAME#v}"

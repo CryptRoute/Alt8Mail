@@ -38,10 +38,10 @@ the user moves between Mail, Calendar, Tasks and Files.
 
 Server routes:
 
-- `POST /api/files/upload-sessions`
-- `GET /api/files/upload-sessions/{id}`
-- `POST /api/files/upload-sessions/{id}/extend`
-- `DELETE /api/files/upload-sessions/{id}`
+- `POST /api/upload-sessions`
+- `GET /api/upload-sessions/{id}`
+- `POST /api/upload-sessions/{id}/extend`
+- `DELETE /api/upload-sessions/{id}`
 - `POST /api/files/import-url`
 - `GET /upload/{token}`
 - `POST /api/public/upload/{token}`

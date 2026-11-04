@@ -17489,9 +17489,9 @@ async function createMobileUploadSession(force = false) {
   if (!state.user) return;
   if (!force && state.uploadMobileSession?.active) return state.uploadMobileSession;
   if (force && state.uploadMobileSession?.id) {
-    await api(`/api/files/upload-sessions/${encodeURIComponent(state.uploadMobileSession.id)}`, { method: "DELETE" }).catch(() => {});
+    await api(`/api/upload-sessions/${encodeURIComponent(state.uploadMobileSession.id)}`, { method: "DELETE" }).catch(() => {});
   }
-  const data = await api("/api/files/upload-sessions", { method: "POST", body: { folderId: state.uploadTargetFolderId || "" } });
+  const data = await api("/api/upload-sessions", { method: "POST", body: { folderId: state.uploadTargetFolderId || "" } });
   state.uploadMobileSession = data.session;
   state.uploadMobileSeen = new Map();
   state.uploadMobileQrData = "";
@@ -17509,7 +17509,7 @@ function startMobileUploadPoll() {
 async function refreshMobileUploadSession() {
   const session = state.uploadMobileSession;
   if (!session?.id) return;
-  const data = await api(`/api/files/upload-sessions/${encodeURIComponent(session.id)}`);
+  const data = await api(`/api/upload-sessions/${encodeURIComponent(session.id)}`);
   state.uploadMobileSession = data.session;
   let completedNew = false;
   for (const item of data.session?.uploads || []) {
@@ -17531,7 +17531,7 @@ async function refreshMobileUploadSession() {
 async function extendMobileUploadSession(hours = 1) {
   const session = state.uploadMobileSession;
   if (!session?.id) return;
-  const data = await api(`/api/files/upload-sessions/${encodeURIComponent(session.id)}/extend`, { method: "POST", body: { hours } });
+  const data = await api(`/api/upload-sessions/${encodeURIComponent(session.id)}/extend`, { method: "POST", body: { hours } });
   state.uploadMobileSession = data.session;
   showToast(`Upload link extended by ${hours} hour${hours === 1 ? "" : "s"}`);
   renderUploadManager();
