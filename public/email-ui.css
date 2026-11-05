@@ -423,6 +423,30 @@
 .reader.is-light-message .reader-scroll .email-body { color: #172230; }
 .reader.is-light-message .reader-scroll .email-body a { color: #0b5fa5; }
 
+/* Inline email colours: keep text readable without changing the mail design. */
+.email-body [data-email-on-dark] { color: #e8eef7 !important; }
+.email-body [data-email-dark-surface] { color: #e8eef7; }
+.email-body [data-email-light-surface] { color: #172230; }
+.email-body [data-email-on-light] { color: #172230 !important; }
+.email-body a[data-email-on-dark] { color: #8fc7ff !important; }
+.email-body a[data-email-on-light] { color: #0b5fa5 !important; }
+
+:root[data-theme="dark"] .reader:not(.is-light-message) .email-body [data-email-dark-page-text] { color: #e8eef7 !important; }
+:root[data-theme="dark"] .reader:not(.is-light-message) .email-body a[data-email-dark-page-text] { color: #8fc7ff !important; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .reader:not(.is-light-message) .email-body [data-email-dark-page-text] { color: #e8eef7 !important; }
+  :root:not([data-theme="light"]) .reader:not(.is-light-message) .email-body a[data-email-dark-page-text] { color: #8fc7ff !important; }
+}
+
+:root[data-theme="light"] .email-body [data-email-light-page-text] { color: #172230 !important; }
+:root[data-theme="light"] .email-body a[data-email-light-page-text] { color: #0b5fa5 !important; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .email-body [data-email-light-page-text] { color: #172230 !important; }
+  :root:not([data-theme="dark"]) .email-body a[data-email-light-page-text] { color: #0b5fa5 !important; }
+}
+.reader.is-light-message .email-body [data-email-light-page-text] { color: #172230 !important; }
+.reader.is-light-message .email-body a[data-email-light-page-text] { color: #0b5fa5 !important; }
+
 /* ---------- pinned priority ---------- */
 .msg .pin-btn.is-pinned { color: #eab308; background: color-mix(in srgb, #eab308 14%, transparent); }
 .msg .pin-btn.is-pinned svg { fill: #eab308; stroke: #ca9a06; filter: drop-shadow(0 0 3px rgba(234, 179, 8, .35)); }

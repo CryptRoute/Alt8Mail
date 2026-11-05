@@ -300,31 +300,19 @@ func (s *Server) adminUserDelegates(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		delegates := s.delegateRows(r.Context(), user.TenantID, user.ID, true)
-		delegations := s.delegateRows(r.Context(), user.TenantID, user.ID, false)
-		writeJSON(w, http.StatusOK, map[string]any{"delegates": delegates, "delegations": delegations})
+		groupDelegates := s.groupDelegateRows(r.Context(), user.TenantID, user.ID)
+		delegations := s.effectiveDelegations(r.Context(), user.TenantID, user.ID)
+		writeJSON(w, http.StatusOK, map[string]any{"delegates": delegates, "groupDelegates": groupDelegates, "delegations": delegations})
 	case http.MethodPost:
 		var body struct {
 			UserID  string `json:"userId"`
 			Email   string `json:"email"`
+			GroupID string `json:"groupId"`
 			CanRead *bool  `json:"canRead"`
 			CanSend *bool  `json:"canSend"`
 		}
 		if err := decodeJSON(w, r, &body, 32*1024); err != nil {
 			writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
-			return
-		}
-		delegateID := strings.TrimSpace(body.UserID)
-		if delegateID == "" && strings.TrimSpace(body.Email) != "" {
-			_ = s.store.DB.QueryRow(r.Context(), `SELECT id::text FROM users WHERE tenant_id=$1 AND lower(email::text)=lower($2) AND deleted_at IS NULL`, user.TenantID, strings.TrimSpace(body.Email)).Scan(&delegateID)
-		}
-		if delegateID == "" || delegateID == user.ID {
-			writeError(w, http.StatusBadRequest, "DELEGATE", "Choose another user in this organization")
-			return
-		}
-		var valid bool
-		_ = s.store.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL)`, delegateID, user.TenantID).Scan(&valid)
-		if !valid {
-			writeError(w, http.StatusNotFound, "DELEGATE_NOT_FOUND", "User not found")
 			return
 		}
 		canRead, canSend := true, false
@@ -336,6 +324,41 @@ func (s *Server) adminUserDelegates(w http.ResponseWriter, r *http.Request) {
 		}
 		if canSend {
 			canRead = true
+		}
+		groupID := strings.TrimSpace(body.GroupID)
+		if groupID != "" {
+			var valid bool
+			_ = s.store.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM groups WHERE id=$1 AND tenant_id=$2 AND status='active')`, groupID, user.TenantID).Scan(&valid)
+			if !valid {
+				writeError(w, http.StatusNotFound, "DELEGATE_GROUP_NOT_FOUND", "Group not found")
+				return
+			}
+			_, err := s.store.DB.Exec(r.Context(), `
+				INSERT INTO mailbox_delegate_groups (id, tenant_id, owner_user_id, group_id, can_read, can_send, created_by)
+				VALUES ($1,$2,$3,$4,$5,$6,$7)
+				ON CONFLICT (owner_user_id, group_id) DO UPDATE SET can_read=EXCLUDED.can_read, can_send=EXCLUDED.can_send, updated_at=now()
+			`, newID("dlgg"), user.TenantID, user.ID, groupID, canRead, canSend, sess.User.Name)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "DELEGATE", "Could not grant mailbox access to the group")
+				return
+			}
+			s.recordAdminAudit(r.Context(), sess, sess.User, "admin.delegate_group_added", user.Email, "Granted delegated mailbox access to a group", map[string]any{"userId": user.ID, "groupId": groupID})
+			writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "delegates": s.delegateRows(r.Context(), user.TenantID, user.ID, true), "groupDelegates": s.groupDelegateRows(r.Context(), user.TenantID, user.ID)})
+			return
+		}
+		delegateID := strings.TrimSpace(body.UserID)
+		if delegateID == "" && strings.TrimSpace(body.Email) != "" {
+			_ = s.store.DB.QueryRow(r.Context(), `SELECT id::text FROM users WHERE tenant_id=$1 AND lower(email::text)=lower($2) AND deleted_at IS NULL`, user.TenantID, strings.TrimSpace(body.Email)).Scan(&delegateID)
+		}
+		if delegateID == "" || delegateID == user.ID {
+			writeError(w, http.StatusBadRequest, "DELEGATE", "Choose another user or group in this organization")
+			return
+		}
+		var valid bool
+		_ = s.store.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND tenant_id=$2 AND deleted_at IS NULL)`, delegateID, user.TenantID).Scan(&valid)
+		if !valid {
+			writeError(w, http.StatusNotFound, "DELEGATE_NOT_FOUND", "User not found")
+			return
 		}
 		_, err := s.store.DB.Exec(r.Context(), `
 			INSERT INTO mailbox_delegates (id, tenant_id, owner_user_id, delegate_user_id, can_read, can_send, created_by)
@@ -360,6 +383,10 @@ func (s *Server) adminUserDelegate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delegateID := r.PathValue("delegateId")
+	isGroup := strings.HasPrefix(delegateID, "group:")
+	if isGroup {
+		delegateID = strings.TrimPrefix(delegateID, "group:")
+	}
 	switch r.Method {
 	case http.MethodPatch:
 		var body struct {
@@ -380,10 +407,22 @@ func (s *Server) adminUserDelegate(w http.ResponseWriter, r *http.Request) {
 		if canSend {
 			canRead = true
 		}
+		if isGroup {
+			_, _ = s.store.DB.Exec(r.Context(), `UPDATE mailbox_delegate_groups SET can_read=$4, can_send=$5, updated_at=now() WHERE owner_user_id=$1 AND group_id=$2 AND tenant_id=$3`, user.ID, delegateID, user.TenantID, canRead, canSend)
+			s.recordAdminAudit(r.Context(), sess, sess.User, "admin.delegate_group_updated", user.Email, "Updated delegated mailbox access for a group", map[string]any{"userId": user.ID, "groupId": delegateID})
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "groupDelegates": s.groupDelegateRows(r.Context(), user.TenantID, user.ID)})
+			return
+		}
 		_, _ = s.store.DB.Exec(r.Context(), `UPDATE mailbox_delegates SET can_read=$3, can_send=$4, updated_at=now() WHERE owner_user_id=$1 AND delegate_user_id=$2`, user.ID, delegateID, canRead, canSend)
 		s.recordAdminAudit(r.Context(), sess, sess.User, "admin.delegate_updated", user.Email, "Updated delegated mailbox access", map[string]any{"userId": user.ID, "delegateId": delegateID})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "delegates": s.delegateRows(r.Context(), user.TenantID, user.ID, true)})
 	case http.MethodDelete:
+		if isGroup {
+			_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM mailbox_delegate_groups WHERE owner_user_id=$1 AND group_id=$2 AND tenant_id=$3`, user.ID, delegateID, user.TenantID)
+			s.recordAdminAudit(r.Context(), sess, sess.User, "admin.delegate_group_removed", user.Email, "Removed delegated mailbox access from a group", map[string]any{"userId": user.ID, "groupId": delegateID})
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "groupDelegates": s.groupDelegateRows(r.Context(), user.TenantID, user.ID)})
+			return
+		}
 		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM mailbox_delegates WHERE owner_user_id=$1 AND delegate_user_id=$2 AND tenant_id=$3`, user.ID, delegateID, user.TenantID)
 		s.recordAdminAudit(r.Context(), sess, sess.User, "admin.delegate_removed", user.Email, "Removed delegated mailbox access", map[string]any{"userId": user.ID, "delegateId": delegateID})
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "delegates": s.delegateRows(r.Context(), user.TenantID, user.ID, true)})
@@ -419,6 +458,46 @@ func (s *Server) delegateRows(ctx context.Context, tenantID, userID string, owne
 				"color": color, "canRead": canRead, "canSend": canSend,
 			})
 		}
+	}
+	return result
+}
+
+func (s *Server) groupDelegateRows(ctx context.Context, tenantID, ownerID string) []map[string]any {
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT g.id::text, g.name, g.email::text, d.can_read, d.can_send
+		FROM mailbox_delegate_groups d
+		JOIN groups g ON g.id = d.group_id
+		WHERE d.owner_user_id = $1 AND d.tenant_id = $2 AND g.tenant_id = $2
+		ORDER BY g.name, g.email
+	`, ownerID, tenantID)
+	if err != nil {
+		return []map[string]any{}
+	}
+	defer rows.Close()
+	result := []map[string]any{}
+	for rows.Next() {
+		var id, name, email string
+		var canRead, canSend bool
+		if rows.Scan(&id, &name, &email, &canRead, &canSend) == nil {
+			result = append(result, map[string]any{
+				"groupId": id, "id": id, "name": name, "email": email,
+				"canRead": canRead, "canSend": canSend, "kind": "group",
+			})
+		}
+	}
+	return result
+}
+
+func (s *Server) effectiveDelegations(ctx context.Context, tenantID, delegateID string) []map[string]any {
+	delegations := s.delegationsFor(ctx, tenantID, delegateID)
+	result := make([]map[string]any, 0, len(delegations))
+	for _, delegation := range delegations {
+		result = append(result, map[string]any{
+			"userId": delegation.OwnerID, "name": delegation.OwnerName,
+			"email": delegation.OwnerEmail, "initials": delegation.OwnerInitials,
+			"color": delegation.OwnerColor, "canRead": delegation.CanRead,
+			"canSend": delegation.CanSend,
+		})
 	}
 	return result
 }

@@ -606,6 +606,8 @@ try {
   await page.eval("(() => { const cell = document.querySelector('.cal-month-cell[data-cal-date]'); cell.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true; })()");
   await page.waitFor(() => !document.getElementById("eventOverlay").hidden, 3000);
   check(await page.eval("document.getElementById('eventDate').value !== ''"), "double-clicking a month day opens New event");
+  check(await page.eval("parseFloat(getComputedStyle(document.querySelector('.cal-cell-add')).width) >= 22"), "month cells expose a larger New event plus control");
+  check(await page.eval("Number(getComputedStyle(document.querySelector('.cal-cell-add')).opacity) >= 0.5"), "month cell plus control stays visible without hover");
   await page.click("#eventCancel");
   await sleep(200);
   await page.click("#calNew");
@@ -661,8 +663,10 @@ try {
   await sleep(300);
   equal(await page.eval("document.getElementById('eventName').value"), "Weekly planning check — moved", "the recurrence exception reopens with its overridden title");
   check(await page.eval("(document.getElementById('eventGuestPanel')?.textContent || '').includes('Conference Room A')"), "the booked room is visible to the organizer");
+  await page.click("#eventSave");
+  await page.waitFor(() => document.getElementById("eventOverlay").hidden, 6000);
+  check(await page.eval("document.getElementById('eventOverlay').hidden"), "saving an existing event closes the dialog without a calendar move error");
   await page.screenshot(path.join(artifacts, "15c-calendar-occurrence.png"));
-  await page.click("#eventClose");
   await page.click("#calPollsBtn");
   await page.waitFor(() => !document.getElementById("calendarPollsOverlay").hidden, 5000);
   await page.click("[data-poll-new]");
@@ -690,6 +694,62 @@ try {
   await sleep(250);
   check(await page.eval("document.querySelector('.person-hero h2')?.textContent.length > 0"), "person detail renders");
   await page.screenshot(path.join(artifacts, "16-people.png"));
+
+  console.log("\n[9b2] Delegated mailbox switcher and separate window");
+  await page.waitFor(() => {
+    const switcher = document.getElementById("delegatedSwitcher");
+    return Boolean(switcher && !switcher.hidden);
+  }, 8000);
+  check(await page.eval("!document.getElementById('delegatedSwitcher').hidden"), "delegated mailbox button appears beside notifications");
+  check(await page.eval("document.getElementById('delegatedSwitchBtn').classList.contains('delegated-switch-btn')"), "delegated switcher uses the primary New-mail button treatment");
+  await page.click("#delegatedSwitchBtn");
+  await page.waitFor(() => !document.getElementById("delegatedMailboxPop").hidden, 4000);
+  check(await page.eval("!document.getElementById('delegatedMailboxPop').hidden"), "delegated mailbox dropdown opens");
+  check(await page.eval("Boolean(document.getElementById('delegatedMailboxSearch'))"), "delegated mailbox dropdown is searchable");
+  equal(await page.eval("document.querySelectorAll('#delegatedMailboxList [data-delegated-mailbox]').length"), 2, "delegated mailbox dropdown lists every mailbox");
+  await page.setValue("#delegatedMailboxSearch", "marcus");
+  await sleep(150);
+  equal(await page.eval("document.querySelectorAll('#delegatedMailboxList [data-delegated-mailbox]').length"), 1, "search narrows the delegated mailbox list");
+  check(await page.eval("document.getElementById('delegatedMailboxList').textContent.includes('marcus.webb@a8m.example')"), "delegated mailbox row names the mailbox address");
+  await page.screenshot(path.join(artifacts, "16a-delegated-switcher.png"));
+  await page.eval(`(() => {
+    window.__a8mDelegatedUrl = "";
+    window.__a8mRealOpen = window.open;
+    window.open = function (url) {
+      if (String(url).startsWith("about:blank")) {
+        return {
+          document: { write() {}, close() {} },
+          location: { replace(value) { window.__a8mDelegatedUrl = String(value); } },
+          close() {}, opener: null
+        };
+      }
+      return window.__a8mRealOpen.call(window, url, "_blank");
+    };
+  })()`);
+  await page.click("#delegatedMailboxList [data-delegated-mailbox]");
+  await page.waitFor(() => Boolean(window.__a8mDelegatedUrl), 6000);
+  const delegatedUrl = await page.eval("window.__a8mDelegatedUrl");
+  check(delegatedUrl.includes("delegate="), "choosing a mailbox requests a one-time delegated window link");
+  const delegatedPage = await browser.newPage(delegatedUrl);
+  try {
+    await delegatedPage.waitFor(() => document.readyState === "complete", 12000);
+    await delegatedPage.waitFor(() => !document.getElementById("app").hidden && document.querySelectorAll(".msg").length > 0, 15000);
+    equal(await delegatedPage.eval("document.querySelector('.account-id span')?.textContent"), "marcus.webb@a8m.example", "delegated window opens the owner mailbox");
+    check(await delegatedPage.eval("document.body.innerText.includes('Delegated inbox: quarterly forecast sign-off')"), "delegated inbox loads its own conversations");
+    check(await delegatedPage.eval("Boolean(document.getElementById('delegatedWindowChip'))"), "delegated window names its mailbox");
+    check(await delegatedPage.eval("document.getElementById('delegatedSwitcher')?.hidden !== false"), "delegated window does not offer a second delegation switcher");
+    equal(await page.eval("document.querySelector('.account-id span')?.textContent"), DEMO_EMAIL, "primary window keeps the original mailbox session");
+    await delegatedPage.screenshot(path.join(artifacts, "16b-delegated-window.png"));
+    await delegatedPage.click("#delegatedWindowExit");
+    await sleep(700);
+    const delegatedClosed = delegatedPage.closed || await delegatedPage.eval("Boolean(document.querySelector('.delegated-closed-card'))").catch(() => true);
+    check(delegatedClosed, "closing the delegated window signs out only that window");
+    const mainStatus = await page.eval("fetch('/api/bootstrap', { credentials: 'same-origin' }).then((response) => response.status)");
+    equal(mainStatus, 200, "primary mailbox stays signed in after the delegated window closes");
+  } finally {
+    try { await delegatedPage.close(); } catch {}
+    await page.eval("if (window.__a8mRealOpen) window.open = window.__a8mRealOpen");
+  }
 
   console.log("\n[9c] Attachment preview and Outlook-style pop-out");
   await page.click(".rail-btn[data-task='mail']");
@@ -1596,6 +1656,29 @@ try {
   await page.click("#themeBtn");
   await sleep(450);
   check(await page.eval("document.documentElement.getAttribute('data-theme') === 'dark'"), "theme toggle applies dark mode");
+  await page.eval(`(() => {
+    const csrf = decodeURIComponent((document.cookie.match(/(?:^|; )a8m_csrf=([^;]*)/) || [])[1] || "");
+    return fetch('/api/dev/inject', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({
+        subject: 'Dark theme readability fixture',
+        bodyText: 'Dark theme readable text. Font attribute text. HSL text. White card text.',
+        bodyHtml: '<p style="color:#111111">Dark theme readable text.</p><p><font color="#111111">Font attribute text.</font></p><p style="color:hsl(0, 0%, 7%)">HSL text.</p><div style="background:#ffffff;padding:8px"><p style="color:#111111">White card text.</p></div>'
+      })
+    });
+  })()`);
+  await page.click("[data-folder='inbox']");
+  await sleep(500);
+  await page.eval(`(() => {
+    const row = [...document.querySelectorAll('.msg')].find((item) => item.textContent.includes('Dark theme readability fixture'));
+    if (row) row.click();
+  })()`);
+  await sleep(450);
+  equal(await page.eval("getComputedStyle(document.querySelector('.email-body p')).color"), "rgb(232, 238, 247)", "dark mode lifts dark inline email text to white");
+  equal(await page.eval("getComputedStyle([...document.querySelectorAll('.email-body font')].find((node) => node.textContent.includes('Font attribute text'))).color"), "rgb(232, 238, 247)", "dark mode lifts dark <font color> text to white");
+  equal(await page.eval("getComputedStyle([...document.querySelectorAll('.email-body p')].find((node) => node.textContent.includes('HSL text'))).color"), "rgb(232, 238, 247)", "dark mode lifts dark HSL text to white");
+  equal(await page.eval("getComputedStyle(document.querySelector('.email-body div p')).color"), "rgb(17, 17, 17)", "dark mode keeps dark text on a white email card");
+  await page.screenshot(path.join(artifacts, "06-dark-email.png"));
   await page.screenshot(path.join(artifacts, "11-dark.png"));
   await page.click("[data-folder='inbox']");
   await sleep(350);

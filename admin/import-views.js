@@ -185,7 +185,7 @@ function downloadUserImportResults() {
 async function renderImportMailboxes() {
   stopImportPolling();
   const history = await safeAdminList("mail-import/jobs");
-  mailImportState.candidates = await loadUserPageCandidates();
+  mailImportState.candidates = (await loadUserPageCandidates()).users;
   if (mailImportState.jobId) await loadMailImportJob(mailImportState.jobId, false);
   const job = mailImportState.job;
   const items = mailImportState.items || [];

@@ -550,7 +550,21 @@ func (s *Server) loadFile(ctx context.Context, user userRecord, id string) (map[
 
 func (s *Server) getFileContent(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
-	file, err := s.loadFileContent(r.Context(), sess.User.ID, r.PathValue("id"))
+	ownerID := strings.TrimSpace(r.URL.Query().Get("owner"))
+	lookupUserID := sess.User.ID
+	if sess.IsDelegated {
+		if ownerID != "" && ownerID != sess.User.ID {
+			writeError(w, http.StatusForbidden, "DELEGATE_FORBIDDEN", "You do not have access to this mailbox")
+			return
+		}
+	} else if ownerID != "" {
+		if _, allowed := s.delegationFor(r.Context(), sess.User.TenantID, ownerID, sess.User.ID); !allowed {
+			writeError(w, http.StatusForbidden, "DELEGATE_FORBIDDEN", "You do not have access to this mailbox")
+			return
+		}
+		lookupUserID = ownerID
+	}
+	file, err := s.loadFileContent(r.Context(), lookupUserID, r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "File not found")
 		return
@@ -744,7 +758,12 @@ func (s *Server) attachmentContent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ownerID := strings.TrimSpace(r.URL.Query().Get("owner"))
 	lookupUserID := sess.User.ID
-	if ownerID != "" {
+	if sess.IsDelegated {
+		if ownerID != "" && ownerID != sess.User.ID {
+			writeError(w, http.StatusForbidden, "DELEGATE_FORBIDDEN", "You do not have access to this mailbox")
+			return
+		}
+	} else if ownerID != "" {
 		if _, allowed := s.delegationFor(r.Context(), sess.User.TenantID, ownerID, sess.User.ID); !allowed {
 			writeError(w, http.StatusForbidden, "DELEGATE_FORBIDDEN", "You do not have access to this mailbox")
 			return

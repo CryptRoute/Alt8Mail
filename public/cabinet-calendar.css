@@ -443,10 +443,10 @@
 .cal-month-cell.is-today .cal-daynum { background: var(--accent); color: var(--on-accent); }
 .cal-month-cell-head { display: flex; align-items: center; justify-content: space-between; min-height: 18px; }
 .cal-daynum { min-width: 18px; height: 18px; padding: 0 4px; border-radius: 5px; display: inline-grid; place-items: center; font-size: 0.625rem; font-weight: 650; color: var(--text-2); }
-.cal-cell-add { width: 17px; height: 17px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); opacity: 0; cursor: pointer; }
-.cal-cell-add:hover { background: var(--accent-soft); color: var(--accent-ink); }
+.cal-cell-add { width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); opacity: .55; cursor: pointer; }
+.cal-cell-add:hover { background: var(--accent-soft); color: var(--accent-ink); opacity: 1; }
 .cal-month-cell:hover .cal-cell-add { opacity: 1; }
-.cal-cell-add .icon { width: 11px; height: 11px; }
+.cal-cell-add .icon { width: 14px; height: 14px; }
 .cal-month-events { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden; }
 .cal-event-chip {
   display: flex; align-items: center; gap: 4px;

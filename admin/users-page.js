@@ -22,8 +22,10 @@ async function renderUserPage(id) {
       identities: [],
       vacation: vacation.vacation || {},
       delegates: delegates.delegates || [],
+      groupDelegates: delegates.groupDelegates || [],
       delegations: delegates.delegations || [],
-      candidates
+      candidates: candidates.users || [],
+      groupCandidates: candidates.groups || []
     };
     try {
       const identityData = await api("users/" + encodeURIComponent(id) + "/identity-signatures");
@@ -36,14 +38,21 @@ async function renderUserPage(id) {
 }
 
 async function loadUserPageCandidates() {
-  if (Array.isArray(state.userCandidates)) return state.userCandidates;
-  try {
-    const data = await api("users?limit=200&status=active");
-    state.userCandidates = (data.users || []).filter((user) => !user.deletedAt);
-  } catch {
-    state.userCandidates = [];
+  if (Array.isArray(state.userCandidates) && Array.isArray(state.groupCandidates)) {
+    return { users: state.userCandidates, groups: state.groupCandidates };
   }
-  return state.userCandidates;
+  try {
+    const [usersData, groupsData] = await Promise.all([
+      api("users?limit=200&status=active").catch(() => ({ users: [] })),
+      api("groups?limit=200").catch(() => ({ groups: [] }))
+    ]);
+    state.userCandidates = (usersData.users || []).filter((user) => !user.deletedAt);
+    state.groupCandidates = (groupsData.groups || []).filter((group) => group.status !== "archived");
+  } catch {
+    state.userCandidates = state.userCandidates || [];
+    state.groupCandidates = state.groupCandidates || [];
+  }
+  return { users: state.userCandidates, groups: state.groupCandidates };
 }
 
 function renderUserPageShell() {
@@ -86,7 +95,7 @@ function renderUserPageShell() {
           <div class="detail-row"><span>Created</span><b>${formatDate(user.createdAt)}</b></div>
         </div>
         <div class="user-page-summary-foot">
-          <span>${(data.delegates || []).length} delegate${(data.delegates || []).length === 1 ? "" : "s"} · ${(data.signatures || []).length} signature${(data.signatures || []).length === 1 ? "" : "s"}</span>
+          <span>${(data.delegates || []).length + (data.groupDelegates || []).length} delegate${((data.delegates || []).length + (data.groupDelegates || []).length) === 1 ? "" : "s"} · ${(data.signatures || []).length} signature${(data.signatures || []).length === 1 ? "" : "s"}</span>
           <span class="badge ${data.vacation?.enabled ? "active" : "neutral"}">${data.vacation?.enabled ? "Away" : "Available"}</span>
         </div>
       </aside>
@@ -167,16 +176,26 @@ function userSignatureCard(signature) {
 
 function userPageDelegates(data) {
   const user = data.user;
-  const candidates = (data.candidates || []).filter((candidate) => candidate.id !== user.id && !(data.delegates || []).some((delegate) => delegate.userId === candidate.id));
+  const directDelegates = data.delegates || [];
+  const groupDelegates = data.groupDelegates || [];
+  const candidates = (data.candidates || []).filter((candidate) => candidate.id !== user.id && !directDelegates.some((delegate) => delegate.userId === candidate.id));
+  const groupCandidates = (data.groupCandidates || []).filter((group) => !groupDelegates.some((delegate) => delegate.groupId === group.id));
+  const totalDelegates = directDelegates.length + groupDelegates.length;
+  const personCards = directDelegates.map((delegate) => `<div class="delegate-card"><span class="avatar" style="background:${esc(delegate.color || "#34557a")}">${esc(delegate.initials || initials(delegate.name))}</span><div class="delegate-copy"><b>${esc(delegate.name)}</b><small>${esc(delegate.email)}</small><div class="delegate-perms"><label class="switch-inline"><input type="checkbox" data-delegate-read="${esc(delegate.userId)}" ${delegate.canRead ? "checked" : ""}><span>Read</span></label><label class="switch-inline"><input type="checkbox" data-delegate-send="${esc(delegate.userId)}" ${delegate.canSend ? "checked" : ""}><span>Reply</span></label></div></div><button class="icon-button" data-delegate-remove="${esc(delegate.userId)}" aria-label="Remove delegate">${icon("trash")}</button></div>`);
+  const groupCards = groupDelegates.map((delegate) => `<div class="delegate-card"><span class="avatar" style="background:#5b4a7e">${esc(initials(delegate.name))}</span><div class="delegate-copy"><b>${esc(delegate.name)} <span class="badge neutral">Group</span></b><small>${esc(delegate.email)}</small><div class="delegate-perms"><label class="switch-inline"><input type="checkbox" data-delegate-read="group:${esc(delegate.groupId)}" ${delegate.canRead ? "checked" : ""}><span>Read</span></label><label class="switch-inline"><input type="checkbox" data-delegate-send="group:${esc(delegate.groupId)}" ${delegate.canSend ? "checked" : ""}><span>Reply</span></label></div></div><button class="icon-button" data-delegate-remove="group:${esc(delegate.groupId)}" aria-label="Remove group delegate">${icon("trash")}</button></div>`);
+  const choices = [
+    candidates.length ? `<optgroup label="People">${candidates.map((candidate) => `<option value="${esc(candidate.id)}">${esc(candidate.name)} · ${esc(candidate.email)}</option>`).join("")}</optgroup>` : "",
+    groupCandidates.length ? `<optgroup label="Groups">${groupCandidates.map((group) => `<option value="group:${esc(group.id)}">${esc(group.name)} · ${esc(group.email)}</option>`).join("")}</optgroup>` : ""
+  ].filter(Boolean).join("");
   return `<div class="mini-section" style="margin-top:0">
-      <div class="mini-section-head"><h3>People who can access this mailbox</h3><span class="badge neutral">${(data.delegates || []).length}</span></div>
-      <p class="mini-help">Delegates see this mailbox's Inbox in their webmail folder rail. Read access lets them read; send access lets them reply from their own account.</p>
-      <div class="delegate-list">${(data.delegates || []).map((delegate) => `<div class="delegate-card"><span class="avatar" style="background:${esc(delegate.color || "#34557a")}">${esc(delegate.initials || initials(delegate.name))}</span><div class="delegate-copy"><b>${esc(delegate.name)}</b><small>${esc(delegate.email)}</small><div class="delegate-perms"><label class="switch-inline"><input type="checkbox" data-delegate-read="${esc(delegate.userId)}" ${delegate.canRead ? "checked" : ""}><span>Read</span></label><label class="switch-inline"><input type="checkbox" data-delegate-send="${esc(delegate.userId)}" ${delegate.canSend ? "checked" : ""}><span>Reply</span></label></div></div><button class="icon-button" data-delegate-remove="${esc(delegate.userId)}" aria-label="Remove delegate">${icon("trash")}</button></div>`).join("") || `<div class="empty-mini">No one else can open this mailbox.</div>`}</div>
-      ${can("users.update") && candidates.length ? `<form id="userPageDelegateForm" class="inline-form" style="margin-top:12px"><label class="field grow"><span>Add a delegate</span><select id="delegateUserId">${candidates.map((candidate) => `<option value="${esc(candidate.id)}">${esc(candidate.name)} · ${esc(candidate.email)}</option>`).join("")}</select></label><label class="switch-inline"><input type="checkbox" id="delegateCanRead" checked><span>Read</span></label><label class="switch-inline"><input type="checkbox" id="delegateCanSend"><span>Reply</span></label><button class="btn primary" type="submit">${icon("plus")}Grant access</button></form>` : ""}
+      <div class="mini-section-head"><h3>People and groups who can access this mailbox</h3><span class="badge neutral">${totalDelegates}</span></div>
+      <p class="mini-help">Delegates can open this mailbox in its own window from their webmail header. Read access lets them read and organise; send access lets them send from the mailbox.</p>
+      <div class="delegate-list">${personCards.join("")}${groupCards.join("") || (personCards.length ? "" : `<div class="empty-mini">No one else can open this mailbox.</div>`)}</div>
+      ${can("users.update") && choices ? `<form id="userPageDelegateForm" class="inline-form" style="margin-top:12px"><label class="field grow"><span>Add a delegate</span><select id="delegateUserId">${choices}</select></label><label class="switch-inline"><input type="checkbox" id="delegateCanRead" checked><span>Read</span></label><label class="switch-inline"><input type="checkbox" id="delegateCanSend"><span>Reply</span></label><button class="btn primary" type="submit">${icon("plus")}Grant access</button></form>` : ""}
     </div>
     <div class="mini-section">
       <div class="mini-section-head"><h3>Mailboxes ${esc(user.name)} can access</h3></div>
-      <div class="delegate-list">${(data.delegations || []).map((delegation) => `<div class="delegate-card"><span class="avatar" style="background:${esc(delegation.color || "#34557a")}">${esc(delegation.initials || initials(delegation.name))}</span><div class="delegate-copy"><b>${esc(delegation.name)}</b><small>${esc(delegation.email)} · ${delegation.canSend ? "read and reply" : "read only"}</small></div><a class="btn small secondary" href="#/users/${encodeURIComponent(delegation.userId)}">Open</a></div>`).join("") || `<div class="empty-mini">This user cannot access another mailbox.</div>`}</div>
+      <div class="delegate-list">${(data.delegations || []).map((delegation) => `<div class="delegate-card"><span class="avatar" style="background:${esc(delegation.color || "#34557a")}">${esc(delegation.initials || initials(delegation.name))}</span><div class="delegate-copy"><b>${esc(delegation.name)}</b><small>${esc(delegation.email)} · ${delegation.canSend ? "read and send" : "read only"}</small></div><a class="btn small secondary" href="#/users/${encodeURIComponent(delegation.userId)}">Open</a></div>`).join("") || `<div class="empty-mini">This user cannot access another mailbox.</div>`}</div>
     </div>`;
 }
 
@@ -261,10 +280,17 @@ function bindUserPage() {
   });
   $("#userPageDelegateForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const chosen = $("#delegateUserId").value;
+    const body = {
+      canRead: $("#delegateCanRead").checked,
+      canSend: $("#delegateCanSend").checked
+    };
+    if (chosen.startsWith("group:")) body.groupId = chosen.slice(6);
+    else body.userId = chosen;
     try {
       await api(`users/${encodeURIComponent(user.id)}/delegates`, {
         method: "POST",
-        body: { userId: $("#delegateUserId").value, canRead: $("#delegateCanRead").checked, canSend: $("#delegateCanSend").checked }
+        body
       });
       toast("Mailbox access granted");
       await renderUserPage(user.id);
@@ -280,7 +306,10 @@ function bindUserPage() {
   }));
   $$("[data-delegate-read], [data-delegate-send]").forEach((checkbox) => checkbox.addEventListener("change", async () => {
     const delegateId = checkbox.dataset.delegateRead || checkbox.dataset.delegateSend;
-    const delegate = (userPageState.delegates || []).find((item) => item.userId === delegateId);
+    const groupKey = delegateId.startsWith("group:") ? delegateId.slice(6) : "";
+    const delegate = groupKey
+      ? (userPageState.groupDelegates || []).find((item) => item.groupId === groupKey)
+      : (userPageState.delegates || []).find((item) => item.userId === delegateId);
     try {
       await api(`users/${encodeURIComponent(user.id)}/delegates/${encodeURIComponent(delegateId)}`, {
         method: "PATCH",

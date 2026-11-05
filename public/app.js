@@ -14,6 +14,8 @@ const esc = (value) => String(value == null ? "" : value).replace(/[&<>"']/g, (c
 const uid = (prefix) => `${prefix}_${(crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)).replace(/-/g, "").slice(0, 18)}`;
 const clone = (value) => structuredClone(value);
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const DELEGATED_SESSION_KEY = "a8m.delegated.window";
+const DELEGATED_SESSION_HEADER = "X-A8M-Delegated-Session";
 
 const avatarFailures = new Set();
 const normalizedEmailDomain = (value) => normalizeEmail(value).split("@")[1] || "";
@@ -115,6 +117,118 @@ function cidImageMap(message) {
   return map;
 }
 
+const EMAIL_NAMED_COLORS = {
+  black: [0, 0, 0], white: [255, 255, 255], gray: [128, 128, 128], grey: [128, 128, 128],
+  silver: [192, 192, 192], red: [255, 0, 0], blue: [0, 0, 255], green: [0, 128, 0],
+  navy: [0, 0, 128], maroon: [128, 0, 0], purple: [128, 0, 128], teal: [0, 128, 128],
+  olive: [128, 128, 0], yellow: [255, 255, 0], lime: [0, 255, 0], aqua: [0, 255, 255],
+  fuchsia: [255, 0, 255]
+};
+
+let emailColorProbe = null;
+const emailColorCache = new Map();
+
+function parseEmailColorFast(raw) {
+  let match = raw.match(/^#([0-9a-f]{3,8})$/i);
+  if (match) {
+    let hex = match[1];
+    if (hex.length === 3 || hex.length === 4) {
+      hex = hex.split("").map((part) => part + part).join("");
+    }
+    if (hex.length === 6 || hex.length === 8) {
+      if (hex.length === 8 && hex.slice(6) === "00") return null;
+      return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+    }
+    return null;
+  }
+  match = raw.match(/^rgba?\(\s*([\d.]+)\s*[,\s]\s*([\d.]+)\s*[,\s]\s*([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/i);
+  if (match) {
+    if (match[4] != null) {
+      const alpha = match[4].endsWith("%") ? Number(match[4].slice(0, -1)) / 100 : Number(match[4]);
+      if (alpha === 0) return null;
+    }
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+  }
+  return EMAIL_NAMED_COLORS[raw] || null;
+}
+
+function parseEmailColor(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw || ["transparent", "inherit", "initial", "unset", "currentcolor", "none"].includes(raw)) return null;
+  if (emailColorCache.has(raw)) return emailColorCache.get(raw);
+  let result = parseEmailColorFast(raw);
+  if (!result) {
+    // Let the browser parse the full CSS Color grammar (hsl, hwb, lab, newer
+    // named colours). The canvas normalises it to hex or rgba for us.
+    try {
+      emailColorProbe = emailColorProbe || document.createElement("canvas").getContext("2d");
+      if (emailColorProbe) {
+        emailColorProbe.fillStyle = "#010203";
+        emailColorProbe.fillStyle = raw;
+        const normalized = String(emailColorProbe.fillStyle || "").toLowerCase();
+        if (normalized && normalized !== "#010203") result = parseEmailColorFast(normalized);
+      }
+    } catch {}
+  }
+  if (emailColorCache.size > 4096) emailColorCache.clear();
+  emailColorCache.set(raw, result);
+  return result;
+}
+
+function emailColorLuminance(rgb) {
+  return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+}
+
+function emailElementBackground(node) {
+  if (!node || node.nodeType !== 1) return null;
+  return parseEmailColor(node.style?.backgroundColor || "")
+    || parseEmailColor(node.getAttribute?.("bgcolor") || "");
+}
+
+function emailElementColor(node) {
+  if (!node || node.nodeType !== 1) return null;
+  return parseEmailColor(node.style?.color || "")
+    || parseEmailColor(node.getAttribute?.("color") || "");
+}
+
+function emailNearestBackground(node) {
+  for (let element = node; element && element.nodeType === 1; element = element.parentElement) {
+    const color = emailElementBackground(element);
+    if (color) return color;
+  }
+  return null;
+}
+
+// Email clients routinely keep dark inline text that disappears on a dark
+// reading surface. Annotate the affected nodes so CSS can adapt them in dark
+// mode while leaving light-background cards and explicit brand colours intact.
+function annotateEmailContrast(node) {
+  const ownBackground = emailElementBackground(node);
+  if (ownBackground) {
+    const luminance = emailColorLuminance(ownBackground);
+    if (luminance > 0.6) node.dataset.emailLightSurface = "1";
+    else if (luminance < 0.4) node.dataset.emailDarkSurface = "1";
+  }
+  const color = emailElementColor(node);
+  if (!color) return;
+  const nearest = emailNearestBackground(node);
+  const luminance = emailColorLuminance(color);
+  if (luminance < 0.5) {
+    if (!nearest) {
+      node.dataset.emailDarkPageText = "1";
+    } else {
+      const background = emailColorLuminance(nearest);
+      if (background < 0.4) node.dataset.emailOnDark = "1";
+    }
+  } else if (luminance > 0.7) {
+    if (!nearest) {
+      node.dataset.emailLightPageText = "1";
+    } else if (emailColorLuminance(nearest) > 0.6) {
+      node.dataset.emailOnLight = "1";
+    }
+  }
+}
+
 function safeEmailHtml(html, { message = null, allowImages = true } = {}) {
   const template = document.createElement("template");
   template.innerHTML = String(html || "");
@@ -176,6 +290,7 @@ function safeEmailHtml(html, { message = null, allowImages = true } = {}) {
       }
     }
   });
+  template.content.querySelectorAll("*").forEach(annotateEmailContrast);
   return template.innerHTML;
 }
 
@@ -837,6 +952,13 @@ const state = {
   user: null,
   organizationName: "",
   csrf: null,
+  delegatedSession: null,
+  delegatedMode: false,
+  delegatedExpired: false,
+  delegatedMailboxes: [],
+  delegatedSwitchOpen: false,
+  delegatedSwitchQuery: "",
+  delegatedHeartbeat: null,
   aliases: [],
   identities: [],
   signatures: [],
@@ -1426,6 +1548,12 @@ const isDrawer = () => window.matchMedia("(max-width: 1119px)").matches;
 /* ============================================================
    API
    ============================================================ */
+function delegatedRequestHeaders(extra = {}) {
+  const headers = { ...extra };
+  if (state.delegatedSession?.token) headers[DELEGATED_SESSION_HEADER] = state.delegatedSession.token;
+  return headers;
+}
+
 class ApiFailure extends Error {
   constructor(status, code, message, details) {
     super(message);
@@ -1443,7 +1571,10 @@ async function api(path, options = {}) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
   }
-  if (state.csrf && method !== "GET") headers["X-CSRF-Token"] = state.csrf;
+  const delegatedSession = state.delegatedSession;
+  if (delegatedSession?.token) headers[DELEGATED_SESSION_HEADER] = delegatedSession.token;
+  const csrf = delegatedSession?.csrf || state.csrf;
+  if (csrf && method !== "GET") headers["X-CSRF-Token"] = csrf;
   let response;
   try {
     response = await fetch(path, { method, headers, body, credentials: "same-origin", cache: "no-store" });
@@ -1460,11 +1591,427 @@ async function api(path, options = {}) {
     payload = await response.text();
   }
   if (!response.ok) {
-    if (response.status === 401 && !options.skipAuth) handleSessionExpired();
+    if (response.status === 401 && !options.skipAuth) {
+      if (state.delegatedMode) {
+        const revoked = payload && payload.error ? payload.error.message : "";
+        expireDelegatedWindow(revoked || "Your primary Alt8Mail session ended. This delegated mailbox has been signed out.");
+      } else {
+        handleSessionExpired();
+      }
+    }
     const detail = payload && payload.error ? payload.error : {};
     throw new ApiFailure(response.status, detail.code || "HTTP_" + response.status, detail.message || `Request failed (${response.status})`, detail.details || null);
   }
   return payload;
+}
+
+/* ============================================================
+   delegated mailbox windows
+   ============================================================ */
+function readDelegatedWindowSession() {
+  try {
+    const raw = sessionStorage.getItem(DELEGATED_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.token !== "string" || !parsed.token || typeof parsed.csrf !== "string") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeDelegatedWindowSession(session) {
+  try {
+    if (session) sessionStorage.setItem(DELEGATED_SESSION_KEY, JSON.stringify(session));
+    else sessionStorage.removeItem(DELEGATED_SESSION_KEY);
+  } catch {}
+}
+
+function delegatedCookie(name) {
+  try {
+    for (const entry of document.cookie.split(";")) {
+      const separator = entry.indexOf("=");
+      if (separator < 0) continue;
+      if (entry.slice(0, separator).trim() !== name) continue;
+      return decodeURIComponent(entry.slice(separator + 1).trim());
+    }
+  } catch {}
+  return "";
+}
+
+async function redeemDelegatedLaunchCode(code) {
+  const response = await fetch("/api/delegation/redeem", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-CSRF-Token": delegatedCookie("a8m_system_csrf") || delegatedCookie("a8m_csrf")
+    },
+    credentials: "same-origin",
+    cache: "no-store",
+    body: JSON.stringify({ code })
+  });
+  const type = response.headers.get("content-type") || "";
+  const payload = type.includes("application/json") ? await response.json().catch(() => null) : null;
+  if (!response.ok) {
+    const detail = payload && payload.error ? payload.error : {};
+    throw new Error(detail.message || "This delegated mailbox link has expired.");
+  }
+  return payload || {};
+}
+
+async function prepareDelegatedWindow() {
+  const params = new URLSearchParams(window.location.search);
+  const launch = params.get("delegate");
+  const stored = readDelegatedWindowSession();
+  if (launch === null && !stored) return false;
+  state.delegatedMode = true;
+  document.documentElement.dataset.delegated = "true";
+  if (launch && launch !== "1") {
+    try {
+      const data = await redeemDelegatedLaunchCode(launch);
+      const session = {
+        token: data.token,
+        csrf: data.csrf,
+        mailbox: data.mailbox || {},
+        canSend: data.delegatedCanSend !== false,
+        expiresAt: data.expiresAt || ""
+      };
+      writeDelegatedWindowSession(session);
+      state.delegatedSession = session;
+      state.csrf = data.csrf || "";
+      params.set("delegate", "1");
+      const query = params.toString();
+      window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash);
+      return true;
+    } catch (error) {
+      state.delegatedExpired = true;
+      showDelegatedClosed(error.message || "This delegated mailbox link is no longer available.");
+      return false;
+    }
+  }
+  if (stored) {
+    state.delegatedSession = stored;
+    state.csrf = stored.csrf || state.csrf;
+    return true;
+  }
+  state.delegatedExpired = true;
+  showDelegatedClosed("This delegated mailbox is no longer open. Ask the mailbox owner to open it again from your main Alt8Mail window.");
+  return false;
+}
+
+function showDelegatedClosed(message) {
+  showLogin();
+  loginForm.hidden = true;
+  const panelHost = document.querySelector(".login-panel");
+  if (!panelHost) return;
+  panelHost.querySelector(".delegated-closed-card")?.remove();
+  const panel = document.createElement("div");
+  panel.className = "login-card delegated-closed-card";
+  panel.innerHTML = `
+    <div class="login-heading">
+      <p class="eyebrow">Delegated mailbox</p>
+      <h2>This window is signed out</h2>
+      <p>${esc(message)}</p>
+    </div>
+    <div class="delegated-closed-note"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span>Closing this window never signs out the primary mailbox that opened it.</span></div>
+    <div class="delegated-closed-actions">
+      <button class="login-submit" type="button" data-delegated-close-window>Close window</button>
+      <button class="link-btn" type="button" data-delegated-main-mailbox>Open my main mailbox</button>
+    </div>`;
+  panelHost.appendChild(panel);
+  panel.querySelector("[data-delegated-close-window]")?.addEventListener("click", () => window.close());
+  panel.querySelector("[data-delegated-main-mailbox]")?.addEventListener("click", () => {
+    clearDelegatedWindowSession();
+    window.location.href = "/";
+  });
+}
+
+function clearDelegatedWindowSession() {
+  writeDelegatedWindowSession(null);
+  state.delegatedSession = null;
+  state.delegatedMode = false;
+  try {
+    delete document.documentElement.dataset.delegated;
+  } catch {}
+}
+
+function stopDelegatedHeartbeat() {
+  if (state.delegatedHeartbeat) clearInterval(state.delegatedHeartbeat);
+  state.delegatedHeartbeat = null;
+}
+
+function expireDelegatedWindow(message) {
+  if (!state.delegatedMode || state.delegatedExpired) return;
+  state.delegatedExpired = true;
+  stopDelegatedHeartbeat();
+  clearDelegatedWindowSession();
+  state.user = null;
+  state.csrf = null;
+  state.delegatedMailboxes = [];
+  document.getElementById("delegatedSwitcher")?.remove();
+  document.getElementById("delegatedWindowChip")?.remove();
+  showDelegatedClosed(message || "Your primary Alt8Mail session ended. This delegated mailbox has been signed out.");
+}
+
+function startDelegatedHeartbeat() {
+  stopDelegatedHeartbeat();
+  if (!state.delegatedMode || !state.delegatedSession?.token) return;
+  state.delegatedHeartbeat = setInterval(async () => {
+    const session = state.delegatedSession;
+    if (!session?.token) return;
+    try {
+      const response = await fetch("/api/session", {
+        headers: { Accept: "application/json", [DELEGATED_SESSION_HEADER]: session.token },
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+      if (response.status === 401) {
+        const payload = await response.json().catch(() => null);
+        expireDelegatedWindow(payload?.error?.message || "Your primary Alt8Mail session ended. This delegated mailbox has been signed out.");
+      }
+    } catch {}
+  }, 30_000);
+}
+
+let delegatedAuthChannel = null;
+
+function setupDelegatedAuthChannel() {
+  if (delegatedAuthChannel) return;
+  try {
+    delegatedAuthChannel = new BroadcastChannel("a8m-delegated-auth");
+    delegatedAuthChannel.addEventListener("message", (event) => {
+      if (event.data?.type !== "parent-signed-out") return;
+      if (state.delegatedMode) expireDelegatedWindow("The primary Alt8Mail session signed out. This delegated mailbox has been closed.");
+    });
+  } catch {}
+}
+
+function broadcastPrimarySignOut() {
+  try {
+    delegatedAuthChannel?.postMessage({ type: "parent-signed-out" });
+  } catch {}
+}
+
+async function closeDelegatedWindow() {
+  if (state.delegatedExpired) {
+    window.close();
+    return;
+  }
+  const session = state.delegatedSession;
+  try {
+    if (session?.token) await api("/api/delegation/session", { method: "DELETE" });
+  } catch {}
+  stopDelegatedHeartbeat();
+  clearDelegatedWindowSession();
+  state.user = null;
+  state.csrf = null;
+  state.delegatedExpired = true;
+  showDelegatedClosed("This delegated mailbox window is closed. Your primary mailbox remains signed in.");
+  setTimeout(() => { try { window.close(); } catch {} }, 200);
+}
+
+function delegatedSendBlocked() {
+  return Boolean(state.delegatedMode && state.delegatedSession && state.delegatedSession.canSend === false);
+}
+
+function delegationInitials(name, email) {
+  const source = String(name || email || "?").trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length > 1) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return source.slice(0, 2).toUpperCase() || "?";
+}
+
+function renderDelegatedMailboxList() {
+  const list = document.getElementById("delegatedMailboxList");
+  if (!list) return;
+  const query = state.delegatedSwitchQuery.trim().toLowerCase();
+  const matches = (state.delegatedMailboxes || []).filter((mailbox) => {
+    if (!query) return true;
+    return `${mailbox.name || ""} ${mailbox.email || ""}`.toLowerCase().includes(query);
+  });
+  if (!matches.length) {
+    list.innerHTML = `<div class="delegated-empty"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><strong>No mailbox found</strong><span>Try a name or email address.</span></div>`;
+    return;
+  }
+  list.innerHTML = matches.map((mailbox) => {
+    const initials = mailbox.initials || delegationInitials(mailbox.name, mailbox.email);
+    const color = mailbox.color || "#34557a";
+    const kind = mailbox.canSend ? "Read & send" : "Read only";
+    return `<button class="delegated-mailbox-row" type="button" role="option" data-delegated-mailbox="${esc(mailbox.id || mailbox.ownerId || "")}" title="Open ${esc(mailbox.email || mailbox.name || "mailbox")} in a new window">
+      <span class="avatar avatar-sm delegated-mailbox-avatar" style="--av:${esc(color)}" aria-hidden="true"><span class="avatar-initials">${esc(initials)}</span></span>
+      <span class="delegated-mailbox-copy"><strong>${esc(mailbox.name || mailbox.email || "Mailbox")}</strong><span>${esc(mailbox.email || "")}</span></span>
+      <span class="delegated-mailbox-kind${mailbox.canSend ? " can-send" : ""}">${kind}</span>
+      <svg class="icon delegated-mailbox-open" aria-hidden="true"><use href="#i-external"/></svg>
+    </button>`;
+  }).join("");
+}
+
+function renderDelegatedMailboxSwitcher() {
+  const wrapper = document.getElementById("delegatedSwitcher");
+  const button = document.getElementById("delegatedSwitchBtn");
+  const count = document.getElementById("delegatedSwitchCount");
+  if (!wrapper || !button || !count) return;
+  const items = state.delegatedMailboxes || [];
+  if (state.delegatedMode || !items.length) {
+    wrapper.hidden = true;
+    state.delegatedSwitchOpen = false;
+    document.getElementById("delegatedMailboxPop")?.setAttribute("hidden", "");
+    button.setAttribute("aria-expanded", "false");
+    return;
+  }
+  wrapper.hidden = false;
+  count.textContent = String(items.length);
+  count.hidden = false;
+  button.title = items.length === 1
+    ? `Open delegated mailbox ${items[0].email || items[0].name}`
+    : `Open one of ${items.length} delegated mailboxes`;
+  renderDelegatedMailboxList();
+}
+
+function ensureDelegatedMailboxUi() {
+  if (document.getElementById("delegatedSwitcher")) {
+    renderDelegatedMailboxSwitcher();
+    return;
+  }
+  const topActions = document.querySelector(".top-actions");
+  const notify = document.getElementById("notifyBtn");
+  if (!topActions || !notify) return;
+  const wrapper = document.createElement("div");
+  wrapper.className = "delegated-switcher";
+  wrapper.id = "delegatedSwitcher";
+  wrapper.hidden = true;
+  wrapper.innerHTML = `
+    <button class="delegated-switch-btn" id="delegatedSwitchBtn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="delegatedMailboxPop" title="Open a delegated mailbox">
+      <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>
+      <span class="delegated-switch-label">Delegated</span>
+      <span class="delegated-switch-count" id="delegatedSwitchCount" hidden>0</span>
+      <svg class="icon delegated-switch-caret" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+    </button>
+    <div class="delegated-mailbox-pop" id="delegatedMailboxPop" role="dialog" aria-label="Delegated mailboxes" hidden>
+      <div class="delegated-mailbox-head">
+        <div><strong>Delegated mailboxes</strong><span>Open a mailbox in its own window</span></div>
+        <span class="delegated-mailbox-shield" title="Each window keeps its own session"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg></span>
+      </div>
+      <label class="delegated-mailbox-search">
+        <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+        <input id="delegatedMailboxSearch" type="search" placeholder="Search name or email" autocomplete="off" spellcheck="false" aria-label="Search delegated mailboxes">
+      </label>
+      <div class="delegated-mailbox-list" id="delegatedMailboxList" role="listbox"></div>
+      <div class="delegated-mailbox-foot"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><span>Signing out of this mailbox closes every delegated window for security.</span></div>
+    </div>`;
+  topActions.insertBefore(wrapper, notify);
+  const button = document.getElementById("delegatedSwitchBtn");
+  const search = document.getElementById("delegatedMailboxSearch");
+  const list = document.getElementById("delegatedMailboxList");
+  button?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleDelegatedMailboxSwitcher();
+  });
+  search?.addEventListener("input", () => {
+    state.delegatedSwitchQuery = search.value || "";
+    renderDelegatedMailboxList();
+  });
+  search?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const first = list?.querySelector("[data-delegated-mailbox]");
+    if (first) openDelegatedMailbox(first.getAttribute("data-delegated-mailbox"));
+  });
+  list?.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-delegated-mailbox]");
+    if (row) openDelegatedMailbox(row.getAttribute("data-delegated-mailbox"));
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#delegatedSwitcher")) closeDelegatedMailboxSwitcher();
+  });
+  renderDelegatedMailboxSwitcher();
+}
+
+function toggleDelegatedMailboxSwitcher(force) {
+  const wrapper = document.getElementById("delegatedSwitcher");
+  const pop = document.getElementById("delegatedMailboxPop");
+  const button = document.getElementById("delegatedSwitchBtn");
+  const search = document.getElementById("delegatedMailboxSearch");
+  if (!wrapper || !pop || wrapper.hidden) return;
+  const open = typeof force === "boolean" ? force : pop.hidden;
+  state.delegatedSwitchOpen = open;
+  pop.hidden = !open;
+  wrapper.classList.toggle("is-open", open);
+  button?.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    state.delegatedSwitchQuery = "";
+    if (search) search.value = "";
+    renderDelegatedMailboxList();
+    setTimeout(() => search?.focus(), 30);
+  }
+}
+
+function closeDelegatedMailboxSwitcher() {
+  toggleDelegatedMailboxSwitcher(false);
+}
+
+async function openDelegatedMailbox(ownerId) {
+  const mailbox = (state.delegatedMailboxes || []).find((item) => (item.id || item.ownerId) === ownerId);
+  if (!mailbox) return;
+  closeDelegatedMailboxSwitcher();
+  let popup = null;
+  try {
+    popup = window.open("about:blank", "_blank");
+    if (popup) {
+      try {
+        popup.document.write("<!doctype html><title>Opening delegated mailbox…</title><body style=\"font:14px system-ui;padding:32px;color:#334155\">Opening the delegated mailbox…</body>");
+        popup.document.close();
+      } catch {}
+    }
+  } catch {}
+  try {
+    const data = await api("/api/delegation/launch", { method: "POST", body: { ownerId } });
+    const url = new URL("/", window.location.origin);
+    url.searchParams.set("delegate", data.code);
+    if (popup) {
+      popup.location.replace(url.toString());
+      try { popup.opener = null; } catch {}
+    } else {
+      const fallback = window.open(url.toString(), "_blank", "noopener");
+      if (!fallback) throw new Error("Allow pop-ups for this site, then try again.");
+    }
+  } catch (error) {
+    try { popup?.close(); } catch {}
+    showError(error);
+  }
+}
+
+function renderDelegatedWindowChrome() {
+  const topActions = document.querySelector(".top-actions");
+  const notify = document.getElementById("notifyBtn");
+  if (!topActions) return;
+  let chip = document.getElementById("delegatedWindowChip");
+  if (!state.delegatedMode || !state.delegatedSession?.mailbox) {
+    chip?.remove();
+    document.documentElement.removeAttribute("data-delegated");
+    return;
+  }
+  document.documentElement.dataset.delegated = "true";
+  const mailbox = state.delegatedSession.mailbox;
+  if (!chip) {
+    chip = document.createElement("div");
+    chip.className = "delegated-window-chip";
+    chip.id = "delegatedWindowChip";
+    chip.innerHTML = `<span class="delegated-window-icon"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></span>
+      <span class="delegated-window-copy"><span>Delegated mailbox</span><strong></strong></span>
+      <button class="delegated-window-exit" id="delegatedWindowExit" type="button">Sign out</button>`;
+    if (notify) topActions.insertBefore(chip, notify);
+    else topActions.prepend(chip);
+    chip.querySelector("#delegatedWindowExit")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeDelegatedWindow();
+    });
+  }
+  const email = chip.querySelector(".delegated-window-copy strong");
+  if (email) email.textContent = mailbox.email || mailbox.name || "Mailbox";
+  chip.title = `${mailbox.name || mailbox.email || "Delegated mailbox"}${state.delegatedSession.canSend === false ? " · read only" : ""}`;
+  chip.classList.toggle("is-read-only", state.delegatedSession.canSend === false);
 }
 
 function maybeShowPasswordChange() {
@@ -1813,6 +2360,10 @@ onboardingOverlay?.addEventListener("click", (event) => {
 });
 
 function handleSessionExpired() {
+  if (state.delegatedMode) {
+    expireDelegatedWindow("Your primary Alt8Mail session ended. This delegated mailbox has been signed out.");
+    return;
+  }
   if (loginScreen.hidden) {
     showLogin();
     loginError.textContent = "Your session expired. Sign in again to continue.";
@@ -1863,6 +2414,7 @@ function updateDocumentTitle() {
         : `${prefix}${folderLabel} — ${state.user.email || `${brand} account`} - ${brand}`;
     }
   }
+  if (state.delegatedMode && state.user) title = `Delegated · ${title}`;
   if (document.title !== title) document.title = title;
 }
 
@@ -2415,6 +2967,7 @@ function resetLoginButtons() {
 }
 
 function showLogin() {
+  document.querySelector(".delegated-closed-card")?.remove();
   composeSessions.slice().forEach((session) => removeComposeSessionUi(session.id));
   composeSessions = [];
   state.user = null;
@@ -3675,9 +4228,14 @@ function showRecoveryCodes(codes, note) {
 }
 
 async function logout() {
+  if (state.delegatedMode) {
+    closeDelegatedWindow();
+    return;
+  }
   if (logoutInProgress) return;
   logoutInProgress = true;
   const startedAt = Date.now();
+  broadcastPrimarySignOut();
   showLogoutSplash();
   try {
     // Persist the open/minimized compose state before the session is revoked so
@@ -3792,6 +4350,15 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   const firstUserLoad = !state.user;
   state.user = data.user;
   state.organizationName = data.organizationName || "";
+  state.delegatedMailboxes = Array.isArray(data.delegatedMailboxes) ? data.delegatedMailboxes : [];
+  if (data.sessionKind === "delegated" || data.delegated === true) {
+    state.delegatedMode = true;
+    if (!state.delegatedSession) {
+      state.delegatedSession = { token: "", csrf: data.csrf || state.csrf || "", mailbox: { email: data.user?.email || "" }, canSend: data.delegatedCanSend !== false };
+    } else {
+      state.delegatedSession.canSend = data.delegatedCanSend !== false;
+    }
+  }
   if (firstUserLoad) {
     restoreHomeTabsState();
   }
@@ -3876,6 +4443,9 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   applyPreferenceChrome();
   rebuildIndex();
   renderAccountChrome();
+  ensureDelegatedMailboxUi();
+  renderDelegatedWindowChrome();
+  startDelegatedHeartbeat();
   renderFolders();
   renderList();
   renderNotifications();
@@ -9719,6 +10289,10 @@ function restoreComposeImageSources(html) {
 
 function replyToMessage(message, all = false) {
   if (!message) return;
+  if (delegatedSendBlocked()) {
+    showToast("This delegated mailbox is read-only");
+    return;
+  }
   if (message.delegateOwnerId && message.delegateCanSend !== true) {
     showToast("This delegated mailbox is read-only");
     return;
@@ -10041,6 +10615,10 @@ async function replyWithAi(thread = currentThread()) {
 
 function forwardMessage(message) {
   if (!message) return;
+  if (delegatedSendBlocked()) {
+    showToast("This delegated mailbox is read-only");
+    return;
+  }
   const quote = composeQuoteFor(message, "forward");
   openCompose({
     toText: "",
@@ -12464,6 +13042,10 @@ function composeTemplate(session) {
 
 function openCompose(prefill = {}, options = {}) {
   const data = prefill || {};
+  if (!options.restoring && delegatedSendBlocked()) {
+    showToast("This delegated mailbox is read-only");
+    return;
+  }
   if (!options.restoring && isMobile()) {
     composeSessions.forEach((session) => {
       if (session.mode !== "minimized" && session.id !== options.id) {
@@ -13150,7 +13732,7 @@ async function attachWorkspaceFile(fileId) {
     return;
   }
   try {
-    const response = await fetch(`/api/files/${encodeURIComponent(fileId)}/content`, { credentials: "same-origin" });
+    const response = await fetch(`/api/files/${encodeURIComponent(fileId)}/content`, { credentials: "same-origin", headers: delegatedRequestHeaders() });
     if (!response.ok) throw new Error("That file could not be downloaded");
     const blob = await response.blob();
     const upload = new File([blob], file.name || "attachment", { type: file.mime || blob.type || "application/octet-stream" });
@@ -13357,11 +13939,11 @@ function flushComposeSessionsKeepalive() {
     try {
       fetch(`/api/drafts/${encodeURIComponent(session.draftId)}`, {
         method: "PUT",
-        headers: {
+        headers: delegatedRequestHeaders({
           "Content-Type": "application/json",
           "X-CSRF-Token": state.csrf,
           Accept: "application/json"
-        },
+        }),
         body: payload,
         credentials: "same-origin",
         keepalive: true
@@ -16038,7 +16620,7 @@ async function renderAudit() {
 async function exportAudit() {
   const filter = document.getElementById("auditFilter")?.value || "";
   try {
-    const response = await fetch(`/api/audit.csv?category=${encodeURIComponent(filter)}`, { credentials: "same-origin" });
+    const response = await fetch(`/api/audit.csv?category=${encodeURIComponent(filter)}`, { credentials: "same-origin", headers: delegatedRequestHeaders() });
     if (!response.ok) throw new Error("Export failed");
     const blob = await response.blob();
     const link = document.createElement("a");
@@ -17899,6 +18481,7 @@ function postJSONWithProgress(path, body, onProgress) {
     xhr.open("POST", path);
     xhr.setRequestHeader("Accept", "application/json");
     xhr.setRequestHeader("Content-Type", "application/json");
+    if (state.delegatedSession?.token) xhr.setRequestHeader(DELEGATED_SESSION_HEADER, state.delegatedSession.token);
     if (state.csrf) xhr.setRequestHeader("X-CSRF-Token", state.csrf);
     xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(event.loaded / event.total); };
     xhr.onerror = () => reject(new Error("Network error while uploading"));
@@ -20025,16 +20608,20 @@ async function refreshCalendarData() {
 }
 
 function startCalendarRealtime() {
-  if (state.calendarRealtime || typeof EventSource === "undefined") return;
-  if (!(state.capabilities || []).includes("calendar-realtime")) return;
-  try {
-    const source = new EventSource("/api/calendar/stream");
-    state.calendarRealtime = source;
-    source.addEventListener("calendar", () => {
-      clearTimeout(state.calendarRefreshTimer);
-      state.calendarRefreshTimer = setTimeout(() => { refreshCalendarData().catch(() => {}); }, 300);
-    });
-  } catch {}
+  // EventSource cannot attach the delegated-session header. A delegated window
+  // keeps the 60-second polling fallback, but must never subscribe to the
+  // primary mailbox's calendar stream.
+  if (!state.calendarRealtime && !state.delegatedMode && typeof EventSource !== "undefined" &&
+      (state.capabilities || []).includes("calendar-realtime")) {
+    try {
+      const source = new EventSource("/api/calendar/stream");
+      state.calendarRealtime = source;
+      source.addEventListener("calendar", () => {
+        clearTimeout(state.calendarRefreshTimer);
+        state.calendarRefreshTimer = setTimeout(() => { refreshCalendarData().catch(() => {}); }, 300);
+      });
+    } catch {}
+  }
   if (!state.calendarPollTimer) {
     state.calendarPollTimer = setInterval(() => {
       if (document.visibilityState === "visible" && state.user) refreshCalendarData().catch(() => {});
@@ -23859,7 +24446,7 @@ function bindEvents() {
           try {
             fetch(`/api/drafts/${encodeURIComponent(session.draftId)}`, {
               method: "PUT", credentials: "same-origin", keepalive: true,
-              headers: { "Content-Type": "application/json", "X-CSRF-Token": state.csrf },
+              headers: delegatedRequestHeaders({ "Content-Type": "application/json", "X-CSRF-Token": state.csrf }),
               body: payload
             }).catch(() => {});
           } catch {}
@@ -23944,6 +24531,7 @@ function bindEvents() {
       if (composeAttachOverlay && !composeAttachOverlay.hidden) { closeComposeAttach(); return; }
       if (noticeLayer && !noticeLayer.hidden) { closeNoticeCenter(); return; }
       if (!notifyPop.hidden) { hideNotify(); return; }
+      if (state.delegatedSwitchOpen) { closeDelegatedMailboxSwitcher(); return; }
       if (!newMenu.hidden || !moveMenu.hidden) { closeMenus(); return; }
       if (helpOverlay.hidden === false) { closeHelp(); return; }
       if (searchHints.hidden === false) { searchHints.hidden = true; searchInput.blur(); return; }
@@ -24032,6 +24620,9 @@ async function boot() {
   ensureAmbientUi();
   bindEvents();
   registerServiceWorker();
+  setupDelegatedAuthChannel();
+  await prepareDelegatedWindow();
+  if (state.delegatedMode && state.delegatedExpired) return;
   if (!navigator.onLine) setOffline(true);
   try {
     const session = await api("/api/session", { skipAuth: true });
@@ -24046,6 +24637,10 @@ async function boot() {
       window.history.replaceState({}, "", window.location.pathname + window.location.hash);
     }
   } catch (error) {
+    if (state.delegatedMode) {
+      expireDelegatedWindow(error.message || "This delegated mailbox is no longer available. Open it again from your main mailbox.");
+      return;
+    }
     if (error.status === 0) {
       // Server unreachable: keep the shell and explain rather than trapping the login form.
       showLogin();

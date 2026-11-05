@@ -386,6 +386,7 @@ func appendStateAudit(state map[string]any, action, target, actor, detail, ip, u
 
 func (s *Server) auditRequest(r *http.Request, sess *sessionRecord, action, target, detail string) {
 	user := sess.User
+	detail = delegatedAuditDetail(sess, detail)
 	ip := clientIP(r)
 	ua := sanitizeUserAgent(r.UserAgent())
 	if user.ID != "" {

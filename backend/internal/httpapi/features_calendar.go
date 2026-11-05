@@ -372,6 +372,7 @@ func publicCalendarEvent(event calendarRecord) map[string]any {
 		"organizer": event.Organizer, "organizerName": event.OrganizerName,
 		"calendarId": event.CalendarID, "calendarName": event.CalendarName,
 		"calendarColor": event.CalendarColor, "calendarKind": event.CalendarKind,
+		"ownerId":  event.OwnerID,
 		"sequence": event.Sequence, "transparency": event.Transparency,
 		"reminderMinutes": event.ReminderMinutes, "meetingUrl": event.MeetingURL,
 		"responseRequested": event.ResponseRequested, "sourceId": event.SourceID,
@@ -613,6 +614,9 @@ func (s *Server) updateCalendarEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ownerID := stateString(existing, "ownerId")
+	if ownerID == "" {
+		_ = s.store.DB.QueryRow(r.Context(), `SELECT user_id::text FROM calendar_events WHERE id=$1`, id).Scan(&ownerID)
+	}
 	targetCalendar := firstNonEmpty(record.CalendarID, stateString(existing, "calendarId"))
 	if !s.calendarEditable(r.Context(), sess.User, targetCalendar, ownerID) {
 		writeError(w, http.StatusForbidden, "EVENT_CALENDAR", "You cannot move the event to that calendar")

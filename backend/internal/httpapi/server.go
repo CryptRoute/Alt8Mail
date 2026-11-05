@@ -28,8 +28,9 @@ import (
 const (
 	// Distinct cookie names from the current reference feature preview. Both
 	// services share the staging origin until the Go API replaces the preview.
-	sessionCookie = "a8m_system_sid"
-	csrfCookie    = "a8m_system_csrf"
+	sessionCookie          = "a8m_system_sid"
+	csrfCookie             = "a8m_system_csrf"
+	delegatedSessionHeader = "X-A8M-Delegated-Session"
 )
 
 type Server struct {
@@ -131,6 +132,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/onboarding", s.requireUser(s.getOnboarding))
 	mux.HandleFunc("POST /api/onboarding/complete", s.requireUser(s.completeOnboarding))
 	mux.HandleFunc("GET /api/bootstrap", s.requireUser(s.bootstrap))
+	mux.HandleFunc("POST /api/delegation/launch", s.requireUser(s.launchDelegatedSession))
+	mux.HandleFunc("POST /api/delegation/redeem", s.requireUser(s.redeemDelegatedSession))
+	mux.HandleFunc("DELETE /api/delegation/session", s.requireUser(s.endDelegatedSession))
 	mux.HandleFunc("GET /api/folders", s.requireUser(s.getFolders))
 	mux.HandleFunc("POST /api/folders", s.requireUser(s.createFolder))
 	mux.HandleFunc("PUT /api/folders/order", s.requireUser(s.reorderFolders))
@@ -385,12 +389,18 @@ type userRecord struct {
 }
 
 type sessionRecord struct {
-	ID        string
-	UserID    string
-	TenantID  string
-	CSRF      string
-	ExpiresAt time.Time
-	User      userRecord
+	ID               string
+	UserID           string
+	TenantID         string
+	CSRF             string
+	ExpiresAt        time.Time
+	User             userRecord
+	IsDelegated      bool
+	ParentSessionID  string
+	DelegatedByID    string
+	DelegatedByEmail string
+	DelegatedOwnerID string
+	DelegatedCanSend bool
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -552,12 +562,27 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in to continue")
 		return
 	}
+	if !s.delegatedAccessCurrent(r, sess) {
+		writeError(w, http.StatusUnauthorized, "DELEGATION_REVOKED", "This mailbox delegation has been removed. The delegated window is now closed.")
+		return
+	}
 	userPayload, _ := s.publicUserWithState(r.Context(), sess.User)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user":      userPayload,
-		"csrf":      sess.CSRF,
-		"expiresAt": sess.ExpiresAt.UTC().Format(time.RFC3339),
+		"user":             userPayload,
+		"csrf":             sess.CSRF,
+		"expiresAt":        sess.ExpiresAt.UTC().Format(time.RFC3339),
+		"sessionKind":      sessionKind(sess),
+		"delegated":        sess.IsDelegated,
+		"delegatedBy":      nullableString(sess.DelegatedByEmail),
+		"delegatedCanSend": sess.DelegatedCanSend,
 	})
+}
+
+func sessionKind(sess *sessionRecord) string {
+	if sess != nil && sess.IsDelegated {
+		return "delegated"
+	}
+	return "standard"
 }
 
 // logout always clears the browser cookies, even when the session has already
@@ -567,6 +592,12 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if sess, err := s.authenticate(r); err == nil && sess != nil {
 		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM sessions WHERE id = $1`, sess.ID)
+		if sess.IsDelegated {
+			// A delegated window shares the browser cookie jar with the primary
+			// mailbox. Never clear the primary sign-in when closing this window.
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "delegated": true})
+			return
+		}
 		s.audit(r, sess.User, "auth.logout", sess.User.Email, "Signed out")
 	}
 	s.clearSessionCookies(w)
@@ -689,11 +720,37 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		}
 		folders = foldersAny
 	}
-	folders, messages = s.applyDelegatedMailboxes(ctx, sess.User, folders, messages)
+	delegatedMailboxes := []map[string]any{}
 	sieve := publicSieve(state, sess.User.Email)
+	// A delegated window already is the owner's mailbox. Do not surface a
+	// second layer of mailboxes that the owner may have delegated to them.
+	if !sess.IsDelegated {
+		folders, messages = s.applyDelegatedMailboxes(ctx, sess.User, folders, messages)
+		delegatedMailboxes = s.delegatedMailboxViews(ctx, sess.User.TenantID, sess.User.ID)
+	}
 	tasks, _ := s.loadTasks(ctx, sess.User.ID)
 	files, _ := s.loadFiles(ctx, sess.User, "")
 	fileFolders, _ := s.loadFileFolders(ctx, sess.User.ID)
+	if sess.IsDelegated {
+		// Media URLs carry the owner id so browser image/iframe requests (which
+		// cannot attach the delegated-session header) resolve through the
+		// delegate relationship on the primary cookie.
+		for _, message := range messages {
+			record, ok := message.(map[string]any)
+			if !ok {
+				continue
+			}
+			record["attachments"] = delegatedAttachments(record["attachments"], sess.User.ID)
+		}
+		for _, file := range files {
+			if contentURL := stateString(file, "contentUrl"); contentURL != "" {
+				file["contentUrl"] = delegatedOwnerURL(contentURL, sess.User.ID)
+			}
+			if downloadURL := stateString(file, "downloadUrl"); downloadURL != "" {
+				file["downloadUrl"] = delegatedOwnerURL(downloadURL, sess.User.ID)
+			}
+		}
+	}
 	_ = s.ensureDefaultCalendar(ctx, sess.User)
 	calendars, _ := s.loadCalendars(ctx, sess.User)
 	calendarEvents, _ := s.loadCalendarEvents(ctx, sess.User)
@@ -788,6 +845,10 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		},
 		"attachmentMaxBytes": 8 * 1024 * 1024,
 		"csrf":               sess.CSRF,
+		"sessionKind":        sessionKind(sess),
+		"delegated":          sess.IsDelegated,
+		"delegatedCanSend":   sess.DelegatedCanSend,
+		"delegatedMailboxes": delegatedMailboxes,
 		"mailClient":         s.mailClientSettings(r, sess.User.Email),
 		"demo":               map[string]any{"email": sess.User.Email, "holdSeconds": 8},
 		"serverTime":         time.Now().UTC().Format(time.RFC3339),
@@ -893,6 +954,20 @@ func (s *Server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Sign in to continue")
 			return
 		}
+		if sess.IsDelegated && !(r.Method == http.MethodDelete && r.URL.Path == "/api/delegation/session") {
+			if !s.delegatedAccessCurrent(r, sess) {
+				writeError(w, http.StatusUnauthorized, "DELEGATION_REVOKED", "This mailbox delegation has been removed. The delegated window is now closed.")
+				return
+			}
+		}
+		if sess.IsDelegated && !delegatedSessionAllowed(r.Method, r.URL.Path) {
+			writeError(w, http.StatusForbidden, "DELEGATED_RESTRICTED", "This action is not available from a delegated mailbox window")
+			return
+		}
+		if sess.IsDelegated && !sess.DelegatedCanSend && delegatedSendPath(r.Method, r.URL.Path) {
+			writeError(w, http.StatusForbidden, "DELEGATED_READ_ONLY", "This mailbox is delegated with read-only access")
+			return
+		}
 		if passwordChangeRequired(sess.User) && r.URL.Path != "/api/password/change" && r.URL.Path != "/api/bootstrap" && r.URL.Path != "/api/session" && r.URL.Path != "/api/onboarding" && r.URL.Path != "/api/onboarding/complete" {
 			writeError(w, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED", "Change your password before continuing")
 			return
@@ -927,35 +1002,66 @@ func (s *Server) requireSessionFromContext(r *http.Request) *sessionRecord {
 }
 
 func (s *Server) authenticate(r *http.Request) (*sessionRecord, error) {
-	cookie, err := r.Cookie(sessionCookie)
-	if err != nil || cookie.Value == "" {
-		return nil, errors.New("no session cookie")
+	rawToken := ""
+	isDelegated := false
+	if headerToken := strings.TrimSpace(r.Header.Get(delegatedSessionHeader)); headerToken != "" {
+		rawToken = headerToken
+		isDelegated = true
+	} else {
+		cookie, err := r.Cookie(sessionCookie)
+		if err != nil || cookie.Value == "" {
+			return nil, errors.New("no session cookie")
+		}
+		rawToken = cookie.Value
 	}
-	tokenHash := hashToken(cookie.Value)
+	tokenHash := hashToken(rawToken)
 	var sess sessionRecord
-	err = s.store.DB.QueryRow(r.Context(), `
+	err := s.store.DB.QueryRow(r.Context(), `
 		SELECT s.id, s.user_id::text, s.tenant_id::text, s.csrf_token, s.expires_at,
 		       u.id::text, u.tenant_id::text, u.email::text, u.name, u.initials, u.color,
 		       u.role, u.status, COALESCE(u.password_hash, ''), u.preferences, u.security,
 		       u.quota_bytes, u.used_bytes, u.enrollment_required, u.force_password_change,
-		       u.onboarding_required, u.password_expires_at
+		       u.onboarding_required, u.password_expires_at,
+		       COALESCE(s.parent_session_id, ''), COALESCE(s.delegated_by_user_id::text, ''),
+		       COALESCE(s.delegated_owner_id::text, ''), COALESCE(s.delegated_can_send, false),
+		       COALESCE(pu.email::text, '')
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		JOIN tenants t ON t.id = u.tenant_id AND t.status = 'active'
+		LEFT JOIN sessions p ON p.id = s.parent_session_id
+		LEFT JOIN users pu ON pu.id = p.user_id AND pu.status = 'active' AND pu.deleted_at IS NULL
 		WHERE s.id = $1 AND s.expires_at > now() AND u.status = 'active'
-	`, tokenHash).Scan(
+		  AND (
+		    ($2 AND s.parent_session_id IS NOT NULL AND p.id IS NOT NULL
+		         AND p.user_id = s.delegated_by_user_id
+		         AND p.expires_at > now() AND pu.id IS NOT NULL)
+		    OR
+		    (NOT $2 AND s.parent_session_id IS NULL)
+		  )
+	`, tokenHash, isDelegated).Scan(
 		&sess.ID, &sess.UserID, &sess.TenantID, &sess.CSRF, &sess.ExpiresAt,
 		&sess.User.ID, &sess.User.TenantID, &sess.User.Email, &sess.User.Name, &sess.User.Initials,
 		&sess.User.Color, &sess.User.Role, &sess.User.Status, &sess.User.PasswordHash,
 		&sess.User.Preferences, &sess.User.Security, &sess.User.QuotaBytes, &sess.User.UsedBytes,
 		&sess.User.EnrollmentRequired, &sess.User.ForcePasswordChange, &sess.User.OnboardingRequired,
-		&sess.User.PasswordExpiresAt,
+		&sess.User.PasswordExpiresAt, &sess.ParentSessionID, &sess.DelegatedByID,
+		&sess.DelegatedOwnerID, &sess.DelegatedCanSend, &sess.DelegatedByEmail,
 	)
 	if err != nil {
 		return nil, err
 	}
 	sess.User.ID = sess.UserID
 	sess.User.TenantID = sess.TenantID
+	sess.IsDelegated = isDelegated
+	if sess.IsDelegated {
+		// A mailbox delegate never inherits the owner's administrative role or
+		// the owner's account-lifecycle prompts. The primary sign-in already
+		// completed those checks.
+		sess.User.Role = "member"
+		sess.User.ForcePasswordChange = false
+		sess.User.OnboardingRequired = false
+		sess.User.PasswordExpiresAt = nil
+	}
 	_, _ = s.store.DB.Exec(r.Context(), `UPDATE sessions SET last_seen_at = now() WHERE id = $1`, sess.ID)
 	return &sess, nil
 }
@@ -1098,6 +1204,9 @@ func (s *Server) pendingSends(ctx context.Context, userID string) ([]map[string]
 }
 
 func (s *Server) audit(r *http.Request, user userRecord, action, target, detail string) {
+	if sess, ok := r.Context().Value(sessionContextKey{}).(*sessionRecord); ok {
+		detail = delegatedAuditDetail(sess, detail)
+	}
 	ip := clientIP(r)
 	userAgent := sanitizeUserAgent(r.UserAgent())
 	if user.ID != "" {

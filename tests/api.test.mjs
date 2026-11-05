@@ -192,6 +192,50 @@ test("auth: bad credentials, CSRF, session, logout", async () => {
   assert.equal(afterLogout.status, 401);
 });
 
+test("delegated mailbox windows use a scoped session revoked with the primary sign-in", async () => {
+  const primary = new ApiClient(base);
+  await primary.login();
+  const bootstrap = await primary.request("/api/bootstrap");
+  assert.equal(bootstrap.status, 200);
+  assert.equal(bootstrap.body.delegatedMailboxes.length, 2);
+  const mailbox = bootstrap.body.delegatedMailboxes.find((item) => item.email === "marcus.webb@a8m.example");
+  assert.ok(mailbox);
+  assert.equal(mailbox.email, "marcus.webb@a8m.example");
+  assert.equal(mailbox.canSend, true);
+
+  const launch = await primary.request("/api/delegation/launch", {
+    method: "POST",
+    body: { ownerId: mailbox.id }
+  });
+  assert.equal(launch.status, 201);
+  assert.ok(launch.body.code);
+
+  const redeem = await primary.request("/api/delegation/redeem", {
+    method: "POST",
+    body: { code: launch.body.code }
+  });
+  assert.equal(redeem.status, 200);
+  assert.ok(redeem.body.token);
+  const delegatedHeaders = { "X-A8M-Delegated-Session": redeem.body.token };
+
+  const session = await primary.request("/api/session", { headers: delegatedHeaders });
+  assert.equal(session.status, 200);
+  assert.equal(session.body.user.email, "marcus.webb@a8m.example");
+  assert.equal(session.body.sessionKind, "delegated");
+
+  const delegatedBootstrap = await primary.request("/api/bootstrap", { headers: delegatedHeaders });
+  assert.equal(delegatedBootstrap.status, 200);
+  assert.ok(delegatedBootstrap.body.messages.some((message) => message.subject.includes("Delegated inbox")));
+  assert.equal(delegatedBootstrap.body.delegatedMailboxes.length, 0);
+
+  const primaryCookie = primary.cookies.get("a8m_sid");
+  assert.ok(primaryCookie);
+  const logout = await primary.request("/api/session", { method: "DELETE" });
+  assert.equal(logout.status, 200);
+  const revoked = await primary.request("/api/session", { headers: delegatedHeaders });
+  assert.equal(revoked.status, 401);
+});
+
 test("two-factor: password challenge, passkey, recovery and one-time codes", async () => {
   const passkeyClient = new ApiClient(base);
   const challenge = await passkeyClient.request("/api/session", {

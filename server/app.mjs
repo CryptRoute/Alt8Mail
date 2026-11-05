@@ -221,6 +221,65 @@ export async function createApp(options = {}) {
   if (!db.user.preferences) db.user.preferences = {};
   if (!db.user.security) db.user.security = { twoFactor: { enabled: false } };
   if (!db.user.id) db.user.id = "user_demo_avery";
+  if (!Array.isArray(db.delegatedMailboxes) || db.delegatedMailboxes.length === 0) {
+    db.delegatedMailboxes = [{
+      id: "user_demo_marcus",
+      ownerId: "user_demo_marcus",
+      name: "Marcus Webb",
+      email: "marcus.webb@a8m.example",
+      initials: "MW",
+      color: "#3d6b62",
+      canRead: true,
+      canSend: true,
+      messages: [{
+        id: "m_delegated_1",
+        threadId: "t_delegated_1",
+        folder: "inbox",
+        from: { name: "Priya Shah", email: "priya.shah@a8m.example", initials: "PS", color: "#7a4a5c" },
+        to: [{ name: "Marcus Webb", email: "marcus.webb@a8m.example" }],
+        cc: [], bcc: [],
+        subject: "Delegated inbox: quarterly forecast sign-off",
+        snippet: "Marcus, please approve the revised quarterly forecast before the finance review.",
+        bodyHtml: "<p>Marcus,</p><p>Please approve the revised quarterly forecast before the finance review. The delegated mailbox window is working independently from your own session.</p><p>Priya</p>",
+        bodyText: "Marcus, please approve the revised quarterly forecast before the finance review. The delegated mailbox window is working independently from your own session. Priya",
+        date: nowIso(),
+        unread: false, starred: false, draft: false,
+        attachments: [], categories: ["finance"], classification: "Internal", external: false,
+        auth: { spf: "pass", dkim: "pass", dmarc: "pass", tls: "TLS 1.3", ip: "127.0.0.1", signer: "a8m.example", firstContact: false, warnings: [] },
+        event: null, sizeBytes: 4096, priority: "normal", receipt: false, delivery: false,
+        saveCopy: true, viaApi: false, windowMode: "floating",
+        messageId: "<m_delegated_1@a8m.example>", inReplyTo: null
+      }]
+    }, {
+      id: "user_demo_aisha",
+      ownerId: "user_demo_aisha",
+      name: "Aisha Bello",
+      email: "aisha.bello@a8m.example",
+      initials: "AB",
+      color: "#4f5673",
+      canRead: true,
+      canSend: false,
+      messages: [{
+        id: "m_delegated_2",
+        threadId: "t_delegated_2",
+        folder: "inbox",
+        from: { name: "Daniel Kim", email: "daniel.kim@a8m.example", initials: "DK", color: "#476b4f" },
+        to: [{ name: "Aisha Bello", email: "aisha.bello@a8m.example" }],
+        cc: [], bcc: [],
+        subject: "Shared inbox: engineering hiring loop",
+        snippet: "Aisha, the interview panel needs one more reviewer for Thursday.",
+        bodyHtml: "<p>Aisha,</p><p>The interview panel needs one more reviewer for Thursday. This read-only delegated mailbox is here for your review.</p><p>Daniel</p>",
+        bodyText: "Aisha, the interview panel needs one more reviewer for Thursday. This read-only delegated mailbox is here for your review. Daniel",
+        date: nowIso(),
+        unread: true, starred: false, draft: false,
+        attachments: [], categories: ["hiring"], classification: "Internal", external: false,
+        auth: { spf: "pass", dkim: "pass", dmarc: "pass", tls: "TLS 1.3", ip: "127.0.0.1", signer: "a8m.example", firstContact: false, warnings: [] },
+        event: null, sizeBytes: 3584, priority: "normal", receipt: false, delivery: false,
+        saveCopy: true, viaApi: false, windowMode: "floating",
+        messageId: "<m_delegated_2@a8m.example>", inReplyTo: null
+      }]
+    }];
+  }
   ensureCollaborationSeed();
 
   function ensureCollaborationSeed() {
@@ -257,6 +316,8 @@ export async function createApp(options = {}) {
   }
 
   const sessions = new Map();
+  const delegatedSessions = new Map();
+  const delegatedLaunchCodes = new Map();
   const sendTimers = new Map();
   const loginAttempts = new Map();
   const twoFactorChallenges = new Map();
@@ -379,7 +440,66 @@ export async function createApp(options = {}) {
     if (db.audit.length > 1000) db.audit.length = 1000;
   }
 
+  function delegatedMailboxFor(session) {
+    const ownerId = session?.delegatedOwnerId;
+    if (!ownerId) return null;
+    return (db.delegatedMailboxes || []).find((mailbox) => mailbox.id === ownerId || mailbox.ownerId === ownerId) || null;
+  }
+
+  function delegatedMailboxView(mailbox) {
+    return {
+      id: mailbox.id, ownerId: mailbox.ownerId || mailbox.id,
+      name: mailbox.name, email: mailbox.email,
+      initials: mailbox.initials || initialsFrom(mailbox.name, mailbox.email),
+      color: mailbox.color || colorForEmail(mailbox.email),
+      canRead: mailbox.canRead !== false, canSend: mailbox.canSend === true
+    };
+  }
+
+  function delegatedPublicUser(mailbox) {
+    return {
+      ...publicUser(db.user),
+      id: mailbox.id,
+      name: mailbox.name,
+      email: mailbox.email,
+      initials: mailbox.initials || initialsFrom(mailbox.name, mailbox.email),
+      color: mailbox.color || colorForEmail(mailbox.email),
+      role: "Delegated mailbox",
+      isSystemAdmin: false,
+      security: null,
+      aliases: [{
+        id: "primary", email: mailbox.email, label: mailbox.name,
+        kind: "primary", canSend: mailbox.canSend === true, reason: mailbox.canSend === true ? "" : "Read-only delegated access"
+      }]
+    };
+  }
+
+  function delegatedFolders(mailbox) {
+    const messages = Array.isArray(mailbox.messages) ? mailbox.messages : [];
+    return db.folders.map((folder) => ({
+      ...folder,
+      unread: messages.filter((message) => message.folder === folder.id && message.unread).length,
+      total: messages.filter((message) => message.folder === folder.id).length
+    }));
+  }
+
   function sessionFrom(req) {
+    const delegatedToken = String(req.headers["x-a8m-delegated-session"] || "").trim();
+    if (delegatedToken) {
+      const session = delegatedSessions.get(delegatedToken);
+      if (!session) return null;
+      if (session.expiresAt < Date.now()) {
+        delegatedSessions.delete(delegatedToken);
+        return null;
+      }
+      const parent = sessions.get(session.parentSid);
+      if (!parent || parent.expiresAt < Date.now()) {
+        delegatedSessions.delete(delegatedToken);
+        return null;
+      }
+      session.lastSeen = Date.now();
+      return { sid: delegatedToken, ...session };
+    }
     const cookies = parseCookies(req.headers.cookie);
     const sid = cookies[SESSION_COOKIE];
     if (!sid) return null;
@@ -1052,10 +1172,14 @@ export async function createApp(options = {}) {
   }
 
   function authPayload(session) {
+    const mailbox = delegatedMailboxFor(session);
     return {
-      user: publicUser(db.user),
+      user: mailbox ? delegatedPublicUser(mailbox) : publicUser(db.user),
       csrf: session.csrf,
-      expiresAt: new Date(session.expiresAt).toISOString()
+      expiresAt: new Date(session.expiresAt).toISOString(),
+      sessionKind: mailbox ? "delegated" : "standard",
+      delegated: Boolean(mailbox),
+      delegatedCanSend: mailbox ? mailbox.canSend === true : false
     };
   }
 
@@ -1275,8 +1399,9 @@ export async function createApp(options = {}) {
   }
 
   function bootstrapPayload(session) {
-    return {
-      user: publicUser(db.user),
+    const mailbox = delegatedMailboxFor(session);
+    const payload = {
+      user: mailbox ? delegatedPublicUser(mailbox) : publicUser(db.user),
       organizationName: "Alt8Mail",
       aliases: db.user.aliases,
       folders: db.folders,
@@ -1319,6 +1444,35 @@ export async function createApp(options = {}) {
       demo: { email: DEMO_EMAIL, holdSeconds: holdOverride != null ? holdOverride / 1000 : 8 },
       serverTime: nowIso()
     };
+    if (mailbox) {
+      payload.folders = delegatedFolders(mailbox);
+      payload.messages = (mailbox.messages || []).map(publicMessage);
+      payload.calendarEvents = [];
+      payload.calendars = [];
+      payload.calendarSubscriptions = [];
+      payload.addressBooks = [];
+      payload.tasks = [];
+      payload.files = [];
+      payload.fileFolders = [];
+      payload.storageProviders = [];
+      payload.pendingSends = [];
+      payload.threadMeta = [];
+      payload.serverNotifications = [];
+      payload.unsubscribeActions = [];
+      payload.signatures = [];
+      payload.sieve = null;
+      payload.delegatedMailboxes = [];
+      payload.sessionKind = "delegated";
+      payload.delegated = true;
+      payload.delegatedCanSend = mailbox.canSend === true;
+      payload.aliases = delegatedPublicUser(mailbox).aliases;
+    } else {
+      payload.delegatedMailboxes = (db.delegatedMailboxes || []).map(delegatedMailboxView);
+      payload.sessionKind = "standard";
+      payload.delegated = false;
+      payload.delegatedCanSend = false;
+    }
+    return payload;
   }
 
   function pruneUndo() {
@@ -1533,7 +1687,15 @@ export async function createApp(options = {}) {
         return;
       }
       if (pathname === "/api/session" && req.method === "DELETE") {
+        if (session.delegatedOwnerId) {
+          delegatedSessions.delete(session.sid);
+          sendJson(res, 200, { ok: true, delegated: true });
+          return;
+        }
         sessions.delete(session.sid);
+        for (const [token, child] of delegatedSessions) {
+          if (child.parentSid === session.sid) delegatedSessions.delete(token);
+        }
         addAudit(req, "auth.logout", db.user.email, "Signed out of browser session");
         await store.save();
         const secure = isSecure(req);
@@ -1543,6 +1705,58 @@ export async function createApp(options = {}) {
             cookieHeader(CSRF_COOKIE, "", { secure, maxAge: 0 })
           ]
         });
+        return;
+      }
+      if (pathname === "/api/delegation/launch" && req.method === "POST") {
+        if (session.delegatedOwnerId) throw new ApiError(403, "DELEGATED_CHAIN", "Open another mailbox from your primary window");
+        const body = await readJson(req);
+        const requested = String(body.ownerId || body.email || "");
+        const mailbox = (db.delegatedMailboxes || []).find((item) =>
+          item.id === requested || item.ownerId === requested || normalizeEmail(item.email) === normalizeEmail(requested)
+        );
+        if (!mailbox) throw new ApiError(403, "DELEGATE_DENIED", "You do not have access to that mailbox");
+        const code = randomBytes(24).toString("hex");
+        delegatedLaunchCodes.set(code, {
+          parentSid: session.sid, ownerId: mailbox.id, expiresAt: Date.now() + 90_000
+        });
+        sendJson(res, 201, {
+          code,
+          expiresAt: new Date(Date.now() + 90_000).toISOString(),
+          mailbox: delegatedMailboxView(mailbox)
+        });
+        return;
+      }
+      if (pathname === "/api/delegation/redeem" && req.method === "POST") {
+        if (session.delegatedOwnerId) throw new ApiError(403, "DELEGATED_CHAIN", "Open another mailbox from your primary window");
+        const body = await readJson(req);
+        const code = String(body.code || "");
+        const launch = delegatedLaunchCodes.get(code);
+        if (!launch || launch.expiresAt < Date.now() || launch.parentSid !== session.sid) {
+          throw new ApiError(410, "DELEGATE_LINK_EXPIRED", "This delegated mailbox link has expired. Open it again from your main mailbox.");
+        }
+        delegatedLaunchCodes.delete(code);
+        const mailbox = (db.delegatedMailboxes || []).find((item) => item.id === launch.ownerId);
+        if (!mailbox) throw new ApiError(410, "DELEGATE_LINK_EXPIRED", "That delegated mailbox is no longer available");
+        const token = randomBytes(32).toString("hex");
+        const csrf = randomBytes(24).toString("hex");
+        const expiresAt = Math.min(session.expiresAt, Date.now() + SESSION_TTL_MS);
+        delegatedSessions.set(token, {
+          parentSid: session.sid, delegatedOwnerId: mailbox.id,
+          csrf, createdAt: Date.now(), lastSeen: Date.now(), expiresAt
+        });
+        sendJson(res, 200, {
+          token, csrf,
+          expiresAt: new Date(expiresAt).toISOString(),
+          sessionKind: "delegated", delegated: true,
+          delegatedCanSend: mailbox.canSend === true,
+          mailbox: delegatedMailboxView(mailbox)
+        });
+        return;
+      }
+      if (pathname === "/api/delegation/session" && req.method === "DELETE") {
+        if (!session.delegatedOwnerId) throw new ApiError(400, "NOT_DELEGATED", "This is not a delegated mailbox window");
+        delegatedSessions.delete(session.sid);
+        sendJson(res, 200, { ok: true, delegated: true });
         return;
       }
       if (pathname === "/api/bootstrap" && req.method === "GET") {

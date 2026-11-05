@@ -11,20 +11,35 @@ const (
 )
 
 type mailboxDelegation struct {
-	OwnerID    string
-	OwnerName  string
-	OwnerEmail string
-	CanRead    bool
-	CanSend    bool
+	OwnerID       string
+	OwnerName     string
+	OwnerEmail    string
+	OwnerInitials string
+	OwnerColor    string
+	CanRead       bool
+	CanSend       bool
 }
 
 func (s *Server) delegationsFor(ctx context.Context, tenantID, delegateID string) []mailboxDelegation {
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT d.owner_user_id::text, u.name, u.email::text, d.can_read, d.can_send
-		FROM mailbox_delegates d
-		JOIN users u ON u.id = d.owner_user_id
-		WHERE d.delegate_user_id = $1 AND d.tenant_id = $2
-		  AND d.can_read = true AND u.deleted_at IS NULL AND u.status = 'active'
+		WITH candidate_grants AS (
+			SELECT d.owner_user_id, d.can_read, d.can_send
+			FROM mailbox_delegates d
+			WHERE d.delegate_user_id = $1 AND d.tenant_id = $2
+			UNION ALL
+			SELECT g.owner_user_id, g.can_read, g.can_send
+			FROM mailbox_delegate_groups g
+			JOIN groups grp ON grp.id = g.group_id AND grp.tenant_id = g.tenant_id AND grp.status = 'active'
+			JOIN group_members gm ON gm.group_id = g.group_id AND gm.user_id = $1
+			WHERE g.tenant_id = $2
+		)
+		SELECT c.owner_user_id::text, u.name, u.email::text, u.initials, u.color,
+		       bool_or(c.can_read) AS can_read, bool_or(c.can_send) AS can_send
+		FROM candidate_grants c
+		JOIN users u ON u.id = c.owner_user_id
+		WHERE u.deleted_at IS NULL AND u.status = 'active'
+		GROUP BY c.owner_user_id, u.name, u.email, u.initials, u.color
+		HAVING bool_or(c.can_read)
 		ORDER BY u.name, u.email
 	`, delegateID, tenantID)
 	if err != nil {
@@ -34,7 +49,7 @@ func (s *Server) delegationsFor(ctx context.Context, tenantID, delegateID string
 	result := []mailboxDelegation{}
 	for rows.Next() {
 		var item mailboxDelegation
-		if rows.Scan(&item.OwnerID, &item.OwnerName, &item.OwnerEmail, &item.CanRead, &item.CanSend) == nil {
+		if rows.Scan(&item.OwnerID, &item.OwnerName, &item.OwnerEmail, &item.OwnerInitials, &item.OwnerColor, &item.CanRead, &item.CanSend) == nil {
 			result = append(result, item)
 		}
 	}
@@ -42,18 +57,12 @@ func (s *Server) delegationsFor(ctx context.Context, tenantID, delegateID string
 }
 
 func (s *Server) delegationFor(ctx context.Context, tenantID, ownerID, delegateID string) (mailboxDelegation, bool) {
-	var item mailboxDelegation
-	err := s.store.DB.QueryRow(ctx, `
-		SELECT d.owner_user_id::text, u.name, u.email::text, d.can_read, d.can_send
-		FROM mailbox_delegates d
-		JOIN users u ON u.id = d.owner_user_id
-		WHERE d.tenant_id = $1 AND d.owner_user_id = $2 AND d.delegate_user_id = $3
-		  AND d.can_read = true AND u.deleted_at IS NULL
-	`, tenantID, ownerID, delegateID).Scan(&item.OwnerID, &item.OwnerName, &item.OwnerEmail, &item.CanRead, &item.CanSend)
-	if err != nil || !item.CanRead {
-		return mailboxDelegation{}, false
+	for _, item := range s.delegationsFor(ctx, tenantID, delegateID) {
+		if item.OwnerID == ownerID && item.CanRead {
+			return item, true
+		}
 	}
-	return item, true
+	return mailboxDelegation{}, false
 }
 
 // applyDelegatedMailboxes appends each delegated Inbox to the bootstrap payload
@@ -124,6 +133,17 @@ func (s *Server) applyDelegatedMailboxes(ctx context.Context, user userRecord, f
 	return folders, messages
 }
 
+func delegatedOwnerURL(rawURL, ownerID string) string {
+	if rawURL == "" || strings.Contains(rawURL, "owner=") {
+		return rawURL
+	}
+	separator := "?"
+	if strings.Contains(rawURL, "?") {
+		separator = "&"
+	}
+	return rawURL + separator + "owner=" + ownerID
+}
+
 func delegatedAttachments(raw any, ownerID string) any {
 	list, _ := raw.([]any)
 	if list == nil {
@@ -139,12 +159,8 @@ func delegatedAttachments(raw any, ownerID string) any {
 		for key, value := range attachment {
 			copyRecord[key] = value
 		}
-		if url := stateString(copyRecord, "contentUrl"); url != "" && !strings.Contains(url, "owner=") {
-			separator := "?"
-			if strings.Contains(url, "?") {
-				separator = "&"
-			}
-			copyRecord["contentUrl"] = url + separator + "owner=" + ownerID
+		if url := stateString(copyRecord, "contentUrl"); url != "" {
+			copyRecord["contentUrl"] = delegatedOwnerURL(url, ownerID)
 		}
 		cloned = append(cloned, copyRecord)
 	}
