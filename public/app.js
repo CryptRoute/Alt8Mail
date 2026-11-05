@@ -3835,7 +3835,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
     const key = mailPageKey(state.folder, "all");
     const total = state.messages.filter((message) => state.folder === "starred"
       ? message.starred && message.folder !== "spam" && message.folder !== "trash"
-      : state.folder === "subscriptions" ? Boolean(message.unsubscribe) && !message.delegateOwnerId
+      : state.folder === "subscriptions" ? message.folder === "subscriptions" && !message.delegateOwnerId
       : message.folder === state.folder).length;
     state.mailPages[key] = {
       folder: state.folder, filter: "all", offset: 0, limit: Math.max(total, 50),
@@ -4925,7 +4925,7 @@ function scopeMessages() {
     } else if (state.folder === "snoozed") {
       messages = state.messages.filter((message) => !message.ignored && snoozeActive(message));
     } else if (state.folder === "subscriptions") {
-      messages = state.messages.filter((message) => !message.ignored && !snoozeActive(message) && message.unsubscribe && !message.delegateOwnerId);
+      messages = state.messages.filter((message) => !message.ignored && !snoozeActive(message) && message.folder === "subscriptions" && !message.delegateOwnerId);
     } else {
       messages = state.messages.filter((message) => message.folder === state.folder && !message.ignored && !snoozeActive(message));
     }
@@ -5596,7 +5596,7 @@ function folderRowMarkup(folder, depth, folders, visited) {
       <span class="folder-name">${esc(folder.label)}</span>
       ${badge ? `<span class="folder-badge${badge.neutral ? " neutral" : ""}" data-folder-badge="${esc(folder.id)}">${badge.count > 999 ? "999+" : badge.count}</span>` : ""}
     </button>
-    <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"${folder.delegated || folder.id === "subscriptions" ? " hidden" : ""}><span aria-hidden="true">⋯</span></button>
+    <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"${folder.delegated ? " hidden" : ""}><span aria-hidden="true">⋯</span></button>
   </div>`;
   if (!hasChildren || collapsed) return row;
   return row + children.map((child) => folderRowMarkup(child, depth + 1, folders, visited)).join("");
@@ -5798,7 +5798,24 @@ function folderMenuCounts(folder) {
   return { total, unread };
 }
 
+function subscriptionFolderMenuHTML(folder) {
+  const counts = folderMenuCounts(folder);
+  const disabled = (condition) => condition ? " disabled" : "";
+  const unsubscribable = (state.messages || []).filter((message) =>
+    message.folder === "subscriptions" && message.unsubscribe && typeof message.unsubscribe === "object").length;
+  return `<div class="folder-menu-head"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><div><strong>${esc(folder.label)}</strong><span>${counts.total} ${counts.total === 1 ? "message" : "messages"} · ${counts.unread} unread · System folder</span></div></div>
+    <button type="button" data-folder-action="rename" disabled title="System folders cannot be renamed">${folderMenuIcon("file")}Rename</button>
+    <button type="button" data-folder-action="move" disabled title="System folders cannot be moved">${folderMenuIcon("folder")}Move</button>
+    <button type="button" data-folder-action="delete" disabled title="System folders cannot be deleted">${folderMenuIcon("trash")}Delete</button>
+    <div class="folder-menu-sep"></div>
+    <button type="button" data-folder-action="empty"${disabled(counts.total === 0)}>${folderMenuIcon("archive")}Empty subscriptions</button>
+    <button type="button" data-folder-action="unsubscribe-all"${disabled(unsubscribable === 0)}>${folderMenuIcon("mail")}Unsubscribe from all<span class="folder-menu-count">${unsubscribable}</span></button>
+    <div class="folder-menu-sep"></div>
+    <button type="button" data-folder-action="mark-read"${disabled(counts.unread === 0)}>${folderMenuIcon("mail")}Mark all as read</button>`;
+}
+
 function folderMenuHTML(folder) {
+  if (folder.id === "subscriptions") return subscriptionFolderMenuHTML(folder);
   const system = folderMenuSystem(folder);
   const emptyDisabled = system && folder.id !== "spam" && folder.id !== "trash";
   const disabled = (condition) => condition ? " disabled" : "";
@@ -5822,7 +5839,7 @@ function folderMenuHTML(folder) {
 
 function openFolderMenu(folderId, event) {
   const folder = (state.folders || []).find((item) => item.id === folderId);
-  if (!folder || !folderMenu || folder.delegated || folder.id === "subscriptions") return;
+  if (!folder || !folderMenu || folder.delegated) return;
   state.folderMenuTarget = folderId;
   folderMenu.innerHTML = folderMenuHTML(folder);
   folderMenu.hidden = false;
@@ -5969,6 +5986,28 @@ async function folderMenuAction(action) {
       const result = await api(`/api/folders/${encodeURIComponent(folder.id)}/mark-read`, { method: "POST", body: {} });
       await refreshMailbox({ quiet: true });
       showToast(`${result.affected || 0} message${result.affected === 1 ? "" : "s"} marked read`);
+    } catch (error) { showError(error); }
+    return;
+  }
+  if (action === "unsubscribe-all") {
+    closeFolderMenu();
+    if (!(await appConfirm({
+      title: "Unsubscribe from all?",
+      message: "Alt8Mail will call every unsubscribe endpoint in Subscriptions. Messages from senders it attempts are permanently deleted to free space, whether the request succeeds or fails. Senders that only offer a manual page are listed in the result.",
+      confirmLabel: "Unsubscribe all",
+      tone: "danger",
+      icon: "i-mail"
+    }))) return;
+    try {
+      showToast("Unsubscribing from all subscriptions…");
+      const data = await api("/api/folders/subscriptions/unsubscribe-all", { method: "POST", body: {} });
+      await refreshMailbox({ quiet: true }).catch(() => {});
+      renderFolders();
+      renderList({ preserveScroll: true });
+      renderReader();
+      syncSelectionUi();
+      syncCommandBar();
+      showSubscriptionCleanupReport(data);
     } catch (error) { showError(error); }
     return;
   }
@@ -6741,6 +6780,51 @@ function unsubscribeMarkup(message) {
   </div>`;
 }
 
+function showSubscriptionCleanupReport(data) {
+  const results = Array.isArray(data?.results) ? data.results : [];
+  const unsubscribed = Number(data?.unsubscribed || 0);
+  const failed = Number(data?.failed || 0);
+  const manual = Number(data?.manual || 0);
+  const deleted = Number(data?.deleted || 0);
+  const statusLabel = (status) => status === "sent" ? "Unsubscribed" : status === "failed" ? "Failed" : "Manual action";
+  const methodLabel = (method) => method === "one-click" ? "One-click POST" : method === "link" ? "Unsubscribe page" : method === "mailto" ? "Email request" : "No automatic endpoint";
+  document.getElementById("subscriptionCleanupOverlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.id = "subscriptionCleanupOverlay";
+  overlay.innerHTML = `<div class="dialog subscription-report-dialog" role="dialog" aria-modal="true" aria-labelledby="subscriptionReportTitle">
+    <div class="dialog-head">
+      <div class="dialog-title-wrap"><span class="dialog-icon subscription-report-icon"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg></span><div><p class="eyebrow">Subscriptions</p><h2 id="subscriptionReportTitle">Cleanup complete</h2></div></div>
+      <button class="icon-btn" type="button" data-sub-report-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="subscription-report-summary">
+        <div><strong>${unsubscribed}</strong><span>unsubscribed</span></div>
+        <div class="${failed ? "is-failed" : ""}"><strong>${failed}</strong><span>failed</span></div>
+        <div><strong>${deleted}</strong><span>messages removed</span></div>
+      </div>
+      <p class="subscription-report-note">Messages from senders Alt8Mail attempted are permanently deleted from Subscriptions to free space. Failed requests are removed too because the sender's unsubscribe endpoint did not work.</p>
+      ${manual ? `<p class="subscription-report-note">${manual} sender${manual === 1 ? "" : "s"} only offered a manual page or address; those messages were kept.</p>` : ""}
+      ${Number(data?.skipped || 0) ? `<p class="subscription-report-note is-warning">${Number(data.skipped)} more sender${Number(data.skipped) === 1 ? "" : "s"} were left for a later run.</p>` : ""}
+      ${data?.deleteError ? `<p class="subscription-report-note is-warning">Some messages could not be removed: ${esc(data.deleteError)}</p>` : ""}
+      <div class="subscription-report-list">
+        ${results.length ? results.map((result) => `<div class="subscription-report-row is-${esc(result.status || "manual")}">
+          <span class="subscription-report-status"><svg class="icon" aria-hidden="true"><use href="#${result.status === "sent" ? "i-check-circle" : result.status === "failed" ? "i-alert" : "i-mail"}"/></svg></span>
+          <div class="subscription-report-copy"><strong>${esc(result.senderName || result.senderEmail || "Sender")}</strong><span>${esc(result.senderEmail || "")} · ${esc(methodLabel(result.method))}</span>${result.error ? `<small>${esc(result.error)}</small>` : ""}</div>
+          <div class="subscription-report-state"><span>${esc(statusLabel(result.status))}</span><small>${Number(result.deleted || 0) ? `${Number(result.deleted)} removed` : "kept"}</small></div>
+        </div>`).join("") : `<div class="subscription-report-empty">No subscription senders needed processing.</div>`}
+      </div>
+    </div>
+    <div class="dialog-foot"><button class="btn-primary" type="button" data-sub-report-close>Done</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest("[data-sub-report-close]")) close();
+  });
+  setTimeout(() => overlay.querySelector("[data-sub-report-close]")?.focus(), 40);
+}
+
 async function requestUnsubscribe(message, button) {
   if (!message) return;
   if (button) button.disabled = true;
@@ -6750,6 +6834,22 @@ async function requestUnsubscribe(message, button) {
     const data = await api(`/api/messages/${encodeURIComponent(message.id)}/unsubscribe`, { method: "POST", body: {} });
     const sender = normalizeEmail(message.from?.email || message.fromEmail);
     if (data.actionRecord && sender) state.unsubscribeActions.set(sender, data.actionRecord);
+    if (data.action === "failed") {
+      if (popup) popup.close();
+      if (data.deleted) {
+        await refreshMailbox({ quiet: true }).catch(() => {});
+        renderFolders();
+        renderList({ preserveScroll: true });
+        renderReader();
+        syncSelectionUi();
+        syncCommandBar();
+        showToast("Unsubscribe failed — the subscription message was permanently deleted to free space.");
+      } else {
+        if (button) button.disabled = false;
+        showToast("Unsubscribe failed: " + (data.deleteError || data.error || "the sender did not accept the request"));
+      }
+      return;
+    }
     if (data.action === "open" && data.url) {
       if (popup) {
         try { popup.opener = null; popup.location.replace(data.url); } catch { popup.close(); window.open(data.url, "_blank", "noopener,noreferrer"); }
@@ -10121,10 +10221,13 @@ function optimisticMailAction(action, folderValue, ids, options = {}) {
         localFolderMove(message, "archive");
         break;
       case "move":
-        localFolderMove(message, folderValue);
+        localFolderMove(message, folderValue === "inbox" && message.unsubscribe ? "subscriptions" : folderValue);
         break;
       case "delete":
-        if (sourceFolder === "trash" || sourceFolder === "drafts") {
+        if (sourceFolder === "subscriptions") {
+          adjustFolderCount(sourceFolder, -1, message.unread ? -1 : 0);
+          removed.add(message.id);
+        } else if (sourceFolder === "trash" || sourceFolder === "drafts") {
           adjustFolderCount(sourceFolder, -1, message.unread ? -1 : 0);
           removed.add(message.id);
         } else {
@@ -10160,7 +10263,7 @@ function optimisticMailAction(action, folderValue, ids, options = {}) {
         localMessageUnread(message, false);
         break;
       case "notSpam":
-        localFolderMove(message, "inbox");
+        localFolderMove(message, message.unsubscribe ? "subscriptions" : "inbox");
         delete message.spamReport;
         break;
       case "report":
@@ -12239,6 +12342,34 @@ function composeEditorToolbar(session) {
   </div>`;
 }
 
+function duplicateReplyWarningMarkup(warning) {
+  const name = warning?.senderName || warning?.senderEmail || "this sender";
+  const count = Math.max(1, Number(warning?.count) || 1);
+  const copy = count > 1
+    ? `You received ${count} other messages from ${esc(name)} with this exact subject in the last 3 days.`
+    : `You received another message from ${esc(name)} with this exact subject in the last 3 days.`;
+  return `<div class="compose-duplicate-warning" data-compose-warning role="status">
+    <span class="compose-duplicate-warning-icon"><svg class="icon" aria-hidden="true"><use href="#i-warning-triangle"/></svg></span>
+    <span class="compose-duplicate-warning-copy">${copy} <strong>Check the earlier message before replying.</strong></span>
+    <button class="compose-duplicate-warning-close" type="button" data-compose-warning-close aria-label="Dismiss reminder" title="Dismiss reminder"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </div>`;
+}
+
+async function checkComposeDuplicateWarning(session) {
+  if (!session?.sourceMessageId || !["reply", "replyAll"].includes(session.kind)) return;
+  try {
+    const data = await api(`/api/messages/${encodeURIComponent(session.sourceMessageId)}/reply-context`);
+    const warning = data?.duplicate;
+    const live = sessionById(session.id);
+    if (!warning || !live?.el || live.duplicateWarning) return;
+    live.duplicateWarning = warning;
+    const host = live.el.querySelector("[data-compose-warning-host]");
+    if (!host) return;
+    host.innerHTML = duplicateReplyWarningMarkup(warning);
+    host.hidden = false;
+  } catch {}
+}
+
 function composeTemplate(session) {
   const title = session.subject.trim() || "New message";
   const fromOptions = aliasesForSelect().map((alias) =>
@@ -12296,6 +12427,7 @@ function composeTemplate(session) {
         <label for="compose-${esc(session.id)}-subject">Subject</label>
         <input id="compose-${esc(session.id)}-subject" data-compose-field="subject" type="text" value="${esc(session.subject)}" placeholder="Add a subject">
       </div>
+      <div class="compose-warning-host" data-compose-warning-host${session.duplicateWarning ? "" : " hidden"}>${session.duplicateWarning ? duplicateReplyWarningMarkup(session.duplicateWarning) : ""}</div>
       <div class="compose-options">
         <button class="compose-options-toggle" data-compose-action="options" type="button" aria-expanded="${session.optionsOpen ? "true" : "false"}">
           <svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>Options<span class="compose-opt-chips" data-compose-opt-chips></span>
@@ -12397,6 +12529,7 @@ function openCompose(prefill = {}, options = {}) {
     threadId: data.threadId || null,
     inReplyTo: data.inReplyTo || null,
     sourceMessageId: data.sourceMessageId || "",
+    duplicateWarning: null,
     sourceAttachments: aiThreadAttachments(data.threadId, data.sourceMessageId ? messageById(data.sourceMessageId) : null),
     aiAttachmentIds: new Set(),
     aiThinking: false,
@@ -12436,6 +12569,7 @@ function openCompose(prefill = {}, options = {}) {
   updateComposeWindow(session);
   updateComposeFiles(session);
   updateComposeStatus(session);
+  checkComposeDuplicateWarning(session);
   renderComposeToneChip(session);
   setTimeout(() => scheduleToneSuggestion(session), 300);
   document.body.classList.add("composing");
@@ -23220,6 +23354,15 @@ function bindEvents() {
       const warnings = composeIntentWarnings(session, null);
       if (warnings.length) showToast(warnings.join(" "), "warning", { title: "Check before sending" });
       else showToast("No missing attachment or date mismatch found.");
+      return;
+    }
+    if (event.target.closest("[data-compose-warning-close]")) {
+      session.duplicateWarning = null;
+      const host = session.el.querySelector("[data-compose-warning-host]");
+      if (host) {
+        host.hidden = true;
+        host.innerHTML = "";
+      }
       return;
     }
     const toneChip = event.target.closest("[data-compose-tone-chip]");

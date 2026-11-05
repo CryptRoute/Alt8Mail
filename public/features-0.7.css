@@ -1508,3 +1508,45 @@
 /* Compose defaults: Arial 12 */
 .compose-editor { font-family: Arial, Helvetica, sans-serif; font-size: 12px; }
 .compose-text { font-family: Arial, Helvetica, sans-serif; font-size: 12px; }
+
+/* Subscription cleanup report */
+.subscription-report-dialog { width: min(580px, calc(100vw - 28px)); }
+.subscription-report-icon { background: var(--accent-soft); color: var(--accent-ink); }
+.subscription-report-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.subscription-report-summary > div { padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.subscription-report-summary strong { display: block; color: var(--text); font-size: 1.15rem; line-height: 1.2; }
+.subscription-report-summary span { display: block; margin-top: 2px; color: var(--text-3); font-size: .54rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.subscription-report-summary .is-failed strong { color: var(--danger); }
+.subscription-report-note { margin: 0 0 10px; color: var(--text-3); font-size: .6rem; line-height: 1.55; }
+.subscription-report-note.is-warning { padding: 8px 10px; border-radius: 8px; background: var(--warning-soft); color: var(--warning); }
+.subscription-report-list { display: flex; flex-direction: column; gap: 5px; max-height: 320px; overflow: auto; }
+.subscription-report-row { display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.subscription-report-status { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 7px; background: var(--surface-2); color: var(--text-3); }
+.subscription-report-status .icon { width: 13px; height: 13px; }
+.subscription-report-row.is-sent .subscription-report-status { background: var(--accent-soft); color: var(--accent-ink); }
+.subscription-report-row.is-failed .subscription-report-status { background: var(--danger-soft); color: var(--danger); }
+.subscription-report-copy { flex: 1; min-width: 0; }
+.subscription-report-copy strong { display: block; color: var(--text); font-size: .65rem; line-height: 1.35; }
+.subscription-report-copy span { display: block; color: var(--text-3); font-size: .55rem; line-height: 1.4; overflow-wrap: anywhere; }
+.subscription-report-copy small { display: block; margin-top: 3px; color: var(--danger); font-size: .52rem; line-height: 1.4; overflow-wrap: anywhere; }
+.subscription-report-state { flex: none; text-align: right; }
+.subscription-report-state span { display: block; color: var(--text-2); font-size: .55rem; font-weight: 700; }
+.subscription-report-state small { display: block; color: var(--text-3); font-size: .5rem; }
+.subscription-report-empty { padding: 18px; text-align: center; color: var(--text-3); font-size: .62rem; }
+@media (max-width: 520px) { .subscription-report-summary { grid-template-columns: 1fr; } }
+
+/* Duplicate-subject reply reminder */
+.compose-warning-host[hidden] { display: none !important; }
+.compose-warning-host { margin: 0 0 8px; }
+.compose-duplicate-warning {
+  display: flex; align-items: flex-start; gap: 8px; padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border));
+  border-radius: 9px; background: var(--warning-soft); color: var(--text);
+}
+.compose-duplicate-warning-icon { width: 18px; height: 18px; flex: none; display: grid; place-items: center; color: var(--warning); }
+.compose-duplicate-warning-icon .icon { width: 17px; height: 17px; }
+.compose-duplicate-warning-copy { flex: 1; min-width: 0; color: var(--text-2); font-size: .62rem; line-height: 1.45; }
+.compose-duplicate-warning-copy strong { color: var(--text); font-weight: 650; }
+.compose-duplicate-warning-close { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--warning); cursor: pointer; }
+.compose-duplicate-warning-close:hover { background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.compose-duplicate-warning-close .icon { width: 12px; height: 12px; }

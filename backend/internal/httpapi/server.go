@@ -157,6 +157,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/messages/read", s.requireUser(s.markRead))
 	mux.HandleFunc("POST /api/messages/actions", s.requireUser(s.messageActions))
 	mux.HandleFunc("GET /api/messages/{id}/trust", s.requireUser(s.messageTrust))
+	mux.HandleFunc("GET /api/messages/{id}/reply-context", s.requireUser(s.messageReplyContext))
 	mux.HandleFunc("GET /api/messages/{id}/calendar-card", s.requireUser(s.messageCalendarCard))
 	mux.HandleFunc("POST /api/messages/{id}/calendar-import", s.requireUser(s.importMessageCalendar))
 	mux.HandleFunc("POST /api/messages/{id}/trust", s.requireUser(s.messageTrust))

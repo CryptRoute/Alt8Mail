@@ -1968,6 +1968,15 @@ export async function createApp(options = {}) {
       }
       const emptyFolderMatch = pathname.match(/^\/api\/folders\/([A-Za-z0-9_-]{1,100})\/empty$/);
       if (emptyFolderMatch && req.method === "POST") {
+        if (emptyFolderMatch[1] === "subscriptions") {
+          const before = db.messages.length;
+          db.messages = db.messages.filter((message) => message.folder !== "subscriptions");
+          const removed = before - db.messages.length;
+          addAudit(req, "folder.empty", "Subscriptions", `Emptied ${removed} messages from Subscriptions`);
+          await store.save();
+          sendJson(res, 200, { ok: true, removed });
+          return;
+        }
         const folder = db.folders.find((item) => item.id === emptyFolderMatch[1]);
         if (!folder) throw new ApiError(404, "FOLDER_NOT_FOUND", "Folder not found");
         if (["inbox", "sent", "drafts", "archive"].includes(folder.id)) {
@@ -1979,6 +1988,20 @@ export async function createApp(options = {}) {
         addAudit(req, "folder.empty", folder.label, `Emptied ${removed} messages from ${folder.label}`);
         await store.save();
         sendJson(res, 200, { ok: true, removed });
+        return;
+      }
+      const markFolderReadMatch = pathname.match(/^\/api\/folders\/([A-Za-z0-9_-]{1,100})\/mark-read$/);
+      if (markFolderReadMatch && req.method === "POST") {
+        let affected = 0;
+        for (const message of db.messages) {
+          if (message.folder === markFolderReadMatch[1] && message.unread) {
+            message.unread = false;
+            affected += 1;
+          }
+        }
+        addAudit(req, "folder.mark_read", markFolderReadMatch[1], `Marked ${affected} messages read`);
+        await store.save();
+        sendJson(res, 200, { ok: true, affected });
         return;
       }
       if (mailFolderMatch && req.method === "DELETE") {
@@ -2385,7 +2408,7 @@ export async function createApp(options = {}) {
         if (requestedThread) messages = db.messages.filter((message) => message.threadId === requestedThread || message.id === requestedThread);
         else if (query) messages = getIndex().search(query).messages;
         else if (folder === "starred") messages = db.messages.filter((message) => message.starred);
-        else if (folder === "subscriptions") messages = db.messages.filter((message) => message.unsubscribe);
+        else if (folder === "subscriptions") messages = db.messages.filter((message) => message.folder === "subscriptions");
         else messages = db.messages.filter((message) => message.folder === folder);
         if (!query && !requestedThread) {
           const closedThreads = new Set(db.threadMeta.filter((item) => item.ownerId === db.user.id && item.closed).map((item) => item.threadId));
@@ -2460,21 +2483,28 @@ export async function createApp(options = {}) {
         pruneUndo();
         const token = randomBytes(18).toString("base64url");
         const snapshot = [];
+        const hardDeleteIds = new Set();
         let permanentlyDeleted = 0;
         for (const message of targets) {
-          snapshot.push({
-            id: message.id,
-            folder: message.folder,
-            unread: message.unread,
-            starred: message.starred,
-            flagged: message.flagged === true,
-            spamReport: message.spamReport ? structuredClone(message.spamReport) : null,
-            full: action === "delete" && message.folder === "trash" ? structuredClone(message) : null
-          });
+          const hardDelete = action === "delete" && message.folder === "subscriptions";
+          if (!hardDelete) {
+            snapshot.push({
+              id: message.id,
+              folder: message.folder,
+              unread: message.unread,
+              starred: message.starred,
+              flagged: message.flagged === true,
+              spamReport: message.spamReport ? structuredClone(message.spamReport) : null,
+              full: action === "delete" && message.folder === "trash" ? structuredClone(message) : null
+            });
+          }
           if (action === "archive") message.folder = "archive";
-          else if (action === "move") message.folder = String(body.folder);
+          else if (action === "move") message.folder = String(body.folder) === "inbox" && message.unsubscribe ? "subscriptions" : String(body.folder);
           else if (action === "delete") {
-            if (message.folder === "trash" || message.folder === "drafts") permanentlyDeleted += 1;
+            if (message.folder === "subscriptions") {
+              permanentlyDeleted += 1;
+              hardDeleteIds.add(message.id);
+            } else if (message.folder === "trash" || message.folder === "drafts") permanentlyDeleted += 1;
             else message.folder = "trash";
           } else if (action === "markRead") message.unread = false;
           else if (action === "markUnread") message.unread = true;
@@ -2486,7 +2516,7 @@ export async function createApp(options = {}) {
             message.folder = "spam";
             message.unread = false;
           } else if (action === "notSpam") {
-            message.folder = "inbox";
+            message.folder = message.unsubscribe ? "subscriptions" : "inbox";
             delete message.spamReport;
           } else if (action === "report") {
             message.folder = "spam";
@@ -2502,16 +2532,19 @@ export async function createApp(options = {}) {
         }
         if (permanentlyDeleted) {
           const remove = new Set(snapshot.filter((entry) => entry.full).map((entry) => entry.id));
+          for (const id of hardDeleteIds) remove.add(id);
           db.messages = db.messages.filter((message) => !remove.has(message.id));
         }
-        db.undo.push({
-          token,
-          createdAt: now,
-          expiresAt: now + (undoOverride != null ? undoOverride : UNDO_TTL_MS),
-          action,
-          snapshot
-        });
-        if (db.undo.length > 50) db.undo = db.undo.slice(-50);
+        if (snapshot.length) {
+          db.undo.push({
+            token,
+            createdAt: now,
+            expiresAt: now + (undoOverride != null ? undoOverride : UNDO_TTL_MS),
+            action,
+            snapshot
+          });
+          if (db.undo.length > 50) db.undo = db.undo.slice(-50);
+        }
         const auditAction = {
           archive: "message.archive",
           move: "message.move",
@@ -2554,8 +2587,8 @@ export async function createApp(options = {}) {
           ok: true,
           affected: targets.length,
           permanentlyDeleted,
-          undoToken: token,
-          undoExpiresAt: new Date(now + (undoOverride != null ? undoOverride : UNDO_TTL_MS)).toISOString(),
+          undoToken: snapshot.length ? token : "",
+          undoExpiresAt: snapshot.length ? new Date(now + (undoOverride != null ? undoOverride : UNDO_TTL_MS)).toISOString() : "",
           quota: quotaInfo(),
           outbound: outboundInfo()
         });
@@ -2759,6 +2792,49 @@ export async function createApp(options = {}) {
         return;
       }
 
+      if (pathname === "/api/folders/subscriptions/unsubscribe-all" && req.method === "POST") {
+        const groups = new Map();
+        for (const message of db.messages.filter((item) => item.folder === "subscriptions" && item.unsubscribe)) {
+          const sender = normalizeEmail(message.from?.email || "");
+          if (!sender) continue;
+          const group = groups.get(sender) || { sender, name: message.from?.name || "", messages: [] };
+          group.messages.push(message);
+          groups.set(sender, group);
+        }
+        const results = [];
+        const removeIds = new Set();
+        let unsubscribed = 0, failed = 0, manual = 0;
+        for (const group of groups.values()) {
+          const metadata = group.messages[0].unsubscribe || {};
+          const method = metadata.oneClick ? "one-click" : metadata.url ? "link" : metadata.mailto ? "mailto" : "";
+          const status = method ? (metadata.simulateFailure ? "failed" : "sent") : "manual";
+          const error = metadata.simulateFailure ? "unsubscribe request failed: dial tcp: connection refused" : "";
+          if (method) for (const message of group.messages) removeIds.add(message.id);
+          if (status === "sent") unsubscribed += 1;
+          else if (status === "failed") failed += 1;
+          else manual += 1;
+          const record = {
+            id: id("unsub"), userId: db.user.id, messageId: group.messages[0].id,
+            senderEmail: group.sender, method: method || "manual",
+            target: metadata.url || metadata.mailto || "", status, error, updatedAt: nowIso()
+          };
+          db.unsubscribeActions = db.unsubscribeActions.filter((item) => !(item.userId === db.user.id && normalizeEmail(item.senderEmail) === group.sender));
+          db.unsubscribeActions.push(record);
+          results.push({
+            senderEmail: group.sender, senderName: group.name, method, status, error,
+            messages: group.messages.length, deleted: method ? group.messages.length : 0
+          });
+        }
+        db.messages = db.messages.filter((message) => !removeIds.has(message.id));
+        addAudit(req, "unsubscribe.bulk", "Subscriptions", `Processed ${results.length} senders; ${unsubscribed} unsubscribed, ${failed} failed, ${removeIds.size} messages removed`);
+        await store.save();
+        sendJson(res, 200, {
+          ok: true, processed: results.length, unsubscribed, failed, manual,
+          deleted: removeIds.size, skipped: 0, results
+        });
+        return;
+      }
+
       const unsubscribeMatch = pathname.match(/^\/api\/messages\/([^/]{1,160})\/unsubscribe$/);
       if (unsubscribeMatch && req.method === "POST") {
         const message = findMessage(decodeURIComponent(unsubscribeMatch[1]));
@@ -2766,6 +2842,24 @@ export async function createApp(options = {}) {
         const metadata = message.unsubscribe;
         if (!metadata || typeof metadata !== "object") throw new ApiError(400, "UNSUBSCRIBE_UNAVAILABLE", "This message does not offer an unsubscribe link");
         const sender = normalizeEmail(message.from?.email || "");
+        if (metadata.simulateFailure) {
+          const record = {
+            id: id("unsub"), userId: db.user.id, messageId: message.id, senderEmail: sender,
+            method: "one-click", target: metadata.url || "", status: "failed",
+            error: "unsubscribe request failed: dial tcp: connection refused", updatedAt: nowIso()
+          };
+          db.unsubscribeActions = db.unsubscribeActions.filter((item) => !(item.userId === db.user.id && normalizeEmail(item.senderEmail) === sender));
+          db.unsubscribeActions.push(record);
+          db.messages = db.messages.filter((item) => item.id !== message.id);
+          addAudit(req, "unsubscribe.failed", message.subject || "(no subject)", `Unsubscribe failed for ${sender}; message permanently deleted`);
+          await store.save();
+          sendJson(res, 200, {
+            ok: false, action: "failed", deleted: true,
+            error: "unsubscribe request failed: dial tcp: connection refused",
+            actionRecord: record
+          });
+          return;
+        }
         const action = metadata.oneClick ? "sent" : metadata.url ? "manual" : "manual";
         const record = {
           id: db.unsubscribeActions.find((item) => item.userId === db.user.id && normalizeEmail(item.senderEmail) === sender)?.id || id("unsub"),
@@ -3431,6 +3525,14 @@ export async function createApp(options = {}) {
         addAudit(req, trusted ? "trust.marked" : "trust.unmarked", email, `${trusted ? "Trusted" : "Removed trust for"} external sender`);
         await store.save();
         sendJson(res, 200, { ok: true, sender: email, trusted });
+        return;
+      }
+
+      const replyContextMatch = pathname.match(/^\/api\/messages\/([A-Za-z0-9_-]{1,100})\/reply-context$/);
+      if (replyContextMatch && req.method === "GET") {
+        const message = findMessage(replyContextMatch[1]);
+        if (!message) throw new ApiError(404, "NOT_FOUND", "Message not found");
+        sendJson(res, 200, { duplicate: message.replyDuplicate || null });
         return;
       }
 

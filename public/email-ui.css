@@ -110,6 +110,7 @@
 .folder-context-menu > button:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
 .folder-context-menu > button:disabled { opacity: .35; cursor: not-allowed; }
 .folder-context-menu > button svg { width: 16px; height: 16px; color: var(--text-3); }
+.folder-menu-count { margin-left: auto; min-width: 18px; padding: 1px 5px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-size: 9px; font-weight: 800; text-align: center; }
 .folder-context-menu > button.is-active { background: var(--accent-soft); color: var(--accent-ink); }
 .folder-context-menu > button[data-folder-action="up"] svg { transform: rotate(180deg); }
 .folder-menu-head { display: flex; align-items: center; gap: 9px; padding: 9px 10px 10px; margin-bottom: 3px; border-bottom: 1px solid var(--border); }

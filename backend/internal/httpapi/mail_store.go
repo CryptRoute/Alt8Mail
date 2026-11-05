@@ -386,7 +386,7 @@ func mailFolderCondition(userID, folder, filter string) (string, []any) {
 	case "snoozed":
 		conditions = append(conditions, `snoozed_until IS NOT NULL AND snoozed_until > now()`)
 	case "subscriptions":
-		conditions = append(conditions, `unsubscribe IS NOT NULL AND unsubscribe <> '{}'::jsonb`, `(snoozed_until IS NULL OR snoozed_until <= now())`)
+		conditions = append(conditions, `folder = 'subscriptions'`, `(snoozed_until IS NULL OR snoozed_until <= now())`)
 	case "", "all":
 		conditions = append(conditions, `(snoozed_until IS NULL OR snoozed_until <= now())`)
 	default:
@@ -552,8 +552,8 @@ func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[s
 	_ = s.store.DB.QueryRow(ctx, `
 		SELECT count(*), count(*) FILTER (WHERE unread)
 		FROM mail_messages
-		WHERE user_id=$1 AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())
-		  AND unsubscribe IS NOT NULL AND unsubscribe <> '{}'::jsonb
+		WHERE user_id=$1 AND folder='subscriptions' AND NOT ignored
+		  AND (snoozed_until IS NULL OR snoozed_until <= now())
 	`, userID).Scan(&subscriptions, &subscriptionsUnread)
 	counts["subscriptions"] = subscriptions
 	unread["subscriptions"] = subscriptionsUnread

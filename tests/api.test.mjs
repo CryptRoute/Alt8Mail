@@ -651,7 +651,7 @@ test("reading-pane spam, report and follow-up flag controls are audited and undo
   });
   assert.equal(notSpam.status, 200);
   after = (await client.request("/api/bootstrap")).body;
-  assert.equal(after.messages.find((message) => message.id === "sp1").folder, "inbox");
+  assert.equal(after.messages.find((message) => message.id === "sp1").folder, "subscriptions", "List-Unsubscribe mail returns to Subscriptions, never Inbox");
 
   const reported = await client.request("/api/messages/actions", {
     method: "POST",
@@ -743,7 +743,7 @@ test("search operators are instant and match indexed bodies and attachment names
     ["in:archive has:attachment", 2],
     ["from:elena has:attachment", 1],
     ["before:2000-01-01", 0],
-    ["after:2000-01-01", 29],
+    ["after:2000-01-01", 33],
     ["first-run-flows", 1],
     ["\"Q4 roadmap\"", 3]
   ];
@@ -1173,6 +1173,10 @@ test("thread collaboration: handling, assignment, closure, notes and notificatio
 });
 
 test("phase 3: subscriptions, reactions, rules and yearly review", async () => {
+  const replyContext = await client.request("/api/messages/m3/reply-context");
+  assert.equal(replyContext.status, 200);
+  assert.equal(replyContext.body.duplicate.senderEmail, "elena.vasquez@a8m.example");
+  assert.match(replyContext.body.duplicate.subject, /Q4 roadmap review/);
   const subscriptions = (await client.request("/api/messages?folder=subscriptions")).body;
   assert.ok(subscriptions.messages.length >= 2);
   const newsletter = subscriptions.messages.find((message) => message.unsubscribe?.oneClick) || subscriptions.messages[0];
@@ -1394,6 +1398,47 @@ test("phase 5: pulse analytics, emoji catalog, sticky notes and reaction guardra
   });
   assert.equal(sentReaction.status, 400);
   assert.equal(sentReaction.body.error.code, "REACTION_UNAVAILABLE");
+});
+
+test("subscriptions folder stays out of Inbox and cleans up failed senders", async () => {
+  const subscriptions = (await client.request("/api/messages?folder=subscriptions&limit=200")).body;
+  assert.ok(subscriptions.messages.length >= 3);
+  assert.ok(subscriptions.messages.every((message) => message.folder === "subscriptions" && message.unsubscribe));
+  const inbox = (await client.request("/api/messages?folder=inbox&limit=200")).body;
+  assert.ok(inbox.messages.every((message) => !message.unsubscribe), "newsletter mail must not remain in Inbox");
+
+  const failedUnsubscribe = await client.request("/api/messages/sub3/unsubscribe", { method: "POST", body: {} });
+  assert.equal(failedUnsubscribe.status, 200);
+  assert.equal(failedUnsubscribe.body.ok, false);
+  assert.equal(failedUnsubscribe.body.deleted, true);
+  const afterSingle = (await client.request("/api/messages?folder=subscriptions&limit=200")).body;
+  assert.ok(!afterSingle.messages.some((message) => message.id === "sub3"), "a failed unsubscribe deletes the message");
+
+  const directDelete = await client.request("/api/messages/actions", {
+    method: "POST",
+    body: { ids: ["sub2"], action: "delete" }
+  });
+  assert.equal(directDelete.status, 200);
+  assert.equal(directDelete.body.permanentlyDeleted, 1);
+  assert.equal(directDelete.body.undoToken, "", "subscription deletes are permanent and offer no undo");
+  const afterDelete = (await client.request("/api/messages?folder=subscriptions&limit=200")).body;
+  assert.ok(!afterDelete.messages.some((message) => message.id === "sub2"));
+  const trashAfterDelete = (await client.request("/api/messages?folder=trash&limit=200")).body;
+  assert.ok(!trashAfterDelete.messages.some((message) => message.id === "sub2"), "deleting a subscription must not create a Trash copy");
+
+  const bulk = await client.request("/api/folders/subscriptions/unsubscribe-all", { method: "POST", body: {} });
+  assert.equal(bulk.status, 200);
+  assert.ok(bulk.body.processed >= 2);
+  assert.ok(bulk.body.unsubscribed >= 1);
+  assert.ok(bulk.body.failed >= 1);
+  assert.ok(bulk.body.deleted >= 2);
+  const afterBulk = (await client.request("/api/messages?folder=subscriptions&limit=200")).body;
+  assert.equal(afterBulk.messages.length, 0, "attempted subscription messages are removed automatically");
+
+  const trash = (await client.request("/api/messages?folder=trash&limit=200")).body;
+  for (const id of ["sub1", "sub2", "sub3", "sub4"]) {
+    assert.ok(!trash.messages.some((message) => message.id === id), `${id} must never appear in Trash`);
+  }
 });
 
 test("calendar invitations: stable sequence, guest responses, resend and undo", async () => {

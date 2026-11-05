@@ -8,12 +8,15 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 func (s *Server) registerSubscriptionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/messages/{id}/unsubscribe", s.requireUser(s.unsubscribeMessage))
+	mux.HandleFunc("POST /api/folders/subscriptions/unsubscribe-all", s.requireUser(s.unsubscribeAllSubscriptions))
 	mux.HandleFunc("GET /api/unsubscribe-actions", s.requireUser(s.listUnsubscribeActions))
 }
 
@@ -84,10 +87,22 @@ func (s *Server) unsubscribeMessage(w http.ResponseWriter, r *http.Request) {
 		method, target = "one-click", targetURL
 		if err := s.postUnsubscribe(r.Context(), targetURL); err != nil {
 			status, lastError = "failed", truncate(sanitizeMailText(err.Error()), 300)
-			s.recordUnsubscribeAction(r.Context(), sess.User, message, sender, method, target, status, lastError)
+			record := s.recordUnsubscribeAction(r.Context(), sess.User, message, sender, method, target, status, lastError)
+			deleted, deleteErr := s.permanentlyDeleteMessages(r.Context(), sess.User, []string{stateString(message, "id")}, "unsubscribe failed")
 			s.audit(r, sess.User, "unsubscribe.failed", firstNonEmpty(stateString(message, "subject"), "(no subject)"),
 				"One-click unsubscribe failed for "+sender+": "+lastError)
-			writeError(w, http.StatusBadGateway, "UNSUBSCRIBE_FAILED", "The unsubscribe request could not be delivered: "+lastError)
+			if deleteErr != nil {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"ok": false, "action": "failed", "deleted": deleted > 0,
+					"error": lastError, "deleteError": truncate(sanitizeMailText(deleteErr.Error()), 300),
+					"actionRecord": record,
+				})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok": false, "action": "failed", "deleted": deleted > 0,
+				"error": lastError, "actionRecord": record,
+			})
 			return
 		}
 		status = "sent"
@@ -138,6 +153,289 @@ func (s *Server) recordUnsubscribeAction(ctx context.Context, user userRecord, m
 	}
 }
 
+type subscriptionSenderTarget struct {
+	Email      string
+	Name       string
+	Subject    string
+	URL        string
+	Mailto     string
+	OneClick   bool
+	MessageIDs []string
+}
+
+type subscriptionSendResult struct {
+	SenderEmail string `json:"senderEmail"`
+	SenderName  string `json:"senderName"`
+	Method      string `json:"method"`
+	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"`
+	Messages    int    `json:"messages"`
+	Deleted     int    `json:"deleted"`
+}
+
+func (s *Server) unsubscribeAllSubscriptions(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	targetsByIdentity := map[string]*subscriptionSenderTarget{}
+	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
+		for _, raw := range stateMessages(state) {
+			message, _ := raw.(map[string]any)
+			if message == nil || stateString(message, "folder") != "subscriptions" {
+				continue
+			}
+			metadata := unsubscribeMetadata(message)
+			if metadata == nil {
+				continue
+			}
+			sender := normalizeEmailValue(stateString(message, "fromEmail"))
+			if !looksLikeEmail(sender) {
+				from, _ := message["from"].(map[string]any)
+				sender = normalizeEmailValue(stateString(from, "email"))
+			}
+			if !looksLikeEmail(sender) {
+				continue
+			}
+			target := targetsByIdentity[sender]
+			if target == nil {
+				from, _ := message["from"].(map[string]any)
+				target = &subscriptionSenderTarget{
+					Email: sender, Name: stateString(from, "name"),
+					URL:      strings.TrimSpace(stateString(metadata, "url")),
+					Mailto:   normalizeEmailValue(stateString(metadata, "mailto")),
+					OneClick: stateBool(metadata, "oneClick"),
+					Subject:  stateString(message, "subject"),
+				}
+				targetsByIdentity[sender] = target
+			}
+			target.MessageIDs = append(target.MessageIDs, stateString(message, "id"))
+		}
+		return nil
+	})
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	targets := make([]subscriptionSenderTarget, 0, len(targetsByIdentity))
+	for _, target := range targetsByIdentity {
+		targets = append(targets, *target)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		return strings.ToLower(firstNonEmpty(targets[i].Name, targets[i].Email)) <
+			strings.ToLower(firstNonEmpty(targets[j].Name, targets[j].Email))
+	})
+	skipped := 0
+	if len(targets) > 200 {
+		skipped = len(targets) - 200
+		targets = targets[:200]
+	}
+	if len(targets) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "processed": 0, "unsubscribed": 0, "failed": 0, "manual": 0,
+			"deleted": 0, "skipped": 0, "results": []subscriptionSendResult{},
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 50*time.Second)
+	defer cancel()
+	results := make([]subscriptionSendResult, 0, len(targets))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, 4)
+	for _, target := range targets {
+		wg.Add(1)
+		go func(item subscriptionSenderTarget) {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			result := subscriptionSendResult{
+				SenderEmail: item.Email, SenderName: item.Name, Messages: len(item.MessageIDs),
+			}
+			method, targetAddr := "", ""
+			switch {
+			case item.OneClick && item.URL != "":
+				method, targetAddr = "one-click", item.URL
+			case item.URL != "":
+				method, targetAddr = "link", item.URL
+			case item.Mailto != "":
+				method, targetAddr = "mailto", item.Mailto
+			}
+			result.Method = method
+			if method == "" {
+				result.Status = "manual"
+			} else {
+				var requestErr error
+				switch method {
+				case "one-click":
+					requestErr = s.postUnsubscribe(ctx, targetAddr)
+				case "link":
+					requestErr = s.getUnsubscribe(ctx, targetAddr)
+				case "mailto":
+					requestErr = s.sendUnsubscribeMailto(ctx, sess.User, targetAddr)
+				}
+				result.Status = "sent"
+				if requestErr != nil {
+					result.Status = "failed"
+					result.Error = truncate(sanitizeMailText(requestErr.Error()), 300)
+				}
+				firstMessageID := ""
+				if len(item.MessageIDs) > 0 {
+					firstMessageID = item.MessageIDs[0]
+				}
+				s.recordUnsubscribeAction(ctx, sess.User, map[string]any{
+					"id": firstMessageID, "subject": item.Subject,
+					"fromEmail": item.Email,
+				}, item.Email, method, targetAddr, result.Status, result.Error)
+			}
+			mu.Lock()
+			results = append(results, result)
+			mu.Unlock()
+		}(target)
+	}
+	wg.Wait()
+	sort.Slice(results, func(i, j int) bool {
+		return strings.ToLower(firstNonEmpty(results[i].SenderName, results[i].SenderEmail)) <
+			strings.ToLower(firstNonEmpty(results[j].SenderName, results[j].SenderEmail))
+	})
+
+	deleteIDs := []string{}
+	for index := range results {
+		if results[index].Method == "" {
+			continue
+		}
+		for _, target := range targets {
+			if !strings.EqualFold(target.Email, results[index].SenderEmail) {
+				continue
+			}
+			deleteIDs = append(deleteIDs, target.MessageIDs...)
+			break
+		}
+	}
+	deleted, deleteErr := s.permanentlyDeleteMessages(ctx, sess.User, deleteIDs, "Unsubscribed from all subscriptions")
+	if ctx.Err() != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		moreDeleted, retryErr := s.permanentlyDeleteMessages(cleanupCtx, sess.User, deleteIDs, "Unsubscribed from all subscriptions")
+		cleanupCancel()
+		deleted += moreDeleted
+		deleteErr = retryErr
+	}
+	if deleteErr == nil {
+		for index := range results {
+			if results[index].Method != "" {
+				results[index].Deleted = results[index].Messages
+			}
+		}
+	}
+	unsubscribed, failed, manual := 0, 0, 0
+	for _, result := range results {
+		switch result.Status {
+		case "sent":
+			unsubscribed++
+		case "failed":
+			failed++
+		default:
+			manual++
+		}
+	}
+	s.audit(r, sess.User, "unsubscribe.bulk", "Subscriptions",
+		fmt.Sprintf("Processed %d senders · %d unsubscribed · %d failed · %d messages removed",
+			len(results), unsubscribed, failed, deleted))
+	payload := map[string]any{
+		"ok": deleteErr == nil, "processed": len(results), "unsubscribed": unsubscribed,
+		"failed": failed, "manual": manual, "deleted": deleted, "skipped": skipped,
+		"results": results,
+	}
+	if deleteErr != nil {
+		payload["deleteError"] = truncate(sanitizeMailText(deleteErr.Error()), 300)
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *Server) sendUnsubscribeMailto(ctx context.Context, user userRecord, address string) error {
+	if !looksLikeEmail(normalizeEmailValue(address)) {
+		return fmt.Errorf("invalid unsubscribe address")
+	}
+	item := map[string]any{
+		"from":     map[string]any{"name": user.Name, "email": user.Email},
+		"to":       []any{map[string]any{"name": "", "email": normalizeEmailValue(address)}},
+		"subject":  "Unsubscribe request",
+		"bodyText": "Please unsubscribe this address from the mailing list.\n\nThank you.",
+	}
+	raw, err := buildMIMEMessage(item, fmt.Sprintf("<%s@%s>", newID("unsub"), s.cfg.MailDomain), nil)
+	if err != nil {
+		return err
+	}
+	return s.submitSMTPMessage(user.Email, []string{normalizeEmailValue(address)}, raw)
+}
+
+// permanentlyDeleteMessages removes subscription noise immediately. It never
+// creates a Trash copy and never adds an undo token; the physical IMAP message
+// is flagged deleted and expunged.
+func (s *Server) permanentlyDeleteMessages(ctx context.Context, user userRecord, ids []string, reason string) (int, error) {
+	held, err := s.userOnLegalHold(ctx, user.TenantID, user.ID)
+	if err != nil {
+		return 0, err
+	}
+	if held {
+		return 0, fail(http.StatusConflict, "LEGAL_HOLD", "A legal hold preserves this mailbox. Subscription messages cannot be deleted while the hold is active.")
+	}
+	seen := map[string]bool{}
+	unique := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	if len(unique) == 0 {
+		return 0, nil
+	}
+	mutations := []imapAction{}
+	folders := map[string]bool{}
+	removed := 0
+	err = s.withMailMetadataState(ctx, user, func(state map[string]any) error {
+		for _, id := range unique {
+			message := findMessageIn(state, id)
+			if message == nil {
+				continue
+			}
+			physicalFolder := stateString(message, "imapFolder")
+			if physicalFolder == "" {
+				physicalFolder = folderIMAPName(state, stateString(message, "folder"))
+			}
+			messageID := stateString(message, "messageId")
+			uid := stateInt(message, "imapUid")
+			if physicalFolder != "" && (messageID != "" || uid > 0) {
+				mutations = append(mutations, imapAction{
+					MessageID: messageID, SourceUID: uid,
+					SourceFolder: physicalFolder, SourceIMAPFolder: physicalFolder, MarkDeleted: true,
+				})
+				folders[physicalFolder] = true
+			}
+			removeMessage(state, id)
+			removed++
+		}
+		if removed > 0 {
+			appendStateAudit(state, "message.subscription_delete", fmt.Sprintf("%d message", removed),
+				user.Name, reason, "127.0.0.1", "subscriptions")
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if len(mutations) > 0 {
+		if err := s.applyIMAPActions(user, mutations); err != nil {
+			s.logger.Warn("subscription delete IMAP propagation failed", "err", err)
+		}
+	}
+	for folder := range folders {
+		if err := s.expungeIMAPFolder(user, folder); err != nil {
+			s.logger.Warn("subscription delete expunge failed", "folder", folder, "err", err)
+		}
+	}
+	return removed, nil
+}
+
 func validateUnsubscribeURL(raw string) (*url.URL, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Host == "" {
@@ -171,11 +469,19 @@ func validateUnsubscribeURL(raw string) (*url.URL, error) {
 }
 
 func (s *Server) postUnsubscribe(ctx context.Context, rawURL string) error {
+	return s.requestUnsubscribe(ctx, rawURL, http.MethodPost)
+}
+
+func (s *Server) getUnsubscribe(ctx context.Context, rawURL string) error {
+	return s.requestUnsubscribe(ctx, rawURL, http.MethodGet)
+}
+
+func (s *Server) requestUnsubscribe(ctx context.Context, rawURL, method string) error {
 	parsed, err := validateUnsubscribeURL(rawURL)
 	if err != nil {
 		return fmt.Errorf("unsubscribe URL is not allowed: %w", err)
 	}
-	if parsed.Scheme != "https" {
+	if method == http.MethodPost && parsed.Scheme != "https" {
 		return fmt.Errorf("one-click unsubscribe requires an HTTPS URL")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
@@ -218,12 +524,18 @@ func (s *Server) postUnsubscribe(ctx context.Context, rawURL string) error {
 			return err
 		},
 	}
-	form := url.Values{"List-Unsubscribe": {"One-Click"}}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, parsed.String(), strings.NewReader(form.Encode()))
+	var body io.Reader
+	if method == http.MethodPost {
+		form := url.Values{"List-Unsubscribe": {"One-Click"}}
+		body = strings.NewReader(form.Encode())
+	}
+	request, err := http.NewRequestWithContext(ctx, method, parsed.String(), body)
 	if err != nil {
 		return fmt.Errorf("build unsubscribe request: %w", err)
 	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if method == http.MethodPost {
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 	request.Header.Set("User-Agent", "Alt8Mail-Unsubscribe/1.0")
 	request.Header.Set("Accept", "text/html,application/json;q=0.9,*/*;q=0.5")
 	response, err := client.Do(request)

@@ -555,6 +555,7 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 	ids = localIDs
 	var response map[string]any
 	mutations := []imapAction{}
+	hardDeleteFolders := map[string]bool{}
 	policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
 	err := s.withMailState(r.Context(), sess.User, ids, false, func(state map[string]any) error {
 		targets := []map[string]any{}
@@ -613,8 +614,8 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 		}
 		now := time.Now()
 		_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM undo_actions WHERE user_id=$1 AND expires_at <= now()`, sess.User.ID)
-		token := newID("undo")
-		expiresAt := now.Add(undoWindow)
+		token := ""
+		expiresAt := now
 		snapshot := []any{}
 		permanentlyDeleted := 0
 		permanentIDs := []string{}
@@ -642,13 +643,23 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 			}
 			targetFolder := originalFolder
 			permanent := false
+			hardDelete := false
 			switch body.Action {
 			case "archive":
 				targetFolder = "archive"
 			case "move":
 				targetFolder = body.Folder
 			case "delete":
-				if originalFolder == "trash" || originalFolder == "drafts" {
+				if originalFolder == "subscriptions" {
+					// Subscription mail must never create a Trash copy. Flag and
+					// expunge the physical INBOX message and keep no undo token.
+					permanent = true
+					hardDelete = true
+					permanentlyDeleted++
+					permanentIDs = append(permanentIDs, stateString(message, "id"))
+					mutation.MarkDeleted = true
+					hardDeleteFolders[originalIMAPFolder] = true
+				} else if originalFolder == "trash" || originalFolder == "drafts" {
 					permanent = true
 					entry["full"] = deepCopyMap(message)
 					permanentlyDeleted++
@@ -767,34 +778,50 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if !permanent && targetFolder != originalFolder {
+				if targetFolder == "inbox" {
+					if unsubscribe, _ := message["unsubscribe"].(map[string]any); len(unsubscribe) > 0 {
+						targetFolder = "subscriptions"
+						mutation.TargetIMAPFolder = "INBOX"
+					}
+				}
 				delete(message, "snoozedUntil")
 				message["folder"] = targetFolder
 				message["imapFolder"] = targetFolder
 				message["imapUid"] = 0
-				entry["destinationFolder"] = targetFolder
-				entry["destinationIMAPFolder"] = targetFolder
 				mutation.TargetFolder = targetFolder
 				if body.Action == "move" {
 					mutation.TargetIMAPFolder = moveIMAPFolder
 				}
+				destinationIMAP := targetFolder
+				if mutation.TargetIMAPFolder != "" {
+					destinationIMAP = mutation.TargetIMAPFolder
+				}
+				entry["destinationFolder"] = targetFolder
+				entry["destinationIMAPFolder"] = destinationIMAP
 			}
 			if mutation.MessageID != "" && mutation.SourceFolder != "" {
 				mutations = append(mutations, mutation)
 			}
-			snapshot = append(snapshot, entry)
+			if !hardDelete {
+				snapshot = append(snapshot, entry)
+			}
 		}
 		for _, id := range permanentIDs {
 			removeMessage(state, id)
 		}
-		snapshotJSON, err := json.Marshal(snapshot)
-		if err != nil {
-			return err
-		}
-		if _, err := s.store.DB.Exec(r.Context(), `
-			INSERT INTO undo_actions (token, tenant_id, user_id, action, snapshot, created_at, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, token, sess.User.TenantID, sess.User.ID, body.Action, snapshotJSON, now, expiresAt); err != nil {
-			return err
+		if len(snapshot) > 0 {
+			token = newID("undo")
+			expiresAt = now.Add(undoWindow)
+			snapshotJSON, err := json.Marshal(snapshot)
+			if err != nil {
+				return err
+			}
+			if _, err := s.store.DB.Exec(r.Context(), `
+				INSERT INTO undo_actions (token, tenant_id, user_id, action, snapshot, created_at, expires_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`, token, sess.User.TenantID, sess.User.ID, body.Action, snapshotJSON, now, expiresAt); err != nil {
+				return err
+			}
 		}
 		auditAction := map[string]string{
 			"archive": "message.archive", "move": "message.move", "delete": "message.delete",
@@ -873,6 +900,9 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 		if err := s.applyIMAPActions(sess.User, mutations); err != nil {
 			s.logger.Warn("IMAP bulk action propagation failed", "err", err)
 		}
+	}
+	for folder := range hardDeleteFolders {
+		_ = s.expungeIMAPFolder(sess.User, folder)
 	}
 	writeJSON(w, http.StatusOK, response)
 }

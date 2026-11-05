@@ -991,8 +991,12 @@ func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []f
 		}
 		messageID := messageIDKey(stateString(message, "messageId"))
 		folder := stateString(message, "folder")
+		physicalFolder := stateString(message, "imapFolder")
+		if physicalFolder == "" {
+			physicalFolder = folder
+		}
 		if messageID != "" {
-			existingByFolderMessageID[folder+"\x00"+messageID] = message
+			existingByFolderMessageID[physicalFolder+"\x00"+messageID] = message
 			existingByMessageID[messageID] = append(existingByMessageID[messageID], message)
 		}
 		if uid := stateInt(message, "imapUid"); uid > 0 {
@@ -1053,8 +1057,12 @@ func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []f
 			moved := []map[string]any{}
 			for _, candidate := range existingByMessageID[normalizedID] {
 				candidateFolder := stateString(candidate, "folder")
-				candidateKey := candidateFolder + "\x00" + messageIDKey(stateString(candidate, "messageId"))
-				if coveredFolders[candidateFolder] && !fetchedKeys[candidateKey] {
+				candidatePhysical := stateString(candidate, "imapFolder")
+				if candidatePhysical == "" {
+					candidatePhysical = candidateFolder
+				}
+				candidateKey := candidatePhysical + "\x00" + messageIDKey(stateString(candidate, "messageId"))
+				if coveredFolders[candidatePhysical] && !fetchedKeys[candidateKey] {
 					moved = append(moved, candidate)
 				}
 			}
@@ -1066,7 +1074,11 @@ func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []f
 		unread := !hasIMAPFlag(item.Flags, `\Seen`)
 		starred := hasIMAPFlag(item.Flags, `\Flagged`)
 		if existing != nil {
-			existing["folder"] = item.Folder
+			unsubscribe := item.Unsubscribe
+			if unsubscribe == nil {
+				unsubscribe, _ = existing["unsubscribe"].(map[string]any)
+			}
+			existing["folder"] = deliveryFolderFor(item.Folder, unsubscribe)
 			existing["imapUid"] = item.UID
 			existing["imapFolder"] = item.Folder
 			existing["imapUidValidity"] = item.UIDValidity
@@ -1139,7 +1151,7 @@ func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []f
 			auth = map[string]any{"spf": "none", "dkim": "none", "dmarc": "none", "tls": "TLS 1.3", "ip": "—", "signer": "", "firstContact": false, "warnings": []any{}}
 		}
 		message := map[string]any{
-			"id": id, "threadId": threadID, "folder": item.Folder, "from": from,
+			"id": id, "threadId": threadID, "folder": deliveryFolderFor(item.Folder, item.Unsubscribe), "from": from,
 			"to": toPeople, "cc": ccPeople, "bcc": bccPeople,
 			"subject": item.Subject, "snippet": snippet(firstNonEmpty(item.BodyText, item.Subject)),
 			"bodyHtml": item.BodyHTML, "bodyText": item.BodyText,
@@ -1233,6 +1245,16 @@ func mergeFetchedMailAdvanced(state map[string]any, user userRecord, fetched []f
 	}
 	state["messages"] = kept
 	return imported, updated, removed
+}
+
+// deliveryFolderFor keeps mail carrying List-Unsubscribe out of Inbox. The
+// physical IMAP copy remains INBOX so moving or deleting it still addresses the
+// real message, while the logical folder is the Subscriptions view.
+func deliveryFolderFor(imapFolder string, unsubscribe map[string]any) string {
+	if imapFolder == "inbox" && len(unsubscribe) > 0 {
+		return "subscriptions"
+	}
+	return imapFolder
 }
 
 func messageIDKey(value string) string {

@@ -177,6 +177,7 @@ function message(input) {
     external,
     auth: input.auth || (external ? authExternal() : authInternal()),
     event: input.event || null,
+    replyDuplicate: input.replyDuplicate || null,
     sizeBytes,
     senderUtcOffsetMinutes: input.senderUtcOffsetMinutes != null ? input.senderUtcOffsetMinutes : -480,
     unsubscribe: input.unsubscribe || null,
@@ -231,6 +232,12 @@ export function seedDatabase() {
     subject: "Re: Q4 roadmap review — Thursday 10:00",
     date: iso(38 * MINUTE), unread: true, sizeBytes: 9 * KIB,
     categories: ["decision"],
+    replyDuplicate: {
+      id: "m-dup-q4", threadId: "Q4DupThread000000000000001",
+      subject: "Q4 roadmap review — Thursday 10:00", date: iso(2 * DAY),
+      senderName: "Elena Vasquez", senderEmail: "elena.vasquez@a8m.example",
+      folder: "archive", count: 1
+    },
     snippet: "One more thing for the agenda: support asked for a hard date on the macro library.",
     inReplyTo: "<m2@a8m.example>",
     bodyHtml: bodyParagraphs(["One more thing for the agenda: support asked for a hard date on the macro library. Could you bring the latest estimate?", "Thanks — Elena"])
@@ -339,6 +346,12 @@ export function seedDatabase() {
     id: "m15", threadId: "Us9qmXz-Z5GUl_r5gJobEQ", folder: "inbox", from: TOMAS, to: ME,
     subject: "Customer call recap: Brightline",
     date: iso(26 * HOUR), unread: false,
+    replyDuplicate: {
+      id: "m-dup-brightline", threadId: "BrightlineDupThread000000001",
+      subject: "Customer call recap: Brightline", date: iso(2 * DAY),
+      senderName: "Tomás Ribeiro", senderEmail: "tomas.ribeiro@a8m.example",
+      folder: "archive", count: 1
+    },
     snippet: "Three themes came up: onboarding speed, reporting depth, and the export limits on the team plan.",
     bodyHtml: bodyParagraphs(["Avery,", "Three themes came up on the Brightline call: onboarding speed, reporting depth, and the export limits on the team plan. I've written them up with quotes in the shared doc.", "Want to fold the export issue into Thursday's agenda? It sounds like the most urgent one.", "Tomás"])
   }));
@@ -452,6 +465,42 @@ export function seedDatabase() {
     snippet: "Five reads on onboarding, pricing pages and design systems.",
     auth: authExternal({ signer: "designweekly.example", ip: "198.51.100.8", dmarc: "pass" }),
     bodyHtml: bodyParagraphs(["Five reads on onboarding, pricing pages and design systems, selected by the Design Weekly editors."])
+  }));
+
+  // Subscriptions: List-Unsubscribe mail lives here, never in Inbox.
+  messages.push(message({
+    id: "sub1", threadId: "SubOfferThread0000000000001", folder: "subscriptions", from: OFFERS, to: ME,
+    subject: "Exclusive offer: 70% off", date: iso(3 * HOUR), unread: false, external: true,
+    unsubscribe: { url: "https://offers-daily.example/unsubscribe?u=demo", mailto: "unsubscribe@offers-daily.example", oneClick: true, detectedAt: new Date(NOW).toISOString() },
+    snippet: "Today only — a selection of deals chosen for you.",
+    auth: authExternal({ ip: "203.0.113.19", dmarc: "pass" }),
+    bodyHtml: bodyParagraphs(["Today only: a selection of deals chosen for you. Unsubscribe at any time."])
+  }));
+  messages.push(message({
+    id: "sub2", threadId: "SubDesignThread0000000000001", folder: "subscriptions", from: DESIGNFILE, to: ME,
+    subject: "This week in product design", date: iso(8 * HOUR), unread: false, external: true,
+    unsubscribe: { url: "https://designweekly.example/unsubscribe", mailto: "unsubscribe@designweekly.example", oneClick: false, detectedAt: new Date(NOW).toISOString() },
+    snippet: "Five reads on onboarding, pricing pages and design systems.",
+    auth: authExternal({ signer: "designweekly.example", ip: "198.51.100.8", dmarc: "pass" }),
+    bodyHtml: bodyParagraphs(["Five reads on onboarding, pricing pages and design systems, selected by the Design Weekly editors."])
+  }));
+  messages.push(message({
+    id: "sub3", threadId: "SubNoiseThread00000000000001", folder: "subscriptions",
+    from: { name: "Daily Deals", email: "deals@daily-deals.example", initials: "DD", color: "#b45309" }, to: ME,
+    subject: "Daily deals for you", date: iso(11 * HOUR), unread: false, external: true,
+    unsubscribe: { url: "https://unsubscribe.invalid/one-click", mailto: "", oneClick: true, simulateFailure: true, detectedAt: new Date(NOW).toISOString() },
+    snippet: "A fresh batch of offers with a broken unsubscribe endpoint.",
+    auth: authExternal({ ip: "198.51.100.44", dmarc: "pass" }),
+    bodyHtml: bodyParagraphs(["A fresh batch of offers. The unsubscribe endpoint is intentionally unreachable in this demo."])
+  }));
+  messages.push(message({
+    id: "sub4", threadId: "SubCouponThread0000000000001", folder: "subscriptions",
+    from: { name: "Coupon Crowd", email: "hello@coupon-crowd.example", initials: "CC", color: "#7a4a5c" }, to: ME,
+    subject: "Coupons picked for you", date: iso(14 * HOUR), unread: false, external: true,
+    unsubscribe: { url: "https://coupons.invalid/unsubscribe", mailto: "", oneClick: false, simulateFailure: true, detectedAt: new Date(NOW).toISOString() },
+    snippet: "Weekly coupons with an unreachable unsubscribe page.",
+    auth: authExternal({ ip: "198.51.100.45", dmarc: "pass" }),
+    bodyHtml: bodyParagraphs(["Weekly coupons. The unsubscribe page is intentionally unreachable in this demo."])
   }));
 
   // A server-backed draft restored into the compose dock on load.

@@ -583,7 +583,10 @@ func (s *Server) markFolderRead(w http.ResponseWriter, r *http.Request) {
 	affected := 0
 	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
-		if folder == nil {
+		label := stateString(folder, "label")
+		if id == "subscriptions" {
+			label = "Subscriptions"
+		} else if folder == nil {
 			return fail(http.StatusNotFound, "FOLDER_NOT_FOUND", "Folder not found")
 		}
 		imapName := folderIMAPName(state, id)
@@ -592,17 +595,21 @@ func (s *Server) markFolderRead(w http.ResponseWriter, r *http.Request) {
 			if message == nil || stateString(message, "folder") != id || !stateBool(message, "unread") {
 				continue
 			}
+			sourceFolder := imapName
+			if id == "subscriptions" {
+				sourceFolder = stateString(message, "imapFolder")
+			}
 			message["unread"] = false
 			clearReturnedSnooze(message)
 			seen := true
 			mutations = append(mutations, imapAction{
 				MessageID: stateString(message, "messageId"), SourceUID: stateInt(message, "imapUid"),
-				SourceFolder: id, SourceIMAPFolder: imapName, SetSeen: &seen,
+				SourceFolder: id, SourceIMAPFolder: sourceFolder, SetSeen: &seen,
 			})
 			affected++
 		}
-		appendStateAudit(state, "folder.mark_read", stateString(folder, "label"), sess.User.Name,
-			fmt.Sprintf("Marked %d messages read in %s", affected, stateString(folder, "label")), clientIP(r), sanitizeUserAgent(r.UserAgent()))
+		appendStateAudit(state, "folder.mark_read", label, sess.User.Name,
+			fmt.Sprintf("Marked %d messages read in %s", affected, label), clientIP(r), sanitizeUserAgent(r.UserAgent()))
 		return nil
 	})
 	if err != nil {
@@ -636,12 +643,21 @@ func (s *Server) emptyFolder(w http.ResponseWriter, r *http.Request) {
 	mutations := []imapAction{}
 	removed := 0
 	imapName := ""
+	labels := ""
+	expungeNames := map[string]bool{}
 	err = s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
-		if folder == nil {
+		if id == "subscriptions" {
+			labels = "Subscriptions"
+		} else if folder == nil {
 			return fail(http.StatusNotFound, "FOLDER_NOT_FOUND", "Folder not found")
+		} else {
+			imapName = folderIMAPName(state, id)
+			labels = stateString(folder, "label")
+			if imapName != "" {
+				expungeNames[imapName] = true
+			}
 		}
-		imapName = folderIMAPName(state, id)
 		remaining := []any{}
 		for _, raw := range stateMessages(state) {
 			message, _ := raw.(map[string]any)
@@ -649,15 +665,25 @@ func (s *Server) emptyFolder(w http.ResponseWriter, r *http.Request) {
 				remaining = append(remaining, raw)
 				continue
 			}
+			sourceFolder := id
+			sourceIMAPFolder := imapName
+			if id == "subscriptions" {
+				sourceFolder = stateString(message, "imapFolder")
+				if sourceFolder == "" {
+					sourceFolder = "INBOX"
+				}
+				sourceIMAPFolder = sourceFolder
+				expungeNames[sourceFolder] = true
+			}
 			mutations = append(mutations, imapAction{
 				MessageID: stateString(message, "messageId"), SourceUID: stateInt(message, "imapUid"),
-				SourceFolder: id, SourceIMAPFolder: imapName, MarkDeleted: true,
+				SourceFolder: sourceFolder, SourceIMAPFolder: sourceIMAPFolder, MarkDeleted: true,
 			})
 			removed++
 		}
 		state["messages"] = remaining
-		appendStateAudit(state, "folder.empty", stateString(folder, "label"), sess.User.Name,
-			fmt.Sprintf("Emptied %d messages from %s", removed, stateString(folder, "label")), clientIP(r), sanitizeUserAgent(r.UserAgent()))
+		appendStateAudit(state, "folder.empty", labels, sess.User.Name,
+			fmt.Sprintf("Emptied %d messages from %s", removed, labels), clientIP(r), sanitizeUserAgent(r.UserAgent()))
 		return nil
 	})
 	if err != nil {
@@ -669,8 +695,8 @@ func (s *Server) emptyFolder(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("folder empty IMAP propagation failed", "err", err)
 		}
 	}
-	if imapName != "" {
-		_ = s.expungeIMAPFolder(sess.User, imapName)
+	for name := range expungeNames {
+		_ = s.expungeIMAPFolder(sess.User, name)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "removed": removed})
 }

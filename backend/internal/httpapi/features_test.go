@@ -208,6 +208,42 @@ func TestMergeFetchedMailKeepsSelfSentAndInboxCopies(t *testing.T) {
 	}
 }
 
+func TestMergeFetchedMailRoutesListUnsubscribeToSubscriptions(t *testing.T) {
+	state := map[string]any{"messages": []any{}, "attachments": map[string]any{}, "people": []any{}}
+	user := userRecord{Email: "avery.chen@a8m.test", Name: "Avery Chen", Initials: "AC", Color: "#34557a"}
+	newsletter := fetchedMail{
+		UID: 21, UIDValidity: 7, Folder: "inbox", Subject: "Weekly deals", MessageID: "<deals@example.test>",
+		Date: time.Now(), From: []map[string]any{{"name": "Deals", "email": "deals@example.test"}},
+		To:       []map[string]any{{"name": "Avery", "email": "avery.chen@a8m.test"}},
+		BodyText: "Weekly deals", BodyHTML: "<p>Weekly deals</p>", Size: 120,
+		Unsubscribe: map[string]any{"url": "https://example.test/unsubscribe", "oneClick": true},
+	}
+	if imported, _, _ := mergeFetchedMail(state, user, []fetchedMail{newsletter}, t.TempDir(), nil); imported != 1 {
+		t.Fatalf("imported = %d", imported)
+	}
+	messages := stateSlice(state, "messages")
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d", len(messages))
+	}
+	message, _ := messages[0].(map[string]any)
+	if stateString(message, "folder") != "subscriptions" {
+		t.Fatalf("folder = %q, want subscriptions", stateString(message, "folder"))
+	}
+	if stateString(message, "imapFolder") != "inbox" {
+		t.Fatalf("physical folder = %q, want inbox", stateString(message, "imapFolder"))
+	}
+	// A later refresh may omit the header. The stored unsubscribe metadata must
+	// keep the message out of Inbox.
+	newsletter.Unsubscribe = nil
+	if _, updated, _ := mergeFetchedMail(state, user, []fetchedMail{newsletter}, t.TempDir(), nil); updated != 1 {
+		t.Fatalf("updated = %d", updated)
+	}
+	message, _ = stateSlice(state, "messages")[0].(map[string]any)
+	if stateString(message, "folder") != "subscriptions" {
+		t.Fatalf("folder after re-sync = %q, want subscriptions", stateString(message, "folder"))
+	}
+}
+
 func TestMergeFetchedMailReconcilesOrphanSentCopy(t *testing.T) {
 	oldDate := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)
 	recentDate := time.Now().UTC().Format(time.RFC3339)
