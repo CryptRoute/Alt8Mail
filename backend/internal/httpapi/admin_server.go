@@ -212,6 +212,9 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /integrations/siem/test", s.adminRequirePermission("siem.manage", s.adminTestSIEM))
 	mux.HandleFunc("POST /integrations/siem/rotate-secret", s.adminRequirePermission("siem.manage", s.adminRotateSIEMSecret))
 	mux.HandleFunc("GET /integrations/siem/deliveries", s.adminRequirePermission("siem.read", s.adminSIEMDeliveries))
+	mux.HandleFunc("GET /addons", s.adminRequirePermission("policies.read", s.adminListAddons))
+	mux.HandleFunc("PATCH /addons/{id}", s.adminRequirePermission("policies.manage", s.adminUpdateAddon))
+	mux.HandleFunc("POST /addon-requests/{id}/resolve", s.adminRequirePermission("policies.manage", s.adminResolveAddonRequest))
 	mux.HandleFunc("GET /quarantine", s.adminRequirePermission("users.security", s.adminListQuarantine))
 	mux.HandleFunc("POST /quarantine/{userId}/{messageId}/release", s.adminRequirePermission("users.security", s.adminReleaseQuarantine))
 

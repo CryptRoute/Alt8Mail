@@ -1499,3 +1499,14 @@ a.security-report-alert:hover { filter: brightness(.985); }
 .mini-stat-grid b { font-size: 13px; font-weight: 650; letter-spacing: -.02em; color: var(--ink); }
 @media (max-width: 1180px) { .webnet-metrics-grid { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .mini-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Add-ons catalog */
+.addon-control-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.addon-control-identity > div { min-width: 0; }
+.addon-control-logo { width: 44px; height: 44px; display: grid; place-items: center; flex: none; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: #fff; overflow: hidden; }
+.addon-control-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.addon-control-logo.is-fallback { color: var(--text-3); }
+.addon-control-tagline { margin-top: 0; }
+.addon-control-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.addon-control-links a { display: inline-flex; align-items: center; padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 10.5px; font-weight: 600; text-decoration: none; }
+.addon-control-links a:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }

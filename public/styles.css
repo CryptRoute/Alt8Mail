@@ -910,6 +910,17 @@ svg.icon {
   background: var(--border);
 }
 .rail-spacer { flex: 1 1 auto; }
+.rail-addon-btn {
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+}
+.rail-addon-btn:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-ink);
+}
+.rail-addon-btn .rail-label { font-weight: 650; }
 .rail .theme-btn .icon-sun { display: none; }
 :root[data-theme="dark"] .rail .theme-btn .icon-sun { display: block; }
 :root[data-theme="dark"] .rail .theme-btn .icon-moon { display: none; }

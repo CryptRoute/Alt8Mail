@@ -285,7 +285,7 @@ async function logout() {
 /* ------------------------------------------------------------
    Navigation / route
 ------------------------------------------------------------ */
-const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "policies", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "tenants", "settings"]);
+const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "tenants", "settings"]);
 
 function route() {
   if (!state.admin) return;
@@ -298,7 +298,7 @@ function route() {
   else if (view === "mailboxes" && parts[1] === "import") view = "import-mailboxes";
   state.routeParam = routeParam;
   state.view = views.has(view) ? view : "overview";
-  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", policies: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
+  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", policies: "policies.read", addons: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
   if (required && !can(required)) { state.view = "overview"; location.hash = "#/overview"; return; }
   const navView = ["user-detail", "import-users", "import-mailboxes"].includes(state.view) ? "users" : state.view;
   $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === navView));
@@ -314,6 +314,7 @@ function route() {
     case "domains": renderDomains(); break;
     case "roles": renderRoles(); break;
     case "policies": renderPolicies(); break;
+    case "addons": renderAddons(); break;
     case "storage": renderStoragePolicy(); break;
     case "ai": renderAI(); break;
     case "quarantine": renderQuarantine(); break;
@@ -1403,6 +1404,124 @@ async function savePolicies() {
 }
 
 /* ------------------------------------------------------------
+   Add-ons
+------------------------------------------------------------ */
+function adminAddonStatus(addon) {
+  if (!addon.systemEnabled) return { label: "Disabled system-wide", cls: "neutral" };
+  if (!addon.tenantEnabled) return { label: "Workspace off", cls: "suspended" };
+  if (addon.connectionScope === "tenant" && !addon.connectionLabel) return { label: "Needs setup", cls: "pending" };
+  if (addon.connectionScope === "user") return { label: "Personal setup", cls: "active" };
+  return { label: "Configured", cls: "active" };
+}
+
+function adminAddonLogo(addon) {
+  const file = String(addon.logo || "").split("/").filter(Boolean).pop() || "";
+  return file ? `addon-logos/${encodeURIComponent(file)}` : "";
+}
+
+function adminProviderLinks(addon) {
+  const links = [
+    ["Website", addon.websiteUrl],
+    ["Support", addon.supportUrl],
+    ["Docs", addon.docsUrl],
+    ["Privacy", addon.privacyUrl],
+  ].filter(([, url]) => url);
+  if (!links.length) return "";
+  return `<div class="addon-admin-links">${links.map(([label, url]) =>
+    `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`
+  ).join("")}</div>`;
+}
+
+async function renderAddons() {
+  loading("Add-ons");
+  try {
+    const data = await api("addons");
+    const addons = Array.isArray(data.addons) ? data.addons : [];
+    const requests = Array.isArray(data.requests) ? data.requests : [];
+    const canManage = can("policies.manage");
+    const activeCount = addons.filter((addon) => addon.systemEnabled && addon.tenantEnabled).length;
+    const requestMarkup = requests.length ? `<div class="card card-pad addons-admin-requests">
+      <div class="card-head" style="padding:0 0 12px"><div><h2>Add-on requests</h2><p>Teammates waiting for workspace setup or install approval.</p></div><span class="badge pending">${requests.length} pending</span></div>
+      <div class="addons-admin-request-list">${requests.map((request) => `<div class="addons-admin-request">
+        <span class="addons-admin-request-logo">${request.addonLogo ? `<img src="${esc(adminAddonLogo({ logo: request.addonLogo }))}" alt="" loading="lazy">` : icon("plug")}</span>
+        <div><b>${esc(request.addonName)} <span class="badge neutral">${request.requestType === "install" ? "Install approval" : "Setup request"}</span></b><small>${esc(request.userName || request.userEmail)}${request.note ? ` · ${esc(request.note)}` : ""}</small></div>
+        <div class="addons-admin-request-actions"><button class="btn secondary small" type="button" data-addon-request="${esc(request.id)}" data-addon-request-status="approved" ${canManage ? "" : "disabled"}>Approve</button><button class="btn ghost small" type="button" data-addon-request="${esc(request.id)}" data-addon-request-status="denied" ${canManage ? "" : "disabled"}>Deny</button></div>
+      </div>`).join("")}</div>
+    </div>` : "";
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Add-ons</h1><p>Control which reviewed integrations this workspace offers, who can install them and pending approvals.</p></div><div class="view-actions"><a class="btn secondary" href="${esc(data.webmailAddonsUrl || "/#/Settings/addons")}" target="_blank" rel="noopener noreferrer">${icon("external")}Open webmail Add-ons</a><button class="btn secondary" type="button" id="addonsRefresh">${icon("refresh")}Refresh</button></div></div>
+      <div class="addons-admin-summary"><div class="card card-pad"><span class="addons-admin-stat">${icon("plug")}<b>${addons.length}</b><small>reviewed add-ons</small></span></div><div class="card card-pad"><span class="addons-admin-stat">${icon("check")}<b>${activeCount}</b><small>enabled for this workspace</small></span></div><div class="card card-pad"><span class="addons-admin-stat">${icon("alert")}<b>${requests.length}</b><small>pending requests</small></span></div></div>
+      <div class="card card-pad addons-admin-notice"><div><b>Workspace policy is managed here.</b><span>Credentials and provider setup are configured in Webmail → Settings → Add-ons. This console controls availability, install policy and approvals.</span></div><span class="badge ${canManage ? "active" : "neutral"}">${canManage ? "You can manage" : "Read-only"}</span></div>
+      ${requestMarkup}
+      <div class="addons-admin-grid">${addons.map((addon) => {
+        const status = adminAddonStatus(addon);
+        const logo = adminAddonLogo(addon);
+        const disabled = !canManage || !addon.systemEnabled;
+        return `<article class="card addons-admin-card">
+          <div class="addons-admin-head">
+            <span class="addons-admin-logo">${logo ? `<img src="${esc(logo)}" alt="${esc(addon.name)} logo" loading="lazy" decoding="async">` : icon("plug")}</span>
+            <div class="addons-admin-title"><h3>${esc(addon.name)}</h3><p>${esc(addon.vendor || "Alt8Mail")} · ${esc(addon.category || "Add-on")}</p></div>
+            <span class="badge ${status.cls}">${esc(status.label)}</span>
+          </div>
+          <p class="addons-admin-tagline">${esc(addon.tagline || addon.description || "")}</p>
+          ${adminProviderLinks(addon)}
+          <div class="detail-list addons-admin-detail">
+            <div class="detail-row"><span>Connection</span><b>${esc(addon.connectionScope === "tenant" ? (addon.connectionLabel || "Needs workspace setup") : "Personal connection")}</b></div>
+            <div class="detail-row"><span>Authentication</span><b>${esc(addon.authType === "oauth2" ? "OAuth 2.0" : addon.authType === "webhook" ? "Webhook" : "API key")}</b></div>
+            <div class="detail-row"><span>Active installs</span><b>${Number(addon.installCount || 0)}</b></div>
+            <div class="detail-row"><span>Connector</span><b>v${esc(addon.connectorVersion || "1.0")}</b></div>
+          </div>
+          <div class="addons-admin-controls">
+            <label class="addons-admin-check"><input type="checkbox" data-addon-enabled="${esc(addon.id)}" ${addon.tenantEnabled ? "checked" : ""} ${disabled ? "disabled" : ""}><span>Enabled for this workspace</span></label>
+            <label class="addons-admin-policy"><span>Install policy</span><select class="input" data-addon-policy="${esc(addon.id)}" ${disabled ? "disabled" : ""}><option value="self_service" ${addon.installPolicy !== "approval_required" ? "selected" : ""}>Self-service</option><option value="approval_required" ${addon.installPolicy === "approval_required" ? "selected" : ""}>Approval required</option></select></label>
+          </div>
+        </article>`;
+      }).join("")}</div>`;
+    $("#addonsRefresh")?.addEventListener("click", renderAddons);
+    $$("[data-addon-enabled]").forEach((input) => input.addEventListener("change", async () => {
+      const addonID = input.getAttribute("data-addon-enabled");
+      const previous = !input.checked;
+      input.disabled = true;
+      try {
+        await api(`addons/${encodeURIComponent(addonID)}`, { method: "PATCH", body: { enabled: input.checked } });
+        toast(input.checked ? "Add-on enabled for this workspace" : "Add-on disabled for this workspace");
+        await renderAddons();
+      } catch (error) {
+        input.checked = previous;
+        input.disabled = false;
+        showError(error);
+      }
+    }));
+    $$("[data-addon-policy]").forEach((select) => select.addEventListener("change", async () => {
+      const addonID = select.getAttribute("data-addon-policy");
+      const previous = select.value === "approval_required" ? "self_service" : "approval_required";
+      select.disabled = true;
+      try {
+        await api(`addons/${encodeURIComponent(addonID)}`, { method: "PATCH", body: { installPolicy: select.value } });
+        toast("Add-on install policy updated");
+        await renderAddons();
+      } catch (error) {
+        select.value = previous;
+        select.disabled = false;
+        showError(error);
+      }
+    }));
+    $$("[data-addon-request]").forEach((button) => button.addEventListener("click", async () => {
+      const requestID = button.getAttribute("data-addon-request");
+      const status = button.getAttribute("data-addon-request-status");
+      button.disabled = true;
+      try {
+        await api(`addon-requests/${encodeURIComponent(requestID)}/resolve`, { method: "POST", body: { status } });
+        toast(status === "approved" ? "Request approved" : "Request denied");
+        await renderAddons();
+      } catch (error) {
+        button.disabled = false;
+        showError(error);
+      }
+    }));
+  } catch (error) { viewError(error); }
+}
+
+/* ------------------------------------------------------------
    AI assistant
 ------------------------------------------------------------ */
 async function renderAI() {
@@ -1958,7 +2077,7 @@ function openCommandPalette() {
 function closeCommandPalette() { $("#commandPalette").hidden = true; $("#commandPalette").innerHTML = ""; }
 
 function paletteStatic() {
-  const items = [["overview", "Overview", "grid"], ["users", "Users", "users"], ["groups", "Groups", "group"], ["org-units", "Org units", "tree"], ["domains", "Domains", "globe"], ["roles", "Roles & access", "key"], ["policies", "Policies", "sliders"], ["ai", "AI assistant", "sparkles"], ["quarantine", "Quarantine", "alert"], ["audit", "Audit log", "list"]];
+  const items = [["overview", "Overview", "grid"], ["users", "Users", "users"], ["groups", "Groups", "group"], ["org-units", "Org units", "tree"], ["domains", "Domains", "globe"], ["roles", "Roles & access", "key"], ["policies", "Policies", "sliders"], ["addons", "Add-ons", "plug"], ["ai", "AI assistant", "sparkles"], ["quarantine", "Quarantine", "alert"], ["audit", "Audit log", "list"]];
   return items.map(([view, label, iconName]) => `<div class="palette-result" data-palette-nav="${view}">${icon(iconName)}<span>${label}</span></div>`).join("");
 }
 

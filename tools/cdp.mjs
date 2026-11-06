@@ -310,8 +310,20 @@ class CdpPage {
       captureBeyondViewport: fullPage
     });
     await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, Buffer.from(result.data, "base64"));
-    return filePath;
+    const image = Buffer.from(result.data, "base64");
+    let lastError;
+    // Windows on-access scanners can briefly lock a screenshot file as it is
+    // created. Retry the write a few times instead of failing the whole run.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        await fs.writeFile(filePath, image);
+        return filePath;
+      } catch (error) {
+        lastError = error;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+    }
+    throw lastError;
   }
 
   clearErrors() {

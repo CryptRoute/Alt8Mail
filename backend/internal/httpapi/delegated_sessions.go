@@ -19,6 +19,8 @@ func delegatedSessionAllowed(method, path string) bool {
 		return method == http.MethodDelete
 	case strings.HasPrefix(path, "/api/delegation/"):
 		return false
+	case strings.HasPrefix(path, "/api/addons"):
+		return false
 	case strings.HasPrefix(path, "/api/security"):
 		return false
 	case strings.HasPrefix(path, "/api/password"):

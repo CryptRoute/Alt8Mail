@@ -421,8 +421,8 @@ export function field({ label, name, type = 'text', value = '', placeholder = ''
   return `<div class="field"><label for="${id}">${esc(label)}${required ? ' <span class="req">*</span>' : ''}</label>${control}${help ? `<small class="field-help">${esc(help)}</small>` : ''}</div>`;
 }
 
-export function switchField({ label, name, checked = false, help = '', disabled = false }) {
-  return `<label class="switch-field"><span class="switch"><input type="checkbox" name="${attr(name)}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}><span class="switch-track"><span></span></span></span><span class="switch-copy"><strong>${esc(label)}</strong>${help ? `<small>${esc(help)}</small>` : ''}</span></label>`;
+export function switchField({ label, name, checked = false, help = '', disabled = false, extra = '' }) {
+  return `<label class="switch-field"><span class="switch"><input type="checkbox" name="${attr(name)}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''} ${extra}><span class="switch-track"><span></span></span></span><span class="switch-copy"><strong>${esc(label)}</strong>${help ? `<small>${esc(help)}</small>` : ''}</span></label>`;
 }
 
 export function codeBlock(text, { language = '', maxHeight = '' } = {}) {

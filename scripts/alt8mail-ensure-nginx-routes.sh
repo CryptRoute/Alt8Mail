@@ -4,21 +4,32 @@
 # Application updates do not overwrite an administrator's nginx site. This
 # script adds a small include to the TLS server block only when a required
 # proxy location is missing, validates the result with nginx -t and restores
-# the previous file if validation fails.
+# the previous files if validation fails.
 set -Eeuo pipefail
 
 SITE="${A8M_NGINX_SITE:-/etc/nginx/sites-available/a8m}"
 SNIPPET="${A8M_NGINX_SNIPPET:-/etc/nginx/snippets/a8m-public-routes.conf}"
 UPSTREAM="${A8M_NGINX_UPSTREAM:-127.0.0.1:8080}"
+ROUTES=(/files/s/ /upload/ /calendar/rsvp/ /calendar/poll/ /calendar/feed/ /oauth/)
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
 [[ -f "$SITE" ]] || { log "nginx site $SITE not found; skipping public route check"; exit 0; }
 command -v nginx >/dev/null 2>&1 || { log "nginx is not installed; skipping public route check"; exit 0; }
 
+site_content="$(cat "$SITE")"
+snippet_content=""
+[[ -f "$SNIPPET" ]] && snippet_content="$(cat "$SNIPPET")"
+
 missing=()
-for path in /files/s/ /upload/ /calendar/rsvp/ /calendar/poll/ /calendar/feed/; do
-  if ! grep -Eq "location[[:space:]]+[^\{]*[[:space:]]${path//\//\\/}" "$SITE"; then
+snippet_routes=()
+for path in "${ROUTES[@]}"; do
+  escaped_path="${path//\//\\/}"
+  if grep -Eq "location[[:space:]]+[^\{]*[[:space:]]${escaped_path}" <<< "$site_content"; then
+    continue
+  fi
+  snippet_routes+=("$path")
+  if ! grep -Eq "location[[:space:]]+[^\{]*[[:space:]]${escaped_path}" <<< "$snippet_content"; then
     missing+=("$path")
   fi
 done
@@ -28,9 +39,23 @@ fi
 
 log "adding missing public nginx routes: ${missing[*]}"
 install -d -m 0755 "$(dirname "$SNIPPET")"
+
+snippet_backup="$(mktemp)"
+site_backup="$(mktemp)"
+updated="$(mktemp)"
+trap 'rm -f "$snippet_backup" "$site_backup" "$updated"' EXIT
+if [[ -f "$SNIPPET" ]]; then
+  cp -a "$SNIPPET" "$snippet_backup"
+else
+  : > "$snippet_backup"
+fi
+
+# Preserve routes already supplied by the snippet and add newly required ones.
+# Routes defined directly in the site are skipped so nginx never sees duplicate
+# location blocks.
 {
-  printf '# Managed by Alt8Mail. Public download, upload and calendar routes.\n'
-  for path in "${missing[@]}"; do
+  printf '# Managed by Alt8Mail. Public download, upload, calendar and OAuth callback routes.\n'
+  for path in "${snippet_routes[@]}"; do
     body=""
     [[ "$path" == "/upload/" ]] && body='        client_max_body_size 12m;\n'
     printf 'location ^~ %s {\n        proxy_pass http://%s;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $remote_addr;\n        proxy_set_header X-Forwarded-Proto $scheme;\n%b    }\n' "$path" "$UPSTREAM" "$body"
@@ -38,12 +63,10 @@ install -d -m 0755 "$(dirname "$SNIPPET")"
 } > "$SNIPPET"
 chmod 0644 "$SNIPPET"
 
-backup="$(mktemp)"
-updated="$(mktemp)"
-trap 'rm -f "$backup" "$updated"' EXIT
-cp -a "$SITE" "$backup"
+cp -a "$SITE" "$site_backup"
 
-if ! awk -v snippet="$SNIPPET" '
+if ! grep -Fq "include $SNIPPET;" "$SITE"; then
+  if ! awk -v snippet="$SNIPPET" '
 {
   line = $0
   if (!in_server && line ~ /^[[:space:]]*server[[:space:]]*\{/) {
@@ -68,16 +91,19 @@ if ! awk -v snippet="$SNIPPET" '
   print line
 }
 END { if (!inserted) exit 3 }
-' "$backup" > "$updated"; then
-  log "no TLS server block found in $SITE; leaving nginx unchanged"
-  exit 0
+' "$site_backup" > "$updated"; then
+    log "no TLS server block found in $SITE; previous public route snippet restored"
+    if [[ -s "$snippet_backup" ]]; then cp -a "$snippet_backup" "$SNIPPET"; else rm -f "$SNIPPET"; fi
+    exit 0
+  fi
+  cat "$updated" > "$SITE"
 fi
-cat "$updated" > "$SITE"
 
 if ! nginx -t >/dev/null 2>&1; then
-  cp -a "$backup" "$SITE"
+  cp -a "$site_backup" "$SITE"
+  if [[ -s "$snippet_backup" ]]; then cp -a "$snippet_backup" "$SNIPPET"; else rm -f "$SNIPPET"; fi
   nginx -t >/dev/null 2>&1 || true
-  log "nginx rejected the public route include; the previous site file was restored"
+  log "nginx rejected the public route include; the previous configuration was restored"
   exit 1
 fi
 if command -v systemctl >/dev/null 2>&1; then

@@ -629,3 +629,47 @@ input[type="checkbox"] { accent-color: var(--brand); width: 14px; height: 14px; 
 @media (max-width: 980px) {
   .storage-policy-grid { grid-template-columns: 1fr; }
 }
+
+/* Add-ons workspace policy */
+.addons-admin-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.addons-admin-stat { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.addons-admin-stat svg { width: 20px; height: 20px; color: var(--accent); flex: none; }
+.addons-admin-stat b { font-size: 21px; letter-spacing: -.03em; line-height: 1; }
+.addons-admin-stat small { color: var(--muted); font-size: 10.5px; }
+.addons-admin-notice { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.addons-admin-notice > div { display: grid; gap: 3px; min-width: 0; }
+.addons-admin-notice b { font-size: 12px; }
+.addons-admin-notice span { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.addons-admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.addons-admin-card { display: flex; flex-direction: column; gap: 10px; padding: 15px 16px; min-width: 0; }
+.addons-admin-head { display: flex; align-items: flex-start; gap: 10px; }
+.addons-admin-logo { width: 44px; height: 44px; display: grid; place-items: center; flex: none; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: #fff; overflow: hidden; color: var(--muted); }
+.addons-admin-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.addons-admin-title { flex: 1; min-width: 0; }
+.addons-admin-title h3 { font-size: 13px; font-weight: 680; }
+.addons-admin-title p { margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+.addons-admin-tagline { margin: 0; color: var(--ink-2); font-size: 11.5px; line-height: 1.45; }
+.addons-admin-links { display: flex; flex-wrap: wrap; gap: 6px; }
+.addons-admin-links a { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-size: 9.5px; font-weight: 650; text-decoration: none; }
+.addons-admin-links a:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.addons-admin-detail { margin-top: 2px; }
+.addons-admin-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: auto; padding-top: 11px; border-top: 1px solid var(--line); }
+.addons-admin-check { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 10.5px; }
+.addons-admin-check input { width: 14px; height: 14px; accent-color: var(--accent); }
+.addons-admin-policy { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+.addons-admin-policy .input { width: 116px; padding: 5px 7px; font-size: 10px; }
+.addons-admin-requests { margin-bottom: 14px; }
+.addons-admin-request-list { display: grid; gap: 1px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--line); }
+.addons-admin-request { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 9px 10px; background: var(--surface); }
+.addons-admin-request-logo { width: 28px; height: 28px; display: grid; place-items: center; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
+.addons-admin-request-logo img { width: 100%; height: 100%; object-fit: contain; }
+.addons-admin-request > div { min-width: 0; display: grid; gap: 2px; }
+.addons-admin-request b { font-size: 11px; }
+.addons-admin-request small { color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.addons-admin-request-actions { display: flex; gap: 6px; }
+@media (max-width: 860px) {
+  .addons-admin-summary { grid-template-columns: 1fr; }
+  .addons-admin-notice { align-items: flex-start; flex-direction: column; }
+  .addons-admin-request { grid-template-columns: 30px minmax(0, 1fr); }
+  .addons-admin-request-actions { grid-column: 2; }
+}

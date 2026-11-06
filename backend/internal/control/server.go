@@ -110,6 +110,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerWebPushRoutes(mux)
 	s.registerSecurityReportRoutes(mux)
 	s.registerThreatIntelRoutes(mux)
+	s.registerAddonRoutes(mux)
 	s.registerUpdateRoutes(mux)
 	s.registerSystemRoutes(mux)
 	s.registerTerminalRoutes(mux)

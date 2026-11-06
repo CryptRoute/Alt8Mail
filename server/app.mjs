@@ -23,6 +23,338 @@ const MAX_JSON_BYTES = 1.5 * 1024 * 1024;
 const MAX_UPLOAD_JSON_BYTES = 13 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const MOCK_BRANDING = { productName: "Alt8Mail", primaryColor: "#0f6cbd", supportEmail: "", loginMessage: "" };
+const MOCK_ADDONS = [
+  {
+    id: "deepl", name: "DeepL", vendor: "DeepL SE", category: "Translation",
+    description: "Translate an email into your preferred language without leaving the reader.",
+    icon: "i-translate", color: "#0f2b46", logo: "/addon-logos/deepl.svg",
+    tagline: "Translate any email without leaving the reader.",
+    websiteUrl: "https://www.deepl.com", supportUrl: "https://support.deepl.com",
+    privacyUrl: "https://www.deepl.com/privacy", docsUrl: "https://developers.deepl.com/docs",
+    connectorVersion: "1.0", connectionScope: "user", authType: "api_key",
+    selfService: true, requiresTenantSetup: false, sortOrder: 10,
+    scopes: ["translate:text"],
+    permissions: ["Read the selected email's subject and body", "Send that text to DeepL for translation"],
+    actions: [{ id: "translate", label: "Translate email", description: "Translate the selected message with DeepL.", surface: "reader" }],
+    fields: [
+      { key: "apiKey", label: "DeepL API key", type: "password", required: true, secret: true, placeholder: "DeepL API key", help: "Free API keys end in :fx. The key is encrypted before it is stored." },
+      { key: "targetLanguage", label: "Translate into", type: "select", default: "EN-US", required: true, options: [
+        { value: "EN-US", label: "English (US)" }, { value: "EN-GB", label: "English (UK)" },
+        { value: "ES", label: "Spanish" }, { value: "FR", label: "French" }, { value: "DE", label: "German" },
+        { value: "IT", label: "Italian" }, { value: "PT-BR", label: "Portuguese (Brazil)" },
+        { value: "NL", label: "Dutch" }, { value: "JA", label: "Japanese" }, { value: "KO", label: "Korean" },
+        { value: "ZH", label: "Chinese" }, { value: "AR", label: "Arabic" }, { value: "RU", label: "Russian" }
+      ] }
+    ]
+  },
+  {
+    id: "todoist", name: "Todoist", vendor: "Doist", category: "Tasks",
+    description: "Turn the email you are reading into a Todoist task with its sender and context attached.",
+    icon: "i-check-circle", color: "#e44332", logo: "/addon-logos/todoist.svg",
+    tagline: "Turn an email into a task with the context attached.",
+    websiteUrl: "https://todoist.com", supportUrl: "https://todoist.com/help",
+    privacyUrl: "https://doist.com/privacy", docsUrl: "https://developer.todoist.com",
+    connectorVersion: "1.0", connectionScope: "user", authType: "api_key",
+    selfService: true, requiresTenantSetup: false, sortOrder: 20,
+    scopes: ["tasks:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Create a task in your Todoist account"],
+    actions: [{ id: "create-task", label: "Create Todoist task", description: "Create a task from the selected email.", surface: "reader" }],
+    fields: [
+      { key: "apiKey", label: "Todoist API token", type: "password", required: true, secret: true, placeholder: "Paste your Todoist API token", help: "Create a token in Todoist → Settings → Integrations → Developer. The token is encrypted before it is stored." }
+    ]
+  },
+  {
+    id: "hubspot", name: "HubSpot", vendor: "HubSpot, Inc.", category: "CRM",
+    description: "Log the selected email to the matching HubSpot contact's CRM timeline.",
+    icon: "i-people", color: "#ff7a59", logo: "/addon-logos/hubspot.svg",
+    tagline: "Log an email to the matching contact's CRM timeline.",
+    websiteUrl: "https://www.hubspot.com", supportUrl: "https://help.hubspot.com",
+    privacyUrl: "https://legal.hubspot.com/privacy-policy", docsUrl: "https://developers.hubspot.com",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "api_key",
+    selfService: false, requiresTenantSetup: true, sortOrder: 40,
+    scopes: ["crm.objects.contacts.read", "crm.objects.contacts.write", "crm.objects.notes.write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Look up the sender as a HubSpot contact", "Create a note on that contact's timeline"],
+    actions: [{ id: "log-email", label: "Log email to HubSpot", description: "Create a HubSpot note on the sender's contact record.", surface: "reader" }],
+    fields: [{ key: "accessToken", label: "HubSpot private app access token", type: "password", required: true, secret: true, placeholder: "pat-…", help: "Create a private app with contact read/write and notes write scopes. The token is encrypted before it is stored." }]
+  },
+  {
+    id: "asana", name: "Asana", vendor: "Asana, Inc.", category: "Tasks",
+    description: "Create an Asana task from the selected email in the project your workspace connects.",
+    icon: "i-check-circle", color: "#f06a6a", logo: "/addon-logos/asana.svg",
+    tagline: "Create a project task from the email you are reading.",
+    websiteUrl: "https://asana.com", supportUrl: "https://asana.com/support",
+    privacyUrl: "https://asana.com/privacy", docsUrl: "https://developers.asana.com",
+    connectorVersion: "1.0", connectionScope: "user", authType: "api_key",
+    selfService: true, requiresTenantSetup: false, sortOrder: 50,
+    scopes: ["tasks:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Create a task in your connected Asana project"],
+    actions: [{ id: "create-task", label: "Create Asana task", description: "Create a task from the selected email.", surface: "reader" }],
+    fields: [
+      { key: "apiKey", label: "Asana personal access token", type: "password", required: true, secret: true, placeholder: "Asana PAT", help: "Create a personal access token in Asana → Settings → Apps. The token is encrypted before it is stored." },
+      { key: "projectGid", label: "Project GID", type: "text", required: true, placeholder: "1201234567890123", help: "Open the Asana project and copy the numeric ID from its URL or project settings." }
+    ]
+  },
+  {
+    id: "pagerduty", name: "PagerDuty", vendor: "PagerDuty, Inc.", category: "Operations",
+    description: "Raise a PagerDuty incident from the email you are reading, with the sender and preview attached.",
+    icon: "i-alert", color: "#06ac38", logo: "/addon-logos/pagerduty.svg",
+    tagline: "Raise an incident from the email that needs attention.",
+    websiteUrl: "https://www.pagerduty.com", supportUrl: "https://support.pagerduty.com",
+    privacyUrl: "https://www.pagerduty.com/privacy/", docsUrl: "https://developer.pagerduty.com",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "api_key",
+    selfService: false, requiresTenantSetup: true, sortOrder: 60,
+    scopes: ["events:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Send a trigger event to the configured PagerDuty routing key"],
+    actions: [{ id: "trigger-incident", label: "Trigger PagerDuty incident", description: "Send an incident trigger from the selected email.", surface: "reader" }],
+    fields: [
+      { key: "routingKey", label: "PagerDuty integration routing key", type: "password", required: true, secret: true, placeholder: "Routing key", help: "Create an Events API v2 integration in PagerDuty and paste its routing key. The key is encrypted before it is stored." },
+      { key: "severity", label: "Default severity", type: "select", default: "error", required: true, options: [
+        { value: "critical", label: "Critical" }, { value: "error", label: "Error" }, { value: "warning", label: "Warning" }, { value: "info", label: "Info" }
+      ] }
+    ]
+  },
+  {
+    id: "zoom", name: "Zoom", vendor: "Zoom Communications", category: "Meetings",
+    description: "Create a Zoom meeting link from an email and copy it into the conversation.",
+    icon: "i-calendar-plus", color: "#0b5cff", logo: "/addon-logos/zoom.svg",
+    tagline: "Create a meeting link from any conversation.",
+    websiteUrl: "https://zoom.us", supportUrl: "https://support.zoom.us",
+    privacyUrl: "https://zoom.us/privacy", docsUrl: "https://developers.zoom.us",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "oauth2",
+    selfService: false, requiresTenantSetup: true, sortOrder: 70,
+    scopes: ["meeting:write"],
+    permissions: ["Read the selected email's subject", "Create a Zoom meeting under the connected account"],
+    actions: [{ id: "create-meeting", label: "Create Zoom meeting", description: "Create a meeting link for the selected email.", surface: "reader" }],
+    fields: [
+      { key: "accountId", label: "Zoom account ID", type: "text", required: true, placeholder: "Zoom account ID" },
+      { key: "clientId", label: "Zoom client ID", type: "text", required: true, placeholder: "Zoom app client ID" },
+      { key: "clientSecret", label: "Zoom client secret", type: "password", required: true, secret: true, placeholder: "Zoom app client secret" },
+      { key: "duration", label: "Default meeting length", type: "select", default: "30", required: true, options: [
+        { value: "30", label: "30 minutes" }, { value: "45", label: "45 minutes" }, { value: "60", label: "60 minutes" }
+      ] }
+    ]
+  },
+  {
+    id: "slack", name: "Slack", vendor: "Slack Technologies", category: "Communication",
+    description: "Post a clean summary of an email into the Slack channel your workspace has connected.",
+    icon: "i-people", color: "#4a154b", logo: "/addon-logos/slack.png",
+    tagline: "Share an email summary with the right Slack channel.",
+    websiteUrl: "https://slack.com", supportUrl: "https://slack.com/help",
+    privacyUrl: "https://slack.com/privacy-policy", docsUrl: "https://api.slack.com",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "webhook",
+    selfService: false, requiresTenantSetup: true, sortOrder: 30,
+    scopes: ["chat:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Post that summary to the configured Slack channel"],
+    actions: [{ id: "send-to-channel", label: "Send to Slack", description: "Post the selected email summary to Slack.", surface: "reader" }],
+    fields: [
+      { key: "webhookUrl", label: "Slack incoming webhook URL", type: "password", required: true, secret: true, placeholder: "https://hooks.slack.com/services/…", help: "Create an Incoming Webhook in your Slack app, choose its channel, and paste the URL here. The URL is encrypted before it is stored." }
+    ]
+  },
+  {
+    id: "pipedrive", name: "Pipedrive", vendor: "Pipedrive, Inc.", category: "CRM",
+    description: "Log the selected email to the matching person in Pipedrive.",
+    icon: "i-people", color: "#017737", logo: "/addon-logos/pipedrive.png",
+    tagline: "Keep every customer email attached to the right Pipedrive record.",
+    websiteUrl: "https://www.pipedrive.com", supportUrl: "https://support.pipedrive.com",
+    privacyUrl: "https://www.pipedrive.com/en/privacy", docsUrl: "https://developers.pipedrive.com",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "api_key",
+    selfService: false, requiresTenantSetup: true, sortOrder: 80,
+    scopes: ["contacts:read", "notes:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Find the sender as a Pipedrive person", "Create a note on that person's timeline"],
+    actions: [{ id: "log-email", label: "Log email to Pipedrive", description: "Create a note on the sender's Pipedrive person.", surface: "reader" }],
+    fields: [
+      { key: "apiToken", label: "Pipedrive API token", type: "password", required: true, secret: true, placeholder: "Pipedrive API token", help: "Create a personal API token in Pipedrive → Settings → Personal preferences → API. The token is encrypted before it is stored." }
+    ]
+  },
+  {
+    id: "zoho", name: "Zoho CRM", vendor: "Zoho Corporation", category: "CRM",
+    description: "Add an email note to the matching contact in Zoho CRM.",
+    icon: "i-people", color: "#e42527", logo: "/addon-logos/zoho.svg",
+    tagline: "Keep customer conversations in the Zoho CRM contact timeline.",
+    websiteUrl: "https://www.zoho.com/crm/", supportUrl: "https://help.zoho.com/portal/en/kb/crm",
+    privacyUrl: "https://www.zoho.com/privacy.html", docsUrl: "https://www.zoho.com/crm/developer/docs/api/",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "oauth2",
+    selfService: false, requiresTenantSetup: true, sortOrder: 90,
+    scopes: ["ZohoCRM.modules.contacts.READ", "ZohoCRM.modules.notes.CREATE"],
+    permissions: ["Read the selected email's subject, sender and preview", "Find the sender as a Zoho CRM contact", "Create a note on that contact's record"],
+    actions: [{ id: "log-email", label: "Log email to Zoho CRM", description: "Create a note on the sender's Zoho CRM contact record.", surface: "reader" }],
+    fields: [
+      { key: "region", label: "Zoho data centre", type: "select", default: "com", required: true, options: [
+        { value: "com", label: "United States (.com)" }, { value: "eu", label: "Europe (.eu)" },
+        { value: "in", label: "India (.in)" }, { value: "com.au", label: "Australia (.com.au)" },
+        { value: "jp", label: "Japan (.jp)" }
+      ] },
+      { key: "clientId", label: "Zoho client ID", type: "text", required: true, placeholder: "1000.XXXXXXXXXXXXXXXX" },
+      { key: "clientSecret", label: "Zoho client secret", type: "password", required: true, secret: true, placeholder: "Zoho client secret" },
+      { key: "refreshToken", label: "Zoho refresh token", type: "password", required: true, secret: true, placeholder: "Refresh token from a Self Client", help: "Create a Self Client in the Zoho API console, generate a refresh token with the CRM scopes, and paste it here. The token is encrypted before it is stored." }
+    ]
+  },
+  {
+    id: "clickup", name: "ClickUp", vendor: "ClickUp", category: "Tasks",
+    description: "Create a ClickUp task from the email you are reading.",
+    icon: "i-check-circle", color: "#7b68ee", logo: "/addon-logos/clickup.svg",
+    tagline: "Turn important mail into an actionable ClickUp task.",
+    websiteUrl: "https://clickup.com", supportUrl: "https://help.clickup.com",
+    privacyUrl: "https://clickup.com/privacy", docsUrl: "https://developer.clickup.com",
+    connectorVersion: "1.0", connectionScope: "user", authType: "api_key",
+    selfService: true, requiresTenantSetup: false, sortOrder: 100,
+    scopes: ["tasks:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Create a task in the connected ClickUp list"],
+    actions: [{ id: "create-task", label: "Create ClickUp task", description: "Create a task from the selected email.", surface: "reader" }],
+    fields: [
+      { key: "apiToken", label: "ClickUp personal API token", type: "password", required: true, secret: true, placeholder: "pk_…", help: "Create a personal API token in ClickUp → Settings → Apps. The token is encrypted before it is stored." },
+      { key: "listId", label: "ClickUp list ID", type: "text", required: true, placeholder: "901234567890", help: "Open the ClickUp list and copy the numeric ID from its URL or list settings." }
+    ]
+  },
+  {
+    id: "zendesk", name: "Zendesk", vendor: "Zendesk, Inc.", category: "Support",
+    description: "Open a support ticket from the email you are reading.",
+    icon: "i-people", color: "#03363d", logo: "/addon-logos/zendesk.svg",
+    tagline: "Turn customer mail into a tracked Zendesk ticket.",
+    websiteUrl: "https://www.zendesk.com", supportUrl: "https://support.zendesk.com",
+    privacyUrl: "https://www.zendesk.com/legal/privacy-policy/", docsUrl: "https://developer.zendesk.com",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "api_key",
+    selfService: false, requiresTenantSetup: true, sortOrder: 110,
+    scopes: ["tickets:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Create a ticket with the email as the initial comment"],
+    actions: [{ id: "create-ticket", label: "Create Zendesk ticket", description: "Open a ticket with the selected email.", surface: "reader" }],
+    fields: [
+      { key: "subdomain", label: "Zendesk subdomain", type: "text", required: true, placeholder: "acme", help: "Use acme when your help centre is acme.zendesk.com." },
+      { key: "email", label: "Agent email", type: "text", required: true, placeholder: "support@example.com", help: "The Zendesk agent email that owns the API token." },
+      { key: "apiToken", label: "Zendesk API token", type: "password", required: true, secret: true, placeholder: "Zendesk API token", help: "Create an API token in Zendesk Admin Center → Apps and integrations → APIs → Zendesk API. The token is encrypted before it is stored." }
+    ]
+  },
+  {
+    id: "salesforce", name: "Salesforce", vendor: "Salesforce, Inc.", category: "CRM",
+    description: "Log the selected email as a completed task on the matching Salesforce contact.",
+    icon: "i-people", color: "#00a1e0", logo: "/addon-logos/salesforce.svg",
+    tagline: "Keep every customer conversation in Salesforce.",
+    websiteUrl: "https://www.salesforce.com", supportUrl: "https://help.salesforce.com",
+    privacyUrl: "https://www.salesforce.com/company/privacy/", docsUrl: "https://developer.salesforce.com/docs",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "oauth2",
+    selfService: false, requiresTenantSetup: true, sortOrder: 120,
+    scopes: ["api", "refresh_token"],
+    permissions: ["Read the selected email's subject, sender and preview", "Find the sender as a Salesforce contact", "Create a completed task on that contact"],
+    actions: [{ id: "log-email", label: "Log email to Salesforce", description: "Create a task on the sender's Salesforce contact.", surface: "reader" }],
+    fields: [
+      { key: "loginUrl", label: "Salesforce login", type: "select", default: "https://login.salesforce.com", required: true, options: [
+        { value: "https://login.salesforce.com", label: "Production" }, { value: "https://test.salesforce.com", label: "Sandbox" }
+      ] },
+      { key: "clientId", label: "Connected app consumer key", type: "text", required: true, placeholder: "Consumer key" },
+      { key: "clientSecret", label: "Connected app consumer secret", type: "password", required: true, secret: true, placeholder: "Consumer secret" },
+      { key: "refreshToken", label: "Salesforce refresh token", type: "password", required: true, secret: true, placeholder: "Refresh token", help: "Authorize a connected app with the api and refresh_token scopes, then paste its refresh token. The token is encrypted before it is stored." }
+    ]
+  },
+  {
+    id: "freshdesk", name: "Freshdesk", vendor: "Freshworks", category: "Support",
+    description: "Open a Freshdesk ticket from the email you are reading.",
+    icon: "i-people", color: "#25c16f", logo: "/addon-logos/freshdesk.svg",
+    tagline: "Turn customer mail into a Freshdesk ticket.",
+    websiteUrl: "https://www.freshworks.com/freshdesk/", supportUrl: "https://support.freshdesk.com",
+    privacyUrl: "https://www.freshworks.com/privacy/", docsUrl: "https://developers.freshdesk.com",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "api_key",
+    selfService: false, requiresTenantSetup: true, sortOrder: 130,
+    scopes: ["tickets:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Create a ticket with the email as the initial description"],
+    actions: [{ id: "create-ticket", label: "Create Freshdesk ticket", description: "Open a ticket with the selected email.", surface: "reader" }],
+    fields: [
+      { key: "domain", label: "Freshdesk domain", type: "text", required: true, placeholder: "acme", help: "Use acme when your help desk is acme.freshdesk.com." },
+      { key: "apiKey", label: "Freshdesk API key", type: "password", required: true, secret: true, placeholder: "Freshdesk API key", help: "Find your API key in Freshdesk Profile settings. The key is encrypted before it is stored." }
+    ]
+  },
+  {
+    id: "intercom", name: "Intercom", vendor: "Intercom, Inc.", category: "Support",
+    description: "Add an internal note to the matching Intercom contact.",
+    icon: "i-people", color: "#1f8ded", logo: "/addon-logos/intercom.svg",
+    tagline: "Keep customer context in Intercom without copying and pasting.",
+    websiteUrl: "https://www.intercom.com", supportUrl: "https://help.intercom.com",
+    privacyUrl: "https://www.intercom.com/legal/privacy", docsUrl: "https://developers.intercom.com",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "api_key",
+    selfService: false, requiresTenantSetup: true, sortOrder: 140,
+    scopes: ["contacts:read", "notes:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Find the sender as an Intercom contact", "Add an internal note to that contact"],
+    actions: [{ id: "add-note", label: "Add Intercom note", description: "Add a note to the sender's Intercom contact.", surface: "reader" }],
+    fields: [
+      { key: "region", label: "Intercom region", type: "select", default: "us", required: true, options: [
+        { value: "us", label: "United States" }, { value: "eu", label: "Europe" }, { value: "au", label: "Australia" }
+      ] },
+      { key: "accessToken", label: "Intercom access token", type: "password", required: true, secret: true, placeholder: "Intercom access token", help: "Create a private app access token in Intercom → Settings → Integrations. The token is encrypted before it is stored." }
+    ]
+  },
+  {
+    id: "ticktick", name: "TickTick", vendor: "TickTick", category: "Tasks",
+    description: "Create a TickTick task from the email you are reading.",
+    icon: "i-check-circle", color: "#4772fa", logo: "/addon-logos/ticktick.svg",
+    tagline: "Capture an email as a TickTick task.",
+    websiteUrl: "https://ticktick.com", supportUrl: "https://help.ticktick.com",
+    privacyUrl: "https://ticktick.com/privacy", docsUrl: "https://developer.ticktick.com",
+    connectorVersion: "1.0", connectionScope: "user", authType: "oauth2",
+    selfService: true, requiresTenantSetup: false, sortOrder: 150,
+    scopes: ["tasks:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Create a task in the connected TickTick project"],
+    actions: [{ id: "create-task", label: "Create TickTick task", description: "Create a task from the selected email.", surface: "reader" }],
+    fields: [
+      { key: "accessToken", label: "TickTick access token", type: "password", required: true, secret: true, placeholder: "TickTick OAuth access token", help: "Create an app in the TickTick developer console and paste its OAuth access token. The token is encrypted before it is stored." },
+      { key: "projectId", label: "TickTick project ID", type: "text", required: true, placeholder: "Project ID", help: "The project ID where new tasks should be created." }
+    ]
+  },
+  {
+    id: "calendly", name: "Calendly", vendor: "Calendly LLC", category: "Scheduling",
+    description: "Create a single-use Calendly booking link from an email.",
+    icon: "i-calendar-plus", color: "#006bff", logo: "/addon-logos/calendly.svg",
+    tagline: "Offer a booking link without leaving the conversation.",
+    websiteUrl: "https://calendly.com", supportUrl: "https://help.calendly.com",
+    privacyUrl: "https://calendly.com/privacy", docsUrl: "https://developer.calendly.com",
+    connectorVersion: "1.0", connectionScope: "user", authType: "api_key",
+    selfService: true, requiresTenantSetup: false, sortOrder: 160,
+    scopes: ["scheduling_links:write"],
+    permissions: ["Read the selected email's subject and sender", "Create a single-use scheduling link for your Calendly event"],
+    actions: [{ id: "create-link", label: "Create Calendly link", description: "Create a single-use booking link for this email.", surface: "reader" }],
+    fields: [
+      { key: "accessToken", label: "Calendly personal access token", type: "password", required: true, secret: true, placeholder: "Calendly access token", help: "Create a personal access token in Calendly integrations. The token is encrypted before it is stored." },
+      { key: "eventTypeUri", label: "Calendly event type URI", type: "text", required: true, placeholder: "https://api.calendly.com/event_types/…" },
+      { key: "ownerUri", label: "Calendly owner URI", type: "text", required: true, placeholder: "https://api.calendly.com/users/…" }
+    ]
+  },
+  {
+    id: "jira", name: "Jira", vendor: "Atlassian", category: "Engineering",
+    description: "Create a Jira issue from the email you are reading.",
+    icon: "i-check-circle", color: "#0052cc", logo: "/addon-logos/jira.svg",
+    tagline: "Turn customer mail into a tracked Jira issue.",
+    websiteUrl: "https://www.atlassian.com/software/jira", supportUrl: "https://support.atlassian.com/jira-software-cloud/",
+    privacyUrl: "https://www.atlassian.com/legal/privacy-policy", docsUrl: "https://developer.atlassian.com/cloud/jira/platform/rest/v3/",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "api_key",
+    selfService: false, requiresTenantSetup: true, sortOrder: 170,
+    scopes: ["issues:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Create an issue in the configured Jira project"],
+    actions: [{ id: "create-issue", label: "Create Jira issue", description: "Create an issue from the selected email.", surface: "reader" }],
+    fields: [
+      { key: "site", label: "Jira Cloud site", type: "text", required: true, placeholder: "acme.atlassian.net", help: "Use the hostname of your Jira Cloud site, without https://." },
+      { key: "email", label: "Atlassian account email", type: "text", required: true, placeholder: "you@example.com" },
+      { key: "apiToken", label: "Atlassian API token", type: "password", required: true, secret: true, placeholder: "Atlassian API token", help: "Create an API token in your Atlassian account security settings. The token is encrypted before it is stored." },
+      { key: "projectKey", label: "Jira project key", type: "text", required: true, placeholder: "ENG" },
+      { key: "issueType", label: "Issue type", type: "text", default: "Task", required: true, placeholder: "Task" }
+    ]
+  },
+  {
+    id: "linear", name: "Linear", vendor: "Linear", category: "Engineering",
+    description: "Create a Linear issue from the email you are reading.",
+    icon: "i-check-circle", color: "#5e6ad2", logo: "/addon-logos/linear.svg",
+    tagline: "Move an email into the team's Linear backlog.",
+    websiteUrl: "https://linear.app", supportUrl: "https://linear.app/contact/support",
+    privacyUrl: "https://linear.app/privacy", docsUrl: "https://developers.linear.app",
+    connectorVersion: "1.0", connectionScope: "tenant", authType: "api_key",
+    selfService: false, requiresTenantSetup: true, sortOrder: 180,
+    scopes: ["issues:write"],
+    permissions: ["Read the selected email's subject, sender and preview", "Create an issue in the configured Linear team"],
+    actions: [{ id: "create-issue", label: "Create Linear issue", description: "Create an issue from the selected email.", surface: "reader" }],
+    fields: [
+      { key: "apiKey", label: "Linear API key", type: "password", required: true, secret: true, placeholder: "lin_api_…", help: "Create a personal API key in Linear → Settings → API. The key is encrypted before it is stored." },
+      { key: "teamId", label: "Linear team ID", type: "text", required: true, placeholder: "Team UUID", help: "Find the team ID in Linear team settings or the API." }
+    ]
+  }
+];
+
 const MOCK_DLP = {
   enabled: true,
   defaultClassification: "Internal",
@@ -221,6 +553,10 @@ export async function createApp(options = {}) {
   if (!db.user.preferences) db.user.preferences = {};
   if (!db.user.security) db.user.security = { twoFactor: { enabled: false } };
   if (!db.user.id) db.user.id = "user_demo_avery";
+  if (!Array.isArray(db.addonConnections)) db.addonConnections = [];
+  if (!Array.isArray(db.addonInstalls)) db.addonInstalls = [];
+  if (!Array.isArray(db.addonRequests)) db.addonRequests = [];
+  if (!Array.isArray(db.tenantAddons)) db.tenantAddons = [];
   if (!Array.isArray(db.delegatedMailboxes) || db.delegatedMailboxes.length === 0) {
     db.delegatedMailboxes = [{
       id: "user_demo_marcus",
@@ -481,6 +817,102 @@ export async function createApp(options = {}) {
       unread: messages.filter((message) => message.folder === folder.id && message.unread).length,
       total: messages.filter((message) => message.folder === folder.id).length
     }));
+  }
+
+  function addonDefinition(id) {
+    return MOCK_ADDONS.find((addon) => addon.id === id) || null;
+  }
+
+  function addonAdminUser() {
+    return db.user.isSystemAdmin === true || db.user.role === "owner" || db.user.role === "admin";
+  }
+
+  function addonTenantState(addonId) {
+    const row = (db.tenantAddons || []).find((item) => item.addonId === addonId);
+    return row
+      ? { exists: true, enabled: row.enabled !== false, installPolicy: row.installPolicy || "self_service" }
+      : { exists: false, enabled: false, installPolicy: "self_service" };
+  }
+
+  function addonConnection(addon) {
+    const scope = addon.connectionScope;
+    return (db.addonConnections || []).find((item) =>
+      item.addonId === addon.id && item.status === "active" && item.scope === scope &&
+      (scope === "tenant" || item.ownerId === db.user.id)
+    ) || null;
+  }
+
+  function addonInstall(addonId) {
+    return (db.addonInstalls || []).find((item) =>
+      item.addonId === addonId && item.userId === db.user.id && item.status === "active"
+    ) || null;
+  }
+
+  function addonRequestPending(addonId) {
+    const request = (db.addonRequests || []).find((item) =>
+      item.addonId === addonId && item.userId === db.user.id && item.status === "pending"
+    );
+    return request ? { pending: true, type: request.requestType || "setup" } : { pending: false, type: "" };
+  }
+
+  function addonView(addon, admin = addonAdminUser()) {
+    const tenant = addonTenantState(addon.id);
+    const effectiveTenant = tenant.exists ? tenant.enabled : addon.connectionScope === "user";
+    const connection = addonConnection(addon);
+    const install = addonInstall(addon.id);
+    const request = addonRequestPending(addon.id);
+    const approvalRequired = !admin && tenant.installPolicy === "approval_required";
+    const tenantPolicyDisabled = tenant.exists && !tenant.enabled;
+    let status = "blocked";
+    if (tenantPolicyDisabled) status = "blocked";
+    else if (install && connection) status = "installed";
+    else if (install) status = "needs_setup";
+    else if (connection && approvalRequired) status = "approval_required";
+    else if (connection) status = "ready";
+    else if (addon.connectionScope === "user" && addon.selfService) status = "needs_connection";
+    else status = "needs_setup";
+    if (request.pending && status !== "installed" && status !== "ready") status = "requested";
+    const canRequest = !admin && (status === "needs_setup" || status === "approval_required" || (status === "blocked" && tenantPolicyDisabled));
+    return {
+      ...addon,
+      systemEnabled: true,
+      tenantEnabled: effectiveTenant,
+      tenantPolicySet: tenant.exists,
+      installPolicy: tenant.installPolicy,
+      approvalRequired,
+      oauthAvailable: addon.id === "slack",
+      oauthMode: addon.id === "slack" ? "managed" : "",
+      configured: Boolean(connection),
+      connectionLabel: connection?.label || "",
+      connectionConfig: connection?.config || {},
+      installed: Boolean(install),
+      installedAt: install?.createdAt || null,
+      requestPending: request.pending,
+      requestType: request.type,
+      status,
+      canRequest,
+      canManage: admin,
+      availableActions: install && connection ? addon.actions : []
+    };
+  }
+
+  function addonRequestsPayload() {
+    return (db.addonRequests || [])
+      .filter((request) => request.status === "pending")
+      .map((request) => {
+        const addon = addonDefinition(request.addonId);
+        return {
+          id: request.id, addonId: request.addonId, addonName: addon?.name || request.addonId,
+          addonLogo: addon?.logo || "",
+          userId: request.userId, userName: db.user.name, userEmail: db.user.email,
+          requestType: request.requestType, note: request.note || "",
+          createdAt: request.createdAt
+        };
+      });
+  }
+
+  function addonMessage(messageId) {
+    return (db.messages || []).find((message) => message.id === messageId) || null;
   }
 
   function sessionFrom(req) {
@@ -1705,6 +2137,354 @@ export async function createApp(options = {}) {
             cookieHeader(CSRF_COOKIE, "", { secure, maxAge: 0 })
           ]
         });
+        return;
+      }
+      if (pathname === "/api/addons" && req.method === "GET") {
+        const admin = addonAdminUser();
+        const requests = admin ? addonRequestsPayload() : [];
+        sendJson(res, 200, {
+          addons: MOCK_ADDONS.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((addon) => addonView(addon, admin)),
+          isAdmin: admin,
+          requests,
+          pendingRequestCount: requests.length
+        });
+        return;
+      }
+      const addonOAuthStartMatch = pathname.match(/^\/api\/addons\/([^/]+)\/oauth\/start$/);
+      if (addonOAuthStartMatch && req.method === "POST") {
+        const addon = addonDefinition(decodeURIComponent(addonOAuthStartMatch[1]));
+        if (!addon || addon.id !== "slack") throw new ApiError(404, "ADDON_OAUTH", "OAuth is not available for this add-on");
+        if (!addonAdminUser()) throw new ApiError(403, "ADDON_ADMIN", "Only an administrator can connect this add-on");
+        const body = await readJson(req);
+        sendJson(res, 200, {
+          oauthUrl: "/api/addons/slack/oauth/mock-callback",
+          mode: body.mode === "byo" ? "byo" : "managed"
+        });
+        return;
+      }
+      if (pathname === "/api/addons/slack/oauth/mock-callback" && req.method === "GET") {
+        if (!addonAdminUser()) throw new ApiError(403, "ADDON_ADMIN", "Only an administrator can connect this add-on");
+        for (const existing of db.addonConnections) {
+          if (existing.addonId === "slack" && existing.scope === "tenant" && existing.status === "active") existing.status = "revoked";
+        }
+        const connection = {
+          id: id("acon"), addonId: "slack", scope: "tenant", ownerId: null,
+          label: "Alt8Mail Demo · #inbox", credentials: { oauth: true },
+          config: { oauth: true, teamName: "Alt8Mail Demo", channel: "#inbox" },
+          status: "active", createdAt: nowIso()
+        };
+        db.addonConnections.push(connection);
+        for (const install of db.addonInstalls) {
+          if (install.addonId === "slack") install.connectionId = connection.id;
+        }
+        const row = db.tenantAddons.find((item) => item.addonId === "slack");
+        if (row) { row.enabled = true; row.updatedAt = nowIso(); }
+        else db.tenantAddons.push({ addonId: "slack", enabled: true, installPolicy: "self_service", updatedAt: nowIso() });
+        for (const request of db.addonRequests) {
+          if (request.addonId === "slack" && request.status === "pending") {
+            request.status = "approved"; request.resolvedAt = nowIso();
+          }
+        }
+        addAudit(req, "addon.oauth_connected", "Slack", "Connected Slack workspace through the managed relay");
+        await store.save();
+        res.writeHead(302, { Location: "/?addon=slack&addon_status=connected#/Settings/addons" });
+        res.end();
+        return;
+      }
+      const addonActionMatch = pathname.match(/^\/api\/addons\/([^/]+)\/actions\/([^/]+)$/);
+      if (addonActionMatch && req.method === "POST") {
+        const addon = addonDefinition(decodeURIComponent(addonActionMatch[1]));
+        if (!addon) throw new ApiError(404, "ADDON_NOT_FOUND", "Add-on not found");
+        const install = addonInstall(addon.id);
+        const connection = addonConnection(addon);
+        if (!install || !connection) throw new ApiError(403, "ADDON_NOT_INSTALLED", "Install this add-on before using it");
+        const body = await readJson(req);
+        const message = addonMessage(String(body.messageId || ""));
+        if (!message) throw new ApiError(404, "MESSAGE_NOT_FOUND", "Message not found");
+        const action = decodeURIComponent(addonActionMatch[2]);
+        let result = null;
+        if (addon.id === "deepl" && action === "translate") {
+          result = { translation: { text: `Translated: ${message.subject}`, sourceLanguage: "EN", targetLanguage: connection.config?.targetLanguage || "EN-US" } };
+        } else if (addon.id === "todoist" && action === "create-task") {
+          result = { taskId: id("task") };
+        } else if (addon.id === "slack" && action === "send-to-channel") {
+          result = { posted: true };
+        } else if (addon.id === "hubspot" && action === "log-email") {
+          result = { contactId: "contact-1", contactName: message.from?.name || message.from?.email || "HubSpot contact", noteId: id("note") };
+        } else if (addon.id === "asana" && action === "create-task") {
+          result = { taskId: id("task"), taskUrl: "https://app.asana.com/0/1200000000000000/1200000000000001" };
+        } else if (addon.id === "pagerduty" && action === "trigger-incident") {
+          result = { status: "success", dedupKey: id("pd") };
+        } else if (addon.id === "zoom" && action === "create-meeting") {
+          result = { meetingId: "987654321", meetingUrl: "https://zoom.us/j/987654321", duration: Number(connection.config?.duration || 30), startTime: nowIso() };
+        } else if (addon.id === "pipedrive" && action === "log-email") {
+          result = { personId: "person-1", noteId: id("note"), contactName: message.from?.name || message.from?.email || "Pipedrive person" };
+        } else if (addon.id === "zoho" && action === "log-email") {
+          result = { contactId: "contact-1", noteId: id("note"), contactName: message.from?.name || message.from?.email || "Zoho CRM contact" };
+        } else if (addon.id === "clickup" && action === "create-task") {
+          result = { taskId: id("task"), taskUrl: "https://app.clickup.com/t/901234567890/abc123", listId: connection.config?.listId || "" };
+        } else if (addon.id === "zendesk" && action === "create-ticket") {
+          const subdomain = connection.config?.subdomain || "acme";
+          result = { ticketId: 12345, ticketUrl: `https://${subdomain}.zendesk.com/agent/tickets/12345` };
+        } else if (addon.id === "salesforce" && action === "log-email") {
+          result = { contactId: "003000000000001", taskId: "00T000000000001", contactName: message.from?.name || message.from?.email || "Salesforce contact" };
+        } else if (addon.id === "freshdesk" && action === "create-ticket") {
+          const domain = connection.config?.domain || "acme";
+          result = { ticketId: 12345, ticketUrl: `https://${domain}.freshdesk.com/a/tickets/12345` };
+        } else if (addon.id === "intercom" && action === "add-note") {
+          result = { contactId: "contact-1", noteId: "note-1", contactName: message.from?.name || message.from?.email || "Intercom contact" };
+        } else if (addon.id === "ticktick" && action === "create-task") {
+          const projectId = connection.config?.projectId || "project-1";
+          result = { taskId: "task-1", taskUrl: `https://ticktick.com/webapp/#p/${projectId}/tasks/task-1` };
+        } else if (addon.id === "calendly" && action === "create-link") {
+          result = { bookingUrl: "https://calendly.com/acme/30min?month=2026-11" };
+        } else if (addon.id === "jira" && action === "create-issue") {
+          const site = connection.config?.site || "acme.atlassian.net";
+          result = { issueId: "10001", issueKey: "ENG-101", issueUrl: `https://${site}/browse/ENG-101` };
+        } else if (addon.id === "linear" && action === "create-issue") {
+          result = { issueId: "issue-1", issueKey: "ENG-101", issueUrl: "https://linear.app/acme/issue/ENG-101" };
+        } else {
+          throw new ApiError(404, "ADDON_ACTION", "Add-on action not found");
+        }
+        addAudit(req, "addon.action", addon.name, `Used ${addon.name} action: ${action}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, result });
+        return;
+      }
+      const addonConnectMatch = pathname.match(/^\/api\/addons\/([^/]+)\/connect$/);
+      if (addonConnectMatch && req.method === "POST") {
+        const addon = addonDefinition(decodeURIComponent(addonConnectMatch[1]));
+        if (!addon) throw new ApiError(404, "ADDON_NOT_FOUND", "Add-on not found");
+        const admin = addonAdminUser();
+        if (addon.connectionScope === "tenant" && !admin) throw new ApiError(403, "ADDON_ADMIN", "Only an administrator can set up this add-on");
+        const tenant = addonTenantState(addon.id);
+        if (addon.connectionScope === "user" && !admin && tenant.exists && !tenant.enabled) {
+          throw new ApiError(403, "ADDON_DISABLED", "This add-on is disabled for the workspace");
+        }
+        const body = await readJson(req);
+        const config = {};
+        if (addon.id === "slack") {
+          const webhookUrl = String(body.webhookUrl || "").trim();
+          if (!/^https:\/\/hooks\.slack\.com\/services\//.test(webhookUrl)) throw new ApiError(400, "ADDON_WEBHOOK", "Paste a valid Slack incoming webhook URL");
+          body.webhookUrl = webhookUrl;
+        } else if (addon.id === "todoist") {
+          if (String(body.apiKey || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid Todoist API token");
+        } else if (addon.id === "deepl") {
+          if (String(body.apiKey || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid DeepL API key");
+          config.targetLanguage = String(body.targetLanguage || "EN-US").toUpperCase();
+        } else if (addon.id === "hubspot") {
+          if (String(body.accessToken || "").trim().length < 12) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a HubSpot private app access token");
+        } else if (addon.id === "asana") {
+          if (String(body.apiKey || "").trim().length < 12) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid Asana personal access token");
+          if (!/^[A-Za-z0-9]{1,32}$/.test(String(body.projectGid || "").trim())) throw new ApiError(400, "ADDON_PROJECT", "Enter a valid Asana project GID");
+          config.projectGid = String(body.projectGid).trim();
+        } else if (addon.id === "pagerduty") {
+          if (String(body.routingKey || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid PagerDuty routing key");
+          config.severity = String(body.severity || "error");
+        } else if (addon.id === "zoom") {
+          if (!String(body.accountId || "").trim() || !String(body.clientId || "").trim() || !String(body.clientSecret || "").trim()) {
+            throw new ApiError(400, "ADDON_CREDENTIALS", "Enter the Zoom account ID, client ID and client secret");
+          }
+          config.duration = String(body.duration || "30");
+        } else if (addon.id === "pipedrive") {
+          if (String(body.apiToken || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid Pipedrive API token");
+        } else if (addon.id === "zoho") {
+          const region = String(body.region || "com").trim().toLowerCase();
+          if (!["com", "eu", "in", "com.au", "jp"].includes(region)) throw new ApiError(400, "ADDON_REGION", "Choose a supported Zoho data centre");
+          if (!String(body.clientId || "").trim() || !String(body.clientSecret || "").trim() || !String(body.refreshToken || "").trim()) {
+            throw new ApiError(400, "ADDON_CREDENTIALS", "Enter the Zoho client ID, client secret and refresh token");
+          }
+          config.region = region;
+        } else if (addon.id === "clickup") {
+          if (String(body.apiToken || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid ClickUp personal API token");
+          const listId = String(body.listId || "").trim();
+          if (!/^[A-Za-z0-9_-]{1,80}$/.test(listId)) throw new ApiError(400, "ADDON_LIST", "Enter a valid ClickUp list ID");
+          config.listId = listId;
+        } else if (addon.id === "zendesk") {
+          const subdomain = String(body.subdomain || "").trim().toLowerCase();
+          if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain)) throw new ApiError(400, "ADDON_SUBDOMAIN", "Enter a valid Zendesk subdomain");
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(body.email || "").trim())) throw new ApiError(400, "ADDON_EMAIL", "Enter the Zendesk agent email");
+          if (String(body.apiToken || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid Zendesk API token");
+          config.subdomain = subdomain;
+        } else if (addon.id === "salesforce") {
+          const loginUrl = String(body.loginUrl || "https://login.salesforce.com").trim();
+          if (!["https://login.salesforce.com", "https://test.salesforce.com"].includes(loginUrl)) throw new ApiError(400, "ADDON_LOGIN", "Choose a valid Salesforce login URL");
+          if (!String(body.clientId || "").trim() || !String(body.clientSecret || "").trim() || !String(body.refreshToken || "").trim()) {
+            throw new ApiError(400, "ADDON_CREDENTIALS", "Enter the Salesforce consumer key, consumer secret and refresh token");
+          }
+          config.loginUrl = loginUrl;
+        } else if (addon.id === "freshdesk") {
+          const domain = String(body.domain || "").trim().toLowerCase();
+          if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(domain)) throw new ApiError(400, "ADDON_SUBDOMAIN", "Enter a valid Freshdesk domain");
+          if (String(body.apiKey || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid Freshdesk API key");
+          config.domain = domain;
+        } else if (addon.id === "intercom") {
+          const region = String(body.region || "us").trim().toLowerCase();
+          if (!["us", "eu", "au"].includes(region)) throw new ApiError(400, "ADDON_REGION", "Choose a supported Intercom region");
+          if (String(body.accessToken || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid Intercom access token");
+          config.region = region;
+        } else if (addon.id === "ticktick") {
+          if (String(body.accessToken || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid TickTick access token");
+          const projectId = String(body.projectId || "").trim();
+          if (!/^[A-Za-z0-9_-]{1,64}$/.test(projectId)) throw new ApiError(400, "ADDON_PROJECT", "Enter a valid TickTick project ID");
+          config.projectId = projectId;
+        } else if (addon.id === "calendly") {
+          if (String(body.accessToken || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid Calendly access token");
+          const eventTypeUri = String(body.eventTypeUri || "").trim();
+          const ownerUri = String(body.ownerUri || "").trim();
+          if (!/^https:\/\/api\.calendly\.com\/event_types\/[^/]+$/.test(eventTypeUri) || !/^https:\/\/api\.calendly\.com\/users\/[^/]+$/.test(ownerUri)) {
+            throw new ApiError(400, "ADDON_URI", "Enter the Calendly event type and owner URIs");
+          }
+          config.eventTypeUri = eventTypeUri;
+          config.ownerUri = ownerUri;
+        } else if (addon.id === "jira") {
+          let site = String(body.site || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+          if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.atlassian\.net$/.test(site)) throw new ApiError(400, "ADDON_SITE", "Enter a Jira Cloud site such as acme.atlassian.net");
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(body.email || "").trim())) throw new ApiError(400, "ADDON_EMAIL", "Enter the Atlassian account email");
+          if (String(body.apiToken || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid Atlassian API token");
+          const projectKey = String(body.projectKey || "").trim().toUpperCase();
+          if (!/^[A-Z][A-Z0-9]{1,9}$/.test(projectKey)) throw new ApiError(400, "ADDON_PROJECT", "Enter a valid Jira project key");
+          config.site = site;
+          config.projectKey = projectKey;
+          config.issueType = String(body.issueType || "Task").trim() || "Task";
+        } else if (addon.id === "linear") {
+          if (String(body.apiKey || "").trim().length < 8) throw new ApiError(400, "ADDON_CREDENTIALS", "Paste a valid Linear API key");
+          const teamId = String(body.teamId || "").trim();
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(teamId)) throw new ApiError(400, "ADDON_TEAM", "Enter a valid Linear team ID");
+          config.teamId = teamId;
+        }
+        for (const existing of db.addonConnections) {
+          if (existing.addonId === addon.id && existing.scope === addon.connectionScope && existing.status === "active" &&
+              (addon.connectionScope === "tenant" || existing.ownerId === db.user.id)) existing.status = "revoked";
+        }
+        const connection = {
+          id: id("acon"), addonId: addon.id, scope: addon.connectionScope,
+          ownerId: addon.connectionScope === "user" ? db.user.id : null,
+          label: addon.connectionScope === "tenant" ? `${addon.name} workspace` : `${addon.name} account`,
+          credentials: { ...body }, config, status: "active", createdAt: nowIso()
+        };
+        db.addonConnections.push(connection);
+        for (const install of db.addonInstalls) {
+          if (install.addonId === addon.id && (addon.connectionScope === "tenant" || install.userId === db.user.id)) {
+            install.connectionId = connection.id;
+          }
+        }
+        if (addon.connectionScope === "tenant") {
+          const row = db.tenantAddons.find((item) => item.addonId === addon.id);
+          if (row) { row.enabled = true; row.updatedAt = nowIso(); }
+          else db.tenantAddons.push({ addonId: addon.id, enabled: true, installPolicy: "self_service", updatedAt: nowIso() });
+          for (const request of db.addonRequests) {
+            if (request.addonId === addon.id && request.status === "pending") {
+              request.status = "approved"; request.resolvedAt = nowIso();
+            }
+          }
+        }
+        addAudit(req, "addon.connected", addon.name, `Connected ${addon.name}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, addonId: addon.id, configured: true });
+        return;
+      }
+      const addonInstallMatch = pathname.match(/^\/api\/addons\/([^/]+)\/install$/);
+      if (addonInstallMatch && req.method === "POST") {
+        const addon = addonDefinition(decodeURIComponent(addonInstallMatch[1]));
+        if (!addon) throw new ApiError(404, "ADDON_NOT_FOUND", "Add-on not found");
+        const tenant = addonTenantState(addon.id);
+        if (tenant.exists && !tenant.enabled) throw new ApiError(403, "ADDON_DISABLED", "This add-on is disabled for the workspace");
+        if (!addonAdminUser() && tenant.installPolicy === "approval_required" && !addonInstall(addon.id)) {
+          throw new ApiError(409, "ADDON_APPROVAL_REQUIRED", "An administrator must approve this add-on for your account");
+        }
+        const connection = addonConnection(addon);
+        if (!connection) throw new ApiError(409, "ADDON_SETUP_REQUIRED", "Connect or set up this add-on first");
+        let install = addonInstall(addon.id);
+        if (install) { install.status = "active"; install.connectionId = connection.id; }
+        else {
+          install = { id: id("ain"), addonId: addon.id, userId: db.user.id, connectionId: connection.id, status: "active", createdAt: nowIso() };
+          db.addonInstalls.push(install);
+        }
+        addAudit(req, "addon.installed", addon.name, `Installed ${addon.name}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, installed: true });
+        return;
+      }
+      if (addonInstallMatch && req.method === "DELETE") {
+        const addon = addonDefinition(decodeURIComponent(addonInstallMatch[1]));
+        if (!addon) throw new ApiError(404, "ADDON_NOT_FOUND", "Add-on not found");
+        db.addonInstalls = db.addonInstalls.filter((item) => !(item.addonId === addon.id && item.userId === db.user.id));
+        if (addon.connectionScope === "user") {
+          for (const connection of db.addonConnections) {
+            if (connection.addonId === addon.id && connection.ownerId === db.user.id) connection.status = "revoked";
+          }
+        }
+        addAudit(req, "addon.uninstalled", addon.name, `Removed ${addon.name}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, installed: false });
+        return;
+      }
+      const addonTenantMatch = pathname.match(/^\/api\/addons\/([^/]+)\/tenant$/);
+      if (addonTenantMatch && req.method === "PUT") {
+        if (!addonAdminUser()) throw new ApiError(403, "ADDON_ADMIN", "Only an administrator can change workspace add-on policy");
+        const addon = addonDefinition(decodeURIComponent(addonTenantMatch[1]));
+        if (!addon) throw new ApiError(404, "ADDON_NOT_FOUND", "Add-on not found");
+        const body = await readJson(req);
+        if (typeof body.enabled !== "boolean" && !body.installPolicy) throw new ApiError(400, "ADDON_POLICY", "Choose a workspace policy change");
+        if (body.installPolicy && !["self_service", "approval_required"].includes(body.installPolicy)) {
+          throw new ApiError(400, "ADDON_POLICY", "Choose self-service or approval-required installation");
+        }
+        const row = db.tenantAddons.find((item) => item.addonId === addon.id);
+        const current = row || { addonId: addon.id, enabled: true, installPolicy: "self_service" };
+        if (typeof body.enabled === "boolean") current.enabled = body.enabled;
+        if (body.installPolicy) current.installPolicy = body.installPolicy;
+        current.updatedAt = nowIso();
+        if (row) Object.assign(row, current);
+        else db.tenantAddons.push(current);
+        addAudit(req, "addon.policy", addon.name, `Updated ${addon.name} workspace policy`);
+        await store.save();
+        sendJson(res, 200, { ok: true, enabled: current.enabled, installPolicy: current.installPolicy });
+        return;
+      }
+      const addonRequestMatch = pathname.match(/^\/api\/addons\/([^/]+)\/request$/);
+      if (addonRequestMatch && req.method === "POST") {
+        if (addonAdminUser()) throw new ApiError(400, "ADDON_ADMIN", "Administrators can set up this add-on directly");
+        const addon = addonDefinition(decodeURIComponent(addonRequestMatch[1]));
+        if (!addon) throw new ApiError(404, "ADDON_NOT_FOUND", "Add-on not found");
+        const view = addonView(addon, false);
+        if (view.status !== "needs_setup" && view.status !== "approval_required" && view.status !== "blocked" && view.status !== "requested") {
+          throw new ApiError(409, "ADDON_READY", "This add-on is already available to you");
+        }
+        const body = await readJson(req);
+        if (!db.addonRequests.some((item) => item.addonId === addon.id && item.userId === db.user.id && item.status === "pending")) {
+          db.addonRequests.push({
+            id: id("arq"), addonId: addon.id, userId: db.user.id,
+            requestType: view.status === "approval_required" ? "install" : "setup",
+            note: String(body.note || "").slice(0, 500), status: "pending", createdAt: nowIso()
+          });
+        }
+        addAudit(req, "addon.requested", addon.name, `Requested setup for ${addon.name}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, pending: true });
+        return;
+      }
+      const addonRequestResolveMatch = pathname.match(/^\/api\/addon-requests\/([^/]+)\/resolve$/);
+      if (addonRequestResolveMatch && req.method === "POST") {
+        if (!addonAdminUser()) throw new ApiError(403, "ADDON_ADMIN", "Only an administrator can resolve add-on requests");
+        const body = await readJson(req);
+        const request = db.addonRequests.find((item) => item.id === decodeURIComponent(addonRequestResolveMatch[1]) && item.status === "pending");
+        if (!request) throw new ApiError(404, "ADDON_REQUEST", "Request not found");
+        const status = String(body.status || "");
+        if (status !== "approved" && status !== "denied") throw new ApiError(400, "ADDON_REQUEST", "Choose approved or denied");
+        request.status = status; request.resolvedAt = nowIso();
+        const addon = addonDefinition(request.addonId);
+        const connection = addon ? addonConnection(addon) : null;
+        let installed = false;
+        if (status === "approved" && request.requestType === "install" && addon && connection) {
+          const existing = db.addonInstalls.find((item) => item.addonId === addon.id && item.userId === request.userId);
+          if (existing) { existing.status = "active"; existing.connectionId = connection.id; }
+          else db.addonInstalls.push({ id: id("ain"), addonId: addon.id, userId: request.userId, connectionId: connection.id, status: "active", createdAt: nowIso() });
+          installed = true;
+        }
+        addAudit(req, "addon.request_resolved", request.addonId, `Add-on request ${status}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, status, requestType: request.requestType, installed });
         return;
       }
       if (pathname === "/api/delegation/launch" && req.method === "POST") {
@@ -3842,6 +4622,10 @@ export async function createApp(options = {}) {
         if (!db.user.id) db.user.id = "user_demo_avery";
         if (!db.user.preferences) db.user.preferences = {};
         if (!db.user.security) db.user.security = { twoFactor: { enabled: false } };
+        db.addonConnections = [];
+        db.addonInstalls = [];
+        db.addonRequests = [];
+        db.tenantAddons = [];
         db.notesTeam = false;
         ensureCollaborationSeed();
         invalidateIndex();

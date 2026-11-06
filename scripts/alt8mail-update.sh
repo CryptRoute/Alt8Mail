@@ -433,8 +433,9 @@ else
   systemctl try-reload-or-restart rspamd || log "WARNING: Rspamd reload failed after installing threat-intelligence rules"
 fi
 
-# Keep public share, upload and calendar pages reachable when an older nginx
-# site predates those routes. The helper backs out on nginx -t failure.
+# Keep public share, upload, calendar and add-on OAuth callback pages reachable
+# when an older nginx site predates those routes. The helper backs out on a
+# nginx -t failure.
 if [[ -f "$TARGET_RELEASE/scripts/alt8mail-ensure-nginx-routes.sh" ]]; then
   bash "$TARGET_RELEASE/scripts/alt8mail-ensure-nginx-routes.sh" \
     || log "WARNING: could not install missing public nginx routes"

@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="light dark">
   <title>Alt8Mail Admin</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f1b33'/%3E%3Cpath d='M8 22V10l8 7 8-7v12' fill='none' stroke='%2378a9ff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="./admin.css?v=0.15.0">
+  <link rel="stylesheet" href="./admin.css?v=0.15.1">
 </head>
 <body>
   <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -20,6 +20,8 @@
     <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5.4c0 4.4 2.7 8 7 9.6 4.3-1.6 7-5.2 7-9.6V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
     <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8.5" cy="9" r="4.5"/><path d="m12 12 8 8M17 17l2-2M14 14l2-2"/></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5M9 8V2M15 8V2M6 8h12v5a6 6 0 0 1-12 0Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M13 5h6v6M19 5l-8 8"/><path d="M18 14v4a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 5 18V8a1.5 1.5 0 0 1 1.5-1.5H10"/></symbol>
     <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3.5 13.7 9l5.5 1.7-5.5 1.7L12 18l-1.7-5.6L4.8 10.7 10.3 9 12 3.5Z"/><path d="M19 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/></symbol>
     <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V5.5A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5V21M15 9h3.5A1.5 1.5 0 0 1 20 10.5V21M2 21h20M7 8h4M7 12h4M7 16h4"/></symbol>
@@ -124,6 +126,7 @@
           <span class="nav-label">Governance</span>
           <a class="nav-link" href="#/roles" data-view="roles" data-permission="roles.read"><svg class="icon"><use href="#i-key"/></svg><span>Roles &amp; access</span></a>
           <a class="nav-link" href="#/policies" data-view="policies" data-permission="policies.read"><svg class="icon"><use href="#i-sliders"/></svg><span>Policies</span></a>
+          <a class="nav-link" href="#/addons" data-view="addons" data-permission="policies.read"><svg class="icon"><use href="#i-plug"/></svg><span>Add-ons</span></a>
           <a class="nav-link" href="#/storage" data-view="storage" data-permission="policies.read"><svg class="icon"><use href="#i-drive"/></svg><span>Storage</span></a>
           <a class="nav-link" href="#/ai" data-view="ai" data-permission="policies.read"><svg class="icon"><use href="#i-sparkles"/></svg><span>AI assistant</span></a>
           <a class="nav-link" href="#/quarantine" data-view="quarantine" data-permission="users.security"><svg class="icon"><use href="#i-alert"/></svg><span>Quarantine</span></a>
@@ -171,6 +174,6 @@
   <script src="./import.js?v=0.15.0" defer></script>
   <script src="./users-page.js?v=0.15.0" defer></script>
   <script src="./import-views.js?v=0.15.0" defer></script>
-  <script src="./admin.js?v=0.15.0" defer></script>
+  <script src="./admin.js?v=0.15.1" defer></script>
 </body>
 </html>

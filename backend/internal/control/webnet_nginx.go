@@ -278,6 +278,7 @@ func webNetWebmailLocations(upstream string) string {
 	builder.WriteString(nginxProxyLocation("^~ /calendar/rsvp/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /calendar/poll/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /calendar/feed/", upstream, "", ""))
+	builder.WriteString(nginxProxyLocation("^~ /oauth/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /api/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /system/api/", upstream, "/api/", ""))
 	builder.WriteString("    location = /admin { return 404; }\n")

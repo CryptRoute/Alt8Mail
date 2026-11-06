@@ -62,6 +62,8 @@ in the request path and its JSON demo data is not read by the live frontend.
 | Calendar | `GET/POST /api/calendar/events`, `PATCH/DELETE /api/calendar/events/:id` |
 | Contacts / directory | `GET/POST /api/contacts`, `PATCH/DELETE /api/contacts/:id`, `GET /api/directory` |
 | Profile | `GET/PATCH /api/profile` (policy-gated) |
+| Add-ons | `GET /api/addons`, `POST /api/addons/:id/connect`, `POST /api/addons/:id/oauth/start`, `POST/DELETE /api/addons/:id/install`, `PUT /api/addons/:id/tenant`, `POST /api/addons/:id/request`, `POST /api/addon-requests/:id/resolve`, `POST /api/addons/:id/actions/:action` |
+| Add-on OAuth / webhooks | `GET /oauth/slack/callback`, `GET /oauth/relay/complete`, `POST /api/addons/webhooks/slack` |
 | Storage / files | `GET /api/storage`, `POST /api/storage/:id/:action`, `GET/POST /api/files`, `PATCH/DELETE /api/files/:id`, `POST /api/files/:id/share`, `GET /api/files/:id/content` |
 | Storage OAuth | `GET /api/storage/oauth/:provider/start`, `GET /api/storage/oauth/:provider/callback` |
 | Guest shares | `GET /api/public/shares/:token`, `GET /api/public/shares/:token/content`, `POST /api/public/shares/:token/replace`, `GET /files/s/:token` |

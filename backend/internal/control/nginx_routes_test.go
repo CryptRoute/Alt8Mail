@@ -35,6 +35,51 @@ server {
 	}
 }
 
+func TestPublicNginxRouteStateMergesWithoutDuplicates(t *testing.T) {
+	site := `server {
+    listen 443 ssl http2;
+    location ^~ /files/s/ { proxy_pass http://127.0.0.1:8080; }
+    location ^~ /upload/ { proxy_pass http://127.0.0.1:8080; }
+}
+`
+	snippet := `location ^~ /calendar/rsvp/ { proxy_pass http://127.0.0.1:8080; }`
+	routes, missing := publicNginxRouteState(site, snippet)
+	wantRoutes := []string{"/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/"}
+	wantMissing := []string{"/calendar/poll/", "/calendar/feed/", "/oauth/"}
+	if strings.Join(routes, ",") != strings.Join(wantRoutes, ",") {
+		t.Fatalf("snippet routes = %v, want %v", routes, wantRoutes)
+	}
+	if strings.Join(missing, ",") != strings.Join(wantMissing, ",") {
+		t.Fatalf("missing routes = %v, want %v", missing, wantMissing)
+	}
+	for _, route := range routes {
+		if route == "/files/s/" || route == "/upload/" {
+			t.Fatalf("route already declared in the site was duplicated: %s", route)
+		}
+	}
+}
+
+func TestPublicNginxRouteStateComplete(t *testing.T) {
+	site := "location ^~ /files/s/ { }\nlocation ^~ /upload/ { }\nlocation ^~ /oauth/ { }\n"
+	snippet := "location ^~ /calendar/rsvp/ { }\nlocation ^~ /calendar/poll/ { }\nlocation ^~ /calendar/feed/ { }\n"
+	if _, missing := publicNginxRouteState(site, snippet); len(missing) != 0 {
+		t.Fatalf("unexpected missing routes: %v", missing)
+	}
+}
+
+func TestPublicNginxSnippetText(t *testing.T) {
+	text := publicNginxSnippetText([]string{"/upload/", "/oauth/"}, "127.0.0.1:8080")
+	if strings.Count(text, "location ^~ /oauth/ {") != 1 {
+		t.Fatalf("OAuth callback route missing from snippet:\n%s", text)
+	}
+	if !strings.Contains(text, "client_max_body_size 12m;") {
+		t.Fatalf("upload body limit missing from snippet:\n%s", text)
+	}
+	if !strings.Contains(text, "proxy_pass http://127.0.0.1:8080;") {
+		t.Fatalf("upstream missing from snippet:\n%s", text)
+	}
+}
+
 func TestInsertNginxServerIncludeWithoutTLS(t *testing.T) {
 	config := "server {\n    listen 80;\n    location / { return 204; }\n}\n"
 	if _, inserted := insertNginxServerInclude(config, "/tmp/routes.conf"); inserted {

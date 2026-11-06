@@ -9,6 +9,45 @@ import (
 
 const publicNginxSnippet = "/etc/nginx/snippets/a8m-public-routes.conf"
 
+var publicNginxRoutes = []string{"/files/s/", "/upload/", "/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/"}
+
+func publicNginxRouteState(site, snippet string) (snippetRoutes, missing []string) {
+	routePresent := func(text, route string) bool {
+		return strings.Contains(text, "location ^~ "+route) || strings.Contains(text, "location "+route)
+	}
+	snippetRoutes = make([]string, 0, len(publicNginxRoutes))
+	missing = make([]string, 0, len(publicNginxRoutes))
+	for _, route := range publicNginxRoutes {
+		if routePresent(site, route) {
+			continue
+		}
+		snippetRoutes = append(snippetRoutes, route)
+		if !routePresent(snippet, route) {
+			missing = append(missing, route)
+		}
+	}
+	return snippetRoutes, missing
+}
+
+func publicNginxSnippetText(routes []string, upstream string) string {
+	var snippet strings.Builder
+	snippet.WriteString("# Managed by Alt8Mail. Public download, upload, calendar and OAuth callback routes.\n")
+	for _, route := range routes {
+		snippet.WriteString("location ^~ " + route + " {\n")
+		snippet.WriteString("        proxy_pass http://" + upstream + ";\n")
+		snippet.WriteString("        proxy_http_version 1.1;\n")
+		snippet.WriteString("        proxy_set_header Host $host;\n")
+		snippet.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
+		snippet.WriteString("        proxy_set_header X-Forwarded-For $remote_addr;\n")
+		snippet.WriteString("        proxy_set_header X-Forwarded-Proto $scheme;\n")
+		if route == "/upload/" {
+			snippet.WriteString("        client_max_body_size 12m;\n")
+		}
+		snippet.WriteString("    }\n")
+	}
+	return snippet.String()
+}
+
 // ensurePublicNginxRoutes repairs an older nginx site that predates the public
 // file-share, upload and calendar pages. Application updates intentionally do
 // not overwrite administrator nginx configuration, so the first boot of a new
@@ -28,16 +67,8 @@ func (s *Server) ensurePublicNginxRoutes(ctx context.Context) {
 		return
 	}
 	site := string(content)
-	if strings.Contains(site, "include "+publicNginxSnippet+";") {
-		return
-	}
-	routes := []string{"/files/s/", "/upload/", "/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/"}
-	missing := make([]string, 0, len(routes))
-	for _, route := range routes {
-		if !strings.Contains(site, "location ^~ "+route) && !strings.Contains(site, "location "+route) {
-			missing = append(missing, route)
-		}
-	}
+	snippetContent, _ := os.ReadFile(publicNginxSnippet)
+	snippetRoutes, missing := publicNginxRouteState(site, string(snippetContent))
 	if len(missing) == 0 {
 		return
 	}
@@ -45,36 +76,36 @@ func (s *Server) ensurePublicNginxRoutes(ctx context.Context) {
 		s.logger.Warn("public route snippet directory failed", "err", err)
 		return
 	}
-	var snippet strings.Builder
-	snippet.WriteString("# Managed by Alt8Mail. Public download, upload and calendar routes.\n")
-	for _, route := range missing {
-		snippet.WriteString("location ^~ " + route + " {\n")
-		snippet.WriteString("        proxy_pass http://" + s.cfg.WebUpstream + ";\n")
-		snippet.WriteString("        proxy_http_version 1.1;\n")
-		snippet.WriteString("        proxy_set_header Host $host;\n")
-		snippet.WriteString("        proxy_set_header X-Real-IP $remote_addr;\n")
-		snippet.WriteString("        proxy_set_header X-Forwarded-For $remote_addr;\n")
-		snippet.WriteString("        proxy_set_header X-Forwarded-Proto $scheme;\n")
-		if route == "/upload/" {
-			snippet.WriteString("        client_max_body_size 12m;\n")
+	restoreSnippet := func() {
+		if len(snippetContent) > 0 {
+			_ = os.WriteFile(publicNginxSnippet, snippetContent, 0o644)
+		} else {
+			_ = os.Remove(publicNginxSnippet)
 		}
-		snippet.WriteString("    }\n")
 	}
-	if err := os.WriteFile(publicNginxSnippet, []byte(snippet.String()), 0o644); err != nil {
+	// Preserve routes already supplied by the snippet and add newly required
+	// ones. Routes defined directly in the site are skipped so nginx never
+	// sees duplicate location blocks.
+	if err := os.WriteFile(publicNginxSnippet, []byte(publicNginxSnippetText(snippetRoutes, s.cfg.WebUpstream)), 0o644); err != nil {
 		s.logger.Warn("public route snippet write failed", "err", err)
 		return
 	}
-	updated, inserted := insertNginxServerInclude(site, publicNginxSnippet)
-	if !inserted {
-		s.logger.Warn("public route include could not be placed in the nginx site")
-		return
-	}
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		s.logger.Warn("nginx site update failed", "err", err)
-		return
+	if !strings.Contains(site, "include "+publicNginxSnippet+";") {
+		updated, inserted := insertNginxServerInclude(site, publicNginxSnippet)
+		if !inserted {
+			restoreSnippet()
+			s.logger.Warn("public route include could not be placed in the nginx site")
+			return
+		}
+		if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+			restoreSnippet()
+			s.logger.Warn("nginx site update failed", "err", err)
+			return
+		}
 	}
 	if result, err := runCommand(ctx, 30*time.Second, "nginx", "-t"); err != nil {
 		_ = os.WriteFile(path, content, 0o644)
+		restoreSnippet()
 		s.logger.Warn("nginx rejected the public route include; previous site restored",
 			"err", err, "output", strings.TrimSpace(result.Stderr+" "+result.Stdout))
 		return

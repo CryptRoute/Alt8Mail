@@ -145,6 +145,9 @@ served by the same mux.
 | GET/POST/PATCH/DELETE | `/roles`, `/roles/:id` | roles.* |
 | POST/DELETE | `/roles/:id/assign`, `/roles/:id/assign/:userId` | roles.manage |
 | GET/PATCH | `/policies` | policies.read/manage |
+| GET | `/addons` | policies.read; tenant catalog with provider details, policy and pending requests |
+| PATCH | `/addons/:id` | policies.manage; workspace enablement and install policy |
+| POST | `/addon-requests/:id/resolve` | policies.manage; approve or deny setup/install requests |
 | GET/PATCH | `/ai` | policies.read/manage; tenant provider settings (key never returned) |
 | POST | `/ai/test` | policies.manage; save-and-test provider connectivity |
 | POST | `/maintenance/retention` | policies.manage; audited manual retention pass |
@@ -320,6 +323,9 @@ The UI is dependency-free HTML/CSS/ES modules under `admin/`:
 - policy editor for security, mail, sharing, directory and branding;
 - AI assistant provider configuration with masked key, model parameters and a
   save-and-test flow;
+- Add-ons page under Governance: reviewed catalog with local provider logos,
+  support/docs links, workspace enablement, install policy, install counts and
+  setup/install request approvals;
 - audit log and CSV export;
 - organization profile, security modal and system administrator management;
 - tenant switcher for system administrators;

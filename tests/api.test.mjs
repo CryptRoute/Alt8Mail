@@ -236,6 +236,328 @@ test("delegated mailbox windows use a scoped session revoked with the primary si
   assert.equal(revoked.status, 401);
 });
 
+test("add-ons: catalog, connections, installs, actions and admin requests", async () => {
+  const originalAdmin = app.db.user.isSystemAdmin;
+  const originalRole = app.db.user.role;
+  try {
+    let result = await client.request("/api/addons");
+    assert.equal(result.status, 200);
+    assert.equal(result.body.addons.length, 18);
+    assert.equal(result.body.addons.find((addon) => addon.id === "deepl").status, "needs_connection");
+    assert.equal(result.body.addons.find((addon) => addon.id === "slack").status, "needs_setup");
+    const hubspot = result.body.addons.find((addon) => addon.id === "hubspot");
+    assert.equal(hubspot.logo, "/addon-logos/hubspot.svg");
+    assert.match(hubspot.supportUrl, /^https:\/\/help\.hubspot\.com/);
+    assert.equal(hubspot.connectorVersion, "1.0");
+    assert.ok(hubspot.tagline);
+
+    result = await client.request("/api/addons/deepl/connect", {
+      method: "POST",
+      body: { apiKey: "test-deepl-key:fx", targetLanguage: "FR" }
+    });
+    assert.equal(result.status, 200);
+    result = await client.request("/api/addons/deepl/install", { method: "POST", body: {} });
+    assert.equal(result.status, 200);
+
+    const bootstrap = (await client.request("/api/bootstrap")).body;
+    const message = bootstrap.messages.find((item) => item.folder === "inbox" && !item.draft);
+    assert.ok(message);
+    result = await client.request("/api/addons/deepl/actions/translate", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.translation.text.includes(message.subject));
+
+    result = await client.request("/api/addons/slack/connect", {
+      method: "POST",
+      body: { webhookUrl: "https://hooks.slack.com/services/T000/B000/XXXX" }
+    });
+    assert.equal(result.status, 200);
+    result = await client.request("/api/addons/slack/install", { method: "POST", body: {} });
+    assert.equal(result.status, 200);
+    result = await client.request("/api/addons/slack/actions/send-to-channel", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.result.posted, true);
+
+    result = await client.request("/api/addons/hubspot/connect", {
+      method: "POST",
+      body: { accessToken: "pat-test-token-123" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/hubspot/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/hubspot/actions/log-email", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.contactName);
+
+    result = await client.request("/api/addons/asana/connect", {
+      method: "POST",
+      body: { apiKey: "asana-token-123456", projectGid: "1201234567890123" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/asana/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/asana/actions/create-task", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.taskUrl.includes("asana.com"));
+
+    result = await client.request("/api/addons/pagerduty/connect", {
+      method: "POST",
+      body: { routingKey: "routing-key-test-123", severity: "warning" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/pagerduty/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/pagerduty/actions/trigger-incident", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.dedupKey);
+
+    result = await client.request("/api/addons/zoom/connect", {
+      method: "POST",
+      body: { accountId: "zoom-account", clientId: "zoom-client", clientSecret: "zoom-secret", duration: "45" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/zoom/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/zoom/actions/create-meeting", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.meetingUrl.includes("zoom.us"));
+
+    result = await client.request("/api/addons/pipedrive/connect", {
+      method: "POST",
+      body: { apiToken: "pipedrive-token-123" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/pipedrive/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/pipedrive/actions/log-email", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.contactName);
+
+    result = await client.request("/api/addons/zoho/connect", {
+      method: "POST",
+      body: { region: "eu", clientId: "1000.TEST", clientSecret: "zoho-secret", refreshToken: "zoho-refresh" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/zoho/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/zoho/actions/log-email", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.contactName);
+
+    result = await client.request("/api/addons/clickup/connect", {
+      method: "POST",
+      body: { apiToken: "pk_clickup_test_123", listId: "901234567890" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/clickup/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/clickup/actions/create-task", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.taskUrl.includes("clickup.com"));
+
+    result = await client.request("/api/addons/zendesk/connect", {
+      method: "POST",
+      body: { subdomain: "acme", email: "agent@example.com", apiToken: "zendesk-token-123" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/zendesk/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/zendesk/actions/create-ticket", {
+      method: "POST",
+      body: { messageId: message.id }
+    });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.ticketUrl.includes("acme.zendesk.com"));
+
+    result = await client.request("/api/addons/salesforce/connect", {
+      method: "POST",
+      body: { loginUrl: "https://login.salesforce.com", clientId: "sf-client", clientSecret: "sf-secret", refreshToken: "sf-refresh" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/salesforce/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/salesforce/actions/log-email", { method: "POST", body: { messageId: message.id } });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.taskId);
+
+    result = await client.request("/api/addons/freshdesk/connect", {
+      method: "POST",
+      body: { domain: "acme", apiKey: "freshdesk-key-123" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/freshdesk/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/freshdesk/actions/create-ticket", { method: "POST", body: { messageId: message.id } });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.ticketUrl.includes("acme.freshdesk.com"));
+
+    result = await client.request("/api/addons/intercom/connect", {
+      method: "POST",
+      body: { region: "eu", accessToken: "intercom-token-123" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/intercom/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/intercom/actions/add-note", { method: "POST", body: { messageId: message.id } });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.noteId);
+
+    result = await client.request("/api/addons/ticktick/connect", {
+      method: "POST",
+      body: { accessToken: "ticktick-token-123", projectId: "665f0b1e8b3e4a0012345678" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/ticktick/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/ticktick/actions/create-task", { method: "POST", body: { messageId: message.id } });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.taskId);
+
+    result = await client.request("/api/addons/calendly/connect", {
+      method: "POST",
+      body: { accessToken: "calendly-token-123", eventTypeUri: "https://api.calendly.com/event_types/ABC123", ownerUri: "https://api.calendly.com/users/XYZ789" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/calendly/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/calendly/actions/create-link", { method: "POST", body: { messageId: message.id } });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.bookingUrl.includes("calendly.com"));
+
+    result = await client.request("/api/addons/jira/connect", {
+      method: "POST",
+      body: { site: "acme.atlassian.net", email: "dev@example.com", apiToken: "jira-token-123", projectKey: "ENG", issueType: "Task" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/jira/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/jira/actions/create-issue", { method: "POST", body: { messageId: message.id } });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.result.issueKey, "ENG-101");
+
+    result = await client.request("/api/addons/linear/connect", {
+      method: "POST",
+      body: { apiKey: "lin_api_test_123", teamId: "12345678-1234-1234-1234-123456789abc" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/linear/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/linear/actions/create-issue", { method: "POST", body: { messageId: message.id } });
+    assert.equal(result.status, 200);
+    assert.ok(result.body.result.issueUrl.includes("linear.app"));
+
+    result = await client.request("/api/addons/slack/tenant", { method: "PUT", body: { enabled: false } });
+    assert.equal(result.status, 200);
+    app.db.user.isSystemAdmin = false;
+    app.db.user.role = "member";
+    result = await client.request("/api/addons/slack/request", { method: "POST", body: { note: "Need this for support" } });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.pending, true);
+    app.db.user.isSystemAdmin = originalAdmin;
+    app.db.user.role = originalRole;
+
+    result = await client.request("/api/addons");
+    assert.equal(result.body.requests.length, 1);
+    assert.equal(result.body.requests[0].addonId, "slack");
+    const requestID = result.body.requests[0].id;
+    result = await client.request(`/api/addon-requests/${encodeURIComponent(requestID)}/resolve`, {
+      method: "POST",
+      body: { status: "approved" }
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.status, "approved");
+  } finally {
+    app.db.user.isSystemAdmin = originalAdmin;
+    app.db.user.role = originalRole;
+  }
+});
+
+test("add-ons: approval-required installation creates a request and installs on approval", async () => {
+  const originalAdmin = app.db.user.isSystemAdmin;
+  const originalRole = app.db.user.role;
+  try {
+    let result = await client.request("/api/addons/slack/connect", {
+      method: "POST",
+      body: { webhookUrl: "https://hooks.slack.com/services/T111/B111/YYYY" }
+    });
+    assert.equal(result.status, 200);
+    result = await client.request("/api/addons/slack/tenant", {
+      method: "PUT",
+      body: { installPolicy: "approval_required" }
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.installPolicy, "approval_required");
+
+    app.db.user.isSystemAdmin = false;
+    app.db.user.role = "member";
+    result = await client.request("/api/addons/slack/install", { method: "POST", body: {} });
+    assert.equal(result.status, 409);
+    assert.equal(result.body.error.code, "ADDON_APPROVAL_REQUIRED");
+    result = await client.request("/api/addons/slack/request", { method: "POST", body: { note: "Please approve Slack" } });
+    assert.equal(result.status, 200);
+
+    app.db.user.isSystemAdmin = originalAdmin;
+    app.db.user.role = originalRole;
+    result = await client.request("/api/addons");
+    assert.equal(result.body.requests.length, 1);
+    assert.equal(result.body.requests[0].requestType, "install");
+    const requestID = result.body.requests[0].id;
+    result = await client.request(`/api/addon-requests/${encodeURIComponent(requestID)}/resolve`, {
+      method: "POST",
+      body: { status: "approved" }
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.installed, true);
+    result = await client.request("/api/addons");
+    assert.equal(result.body.addons.find((addon) => addon.id === "slack").installed, true);
+  } finally {
+    app.db.user.isSystemAdmin = originalAdmin;
+    app.db.user.role = originalRole;
+  }
+});
+
+test("add-ons: Slack OAuth start and callback connect the workspace", async () => {
+  let result = await client.request("/api/addons");
+  const initial = result.body.addons.find((addon) => addon.id === "slack");
+  assert.equal(initial.oauthAvailable, true);
+  assert.equal(initial.oauthMode, "managed");
+
+  result = await client.request("/api/addons/slack/oauth/start", { method: "POST", body: {} });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.mode, "managed");
+  assert.match(result.body.oauthUrl, /\/api\/addons\/slack\/oauth\/mock-callback$/);
+
+  result = await client.request("/api/addons/slack/oauth/start", { method: "POST", body: { mode: "byo" } });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.mode, "byo");
+
+  const callback = await client.request("/api/addons/slack/oauth/mock-callback", { raw: true });
+  assert.equal(callback.status, 302);
+  assert.match(callback.headers.get("location") || "", /addon=slack&addon_status=connected/);
+
+  result = await client.request("/api/addons");
+  const slack = result.body.addons.find((addon) => addon.id === "slack");
+  assert.equal(slack.configured, true);
+  assert.equal(slack.connectionLabel, "Alt8Mail Demo · #inbox");
+  assert.equal(slack.status, "ready");
+
+  result = await client.request("/api/addons/slack/install", { method: "POST", body: {} });
+  assert.equal(result.status, 200);
+  result = await client.request("/api/addons");
+  assert.equal(result.body.addons.find((addon) => addon.id === "slack").status, "installed");
+});
+
 test("two-factor: password challenge, passkey, recovery and one-time codes", async () => {
   const passkeyClient = new ApiClient(base);
   const challenge = await passkeyClient.request("/api/session", {

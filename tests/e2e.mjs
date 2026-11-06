@@ -1644,6 +1644,92 @@ try {
   await page.eval("document.querySelector('[data-close-reader]')?.click()");
   await sleep(250);
 
+  console.log("\n[9r] Curated add-ons directory and reader actions");
+  check(await page.eval("document.getElementById('railAddons')?.offsetParent !== null"), "workspace rail exposes the Add-on shortcut");
+  await page.click("#railAddons");
+  await page.waitFor(() => !document.getElementById("settingsView").hidden && !document.getElementById("addonsSettings").hidden, 4000);
+  await page.waitFor(() => document.querySelectorAll("#addonsGrid .addon-card").length === 18, 8000);
+  check(await page.eval("Boolean(document.getElementById('addonSettingsNav'))"), "Add-ons appears in Settings");
+  check(await page.eval("document.querySelector('.addons-hero')?.textContent.includes('Do more from your inbox')"), "add-ons page uses a curated directory hero");
+  equal(await page.eval("document.querySelectorAll('#addonsGrid .addon-card').length"), 18, "add-ons page lists the first-party catalog");
+  check(await page.eval("document.querySelector('[data-addon-card=\"deepl\"]')?.textContent.includes('DeepL')"), "add-on cards name the provider");
+  check(await page.eval("document.querySelectorAll('#addonsGrid .addon-logo-tile img').length === 18"), "every add-on card shows its provider logo");
+  check(await page.eval("Array.from(document.querySelectorAll('#addonsGrid .addon-logo-tile img')).every((img) => img.complete && img.naturalWidth > 0)"), "every provider logo file loads");
+  check(await page.eval("document.querySelectorAll('#addonsGrid .addon-support-link').length === 18"), "every add-on card links to provider support");
+  await page.screenshot(path.join(artifacts, "26-addons-catalog.png"));
+  await page.eval("document.getElementById('settingsScroll').scrollTop = document.getElementById('settingsScroll').scrollHeight");
+  await sleep(250);
+  await page.screenshot(path.join(artifacts, "26c-addons-wave3.png"));
+  await page.eval("document.getElementById('settingsScroll').scrollTop = 0");
+  await page.click('[data-addon-card="hubspot"] [data-addon-details="hubspot"]');
+  await page.waitFor(() => !document.getElementById("addonDetailsOverlay").hidden, 4000);
+  check(await page.eval("document.getElementById('addonDetailsTitle').textContent.includes('HubSpot')"), "add-on details identify the provider");
+  check(await page.eval("Boolean(document.getElementById('addonDetailsBody').querySelector('a[href*=\"help.hubspot.com\"]'))"), "add-on details link to provider support");
+  check(await page.eval("Boolean(document.getElementById('addonDetailsBody').querySelector('a[href*=\"developers.hubspot.com\"]'))"), "add-on details link to provider documentation");
+  check(await page.eval("Boolean(document.querySelector('#addonDetailsIcon img'))"), "add-on details show the provider logo");
+  await page.screenshot(path.join(artifacts, "26a-addon-details.png"));
+  await page.click('#addonDetailsOverlay [data-addon-details-close]');
+  await sleep(200);
+  await page.setValue("#addonsSearch", "deepl");
+  await sleep(180);
+  equal(await page.eval("document.querySelectorAll('#addonsGrid .addon-card').length"), 1, "add-on search filters the catalog");
+
+  await page.click('[data-addon-primary="deepl"]');
+  await page.waitFor(() => !document.getElementById("addonSetupOverlay").hidden, 4000);
+  check(await page.eval("document.getElementById('addonSetupTitle').textContent.includes('DeepL')"), "personal add-on setup opens a permissions dialog");
+  check(await page.eval("document.getElementById('addonSetupPermissions').textContent.includes('Send that text to DeepL')"), "add-on setup discloses provider permissions");
+  await page.setValue('#addonSetupFields [data-addon-field="apiKey"]', "test-deepl-key:fx");
+  await page.setValue('#addonSetupFields [data-addon-field="targetLanguage"]', "FR");
+  await page.click("#addonSetupSave");
+  await page.waitFor(() => document.getElementById("addonSetupOverlay").hidden, 5000);
+  await sleep(500);
+  check(await page.eval("document.querySelector('[data-addon-card=\"deepl\"]')?.textContent.includes('Installed')"), "connecting a personal add-on installs it");
+
+  await page.setValue("#addonsSearch", "slack");
+  await sleep(180);
+  await page.click('[data-addon-card="slack"] [data-addon-primary="slack"]');
+  await page.waitFor(() => !document.getElementById("addonSetupOverlay").hidden, 4000);
+  check(await page.eval("Boolean(document.querySelector('#addonSetupFields [data-addon-oauth-start=\"managed\"]'))"), "Slack setup offers managed OAuth");
+  check(await page.eval("document.querySelector('.addon-oauth-byo summary')?.textContent.includes('Use your own Slack app')"), "Slack setup offers a bring-your-own-app path");
+  check(await page.eval("Boolean(document.querySelector('#addonSetupLinks a[href*=\"slack.com/help\"]'))"), "Slack setup links to provider support");
+  check(await page.eval("Boolean(document.querySelector('#addonSetupIcon img'))"), "Slack setup shows the provider logo");
+  await page.setValue('#addonSetupFields [data-addon-field="webhookUrl"]', "https://hooks.slack.com/services/T000/B000/XXXX");
+  await page.click("#addonSetupSave");
+  await page.waitFor(() => document.getElementById("addonSetupOverlay").hidden, 5000);
+  await sleep(500);
+  check(await page.eval("document.querySelector('[data-addon-card=\"slack\"]')?.textContent.includes('Ready to install')"), "workspace admin setup makes an add-on ready for users");
+  await page.click('[data-addon-card="slack"] [data-addon-primary="slack"]');
+  await page.waitFor(() => document.querySelector('[data-addon-card="slack"]')?.textContent.includes('Installed'), 5000);
+  check(await page.eval("document.querySelector('[data-addon-card=\"slack\"]')?.textContent.includes('Installed')"), "workspace add-on installs after setup");
+  equal(await page.eval("document.querySelector('[data-addon-card=\"slack\"] [data-addon-install-policy]')?.value"), "self_service", "add-ons default to self-service installation");
+  await page.setValue('[data-addon-card="slack"] [data-addon-install-policy]', "approval_required");
+  await page.waitFor(() => document.querySelector('[data-addon-card="slack"] [data-addon-install-policy]')?.value === "approval_required", 5000);
+  await sleep(500);
+  check(await page.eval("document.querySelector('[data-addon-card=\"slack\"] [data-addon-install-policy]')?.value === 'approval_required'"), "workspace admin can require approval for future installs");
+
+  await page.click(".rail-btn[data-task='mail']");
+  await sleep(350);
+  await page.click("[data-folder='inbox']");
+  await sleep(350);
+  await page.click(".msg[data-thread-id]");
+  await page.waitFor(() => !document.getElementById("reader").classList.contains("is-empty"), 5000);
+  await page.waitFor(() => document.getElementById("readerAddonsWrap") && !document.getElementById("readerAddonsWrap").hidden, 5000);
+  check(await page.eval("!document.getElementById('readerAddonsWrap').hidden"), "reader exposes installed add-on actions");
+  await page.click("#readerAddonsBtn");
+  await page.waitFor(() => !document.getElementById("readerAddonsMenu").hidden, 3000);
+  check(await page.eval("document.querySelectorAll('#readerAddonsMenu [data-addon-reader-action]').length === 2"), "reader add-on menu lists each installed action");
+  await page.click('#readerAddonsMenu [data-addon-id="deepl"]');
+  await page.waitFor(() => !document.getElementById("addonResultOverlay").hidden, 5000);
+  check(await page.eval("document.getElementById('addonResultText').textContent.includes('Translated:')"), "DeepL action returns a translation");
+  await page.screenshot(path.join(artifacts, "26b-addon-translation.png"));
+  await page.click("#addonResultOverlay [data-addon-result-close]");
+  await page.click("#readerAddonsBtn");
+  await page.click('#readerAddonsMenu [data-addon-id="slack"]');
+  await page.waitFor(() => (document.querySelector(".toast-text")?.textContent || "").includes("Sent to Slack"), 5000);
+  check(await page.eval("(document.querySelector('.toast-text')?.textContent || '').includes('Sent to Slack')"), "Slack action posts through the workspace connection");
+  await page.eval("document.querySelector('[data-close-reader]')?.click()");
+  await sleep(300);
+
   console.log("\n[10] PWA and theming");
   const swReady = await page.eval("navigator.serviceWorker.ready.then(r=>({scope:r.scope,state:r.active?.state}))", { timeout: 15000 });
   equal(swReady.state, "activated", "service worker is activated");
@@ -1667,6 +1753,13 @@ try {
       })
     });
   })()`);
+  // Force a fresh bootstrap so a fixture injected while Inbox is already
+  // active is fetched into the local index.
+  await page.eval("location.reload()");
+  await page.waitFor(() => document.readyState === "complete", 12000);
+  await page.waitFor(() => document.getElementById("app") && !document.getElementById("app").hidden && document.querySelectorAll(".msg").length > 0, 15000);
+  await page.waitFor(() => document.getElementById("bootSplash")?.hidden !== false, 10000);
+  await page.waitFor(() => document.documentElement.getAttribute("data-theme") === "dark", 5000);
   await page.click("[data-folder='inbox']");
   await sleep(500);
   await page.eval(`(() => {

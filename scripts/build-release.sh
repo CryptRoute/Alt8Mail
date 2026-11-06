@@ -64,6 +64,7 @@ echo "building Alt8Mail $VERSION for $GOOS_TARGET/$GOARCH_TARGET"
   go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/a8m-mailprovision" ./cmd/mailprovision
   go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/a8m-dkimprovision" ./cmd/dkimprovision
   go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$STAGE/bin/alt8mail-control" ./cmd/control
+  go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$STAGE/bin/a8m-addon-relay" ./cmd/addonrelay
 )
 
 chmod 0755 "$STAGE/bin/"*
