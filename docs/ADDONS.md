@@ -4,23 +4,22 @@ Alt8Mail add-ons are a **curated, first-party-reviewed directory**. They are not
 
 ## Current phase
 
-**Wave 3 — Enterprise work connectors.**
+**Wave 4 — Notes and mail-merge handoff.**
 
-Wave 3 includes:
+Wave 4 includes:
 
-- everything delivered in Waves 1 and 2
-- seven additional first-party connectors:
-  - **Salesforce** — workspace OAuth refresh token, log an email as a completed task on a contact
-  - **Freshdesk** — workspace domain and API key, open a ticket
-  - **Intercom** — workspace access token, add an internal note to a contact
-  - **TickTick** — personal OAuth token, create a task in a project
-  - **Calendly** — personal access token, create a single-use booking link
-  - **Jira** — workspace Atlassian API token, create an issue
-  - **Linear** — workspace API key, create an issue in a team
-- provider identity on all 18 connectors: exact local logos, vendor, category,
+- everything delivered in Waves 1–3
+- two additional first-party connectors:
+  - **Evernote** — personal private notes address, save the selected email to Evernote
+  - **Mergo** — Google Sheets campaign handoff, add the sender to a Mergo mail-merge sheet
+- provider identity on all 20 connectors: exact local logos, vendor, category,
   tagline, connector version, website, support, documentation and privacy links
-- a Details dialog in Webmail, provider support links on cards and setup, and
-  provider links in System Control
+- Evernote uses its documented **Email notes to** address; Alt8Mail sends the
+  selected email through the user's own submission service, so no deprecated
+  Evernote API or token is required
+- Mergo has no native public API. Its connector uses Mergo's documented
+  Google Sheets/Zapier workflow: a small Apps Script web app appends the sender
+  to the campaign sheet, and the connector posts to that user-hosted endpoint
 
 ### Phase history
 
@@ -30,16 +29,17 @@ Wave 3 includes:
 | Phase 2 / Wave 1 | Managed OAuth relay, Slack OAuth and events, install approval policy, rate gate, System Control policy | + HubSpot, Asana, PagerDuty, Zoom (**7**) |
 | Phase 3 / Wave 2 | Provider identity, support/docs links, exact logos, CRM/project/support wave | + Pipedrive, Zoho CRM, ClickUp, Zendesk (**11**) |
 | Phase 4 / Wave 3 | Enterprise work connectors: CRM, support, tasks, scheduling and engineering | + Salesforce, Freshdesk, Intercom, TickTick, Calendly, Jira, Linear (**18**) |
-| Wave 4 (planned) | Design, telephony and e-signature deep integrations | Canva, Dialpad, DocuSign, plus community/security connectors |
+| Wave 4 | Notes and mail-merge handoff | + Evernote, Mergo (**20**) |
+| Wave 5 (planned) | Design, telephony and e-signature deep integrations | Canva, Dialpad, DocuSign, plus community/security connectors |
 
 Canva, Dialpad and DocuSign are intentionally deferred rather than shipped as
 token stubs: Canva needs a design/asset pipeline, Dialpad outbound messaging
 needs explicit telephony consent, and DocuSign needs an envelope and attachment
-pipeline. They will be implemented with those workflows in Wave 4.
+pipeline. They will be implemented with those workflows in Wave 5.
 
 Migrations: `0046_addons`, `0047_addon_oauth_policy`,
 `0048_addon_catalog_seed`, `0049_addon_wave2_branding`,
-`0050_addon_wave3_connectors`.
+`0050_addon_wave3_connectors`, `0051_addon_notes_mailmerge`.
 
 ## Connector directory
 
@@ -63,13 +63,15 @@ Migrations: `0046_addons`, `0047_addon_oauth_policy`,
 | Calendly | Scheduling | Personal | Personal access token | https://help.calendly.com |
 | Jira | Engineering | Workspace | Atlassian API token | https://support.atlassian.com/jira-software-cloud/ |
 | Linear | Engineering | Workspace | API key | https://linear.app/contact/support |
+| Evernote | Notes | Personal | Private notes email address | https://help.evernote.com |
+| Mergo | Marketing | Personal | Google Apps Script sheet webhook | https://help.mergo.app |
 
 Provider logos are stored locally under `public/addon-logos/` (and mirrored for
 System Control under `backend/internal/control/web/addon-logos/`). They are used
 only to identify the provider integration; all marks remain the property of
 their owners. The Details dialog repeats that attribution. The vector marks are
 drawn from Simple Icons (CC0) in the provider's official brand colour; Slack,
-Pipedrive, Salesforce and Freshdesk use their product/app icons.
+Pipedrive, Salesforce, Freshdesk and Mergo use their product/app icons.
 
 ## Admin surfaces
 
@@ -220,6 +222,31 @@ A workspace administrator can disable a personal add-on for the whole workspace 
   and issue type. Only `*.atlassian.net` sites are accepted.
 - **Linear** — paste a personal API key and the target team UUID. The connector
   creates an issue through Linear's GraphQL API.
+- **Evernote** — find the private notes address under Evernote Account settings
+  → Email notes to and paste it into the connection. Alt8Mail sends the selected
+  email to that address through the user's mailbox. Only `@m.evernote.com`
+  addresses are accepted.
+- **Mergo** — Mergo has no public REST API; it reads campaign recipients from
+  Google Sheets. Deploy a Google Apps Script web app for the campaign sheet and
+  paste its `/exec` URL into the connection. Only `script.google.com` Apps Script
+  URLs are accepted.
+
+Example Apps Script for the Mergo handoff:
+
+```javascript
+function doPost(e) {
+  const body = JSON.parse(e.postData.contents || "{}");
+  const sheet = SpreadsheetApp.openById("YOUR_MERGO_CAMPAIGN_SHEET_ID")
+    .getSheetByName("Campaign");
+  sheet.appendRow([new Date(), body.name || "", body.email || "",
+                   body.subject || "", body.source || "Alt8Mail"]);
+  return ContentService.createTextOutput(JSON.stringify({ ok: true }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+```
+
+Deploy it as a web app that executes as the sheet owner and allows access to
+anyone with the link, then paste the `/exec` URL into the Mergo add-on setup.
 
 ## Adding a connector
 
@@ -228,10 +255,10 @@ A workspace administrator can disable a personal add-on for the whole workspace 
 3. Add credential validation for the provider fields.
 4. Add the provider API call in the add-on action dispatcher through
    `addonDo` so it inherits the provider rate gate.
-5. Update the catalog seed migrations (`0048_addon_catalog_seed.sql`,
-   `0049_addon_wave2_branding.sql` and `0050_addon_wave3_connectors.sql`) and
-   the mock definition in `server/app.mjs`, including the logo, support,
-   website, docs and privacy metadata.
+5. Update the catalog seed migrations (`0048_addon_catalog_seed.sql` through
+   `0051_addon_notes_mailmerge.sql`) and the mock definition in
+   `server/app.mjs`, including the logo, support, website, docs and privacy
+   metadata.
 6. Add API and browser coverage in `tests/api.test.mjs` and `tests/e2e.mjs`.
 7. Keep provider calls server-side. Do not expose credentials or call providers directly from the browser.
 
@@ -307,8 +334,10 @@ installation repairs the managed include automatically on the next boot.
   validated before they are placed in a URL; Zoho data-centre hosts come from a
   fixed allowlist; Salesforce instance URLs must end in `.salesforce.com`;
   Jira accepts only `*.atlassian.net`; Intercom regions map to fixed hosts;
-  Calendly URIs must belong to `api.calendly.com`; ClickUp list IDs, Asana
-  project GIDs and Linear team IDs are validated before use.
+  Calendly URIs must belong to `api.calendly.com`; Evernote destinations must
+  end in `@m.evernote.com`; Mergo webhooks must be
+  `https://script.google.com/macros/s/*/exec`; ClickUp list IDs, Asana project
+  GIDs and Linear team IDs are validated before use.
 - Provider logos are local assets. No logo, font or script is loaded from a
   third-party origin at runtime, so the webmail CSP and user privacy are kept.
 - OAuth state is HMAC-signed, expires after ten minutes and is bound to the

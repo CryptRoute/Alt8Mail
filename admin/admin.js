@@ -1466,7 +1466,7 @@ async function renderAddons() {
           ${adminProviderLinks(addon)}
           <div class="detail-list addons-admin-detail">
             <div class="detail-row"><span>Connection</span><b>${esc(addon.connectionScope === "tenant" ? (addon.connectionLabel || "Needs workspace setup") : "Personal connection")}</b></div>
-            <div class="detail-row"><span>Authentication</span><b>${esc(addon.authType === "oauth2" ? "OAuth 2.0" : addon.authType === "webhook" ? "Webhook" : "API key")}</b></div>
+            <div class="detail-row"><span>Authentication</span><b>${esc(addon.authType === "oauth2" ? "OAuth 2.0" : addon.authType === "webhook" ? "Webhook" : addon.authType === "email" ? "Email address" : "API key")}</b></div>
             <div class="detail-row"><span>Active installs</span><b>${Number(addon.installCount || 0)}</b></div>
             <div class="detail-row"><span>Connector</span><b>v${esc(addon.connectorVersion || "1.0")}</b></div>
           </div>

@@ -72,7 +72,7 @@ function providerLinks(addon) {
 function addonCard(addon, canManage) {
   const enabled = addon.enabled !== false;
   const scope = addon.connectionScope === 'tenant' ? 'Workspace connection' : 'Personal connection';
-  const auth = addon.id === 'slack' ? 'OAuth / webhook' : addon.authType === 'oauth2' ? 'OAuth 2.0' : addon.authType === 'webhook' ? 'Webhook' : 'API key';
+  const auth = addon.id === 'slack' ? 'OAuth / webhook' : addon.authType === 'oauth2' ? 'OAuth 2.0' : addon.authType === 'webhook' ? 'Webhook' : addon.authType === 'email' ? 'Email address' : 'API key';
   return `<section class="card" data-addon-card="${esc(addon.id)}">
     <header class="card-head">
       <div class="addon-control-identity">${addonLogo(addon)}<div><h3>${esc(addon.name)}</h3><p>${esc(addon.vendor || 'Alt8Mail')} · ${esc(addon.category || 'Add-on')}</p></div></div>

@@ -352,6 +352,38 @@ const MOCK_ADDONS = [
       { key: "apiKey", label: "Linear API key", type: "password", required: true, secret: true, placeholder: "lin_api_…", help: "Create a personal API key in Linear → Settings → API. The key is encrypted before it is stored." },
       { key: "teamId", label: "Linear team ID", type: "text", required: true, placeholder: "Team UUID", help: "Find the team ID in Linear team settings or the API." }
     ]
+  },
+  {
+    id: "evernote", name: "Evernote", vendor: "Evernote Corporation", category: "Notes",
+    description: "Save the selected email as a note in Evernote.",
+    icon: "i-file", color: "#00a82d", logo: "/addon-logos/evernote.svg",
+    tagline: "Turn an important email into a searchable Evernote note.",
+    websiteUrl: "https://evernote.com", supportUrl: "https://help.evernote.com",
+    privacyUrl: "https://evernote.com/privacy", docsUrl: "https://help.evernote.com/hc/en-us/articles/209005347-Save-emails-into-Evernote",
+    connectorVersion: "1.0", connectionScope: "user", authType: "email",
+    selfService: true, requiresTenantSetup: false, sortOrder: 190,
+    scopes: ["notes:write"],
+    permissions: ["Read the selected email's subject, sender and content", "Send that email to your private Evernote notes address"],
+    actions: [{ id: "save-email", label: "Save to Evernote", description: "Send the selected email to your Evernote notes address.", surface: "reader" }],
+    fields: [
+      { key: "evernoteEmail", label: "Evernote email address", type: "text", required: true, secret: true, placeholder: "name.abc123@m.evernote.com", help: "Find your private Evernote email address under Account settings → Email notes to. It is encrypted before it is stored." }
+    ]
+  },
+  {
+    id: "mergo", name: "Mergo", vendor: "Mergo", category: "Marketing",
+    description: "Add the selected sender to the Google Sheet used by a Mergo mail-merge campaign.",
+    icon: "i-send", color: "#0fa37f", logo: "/addon-logos/mergo.png",
+    tagline: "Put a new contact into the Mergo campaign sheet without leaving the inbox.",
+    websiteUrl: "https://www.mergo.app", supportUrl: "https://help.mergo.app",
+    privacyUrl: "https://www.mergo.app/privacy-policy/", docsUrl: "https://help.mergo.app/article/66-automatically-send-emails-when-a-row-is-populated",
+    connectorVersion: "1.0", connectionScope: "user", authType: "webhook",
+    selfService: true, requiresTenantSetup: false, sortOrder: 200,
+    scopes: ["campaigns:write"],
+    permissions: ["Read the selected email's sender and subject", "Send the sender's name and email to your Mergo campaign sheet webhook"],
+    actions: [{ id: "add-contact", label: "Add to Mergo campaign", description: "Add the sender to the configured Mergo campaign sheet.", surface: "reader" }],
+    fields: [
+      { key: "webhookUrl", label: "Mergo sheet webhook URL", type: "password", required: true, secret: true, placeholder: "https://script.google.com/macros/s/…/exec", help: "Mergo reads campaign recipients from Google Sheets. Deploy the documented Apps Script web app for your campaign sheet and paste its /exec URL here. The URL is encrypted before it is stored." }
+    ]
   }
 ];
 
@@ -2243,6 +2275,10 @@ export async function createApp(options = {}) {
           result = { issueId: "10001", issueKey: "ENG-101", issueUrl: `https://${site}/browse/ENG-101` };
         } else if (addon.id === "linear" && action === "create-issue") {
           result = { issueId: "issue-1", issueKey: "ENG-101", issueUrl: "https://linear.app/acme/issue/ENG-101" };
+        } else if (addon.id === "evernote" && action === "save-email") {
+          result = { saved: true };
+        } else if (addon.id === "mergo" && action === "add-contact") {
+          result = { queued: true };
         } else {
           throw new ApiError(404, "ADDON_ACTION", "Add-on action not found");
         }
@@ -2352,6 +2388,12 @@ export async function createApp(options = {}) {
           const teamId = String(body.teamId || "").trim();
           if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(teamId)) throw new ApiError(400, "ADDON_TEAM", "Enter a valid Linear team ID");
           config.teamId = teamId;
+        } else if (addon.id === "evernote") {
+          const email = String(body.evernoteEmail || "").trim().toLowerCase();
+          if (!/^[^@\s]+@m\.evernote\.com$/.test(email)) throw new ApiError(400, "ADDON_EMAIL", "Enter your private @m.evernote.com notes address");
+        } else if (addon.id === "mergo") {
+          const webhookUrl = String(body.webhookUrl || "").trim();
+          if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(webhookUrl)) throw new ApiError(400, "ADDON_WEBHOOK", "Enter a Google Apps Script /exec webhook URL");
         }
         for (const existing of db.addonConnections) {
           if (existing.addonId === addon.id && existing.scope === addon.connectionScope && existing.status === "active" &&

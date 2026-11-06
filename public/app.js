@@ -2268,7 +2268,7 @@ function addonStatusMeta(addon) {
 
 function addonLogoMarkup(addon, className = "addon-logo") {
   if (addon?.logo) {
-    return `<img class="${esc(className)}" src="${esc(addon.logo)}" alt="${esc(addon.name || "Add-on")} logo" loading="lazy" decoding="async">`;
+    return `<img class="${esc(className)}" src="${esc(addon.logo)}" alt="${esc(addon.name || "Add-on")} logo" decoding="async">`;
   }
   return `<svg class="icon" aria-hidden="true"><use href="#${esc(addon?.icon || "i-grid")}"/></svg>`;
 }
@@ -2278,6 +2278,7 @@ function addonAuthLabel(addon) {
   if (addon?.id === "salesforce" || addon?.id === "zoho") return "OAuth 2.0 (refresh token)";
   if (addon?.id === "ticktick") return "OAuth access token";
   if (addon?.id === "zoom") return "OAuth 2.0 (server-to-server)";
+  if (addon?.authType === "email") return "Email address";
   if (addon?.authType === "webhook") return "Webhook";
   if (addon?.authType === "oauth2") return "OAuth 2.0";
   return "API key";
@@ -2705,6 +2706,10 @@ async function runReaderAddonAction(addonId, actionId) {
       showToast(`Task created in ${addon.name}`);
     } else if (data?.result?.posted) {
       showToast(`Sent to ${addon.name}`);
+    } else if (data?.result?.saved) {
+      showToast(`Saved to ${addon.name}`);
+    } else if (data?.result?.queued) {
+      showToast(`Added to ${addon.name}`);
     } else {
       showToast(`${addon.name} action completed`);
     }

@@ -1648,14 +1648,14 @@ try {
   check(await page.eval("document.getElementById('railAddons')?.offsetParent !== null"), "workspace rail exposes the Add-on shortcut");
   await page.click("#railAddons");
   await page.waitFor(() => !document.getElementById("settingsView").hidden && !document.getElementById("addonsSettings").hidden, 4000);
-  await page.waitFor(() => document.querySelectorAll("#addonsGrid .addon-card").length === 18, 8000);
+  await page.waitFor(() => document.querySelectorAll("#addonsGrid .addon-card").length === 20, 8000);
   check(await page.eval("Boolean(document.getElementById('addonSettingsNav'))"), "Add-ons appears in Settings");
   check(await page.eval("document.querySelector('.addons-hero')?.textContent.includes('Do more from your inbox')"), "add-ons page uses a curated directory hero");
-  equal(await page.eval("document.querySelectorAll('#addonsGrid .addon-card').length"), 18, "add-ons page lists the first-party catalog");
+  equal(await page.eval("document.querySelectorAll('#addonsGrid .addon-card').length"), 20, "add-ons page lists the first-party catalog");
   check(await page.eval("document.querySelector('[data-addon-card=\"deepl\"]')?.textContent.includes('DeepL')"), "add-on cards name the provider");
-  check(await page.eval("document.querySelectorAll('#addonsGrid .addon-logo-tile img').length === 18"), "every add-on card shows its provider logo");
+  check(await page.eval("document.querySelectorAll('#addonsGrid .addon-logo-tile img').length === 20"), "every add-on card shows its provider logo");
   check(await page.eval("Array.from(document.querySelectorAll('#addonsGrid .addon-logo-tile img')).every((img) => img.complete && img.naturalWidth > 0)"), "every provider logo file loads");
-  check(await page.eval("document.querySelectorAll('#addonsGrid .addon-support-link').length === 18"), "every add-on card links to provider support");
+  check(await page.eval("document.querySelectorAll('#addonsGrid .addon-support-link').length === 20"), "every add-on card links to provider support");
   await page.screenshot(path.join(artifacts, "26-addons-catalog.png"));
   await page.eval("document.getElementById('settingsScroll').scrollTop = document.getElementById('settingsScroll').scrollHeight");
   await sleep(250);

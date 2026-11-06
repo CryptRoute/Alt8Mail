@@ -11,8 +11,8 @@ import (
 )
 
 func TestAddonDefinitionsAreUniqueAndComplete(t *testing.T) {
-	if len(addonDefinitions) != 18 {
-		t.Fatalf("add-on catalog has %d connectors, want 18", len(addonDefinitions))
+	if len(addonDefinitions) != 20 {
+		t.Fatalf("add-on catalog has %d connectors, want 20", len(addonDefinitions))
 	}
 	seen := map[string]bool{}
 	for _, definition := range addonDefinitions {
@@ -26,7 +26,7 @@ func TestAddonDefinitionsAreUniqueAndComplete(t *testing.T) {
 		if definition.ConnectionScope != "user" && definition.ConnectionScope != "tenant" {
 			t.Fatalf("invalid connection scope for %s: %q", definition.ID, definition.ConnectionScope)
 		}
-		if definition.AuthType != "api_key" && definition.AuthType != "webhook" && definition.AuthType != "oauth2" {
+		if definition.AuthType != "api_key" && definition.AuthType != "webhook" && definition.AuthType != "oauth2" && definition.AuthType != "email" {
 			t.Fatalf("invalid auth type for %s: %q", definition.ID, definition.AuthType)
 		}
 		if len(definition.Actions) == 0 {
@@ -155,6 +155,20 @@ func TestWave3ConnectorValidationHelpers(t *testing.T) {
 	}
 	if !validLinearTeam("12345678-1234-1234-1234-123456789abc") || validLinearTeam("team-1") {
 		t.Error("Linear team validation is incorrect")
+	}
+}
+
+func TestNotesAndMailMergeValidationHelpers(t *testing.T) {
+	if !validEvernoteAddress("name.abc123@m.evernote.com") || validEvernoteAddress("name@example.com") || validEvernoteAddress("not-an-email") {
+		t.Error("Evernote address validation is incorrect")
+	}
+	if !validMergoWebhook("https://script.google.com/macros/s/AKfycb123456789/exec") {
+		t.Error("valid Mergo Apps Script URL was rejected")
+	}
+	for _, value := range []string{"https://example.com/macros/s/abc/exec", "http://script.google.com/macros/s/abc/exec", "https://script.google.com/macros/s/abc"} {
+		if validMergoWebhook(value) {
+			t.Errorf("invalid Mergo webhook %q was accepted", value)
+		}
 	}
 }
 

@@ -509,6 +509,50 @@ var addonDefinitions = []addonDefinition{
 		},
 		SortOrder: 180,
 	},
+	{
+		ID: "evernote", Name: "Evernote", Vendor: "Evernote Corporation", Category: "Notes",
+		Description: "Save the selected email as a note in Evernote.",
+		Tagline:     "Turn an important email into a searchable Evernote note.",
+		Icon:        "i-file", Color: "#00a82d", LogoAsset: "evernote.svg",
+		WebsiteURL: "https://evernote.com", SupportURL: "https://help.evernote.com",
+		PrivacyURL: "https://evernote.com/privacy", DocsURL: "https://help.evernote.com/hc/en-us/articles/209005347-Save-emails-into-Evernote",
+		ConnectorVersion: "1.0",
+		ConnectionScope:  "user", AuthType: "email", SelfService: true,
+		Scopes: []string{"notes:write"},
+		Permissions: []string{
+			"Read the selected email's subject, sender and content",
+			"Send that email to your private Evernote notes address",
+		},
+		Actions: []addonAction{
+			{ID: "save-email", Label: "Save to Evernote", Description: "Send the selected email to your Evernote notes address.", Surface: "reader"},
+		},
+		Fields: []addonField{
+			{Key: "evernoteEmail", Label: "Evernote email address", Type: "text", Required: true, Secret: true, Placeholder: "name.abc123@m.evernote.com", Help: "Find your private Evernote email address under Account settings → Email notes to. It is encrypted before it is stored."},
+		},
+		SortOrder: 190,
+	},
+	{
+		ID: "mergo", Name: "Mergo", Vendor: "Mergo", Category: "Marketing",
+		Description: "Add the selected sender to the Google Sheet used by a Mergo mail-merge campaign.",
+		Tagline:     "Put a new contact into the Mergo campaign sheet without leaving the inbox.",
+		Icon:        "i-send", Color: "#0fa37f", LogoAsset: "mergo.png",
+		WebsiteURL: "https://www.mergo.app", SupportURL: "https://help.mergo.app",
+		PrivacyURL: "https://www.mergo.app/privacy-policy/", DocsURL: "https://help.mergo.app/article/66-automatically-send-emails-when-a-row-is-populated",
+		ConnectorVersion: "1.0",
+		ConnectionScope:  "user", AuthType: "webhook", SelfService: true,
+		Scopes: []string{"campaigns:write"},
+		Permissions: []string{
+			"Read the selected email's sender and subject",
+			"Send the sender's name and email to your Mergo campaign sheet webhook",
+		},
+		Actions: []addonAction{
+			{ID: "add-contact", Label: "Add to Mergo campaign", Description: "Add the sender to the configured Mergo campaign sheet.", Surface: "reader"},
+		},
+		Fields: []addonField{
+			{Key: "webhookUrl", Label: "Mergo sheet webhook URL", Type: "password", Required: true, Secret: true, Placeholder: "https://script.google.com/macros/s/…/exec", Help: "Mergo reads campaign recipients from Google Sheets. Deploy the documented Apps Script web app for your campaign sheet and paste its /exec URL here. The URL is encrypted before it is stored."},
+		},
+		SortOrder: 200,
+	},
 }
 
 func addonDefinitionByID(id string) (addonDefinition, bool) {
@@ -1117,6 +1161,22 @@ func (s *Server) connectAddon(w http.ResponseWriter, r *http.Request) {
 		credentials["apiKey"] = apiKey
 		config["teamId"] = teamID
 		accountLabel = "Linear workspace"
+	case "evernote":
+		evernoteEmail := strings.ToLower(strings.TrimSpace(body["evernoteEmail"]))
+		if !validEvernoteAddress(evernoteEmail) {
+			writeError(w, http.StatusBadRequest, "ADDON_EMAIL", "Enter your private @m.evernote.com notes address")
+			return
+		}
+		credentials["evernoteEmail"] = evernoteEmail
+		accountLabel = "Evernote notes"
+	case "mergo":
+		webhookURL := strings.TrimSpace(body["webhookUrl"])
+		if !validMergoWebhook(webhookURL) {
+			writeError(w, http.StatusBadRequest, "ADDON_WEBHOOK", "Enter a Google Apps Script /exec webhook URL")
+			return
+		}
+		credentials["webhookUrl"] = webhookURL
+		accountLabel = "Mergo campaign"
 	default:
 		writeError(w, http.StatusBadRequest, "ADDON_SETUP", "This add-on does not support direct setup yet")
 		return
@@ -1692,6 +1752,28 @@ func (s *Server) runAddonAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result = issue
+	case "evernote":
+		if action != "save-email" {
+			writeError(w, http.StatusNotFound, "ADDON_ACTION", "Add-on action not found")
+			return
+		}
+		if err := s.evernoteSaveEmail(sess, credentials["evernoteEmail"], message); err != nil {
+			s.logger.Warn("evernote save", "err", err)
+			writeError(w, http.StatusBadGateway, "ADDON_PROVIDER", "Evernote could not save this email")
+			return
+		}
+		result = map[string]any{"saved": true}
+	case "mergo":
+		if action != "add-contact" {
+			writeError(w, http.StatusNotFound, "ADDON_ACTION", "Add-on action not found")
+			return
+		}
+		if err := mergoAddContact(r.Context(), credentials["webhookUrl"], message); err != nil {
+			s.logger.Warn("mergo contact", "err", err)
+			writeError(w, http.StatusBadGateway, "ADDON_PROVIDER", "Mergo could not add this contact")
+			return
+		}
+		result = map[string]any{"queued": true}
 	default:
 		writeError(w, http.StatusNotFound, "ADDON_ACTION", "Add-on action not found")
 		return
@@ -2169,6 +2251,23 @@ func validJiraProjectKey(value string) bool {
 		return false
 	}
 	return true
+}
+
+func validEvernoteAddress(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return looksLikeEmail(value) && strings.HasSuffix(value, "@m.evernote.com")
+}
+
+func validMergoWebhook(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme != "https" || !strings.EqualFold(parsed.Hostname(), "script.google.com") {
+		return false
+	}
+	if !strings.HasPrefix(parsed.Path, "/macros/s/") || !strings.HasSuffix(parsed.Path, "/exec") {
+		return false
+	}
+	deployment := strings.TrimSuffix(strings.TrimPrefix(parsed.Path, "/macros/s/"), "/exec")
+	return len(deployment) >= 8
 }
 
 func validLinearTeam(value string) bool {
@@ -2944,6 +3043,65 @@ func linearCreateIssue(ctx context.Context, apiKey, teamID string, message addon
 	return map[string]any{
 		"issueId": issue.ID, "issueKey": issue.Identifier, "issueUrl": issue.URL,
 	}, nil
+}
+
+func (s *Server) evernoteSaveEmail(sess *sessionRecord, target string, message addonMailMessage) error {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if !validEvernoteAddress(target) {
+		return fmt.Errorf("Evernote notes address is invalid")
+	}
+	if sess == nil || !looksLikeEmail(sess.User.Email) {
+		return fmt.Errorf("a mailbox sender is required")
+	}
+	user := sess.User
+	subject := firstNonEmpty(message.Subject, "Email from "+firstNonEmpty(message.FromEmail, "Alt8Mail"))
+	if len(subject) > 240 {
+		subject = subject[:240]
+	}
+	body := "Saved from Alt8Mail\n\n" +
+		"From: " + firstNonEmpty(message.FromName, message.FromEmail) + "\n" +
+		"Subject: " + firstNonEmpty(message.Subject, "(no subject)") + "\n\n" +
+		firstNonEmpty(message.Snippet, message.BodyText)
+	item := map[string]any{
+		"from":     map[string]any{"name": user.Name, "email": user.Email},
+		"to":       []any{map[string]any{"name": "Evernote", "email": target}},
+		"subject":  subject,
+		"bodyText": body,
+	}
+	raw, err := buildMIMEMessage(item, fmt.Sprintf("<%s@%s>", newID("evernote"), s.cfg.MailDomain), nil)
+	if err != nil {
+		return err
+	}
+	return s.submitSMTPMessage(user.Email, []string{target}, raw)
+}
+
+func mergoAddContact(ctx context.Context, webhookURL string, message addonMailMessage) error {
+	if !validMergoWebhook(webhookURL) {
+		return fmt.Errorf("Mergo webhook URL is invalid")
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"name":    firstNonEmpty(message.FromName, message.FromEmail),
+		"email":   strings.ToLower(strings.TrimSpace(message.FromEmail)),
+		"subject": message.Subject,
+		"source":  "Alt8Mail",
+	})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := addonDo(ctx, "mergo", request)
+	if err != nil {
+		return err
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024))
+	response.Body.Close()
+	// Apps Script web apps answer with a short-lived redirect after a
+	// successful POST. Any non-error response means the row was accepted.
+	if response.StatusCode >= 400 {
+		return fmt.Errorf("Mergo webhook returned %d", response.StatusCode)
+	}
+	return nil
 }
 
 func slackPost(ctx context.Context, webhookURL string, message addonMailMessage) error {

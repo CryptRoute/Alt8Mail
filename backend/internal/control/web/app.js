@@ -14,13 +14,13 @@ import { renderSecurityReports } from './views-security-reports.js';
 import { renderWebPush } from './views-push.js';
 import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
-import { renderAddons } from './views-addons.js?v=0.11.33-control';
+import { renderAddons } from './views-addons.js?v=0.11.34-control';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '0.21.0';
+const APP_VERSION = '0.22.0';
 
 const state = {
   csrf: '',

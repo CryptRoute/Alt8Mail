@@ -242,7 +242,7 @@ test("add-ons: catalog, connections, installs, actions and admin requests", asyn
   try {
     let result = await client.request("/api/addons");
     assert.equal(result.status, 200);
-    assert.equal(result.body.addons.length, 18);
+    assert.equal(result.body.addons.length, 20);
     assert.equal(result.body.addons.find((addon) => addon.id === "deepl").status, "needs_connection");
     assert.equal(result.body.addons.find((addon) => addon.id === "slack").status, "needs_setup");
     const hubspot = result.body.addons.find((addon) => addon.id === "hubspot");
@@ -456,6 +456,26 @@ test("add-ons: catalog, connections, installs, actions and admin requests", asyn
     result = await client.request("/api/addons/linear/actions/create-issue", { method: "POST", body: { messageId: message.id } });
     assert.equal(result.status, 200);
     assert.ok(result.body.result.issueUrl.includes("linear.app"));
+
+    result = await client.request("/api/addons/evernote/connect", {
+      method: "POST",
+      body: { evernoteEmail: "notes.abc123@m.evernote.com" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/evernote/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/evernote/actions/save-email", { method: "POST", body: { messageId: message.id } });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.result.saved, true);
+
+    result = await client.request("/api/addons/mergo/connect", {
+      method: "POST",
+      body: { webhookUrl: "https://script.google.com/macros/s/AKfycb123456789/exec" }
+    });
+    assert.equal(result.status, 200);
+    await client.request("/api/addons/mergo/install", { method: "POST", body: {} });
+    result = await client.request("/api/addons/mergo/actions/add-contact", { method: "POST", body: { messageId: message.id } });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.result.queued, true);
 
     result = await client.request("/api/addons/slack/tenant", { method: "PUT", body: { enabled: false } });
     assert.equal(result.status, 200);
