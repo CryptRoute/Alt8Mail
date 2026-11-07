@@ -1,0 +1,25 @@
+[Unit]
+Description=Alt8Mail Office lifecycle agent
+Documentation=https://github.com/CryptRoute/Alt8Mail
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=a8m
+WorkingDirectory=/opt/a8m/current
+EnvironmentFile=-/etc/a8m/office-agent.env
+ExecStart=/opt/a8m/current/bin/a8m-office-agent
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGTERM
+UMask=0027
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/etc/a8m /etc/nginx -/var/lib/a8m-office -/var/www/certbot
+
+[Install]
+WantedBy=multi-user.target

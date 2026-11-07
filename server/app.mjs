@@ -569,6 +569,10 @@ export async function createApp(options = {}) {
   if (!Array.isArray(db.files)) db.files = [];
   if (!Array.isArray(db.uploadSessions)) db.uploadSessions = [];
   if (!Array.isArray(db.storageProviders)) db.storageProviders = [];
+  if (!db.office || typeof db.office !== "object") {
+    db.office = { enabled: false, ready: false, publicUrl: "", status: "not_installed", version: "", secretConfigured: false };
+  }
+  if (!Array.isArray(db.officeDocuments)) db.officeDocuments = [];
   if (!Array.isArray(db.signatures)) db.signatures = [];
   if (!db.signatures.length) {
     db.signatures.push({
@@ -1342,6 +1346,12 @@ export async function createApp(options = {}) {
       createdAt: nowIso(),
       starred: false,
       sharedWith: [],
+      permissions: [],
+      access: "owner",
+      shared: false,
+      dlpClassification: "",
+      dlpWarnings: [],
+      dlpMatches: [],
       locked: false,
       version: "1",
       previewable: !!contentUrl,
@@ -1897,6 +1907,7 @@ export async function createApp(options = {}) {
         sharing: { externalSharing: true, linkDefault: "view", allowedDomains: [], guestInvites: false },
         dlp: { enabled: MOCK_DLP.enabled, defaultClassification: MOCK_DLP.defaultClassification, labels: MOCK_DLP.labels },
         features: { stickyNotes: true, reactions: true },
+        office: { enabled: true, internalSharing: true, externalEditing: true, ai: true, dlpOnSave: true, versionRetention: 0 },
         branding: { ...MOCK_BRANDING }
       },
       branding: { ...MOCK_BRANDING },
@@ -2009,6 +2020,16 @@ export async function createApp(options = {}) {
     try {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const pathname = url.pathname;
+      if (pathname === "/office-editor") {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Office editor preview</title></head><body style="margin:0;font:14px system-ui;display:grid;place-items:center;height:100vh;background:#f6f8fb"><div style="text-align:center"><h1 style="font-size:16px">Office editor preview</h1><p id="office-mock-file" style="color:#64748b">Loading document…</p></div><script src="/office-editor.js"></script></body></html>`);
+        return;
+      }
+      if (pathname === "/office-editor.js") {
+        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(`(function(){var file=new URLSearchParams(location.search).get("file")||"";document.getElementById("office-mock-file").textContent=file||"No document selected";})();`);
+        return;
+      }
       if (!pathname.startsWith("/api/")) {
         await serveStatic(req, res, pathname);
         return;
@@ -2168,6 +2189,23 @@ export async function createApp(options = {}) {
             cookieHeader(SESSION_COOKIE, "", { httpOnly: true, secure, maxAge: 0 }),
             cookieHeader(CSRF_COOKIE, "", { secure, maxAge: 0 })
           ]
+        });
+        return;
+      }
+      if (pathname === "/api/office/config" && req.method === "GET") {
+        const office = db.office || {};
+        sendJson(res, 200, {
+          enabled: Boolean(office.enabled), ready: Boolean(office.ready),
+          publicUrl: office.publicUrl || "", status: office.status || "not_installed",
+          version: office.version || "", secretConfigured: Boolean(office.secretConfigured),
+          mode: "editor",
+          formats: {
+            word: ["doc", "docx", "odt", "rtf", "txt"],
+            cell: ["csv", "ods", "xls", "xlsx"],
+            slide: ["odp", "ppt", "pptx"],
+            pdf: ["pdf"]
+          },
+          policy: { internalSharing: true, ai: true, dlpOnSave: true }
         });
         return;
       }
@@ -3211,6 +3249,192 @@ export async function createApp(options = {}) {
         return;
       }
 
+      const officeFormatInfo = (format) => ({
+        docx: { documentType: "word", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", badge: "DOCX" },
+        xlsx: { documentType: "cell", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", badge: "XLSX" },
+        pptx: { documentType: "slide", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", badge: "PPTX" }
+      }[String(format || "").toLowerCase()] || null);
+      const officeMockDocument = (file) => {
+        let doc = db.officeDocuments.find((item) => item.fileId === file.id);
+        if (doc) return doc;
+        const ext = String(file.name.split(".").pop() || "docx").toLowerCase();
+        const info = officeFormatInfo(ext);
+        doc = {
+          id: id("odoc"),
+          fileId: file.id,
+          format: ext,
+          documentType: info ? info.documentType : (ext === "pdf" ? "pdf" : "word"),
+          currentVersion: 1,
+          versions: [{ version: 1, source: "initial", sizeBytes: file.sizeBytes || 0, createdAt: nowIso() }]
+        };
+        db.officeDocuments.push(doc);
+        return doc;
+      };
+      const officeDocumentPayload = (doc) => ({
+        id: doc.id, fileId: doc.fileId, format: doc.format, documentType: doc.documentType,
+        currentVersion: doc.currentVersion,
+        editable: !["pdf", "doc", "xls", "ppt"].includes(doc.format)
+      });
+      const officeVersionPayload = (doc) => (doc.versions || []).map((version) => ({
+        id: `ver_${doc.id}_${version.version}`, version: version.version,
+        sizeBytes: version.sizeBytes || 0, source: version.source || "editor",
+        createdAt: version.createdAt || nowIso(), current: version.version === doc.currentVersion,
+        dlpClassification: version.dlpClassification || "", dlpWarnings: version.dlpWarnings || [],
+        dlpMatches: version.dlpMatches || [], reviewStatus: version.reviewStatus || "",
+        reviewNote: version.reviewNote || "", reviewedBy: version.reviewedBy || "",
+        reviewedAt: version.reviewedAt || ""
+      }));
+
+      if (pathname === "/api/office/documents" && req.method === "POST") {
+        if (!db.office?.ready) throw new ApiError(409, "OFFICE_NOT_READY", "Office is not enabled or healthy for this workspace");
+        const body = await readJson(req);
+        const format = String(body.format || "").toLowerCase();
+        const info = officeFormatInfo(format);
+        if (!info) throw new ApiError(400, "OFFICE_FORMAT", "Choose a Word, Excel or PowerPoint document");
+        let name = safeFileName(body.name || "Untitled");
+        const suffix = "." + format;
+        if (!name.toLowerCase().endsWith(suffix)) {
+          name = officeFormatInfo(String(name.split(".").pop() || "").toLowerCase())
+            ? name.replace(/\.[^.]+$/, "") + suffix
+            : name + suffix;
+        }
+        const record = createFileRecord({
+          name, type: info.badge, mime: info.mime, sizeBytes: 2048, providerId: "a8m",
+          path: "Files", description: "Created in Alt8Mail Office."
+        });
+        db.files.unshift(record);
+        const doc = {
+          id: id("odoc"), fileId: record.id, format, documentType: info.documentType,
+          currentVersion: 1, versions: [{ version: 1, source: "template", sizeBytes: 2048, createdAt: nowIso() }]
+        };
+        db.officeDocuments.push(doc);
+        addAudit(req, "office.created", record.name, "Created in Alt8Mail Office");
+        await store.save();
+        sendJson(res, 201, { file: record, document: officeDocumentPayload(doc) });
+        return;
+      }
+      const officeOpenMatch = pathname.match(/^\/api\/office\/documents\/([A-Za-z0-9_-]{1,100})\/open$/);
+      if (officeOpenMatch && req.method === "POST") {
+        if (!db.office?.ready) throw new ApiError(409, "OFFICE_NOT_READY", "Office is not enabled or healthy for this workspace");
+        const file = findFile(officeOpenMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        const doc = officeMockDocument(file);
+        const base = `https://${req.headers.host || "mail.a8m.example"}`;
+        const config = {
+          document: {
+            fileType: doc.format, key: `${doc.id}-v${doc.currentVersion}`, title: file.name,
+            url: `${base}/api/office/content?token=mock`, permissions: { edit: !["pdf", "doc", "xls", "ppt"].includes(doc.format), download: true, print: true }
+          },
+          documentType: doc.documentType,
+          editorConfig: {
+            mode: doc.documentType === "pdf" ? "view" : "edit",
+            callbackUrl: `${base}/api/office/callback?token=mock`,
+            user: { id: db.user.id, name: db.user.name }
+          },
+          type: "desktop", width: "100%", height: "100%", token: "mock-token"
+        };
+        await store.save();
+        sendJson(res, 200, {
+          config, documentServerUrl: "https://office.a8m.example",
+          editable: !["pdf", "doc", "xls", "ppt"].includes(doc.format), document: officeDocumentPayload(doc), file
+        });
+        return;
+      }
+      const officeVersionsMatch = pathname.match(/^\/api\/office\/documents\/([A-Za-z0-9_-]{1,100})\/versions$/);
+      if (officeVersionsMatch && req.method === "GET") {
+        const file = findFile(officeVersionsMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        const doc = db.officeDocuments.find((item) => item.fileId === file.id);
+        if (!doc) {
+          sendJson(res, 200, { document: null, versions: [] });
+          return;
+        }
+        sendJson(res, 200, { document: officeDocumentPayload(doc), versions: officeVersionPayload(doc), access: "owner" });
+        return;
+      }
+      const officeVersionDownloadMatch = pathname.match(/^\/api\/office\/documents\/([A-Za-z0-9_-]{1,100})\/versions\/(\d{1,6})\/download$/);
+      if (officeVersionDownloadMatch && req.method === "GET") {
+        const file = findFile(officeVersionDownloadMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        const doc = db.officeDocuments.find((item) => item.fileId === file.id);
+        if (!doc || !doc.versions.some((version) => version.version === Number(officeVersionDownloadMatch[2]))) {
+          throw new ApiError(404, "OFFICE_VERSION", "Version not found");
+        }
+        res.writeHead(200, {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${safeFileName(file.name)}.v${officeVersionDownloadMatch[2]}"`,
+          "Cache-Control": "private, no-store"
+        });
+        res.end(Buffer.from("PK\x03\x04mock office version"));
+        return;
+      }
+      const officeRestoreMatch = pathname.match(/^\/api\/office\/documents\/([A-Za-z0-9_-]{1,100})\/versions\/(\d{1,6})\/restore$/);
+      if (officeRestoreMatch && req.method === "POST") {
+        const file = findFile(officeRestoreMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        const doc = db.officeDocuments.find((item) => item.fileId === file.id);
+        const version = doc?.versions.find((item) => item.version === Number(officeRestoreMatch[2]));
+        if (!doc || !version) throw new ApiError(404, "OFFICE_VERSION", "Version not found");
+        const next = doc.currentVersion + 1;
+        doc.currentVersion = next;
+        doc.versions.push({ version: next, source: "restore", sizeBytes: version.sizeBytes, createdAt: nowIso() });
+        file.version = String(next);
+        file.sizeBytes = version.sizeBytes;
+        file.modifiedAt = nowIso();
+        addAudit(req, "office.version_restored", file.name, `Restored version ${version.version} as version ${next}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, version: next, file });
+        return;
+      }
+      const officeReviewMatch = pathname.match(/^\/api\/office\/documents\/([A-Za-z0-9_-]{1,100})\/versions\/(\d{1,6})\/review$/);
+      if (officeReviewMatch && req.method === "POST") {
+        const file = findFile(officeReviewMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        const doc = db.officeDocuments.find((item) => item.fileId === file.id);
+        const version = doc?.versions.find((item) => item.version === Number(officeReviewMatch[2]));
+        if (!doc || !version) throw new ApiError(404, "OFFICE_VERSION", "Version not found");
+        const body = await readJson(req);
+        const status = String(body.status || "").trim();
+        if (status !== "approved" && status !== "changes_requested") throw new ApiError(400, "OFFICE_REVIEW", "Choose approved or changes requested");
+        version.reviewStatus = status;
+        version.reviewNote = String(body.note || "").slice(0, 1000);
+        version.reviewedBy = db.user.email;
+        version.reviewedAt = nowIso();
+        addAudit(req, "office.version_reviewed", file.name, `Version ${version.version} · ${status === "approved" ? "Approved" : "Changes requested"}`);
+        await store.save();
+        sendJson(res, 200, { ok: true, review: { version: version.version, status, note: version.reviewNote, reviewedBy: db.user.email, reviewedAt: version.reviewedAt } });
+        return;
+      }
+      const officeConvertMatch = pathname.match(/^\/api\/office\/documents\/([A-Za-z0-9_-]{1,100})\/convert$/);
+      if (officeConvertMatch && req.method === "POST") {
+        if (!db.office?.ready) throw new ApiError(409, "OFFICE_NOT_READY", "Office is not enabled or healthy for this workspace");
+        const file = findFile(officeConvertMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        const base = String(file.name).replace(/\.[^.]+$/, "");
+        const record = createFileRecord({
+          name: `${base}.pdf`, type: "PDF", mime: "application/pdf", sizeBytes: 4096,
+          providerId: "a8m", path: file.path || "Files", description: `PDF conversion of ${file.name}.`
+        });
+        db.files.unshift(record);
+        addAudit(req, "office.converted", record.name, `Converted ${file.name} to PDF`);
+        await store.save();
+        sendJson(res, 201, { file: record });
+        return;
+      }
+
+      const fileContentMatch = pathname.match(/^\/api\/files\/([A-Za-z0-9_-]{1,100})\/content$/);
+      if (fileContentMatch && req.method === "GET") {
+        const file = findFile(fileContentMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        res.writeHead(200, {
+          "Content-Type": file.mime || "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${safeFileName(file.name)}"`,
+          "Cache-Control": "private, no-store"
+        });
+        res.end(Buffer.from(`mock content for ${file.name}`));
+        return;
+      }
+
       if (pathname === "/api/files" && req.method === "GET") {
         const files = db.files.slice().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
         sendJson(res, 200, { count: files.length, files, providers: db.storageProviders });
@@ -3247,6 +3471,84 @@ export async function createApp(options = {}) {
         sendJson(res, 201, { file: record });
         return;
       }
+      if (pathname === "/api/files/share-groups" && req.method === "GET") {
+        sendJson(res, 200, {
+          groups: [
+            { id: "grp_mock_team", name: "Team", members: 3, color: "#0f6cbd" },
+            { id: "grp_mock_leadership", name: "Leadership", members: 2, color: "#7c3aed" }
+          ]
+        });
+        return;
+      }
+      const permissionMatch = pathname.match(/^\/api\/files\/([A-Za-z0-9_-]{1,100})\/permissions$/);
+      if (permissionMatch && req.method === "GET") {
+        const file = findFile(permissionMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        sendJson(res, 200, {
+          permissions: Array.isArray(file.permissions) ? file.permissions : [],
+          internalSharing: true, fileLocked: !!file.locked
+        });
+        return;
+      }
+      if (permissionMatch && req.method === "POST") {
+        const file = findFile(permissionMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        const body = await readJson(req);
+        const access = body.access === "edit" ? "edit" : "view";
+        const email = String(body.email || "").trim().toLowerCase();
+        const groupId = String(body.groupId || "").trim();
+        if ((!email && !groupId) || (email && groupId)) {
+          throw new ApiError(400, "SHARE_TARGET", "Choose either a person or a group");
+        }
+        if (!Array.isArray(file.permissions)) file.permissions = [];
+        const existingPermission = file.permissions.find((entry) => groupId
+          ? entry.granteeType === "group" && entry.granteeId === groupId
+          : entry.granteeType === "user" && String(entry.email || "").toLowerCase() === email);
+        let permission;
+        if (groupId) {
+          const groups = { grp_mock_team: { name: "Team", members: 3, color: "#0f6cbd" }, grp_mock_leadership: { name: "Leadership", members: 2, color: "#7c3aed" } };
+          const group = groups[groupId];
+          if (!group) throw new ApiError(404, "SHARE_GROUP", "Group not found");
+          permission = { id: existingPermission ? existingPermission.id : id("fperm"), granteeType: "group", granteeId: groupId, name: group.name, email: "", access, createdAt: nowIso() };
+        } else {
+          const person = db.people.find((entry) => normalizeEmail(entry.email) === email);
+          if (!person) throw new ApiError(404, "SHARE_USER", "No colleague with that email address");
+          permission = { id: existingPermission ? existingPermission.id : id("fperm"), granteeType: "user", granteeId: email, ...senderPerson(person), access, createdAt: nowIso() };
+        }
+        if (!Array.isArray(file.permissions)) file.permissions = [];
+        file.permissions = file.permissions.filter((entry) => !(entry.granteeType === permission.granteeType && entry.granteeId === permission.granteeId));
+        file.permissions.unshift(permission);
+        addAudit(req, "file.permission_granted", file.name, `${permission.granteeType === "group" ? "Group" : permission.email} can ${access}`);
+        await store.save();
+        sendJson(res, 201, { permission });
+        return;
+      }
+      const permissionDeleteMatch = pathname.match(/^\/api\/files\/([A-Za-z0-9_-]{1,100})\/permissions\/([A-Za-z0-9_-]{1,100})$/);
+      if (permissionDeleteMatch && req.method === "DELETE") {
+        const file = findFile(permissionDeleteMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        const before = Array.isArray(file.permissions) ? file.permissions.length : 0;
+        file.permissions = (file.permissions || []).filter((entry) => entry.id !== permissionDeleteMatch[2]);
+        if (file.permissions.length === before) throw new ApiError(404, "SHARE_PERMISSION", "Internal access not found");
+        addAudit(req, "file.permission_revoked", file.name, "Internal access revoked");
+        await store.save();
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      const sharesListMatch = pathname.match(/^\/api\/files\/([A-Za-z0-9_-]{1,100})\/shares$/);
+      if (sharesListMatch && req.method === "GET") {
+        const file = findFile(sharesListMatch[1]);
+        if (!file) throw new ApiError(404, "NOT_FOUND", "File not found");
+        sendJson(res, 200, {
+          shares: (file.shares || []).map((entry, index) => ({
+            id: entry.token || `share_${index}`, recipient: entry.recipientEmail || "Anyone with the link",
+            access: entry.access, expiresAt: entry.expiresAt,
+            active: Date.parse(entry.expiresAt) > Date.now(), accessCount: 0
+          }))
+        });
+        return;
+      }
+
       const uploadSessionPayload = (session) => ({
         id: session.id, providerId: "a8m", folderId: session.folderId || "",
         expiresAt: session.expiresAt, createdAt: session.createdAt,
@@ -5045,7 +5347,7 @@ export async function createApp(options = {}) {
       rule: (entry) => entry.action.startsWith("rule.") || entry.action.startsWith("vacation."),
       draft: (entry) => entry.action.startsWith("draft."),
       task: (entry) => entry.action.startsWith("task."),
-      files: (entry) => entry.action.startsWith("file.") || entry.action.startsWith("storage.") || entry.action.startsWith("attachment."),
+      files: (entry) => entry.action.startsWith("file.") || entry.action.startsWith("storage.") || entry.action.startsWith("attachment.") || entry.action.startsWith("office."),
       preferences: (entry) => entry.action.startsWith("preferences.")
     };
     const predicate = mapping[category];

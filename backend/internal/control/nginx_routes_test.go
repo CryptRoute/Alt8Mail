@@ -44,8 +44,8 @@ func TestPublicNginxRouteStateMergesWithoutDuplicates(t *testing.T) {
 `
 	snippet := `location ^~ /calendar/rsvp/ { proxy_pass http://127.0.0.1:8080; }`
 	routes, missing := publicNginxRouteState(site, snippet)
-	wantRoutes := []string{"/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/"}
-	wantMissing := []string{"/calendar/poll/", "/calendar/feed/", "/oauth/"}
+	wantRoutes := []string{"/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/", "/office-editor"}
+	wantMissing := []string{"/calendar/poll/", "/calendar/feed/", "/oauth/", "/office-editor"}
 	if strings.Join(routes, ",") != strings.Join(wantRoutes, ",") {
 		t.Fatalf("snippet routes = %v, want %v", routes, wantRoutes)
 	}
@@ -60,7 +60,7 @@ func TestPublicNginxRouteStateMergesWithoutDuplicates(t *testing.T) {
 }
 
 func TestPublicNginxRouteStateComplete(t *testing.T) {
-	site := "location ^~ /files/s/ { }\nlocation ^~ /upload/ { }\nlocation ^~ /oauth/ { }\n"
+	site := "location ^~ /files/s/ { }\nlocation ^~ /upload/ { }\nlocation ^~ /oauth/ { }\nlocation ^~ /office-editor { }\n"
 	snippet := "location ^~ /calendar/rsvp/ { }\nlocation ^~ /calendar/poll/ { }\nlocation ^~ /calendar/feed/ { }\n"
 	if _, missing := publicNginxRouteState(site, snippet); len(missing) != 0 {
 		t.Fatalf("unexpected missing routes: %v", missing)
@@ -68,9 +68,15 @@ func TestPublicNginxRouteStateComplete(t *testing.T) {
 }
 
 func TestPublicNginxSnippetText(t *testing.T) {
-	text := publicNginxSnippetText([]string{"/upload/", "/oauth/"}, "127.0.0.1:8080")
+	text := publicNginxSnippetText([]string{"/upload/", "/oauth/", "/office-editor"}, "127.0.0.1:8080")
 	if strings.Count(text, "location ^~ /oauth/ {") != 1 {
 		t.Fatalf("OAuth callback route missing from snippet:\n%s", text)
+	}
+	if !strings.Contains(text, "location ^~ /office-editor {") {
+		t.Fatalf("Office editor route missing from snippet:\n%s", text)
+	}
+	if !strings.Contains(text, "frame-ancestors 'self'") {
+		t.Fatalf("Office editor CSP missing from snippet:\n%s", text)
 	}
 	if !strings.Contains(text, "client_max_body_size 12m;") {
 		t.Fatalf("upload body limit missing from snippet:\n%s", text)

@@ -19,7 +19,7 @@ func delegatedSessionAllowed(method, path string) bool {
 		return method == http.MethodDelete
 	case strings.HasPrefix(path, "/api/delegation/"):
 		return false
-	case strings.HasPrefix(path, "/api/addons"):
+	case strings.HasPrefix(path, "/api/addons"), strings.HasPrefix(path, "/api/office"):
 		return false
 	case strings.HasPrefix(path, "/api/security"):
 		return false
@@ -42,7 +42,8 @@ func delegatedSessionAllowed(method, path string) bool {
 		return method == http.MethodGet || method == http.MethodHead
 	case strings.HasPrefix(path, "/api/dev"):
 		return false
-	case path == "/api/audit", strings.HasPrefix(path, "/api/audit.csv"), path == "/api/workspace/audit":
+	case path == "/api/audit", strings.HasPrefix(path, "/api/audit.csv"),
+		path == "/api/workspace/audit", path == "/api/workspace/audit.csv":
 		return false
 	}
 	readOnly := method == http.MethodGet || method == http.MethodHead

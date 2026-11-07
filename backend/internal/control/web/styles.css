@@ -1510,3 +1510,12 @@ a.security-report-alert:hover { filter: brightness(.985); }
 .addon-control-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .addon-control-links a { display: inline-flex; align-items: center; padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 10.5px; font-weight: 600; text-decoration: none; }
 .addon-control-links a:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+
+/* Office / OnlyOffice lifecycle */
+.office-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.office-fields { display: grid; gap: 12px; }
+.office-feature { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.office-error { color: var(--status-critical-ink); margin-top: 12px; }
+.office-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.office-logs { max-height: 360px; overflow: auto; white-space: pre-wrap; margin: 0; }
+@media (max-width: 1000px) { .office-grid { grid-template-columns: 1fr; } }

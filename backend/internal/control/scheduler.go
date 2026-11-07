@@ -40,6 +40,7 @@ func (s *Server) Start(ctx context.Context) {
 	go s.runPruneScheduler(ctx)
 	go s.runPackageMonitor(ctx)
 	go s.runServiceHealthHeartbeat(ctx)
+	go s.runOfficeMonitor(ctx)
 }
 
 func (s *Server) runServiceMonitor(ctx context.Context) {
@@ -68,6 +69,34 @@ func (s *Server) runServiceHealthHeartbeat(ctx context.Context) {
 		s.persistServiceStates(ctx, services)
 	}
 	<-ctx.Done()
+}
+
+// runOfficeMonitor keeps office_settings.last_health_at fresh. Webmail requires
+// a recent health timestamp before exposing Office, so readiness cannot depend
+// on someone leaving the System Control Office page open.
+func (s *Server) runOfficeMonitor(ctx context.Context) {
+	check := func() {
+		settings, err := s.officeSettings(ctx)
+		if err != nil || (settings.Status == "not_installed" && !settings.Enabled) {
+			return
+		}
+		agent, err := s.officeAgentQuickStatus(ctx)
+		if err != nil {
+			return
+		}
+		s.persistOfficeStatus(ctx, agent)
+	}
+	check()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			check()
+		}
+	}
 }
 
 func (s *Server) readServicesWithContext(ctx context.Context) ([]serviceStatus, error) {

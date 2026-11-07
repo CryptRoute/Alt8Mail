@@ -35,6 +35,7 @@ func TestDelegatedSessionAllowedPaths(t *testing.T) {
 		{http.MethodPost, "/api/mail/sync", false},
 		{http.MethodGet, "/api/mail/sync", true},
 		{http.MethodGet, "/api/addons", false},
+		{http.MethodGet, "/api/office/config", false},
 		{http.MethodGet, "/api/audit", false},
 		{http.MethodGet, "/api/audit.csv", false},
 		{http.MethodPost, "/api/dev/reset", false},

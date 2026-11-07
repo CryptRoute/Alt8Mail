@@ -65,6 +65,7 @@ echo "building Alt8Mail $VERSION for $GOOS_TARGET/$GOARCH_TARGET"
   go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/a8m-dkimprovision" ./cmd/dkimprovision
   go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$STAGE/bin/alt8mail-control" ./cmd/control
   go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$STAGE/bin/a8m-addon-relay" ./cmd/addonrelay
+  go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$STAGE/bin/a8m-office-agent" ./cmd/officeagent
 )
 
 chmod 0755 "$STAGE/bin/"*
@@ -105,6 +106,10 @@ CONTROL_SMTP_ADDR=127.0.0.1:25
 CONTROL_POLICY_LISTEN=127.0.0.1:10040
 CONTROL_REDIS_ADDR=127.0.0.1:6379
 CONTROL_REDIS_PASSWORD_FILE=/opt/a8m/secrets/redis_password
+CONTROL_OFFICE_AGENT_URL=http://127.0.0.1:8098
+CONTROL_OFFICE_AGENT_TOKEN_FILE=/etc/a8m/office-agent-token
+CONTROL_OFFICE_IMAGE=onlyoffice/documentserver:9.4.0.1
+CONTROL_OFFICE_JWT_SECRET_FILE=/etc/a8m/office-jwt-secret
 CONTROL_RETENTION_DAYS=365
 CONTROL_TRUSTED_PROXY=false
 EOF

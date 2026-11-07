@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Alt8Mail Office</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #f6f8fb; --surface: #ffffff; --text: #17202b; --muted: #64748b; --line: #dbe3ec; --accent: #0f6cbd; --critical: #b42318; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0c1420; --surface: #121d2b; --text: #e7eef8; --muted: #93a4b8; --line: #253448; --accent: #58a6f4; --critical: #fda29b; }
+    }
+    [hidden] { display: none !important; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #shell { display: flex; flex-direction: column; height: 100%; }
+    #editor { position: relative; flex: 1; min-height: 0; background: var(--surface); }
+    #state { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; }
+    .state-card { max-width: 460px; text-align: center; }
+    .state-mark { width: 44px; height: 44px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 12px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-size: 18px; font-weight: 700; }
+    .state-card h1 { margin: 0 0 6px; font-size: 16px; }
+    .state-card p { margin: 0; color: var(--muted); }
+    .state-card p.error { color: var(--critical); }
+    .spinner { width: 22px; height: 22px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 14px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+    .ai-fab { position: fixed; right: 18px; bottom: 18px; z-index: 20; border: 0; border-radius: 999px; padding: 11px 18px; background: var(--accent); color: #fff; font: inherit; font-weight: 750; cursor: pointer; box-shadow: 0 12px 30px rgba(15, 108, 189, .32); }
+    .ai-panel { position: fixed; top: 14px; right: 14px; bottom: 14px; z-index: 30; width: min(370px, calc(100vw - 28px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: 0 24px 70px rgba(7, 16, 30, .28); }
+    .ai-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+    .ai-head > div { display: flex; flex-direction: column; gap: 2px; }
+    .ai-head strong { font-size: 13px; }
+    .ai-head span { color: var(--muted); font-size: 11px; }
+    .ai-close { border: 0; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; padding: 2px 5px; }
+    .ai-body { flex: 1; overflow: auto; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+    .ai-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ai-actions button { border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--text); padding: 5px 10px; font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
+    .ai-actions button.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); }
+    .ai-language, .ai-prompt-wrap { display: flex; flex-direction: column; gap: 5px; font-size: 11px; font-weight: 650; color: var(--muted); }
+    .ai-language select, .ai-prompt-wrap textarea { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); color: var(--text); padding: 9px 10px; font: inherit; font-size: 12px; }
+    .ai-prompt-wrap textarea { resize: vertical; min-height: 68px; }
+    .ai-prompt-wrap small { font-weight: 500; }
+    .ai-generate { border: 0; border-radius: 9px; background: var(--accent); color: #fff; padding: 10px 12px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+    .ai-generate:disabled { opacity: .6; cursor: default; }
+    .ai-status { min-height: 16px; margin: 0; font-size: 11px; color: var(--muted); }
+    .ai-status.is-error { color: var(--critical); }
+    .ai-result { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); padding: 11px 12px; font-size: 12px; line-height: 1.55; }
+    .ai-result-actions { display: flex; gap: 7px; margin-top: 8px; }
+    .ai-result-actions button { flex: 1; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); padding: 8px 10px; font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
+    .ai-result-actions #aiInsert { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .ai-note { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+    @media (max-width: 560px) { .ai-panel { top: 0; right: 0; bottom: 0; width: 100%; border-radius: 0; } }
+  </style>
+</head>
+<body>
+  <div id="shell">
+    <div id="editor">
+      <div id="state">
+        <div class="state-card">
+          <div class="spinner" id="spinner"></div>
+          <div class="state-mark" id="stateMark" hidden>O</div>
+          <h1 id="stateTitle">Opening Office…</h1>
+          <p id="stateMessage">Preparing a secure editing session.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <button id="aiFab" class="ai-fab" type="button" hidden aria-label="Open Alt8Mail AI assistant">AI</button>
+  <aside id="aiPanel" class="ai-panel" hidden aria-label="Alt8Mail AI assistant">
+    <header class="ai-head">
+      <div><strong>Alt8Mail AI</strong><span>Work with the selected text</span></div>
+      <button id="aiClose" class="ai-close" type="button" aria-label="Close AI assistant">×</button>
+    </header>
+    <div class="ai-body">
+      <div class="ai-actions" role="group" aria-label="AI actions">
+        <button type="button" data-ai-action="summarize">Summarize</button>
+        <button type="button" data-ai-action="rewrite">Rewrite</button>
+        <button type="button" data-ai-action="translate">Translate</button>
+        <button type="button" data-ai-action="continue">Continue</button>
+        <button type="button" data-ai-action="custom">Ask AI</button>
+      </div>
+      <label class="ai-language" id="aiLanguageWrap" hidden><span>Translate to</span>
+        <select id="aiLanguage">
+          <option value="English">English</option>
+          <option value="Spanish">Spanish</option>
+          <option value="French">French</option>
+          <option value="German">German</option>
+          <option value="Portuguese">Portuguese</option>
+          <option value="Italian">Italian</option>
+          <option value="Arabic">Arabic</option>
+          <option value="Chinese (Simplified)">Chinese (Simplified)</option>
+          <option value="Japanese">Japanese</option>
+          <option value="Hindi">Hindi</option>
+          <option value="Yoruba">Yoruba</option>
+        </select>
+      </label>
+      <label class="ai-prompt-wrap"><span>Instruction <small>optional</small></span>
+        <textarea id="aiPrompt" maxlength="2000" rows="3" placeholder="e.g. make it more formal, or write a closing paragraph"></textarea>
+      </label>
+      <button id="aiGenerate" class="ai-generate" type="button">Generate with AI</button>
+      <p id="aiStatus" class="ai-status" role="status" aria-live="polite"></p>
+      <div id="aiResultWrap" hidden>
+        <div id="aiResult" class="ai-result"></div>
+        <div class="ai-result-actions">
+          <button id="aiInsert" type="button">Insert into document</button>
+          <button id="aiCopy" type="button">Copy</button>
+        </div>
+      </div>
+      <p class="ai-note">The selected text is sent to your organization's AI provider. Review generated text before inserting it.</p>
+    </div>
+  </aside>
+  <script src="/office-editor.js" defer></script>
+</body>
+</html>

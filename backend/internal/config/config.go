@@ -80,9 +80,10 @@ type Config struct {
 	MicrosoftClientID     string
 	MicrosoftClientSecret string
 
-	AddonRelayURL      string
-	AddonRelaySecret   string
-	AddonGatewayURL    string
+	AddonRelayURL       string
+	AddonRelaySecret    string
+	AddonGatewayURL     string
+	OfficeJWTSecretFile string
 
 	AdminListen       string
 	AdminDir          string
@@ -153,6 +154,7 @@ func Load() (Config, error) {
 		AddonRelayURL:         strings.TrimRight(env("ALT8MAIL_ADDON_RELAY_URL", ""), "/"),
 		AddonRelaySecret:      os.Getenv("ALT8MAIL_ADDON_RELAY_SECRET"),
 		AddonGatewayURL:       strings.TrimRight(env("ALT8MAIL_ADDON_GATEWAY_URL", ""), "/"),
+		OfficeJWTSecretFile:   env("ALT8MAIL_OFFICE_JWT_SECRET_FILE", "/etc/a8m/office-jwt-secret"),
 		AdminListen:           env("ALT8MAIL_ADMIN_LISTEN", "127.0.0.1:8081"),
 		AdminDir:              env("ALT8MAIL_ADMIN_DIR", "./admin"),
 		AdminPublicURL:        strings.TrimRight(env("ALT8MAIL_ADMIN_URL", ""), "/"),

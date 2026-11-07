@@ -858,6 +858,22 @@ const AUDIT_LABELS = {
   "file.updated": "File updated",
   "file.shared": "File shared",
   "file.deleted": "File deleted",
+  "file.permission_granted": "Internal access granted",
+  "file.permission_revoked": "Internal access revoked",
+  "office.created": "Office document created",
+  "office.opened": "Office document opened",
+  "office.saved": "Office document saved",
+  "office.guest_opened": "Guest opened Office document",
+  "office.guest_saved": "Guest saved Office document",
+  "office.shared_saved": "Shared editor saved Office document",
+  "office.dlp_blocked": "Office save blocked by DLP",
+  "office.quota_blocked": "Office save blocked by quota",
+  "office.version_restored": "Office version restored",
+  "office.version_reviewed": "Office version reviewed",
+  "office.version_downloaded": "Office version downloaded",
+  "office.versions_compared": "Office versions compared",
+  "office.converted": "Office document converted",
+  "office.ai_used": "Office AI assistant used",
   "storage.connected": "Storage connected",
   "storage.disconnected": "Storage disconnected",
   "attachment.uploaded": "Attachment uploaded",
@@ -1062,7 +1078,19 @@ const state = {
   fileSortDesc: false,
   fileAction: null,
   fileShareList: [],
+  filePermissionList: [],
+  shareGroups: [],
+  shareGroupsLoaded: false,
   fileContextTarget: null,
+  office: { enabled: false, ready: false, publicUrl: "", status: "not_installed", formats: {} },
+  officeLoaded: false,
+  officeFile: null,
+  officeVersionsFileId: "",
+  officeVersions: [],
+  officeVersionsAccess: "",
+  officeComposeAttachment: null,
+  officeMailAttachment: null,
+  officeNewComposeSession: "",
   uploadManagerOpen: false,
   uploadManagerMinimized: false,
   uploadTab: "computer",
@@ -3111,6 +3139,7 @@ onboardingOverlay?.addEventListener("click", (event) => {
 });
 
 function handleSessionExpired() {
+  closeOfficeUiOnSignOut();
   if (state.delegatedMode) {
     expireDelegatedWindow("Your primary Alt8Mail session ended. This delegated mailbox has been signed out.");
     return;
@@ -4987,6 +5016,7 @@ async function logout() {
     return;
   }
   if (logoutInProgress) return;
+  closeOfficeUiOnSignOut();
   logoutInProgress = true;
   const startedAt = Date.now();
   broadcastPrimarySignOut();
@@ -5202,6 +5232,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   startDelegatedHeartbeat();
   ensureAddonsSettingsUi();
   if (!state.delegatedMode) loadAddons({ silent: !state.addonsLoaded }).catch(() => {});
+  if (!state.delegatedMode) loadOfficeConfig({ silent: true }).catch(() => {});
   renderFolders();
   renderList();
   renderNotifications();
@@ -10671,6 +10702,7 @@ function attachmentMarkup(files, message = null) {
           <span class="attach-preview-hint">${blocked ? "Locked" : file.previewable ? "Preview" : "Info"}</span>
         </button>
         ${file.id && !blocked ? `<button class="attach-save" data-save-attachment="${esc(file.id)}" data-save-attachment-name="${esc(file.name)}" type="button" title="Save to Cabinet" aria-label="Save ${esc(file.name)} to Cabinet"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg></button>` : ""}
+        ${file.id && !blocked && !message?.delegateOwnerId && state.office.ready && officeMetaForName(file.name) ? `<button class="attach-office" data-office-attachment="${esc(file.id)}" data-office-attachment-name="${esc(file.name)}" data-office-message="${esc(messageId)}" type="button" title="Open in Office" aria-label="Open ${esc(file.name)} in Office"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></button>` : ""}
       </div>`).join("")}
     </div>
     ${blocked ? `<p class="attach-blocked-note"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Previews, downloads and saving to Cabinet are disabled while this message is in Junk. Move it to Inbox to continue.</p>` : ""}
@@ -10707,6 +10739,41 @@ async function saveAttachmentToCabinet(attachmentId, name, { quiet = false } = {
     showError(error);
     return false;
   }
+}
+
+async function editMailAttachmentInOffice(attachmentId, name, messageId = "") {
+  if (!attachmentId) return;
+  if (!state.office.ready) {
+    showToast("Office is not enabled or healthy for this workspace yet", null, null, { duration: 5000 });
+    return;
+  }
+  let file = (state.files || []).find((item) => item.attachmentId === attachmentId && item.providerId === "a8m");
+  if (!file) {
+    const data = await api("/api/files", {
+      method: "POST",
+      body: {
+        providerId: "a8m",
+        attachmentId,
+        name: name || "Attachment",
+        description: "Opened in Office from a mail attachment."
+      }
+    });
+    file = data.file;
+    await refreshCabinet();
+    file = (state.files || []).find((item) => item.id === file.id) || file;
+  }
+  if (!file) {
+    showToast("That attachment could not be prepared for Office", null, null, { duration: 5000 });
+    return;
+  }
+  state.officeMailAttachment = {
+    messageId: messageId || "",
+    attachmentId,
+    sourceFileId: file.id,
+    name: file.name || name || "Attachment",
+    originalVersion: file.version || "1"
+  };
+  openOfficeEditor(file);
 }
 
 async function saveAllAttachmentsToCabinet(messageId) {
@@ -11059,7 +11126,7 @@ function replyToMessage(message, all = false) {
   const receivedAlias = state.aliases.find((alias) => alias.canSend && (message.to || []).some((person) => normalizeEmail(person.email) === normalizeEmail(alias.email)));
   const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
   const quote = composeQuoteFor(message, "reply");
-  openCompose({
+  return openCompose({
     toText: plan.to,
     ccText: all ? plan.cc.join(", ") : "",
     subject,
@@ -14027,11 +14094,15 @@ function updateComposeIdentity(session) {
   }
 }
 
-function composeFileCard(file, index) {
+function composeFileCard(file, index, sessionId = "") {
+  const office = index != null && state.office.ready && file.id && officeMetaForName(file.name);
   return `<div class="compose-file-card">
     <span class="file-art"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></span>
     <span class="file-copy"><strong>${esc(file.name || "Attachment")}</strong><span>${esc(file.mime || file.type || "File")} · ${esc(file.size || formatBytes(file.sizeBytes))}</span></span>
-    ${index == null ? "" : `<button class="file-remove" data-compose-remove="${index}" type="button" aria-label="Remove ${esc(file.name || "attachment")}"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>`}
+    <span class="file-card-actions">
+      ${office ? `<button class="file-office" data-compose-office="${index}" data-compose-office-session="${esc(sessionId)}" type="button" title="Edit in Office" aria-label="Edit ${esc(file.name || "attachment")} in Office"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></button>` : ""}
+      ${index == null ? "" : `<button class="file-remove" data-compose-remove="${index}" type="button" aria-label="Remove ${esc(file.name || "attachment")}"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>`}
+    </span>
   </div>`;
 }
 
@@ -14040,7 +14111,7 @@ function updateComposeFiles(session) {
   const box = session.el.querySelector("[data-compose-files]");
   if (!box) return;
   box.className = session.files.length ? "compose-file-grid" : "compose-files";
-  box.innerHTML = session.files.map((file, index) => composeFileCard(file, index)).join("");
+  box.innerHTML = session.files.map((file, index) => composeFileCard(file, index, session.id)).join("");
 }
 
 function toggleComposeQuote(session) {
@@ -14435,7 +14506,7 @@ function renderComposeAttachPicker() {
   if (!session) { closeComposeAttach(); return; }
   const current = composeAttachCurrentList;
   if (current) {
-    current.innerHTML = session.files.length ? session.files.map((file, index) => composeFileCard(file, index)).join("") : '<div class="settings-note">No attachments yet.</div>';
+    current.innerHTML = session.files.length ? session.files.map((file, index) => composeFileCard(file, index, attachPickerSessionId)).join("") : '<div class="settings-note">No attachments yet.</div>';
   }
   if (composeAttachCurrentCount) composeAttachCurrentCount.textContent = `${session.files.length} file${session.files.length === 1 ? "" : "s"}`;
   if (!composeAttachFileList) return;
@@ -14449,7 +14520,8 @@ function renderComposeAttachPicker() {
 }
 
 async function uploadComposeFiles(session, files) {
-  if (!session || !files?.length) return;
+  const uploaded = [];
+  if (!session || !files?.length) return uploaded;
   const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
   for (const file of files) {
     if (file.size > max) {
@@ -14469,6 +14541,7 @@ async function uploadComposeFiles(session, files) {
         body: { name: file.name, mime: file.type || "application/octet-stream", dataBase64 }
       });
       session.files.push(data.attachment);
+      uploaded.push(data.attachment);
       updateComposeFiles(session);
       scheduleComposeSave(session, 200);
       refreshAttachPickerIfOpen();
@@ -14478,24 +14551,30 @@ async function uploadComposeFiles(session, files) {
   }
   updateComposeStatus(session);
   renderComposeDockTabs();
+  return uploaded;
 }
 
-async function attachWorkspaceFile(fileId) {
-  const session = sessionById(attachPickerSessionId);
+async function attachWorkspaceFile(fileId, sessionId = attachPickerSessionId) {
+  const session = sessionById(sessionId);
   const file = (state.files || []).find((item) => item.id === fileId);
-  if (!session || !file) return;
+  if (!session || !file) return null;
   const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
   if (Number(file.sizeBytes || 0) > max) {
     showToast(`${file.name} is larger than ${formatBytes(max)}`);
-    return;
+    return null;
   }
   try {
     const response = await fetch(`/api/files/${encodeURIComponent(fileId)}/content`, { credentials: "same-origin", headers: delegatedRequestHeaders() });
     if (!response.ok) throw new Error("That file could not be downloaded");
     const blob = await response.blob();
     const upload = new File([blob], file.name || "attachment", { type: file.mime || blob.type || "application/octet-stream" });
-    await uploadComposeFiles(session, [upload]);
+    const uploaded = await uploadComposeFiles(session, [upload]);
+    if (uploaded && uploaded[0]) {
+      uploaded[0].sourceFileId = fileId;
+      return uploaded[0];
+    }
   } catch (error) { showError(error); }
+  return null;
 }
 
 function updateComposeStatus(session) {
@@ -17818,7 +17897,7 @@ function fileIsImage(file) {
 }
 
 function fileMatchesFilter(file) {
-  if (!storageConnected(file.providerId)) return false;
+  if (!file.shared && !storageConnected(file.providerId)) return false;
   if (state.fileProvider !== "all" && file.providerId !== state.fileProvider) return false;
   if (state.fileProvider === "all" || state.fileProvider === "a8m") {
     if (state.fileFolderId && file.folderId !== state.fileFolderId) return false;
@@ -17827,9 +17906,9 @@ function fileMatchesFilter(file) {
     const modified = new Date(file.modifiedAt);
     if (Number.isNaN(modified.getTime()) || Date.now() - modified.getTime() > 7 * 86400000) return false;
   }
-  if (state.fileFilter === "shared" && !(file.sharedWith || []).length) return false;
+  if (state.fileFilter === "shared" && !file.shared && !(file.sharedWith || []).length) return false;
   if (state.fileFilter === "images" && !String(file.mime || "").startsWith("image/")) return false;
-  if (state.fileFilter === "documents" && !["PDF", "DOC", "DOCX", "XLS", "XLSX", "PPT", "PPTX", "TXT"].includes(String(file.type || "").toUpperCase())) return false;
+  if (state.fileFilter === "documents" && !["PDF", "DOC", "DOCX", "XLS", "XLSX", "PPT", "PPTX", "TXT", "ODT", "ODS", "ODP", "RTF", "CSV"].includes(String(file.type || "").toUpperCase())) return false;
   if (state.fileFilter === "starred" && !file.starred) return false;
   const query = state.query.toLowerCase();
   if (query) {
@@ -17897,15 +17976,16 @@ function cabinetGroupKey(file) {
 function cabinetFileRow(file) {
   const provider = storageProvider(file.providerId);
   const selected = file.id === state.selectedFileId;
-  const shared = (file.sharedWith || []).length > 0;
-  return `<div class="file-row cabinet-row${selected ? " is-selected" : ""}" data-file-id="${esc(file.id)}" tabindex="0" role="button" draggable="true" aria-pressed="${selected}" aria-label="${esc(file.name)}">
+  const shared = Boolean(file.shared) || (file.sharedWith || []).length > 0;
+  const sharedLabel = file.shared ? "Shared with you" : "Shared";
+  return `<div class="file-row cabinet-row${selected ? " is-selected" : ""}${file.shared ? " is-shared-file" : ""}" data-file-id="${esc(file.id)}" tabindex="0" role="button" draggable="true" aria-pressed="${selected}" aria-label="${esc(file.name)}">
     <span class="file-type ${fileTypeClass(file)}">${esc(file.type || "FILE")}</span>
-    <div class="file-main"><strong>${esc(file.name)}</strong><span>${esc(file.path || "Files")} · ${esc(provider ? provider.name : "Storage")}</span></div>
+    <div class="file-main"><strong>${esc(file.name)}</strong><span>${esc(file.path || "Files")} · ${esc(provider ? provider.name : "Storage")}${file.shared ? ` · <em class="file-shared-note">${esc(sharedLabel)}</em>` : ""}</span></div>
     <span class="file-owner">${esc(file.owner ? file.owner.name : "—")}</span>
     <span class="file-modified">${esc(formatDateOnly(file.modifiedAt))}</span>
     <span class="file-size">${esc(formatBytes(file.sizeBytes))}</span>
-    <span class="file-flags">${shared ? '<svg class="icon" aria-label="Shared" title="Shared"><use href="#i-people"/></svg>' : ""}${file.locked ? '<svg class="icon" aria-label="Locked" title="Locked"><use href="#i-lock"/></svg>' : ""}</span>
-    <button class="star-btn${file.starred ? " is-starred" : ""}" data-file-star="${esc(file.id)}" type="button" aria-label="${file.starred ? "Remove star" : "Star file"}" aria-pressed="${file.starred ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>
+    <span class="file-flags">${shared ? `<svg class="icon" aria-label="${esc(sharedLabel)}" title="${esc(sharedLabel)}"><use href="#i-people"/></svg>` : ""}${file.dlpClassification ? `<svg class="icon dlp-flag" aria-label="Data classification ${esc(file.dlpClassification)}" title="${esc(file.dlpClassification)}${(file.dlpWarnings || []).length ? ` · ${esc((file.dlpWarnings || []).join(" · "))}` : ""}"><use href="#${(file.dlpWarnings || []).length ? "i-shield-alert" : "i-shield-check"}"/></svg>` : ""}${file.locked ? '<svg class="icon" aria-label="Locked" title="Locked"><use href="#i-lock"/></svg>' : ""}</span>
+    ${file.shared ? "" : `<button class="star-btn${file.starred ? " is-starred" : ""}" data-file-star="${esc(file.id)}" type="button" aria-label="${file.starred ? "Remove star" : "Star file"}" aria-pressed="${file.starred ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`}
     <button class="icon-btn cabinet-row-more" data-file-menu="${esc(file.id)}" type="button" aria-label="More actions for ${esc(file.name)}"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
   </div>`;
 }
@@ -17936,10 +18016,10 @@ function cabinetFileTile(file, mode) {
   const provider = storageProvider(file.providerId);
   const selected = file.id === state.selectedFileId;
   const image = fileIsImage(file) && file.contentUrl;
-  return `<article class="cabinet-tile${selected ? " is-selected" : ""}${mode === "thumbs" ? " is-thumb" : ""}" data-file-id="${esc(file.id)}" tabindex="0" role="button" draggable="true" aria-pressed="${selected}" aria-label="${esc(file.name)}">
-    <div class="cabinet-tile-art ${fileTypeClass(file)}">${mode === "thumbs" && image ? `<img src="${esc(file.contentUrl)}" alt="" loading="lazy">` : `<span class="file-type ${fileTypeClass(file)}">${esc(file.type || "FILE")}</span>`}${file.starred ? '<span class="cabinet-star-mark"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></span>' : ""}</div>
+  return `<article class="cabinet-tile${selected ? " is-selected" : ""}${mode === "thumbs" ? " is-thumb" : ""}${file.shared ? " is-shared-file" : ""}" data-file-id="${esc(file.id)}" tabindex="0" role="button" draggable="true" aria-pressed="${selected}" aria-label="${esc(file.name)}">
+    <div class="cabinet-tile-art ${fileTypeClass(file)}">${mode === "thumbs" && image ? `<img src="${esc(file.contentUrl)}" alt="" loading="lazy">` : `<span class="file-type ${fileTypeClass(file)}">${esc(file.type || "FILE")}</span>`}${!file.shared && file.starred ? '<span class="cabinet-star-mark"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></span>' : ""}${file.shared ? '<span class="cabinet-star-mark cabinet-share-mark" title="Shared with you"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></span>' : ""}</div>
     <strong>${esc(file.name)}</strong>
-    <span>${esc(provider ? provider.name : "Storage")} · ${esc(formatBytes(file.sizeBytes))}</span>
+    <span>${file.shared ? "Shared with you" : esc(provider ? provider.name : "Storage")} · ${esc(formatBytes(file.sizeBytes))}</span>
     <span class="cabinet-tile-meta">${esc(formatDateOnly(file.modifiedAt))}</span>
     <button class="icon-btn cabinet-tile-more" data-file-menu="${esc(file.id)}" type="button" aria-label="More actions for ${esc(file.name)}"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></button>
   </article>`;
@@ -18018,7 +18098,7 @@ function cabinetGroupedMarkup(folders, files, mode) {
 function renderFiles() {
   if (!filesView || !fileList) return;
   const connected = state.storageProviders.filter((provider) => provider.connected);
-  const available = state.files.filter((file) => storageConnected(file.providerId));
+  const available = state.files.filter((file) => file.shared || storageConnected(file.providerId));
   const filtered = sortCabinetFiles(available.filter(fileMatchesFilter));
   if (!filtered.some((file) => file.id === state.selectedFileId)) state.selectedFileId = filtered[0] ? filtered[0].id : null;
   const used = connected.reduce((sum, provider) => sum + (Number(provider.usedBytes) || 0), 0);
@@ -18057,6 +18137,7 @@ function renderFiles() {
   renderFileDetail();
   syncStatusRange();
   syncStatusContext();
+  syncOfficeCabinetUi();
 }
 
 function renderFileDetail() {
@@ -18071,13 +18152,16 @@ function renderFileDetail() {
   const image = fileIsImage(file) && file.contentUrl;
   const pdf = file.mime === "application/pdf" && file.contentUrl;
   const folder = fileFolderById(file.folderId);
+  const office = canUseOffice(file) ? officeMetaForFile(file) : null;
+  const sharedFile = Boolean(file.shared);
+  const officeLabel = office && office.editable && !(sharedFile && file.access === "view") ? "Edit in Office" : "View in Office";
   fileDetail.innerHTML = `<div class="file-detail-head"><div><span class="eyebrow">File details</span><h2>${esc(file.name)}</h2></div><button class="icon-btn file-detail-back" data-file-back type="button" aria-label="Back to files"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg></button></div>
     <div class="file-preview-card ${fileTypeClass(file)}">
       ${image ? `<img src="${esc(file.contentUrl)}" alt="${esc(file.name)}" loading="lazy">` : pdf ? `<span class="file-preview-pdf"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>PDF</span>` : `<span class="file-preview-generic"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg><strong>${esc(file.type)}</strong></span>`}
       <div class="file-preview-overlay"><button class="btn-secondary" data-file-preview="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg>${file.previewable ? "Preview" : "Open details"}</button><button class="btn-secondary" data-file-menu="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>More</button></div>
     </div>
-    <div class="file-badges"><span class="provider-badge" style="--provider:${provider ? provider.color : "#64748b"}">${esc(provider ? provider.name : "Storage")}</span>${file.starred ? '<span class="policy-chip">Starred</span>' : ""}${file.locked ? '<span class="policy-chip">Locked</span>' : ""}${(file.sharedWith || []).length ? `<span class="policy-chip">${file.sharedWith.length} shared</span>` : ""}</div>
-    <p class="file-description">${esc(file.description || "No description.")}</p>
+    <div class="file-badges"><span class="provider-badge" style="--provider:${provider ? provider.color : "#64748b"}">${esc(provider ? provider.name : "Storage")}</span>${sharedFile ? '<span class="policy-chip is-shared">Shared with you</span>' : ""}${file.starred && !sharedFile ? '<span class="policy-chip">Starred</span>' : ""}${file.locked ? '<span class="policy-chip">Locked</span>' : ""}${file.dlpClassification ? `<span class="policy-chip dlp-chip" title="${esc((file.dlpWarnings || []).join(" · "))}"><svg class="icon" aria-hidden="true"><use href="#${(file.dlpWarnings || []).length ? "i-shield-alert" : "i-shield-check"}"/></svg>${esc(file.dlpClassification)}</span>` : ""}${!sharedFile && (file.sharedWith || []).length ? `<span class="policy-chip">${file.sharedWith.length} shared</span>` : ""}</div>
+    <p class="file-description">${esc(file.description || (sharedFile ? `Shared by ${file.owner ? file.owner.name : "a colleague"}.` : "No description."))}</p>
     <div class="file-meta-grid">
       <div><span>Owner</span><strong>${esc(file.owner ? file.owner.name : "—")}</strong></div>
       <div><span>Modified</span><strong>${esc(formatDateOnly(file.modifiedAt))}</strong></div>
@@ -18086,14 +18170,15 @@ function renderFileDetail() {
     </div>
     <div class="file-path"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><button class="link-btn" data-folder-open="${esc(file.folderId || "")}" type="button">${esc(folder ? folder.path : "All files")}</button></div>
     <div class="file-detail-actions">
-      <button class="btn-primary" data-file-preview="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg>Preview</button>
+      ${office ? `<button class="btn-primary" data-office-edit="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>${officeLabel}</button>` : `<button class="btn-primary" data-file-preview="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg>Preview</button>`}
+      ${office ? `<button class="btn-secondary" data-office-versions="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg>Versions</button>` : ""}
       <button class="btn-secondary" data-file-download="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</button>
-      <button class="btn-secondary" data-file-share="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Share</button>
+      ${sharedFile ? "" : `<button class="btn-secondary" data-file-share="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Share</button>
       <button class="btn-secondary" data-file-lock="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>${file.locked ? "Unlock link" : "Lock link"}</button>
       <button class="btn-secondary" data-file-send="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Send</button>
-      <button class="btn-secondary" data-file-menu="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>More</button>
+      <button class="btn-secondary" data-file-menu="${esc(file.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>More</button>`}
     </div>
-    ${(file.sharedWith || []).length ? `<div class="file-shared-list"><h3>Shared with</h3>${file.sharedWith.map((email) => `<span>${avatar({ name: email.split("@")[0], email, initials: initialsFrom(email.split("@")[0]), color: colorForString(email) }, "sm")}${esc(email)}</span>`).join("")}</div>` : ""}`;
+    ${!sharedFile && (file.sharedWith || []).length ? `<div class="file-shared-list"><h3>Shared with</h3>${file.sharedWith.map((email) => `<span>${avatar({ name: email.split("@")[0], email, initials: initialsFrom(email.split("@")[0]), color: colorForString(email) }, "sm")}${esc(email)}</span>`).join("")}</div>` : ""}`;
 }
 
 async function refreshCabinet() {
@@ -18261,26 +18346,43 @@ function renderFileContextMenu() {
   let items = "";
   if (record.type === "file") {
     const file = record.file;
+    const office = canUseOffice(file) ? officeMetaForFile(file) : null;
     if (!view) {
-      items = [
-        fileMenuEntry("preview", "Preview", "file"),
-        fileMenuEntry("download", "Download", "download"),
-        `<div class="file-menu-sep"></div>`,
-        fileMenuEntry("openin", "Open in", "external"),
-        fileMenuEntry("copy-link", "Copy link", "link"),
-        fileMenuEntry("more-send", "Send via email", "send"),
-        fileMenuEntry("share-menu", "Share", "people"),
-        fileMenuEntry("permissions", "Manage permissions", "lock"),
-        `<div class="file-menu-sep"></div>`,
-        fileMenuEntry("rename", "Rename", "pencil"),
-        fileMenuEntry("move", "Move", "folder"),
-        fileMenuEntry("copy", "Copy", "copy"),
-        fileMenuEntry("saveas", "Save as…", "download"),
-        `<div class="file-menu-sep"></div>`,
-        fileMenuEntry("delete", "Delete", "trash"),
-        fileMenuEntry("info", "File info", "info"),
-        fileMenuEntry("more", "More", "more")
-      ].join("");
+      if (file.shared) {
+        items = [
+          office ? fileMenuEntry("office-edit", office.editable && file.access !== "view" ? "Edit in Office" : "View in Office", "file") : "",
+          office ? fileMenuEntry("office-versions", "Version history", "history") : "",
+          office && office.documentType !== "pdf" ? fileMenuEntry("office-convert", "Convert to PDF", "download") : "",
+          office ? `<div class="file-menu-sep"></div>` : "",
+          fileMenuEntry("preview", "Preview", "file"),
+          fileMenuEntry("download", "Download", "download"),
+          fileMenuEntry("info", "File info", "info")
+        ].join("");
+      } else {
+        items = [
+          office ? fileMenuEntry("office-edit", office.editable ? "Edit in Office" : "View in Office", "file") : "",
+          office ? fileMenuEntry("office-versions", "Version history", "history") : "",
+          office && office.documentType !== "pdf" ? fileMenuEntry("office-convert", "Convert to PDF", "download") : "",
+          office ? `<div class="file-menu-sep"></div>` : "",
+          fileMenuEntry("preview", "Preview", "file"),
+          fileMenuEntry("download", "Download", "download"),
+          `<div class="file-menu-sep"></div>`,
+          fileMenuEntry("openin", "Open in", "external"),
+          fileMenuEntry("copy-link", "Copy link", "link"),
+          fileMenuEntry("more-send", "Send via email", "send"),
+          fileMenuEntry("share-menu", "Share", "people"),
+          fileMenuEntry("permissions", "Manage permissions", "lock"),
+          `<div class="file-menu-sep"></div>`,
+          fileMenuEntry("rename", "Rename", "pencil"),
+          fileMenuEntry("move", "Move", "folder"),
+          fileMenuEntry("copy", "Copy", "copy"),
+          fileMenuEntry("saveas", "Save as…", "download"),
+          `<div class="file-menu-sep"></div>`,
+          fileMenuEntry("delete", "Delete", "trash"),
+          fileMenuEntry("info", "File info", "info"),
+          fileMenuEntry("more", "More", "more")
+        ].join("");
+      }
     } else if (view === "openin") {
       items = [
         fileMenuEntry("preview", "Preview in Alt8Mail", "expand"),
@@ -18447,6 +18549,7 @@ async function createShareForFile(file, options = {}) {
 async function copyFileLink(fileId) {
   const file = state.files.find((item) => item.id === fileId);
   if (!file) return;
+  if (file.shared) { showToast("Only the file owner can create a share link"); return; }
   try {
     const share = await createShareForFile(file);
     const copied = await copyTextToClipboard(share.url);
@@ -18459,6 +18562,7 @@ async function copyFileLink(fileId) {
 async function sendFileViaEmail(fileId) {
   const file = state.files.find((item) => item.id === fileId);
   if (!file) return;
+  if (file.shared) { showToast("Only the file owner can email this file"); return; }
   try {
     const session = openCompose({ subject: `Sharing ${file.name}`, bodyText: `Hi,\n\nI'm sharing ${file.name} from the Alt8Mail Cabinet.\n\n` });
     attachPickerSessionId = session.id;
@@ -18490,6 +18594,13 @@ async function handleFileMenuAction(action) {
   }
   closeFileContextMenu();
   if (!record) return;
+  if (file && file.shared && ["copy-link", "more-send", "share-menu", "share-dialog", "share-email", "permissions", "rename", "move", "copy", "saveas", "saveas-copy", "delete", "more-star", "openmail"].includes(action)) {
+    showToast("Only the file owner can manage sharing and file settings");
+    return;
+  }
+  if (action === "office-edit" && file) { await openOfficeEditorById(file.id); return; }
+  if (action === "office-versions" && file) { await openOfficeVersions(file.id); return; }
+  if (action === "office-convert" && file) { await convertOfficeFile(file.id); return; }
   if (action === "preview" && file) previewFileRecord(file);
   else if (action === "download" && file) await downloadCabinetFile(file.id);
   else if (action === "copy-link" && file) await copyFileLink(file.id);
@@ -18515,6 +18626,681 @@ async function handleFileMenuAction(action) {
   else if (action === "folder-move" && folder) openFolderDialog(folder.id);
   else if (action === "folder-delete" && folder) await deleteFileFolder(folder.id);
   else if (action === "folder-info" && folder) openFileActionDialog("folder-info", folder.id);
+}
+
+/* ============================================================
+   Alt8Mail Office
+   ============================================================ */
+const OFFICE_FALLBACK_FORMATS = {
+  word: ["docx", "doc", "odt", "rtf", "txt"],
+  cell: ["xlsx", "xls", "ods", "csv"],
+  slide: ["pptx", "ppt", "odp"],
+  pdf: ["pdf"]
+};
+const OFFICE_VERSION_SOURCE = {
+  template: "Created from template",
+  initial: "Initial document",
+  editor: "Saved in the Office editor",
+  restore: "Restored version"
+};
+const OFFICE_VIEW_ONLY_EXTENSIONS = new Set(["doc", "xls", "ppt", "pdf"]);
+
+async function loadOfficeConfig({ silent = true } = {}) {
+  if (state.delegatedMode) {
+    state.office = { enabled: false, ready: false, publicUrl: "", status: "delegated", formats: {} };
+    state.officeLoaded = true;
+    syncOfficeCabinetUi();
+    return;
+  }
+  try {
+    const data = await api("/api/office/config");
+    state.office = {
+      enabled: Boolean(data.enabled),
+      ready: Boolean(data.ready),
+      publicUrl: data.publicUrl || "",
+      status: data.status || "not_installed",
+      formats: data.formats && Object.keys(data.formats).length ? data.formats : OFFICE_FALLBACK_FORMATS
+    };
+  } catch (error) {
+    state.office = { enabled: false, ready: false, publicUrl: "", status: "unavailable", formats: OFFICE_FALLBACK_FORMATS };
+    if (!silent) showError(error);
+  }
+  state.officeLoaded = true;
+  syncOfficeCabinetUi();
+  if (state.task === "files" && filesView && !filesView.hidden) renderFiles();
+  if (state.task === "mail" && state.selectedThreadId && !state.delegatedMode) renderReader();
+  const eventOverlay = document.getElementById("eventOverlay");
+  if (eventOverlay && !eventOverlay.hidden) renderEventAttachments();
+}
+
+function syncOfficeCabinetUi() {
+  const button = document.getElementById("newOfficeDocBtn");
+  if (button) button.hidden = !state.office.ready || state.delegatedMode;
+  const composeButton = document.getElementById("composeNewOfficeDoc");
+  if (composeButton) composeButton.hidden = !state.office.ready || state.delegatedMode;
+}
+
+function officeMetaForName(name) {
+  const ext = String(name || "").split(".").pop().toLowerCase();
+  const formats = state.office.formats && Object.keys(state.office.formats).length ? state.office.formats : OFFICE_FALLBACK_FORMATS;
+  for (const type of ["word", "cell", "slide", "pdf"]) {
+    if ((formats[type] || []).includes(ext)) {
+      return { ext, documentType: type, editable: !OFFICE_VIEW_ONLY_EXTENSIONS.has(ext) };
+    }
+  }
+  return null;
+}
+
+function officeMetaForFile(file) {
+  if (!file || state.delegatedMode || file.providerId !== "a8m") return null;
+  return officeMetaForName(file.name);
+}
+
+function canUseOffice(file) {
+  return Boolean(state.office.ready && officeMetaForFile(file));
+}
+
+function officeTypeLabel(type) {
+  return { word: "Document", cell: "Spreadsheet", slide: "Presentation", pdf: "PDF" }[type] || "Document";
+}
+
+async function openOfficeEditorById(fileId) {
+  let file = (state.files || []).find((item) => item.id === fileId);
+  if (!file) {
+    await refreshCabinet();
+    file = (state.files || []).find((item) => item.id === fileId);
+  }
+  if (!file) {
+    showToast("That file is no longer available in this Cabinet");
+    return;
+  }
+  openOfficeEditor(file);
+}
+
+function openOfficeEditor(file) {
+  const meta = officeMetaForFile(file);
+  if (!state.office.ready || !meta) {
+    showToast("Office is not enabled or healthy for this workspace yet", null, null, { duration: 5000 });
+    return;
+  }
+  const overlay = document.getElementById("officeEditorOverlay");
+  const frame = document.getElementById("officeEditorFrame");
+  if (!overlay || !frame) return;
+  document.getElementById("officeEditorTitle").textContent = file.name || "Document";
+  document.getElementById("officeEditorMeta").textContent = `${officeTypeLabel(meta.documentType)} · Alt8Mail Office`;
+  state.officeFile = { id: file.id, name: file.name || "Document" };
+  const theme = effectiveTheme() === "dark" ? "dark" : "light";
+  frame.src = `/office-editor?file=${encodeURIComponent(file.id)}&theme=${theme}`;
+  overlay.hidden = false;
+  document.body.classList.add("office-editor-open");
+  setTimeout(() => document.getElementById("officeEditorClose")?.focus(), 40);
+}
+
+function closeOfficeEditor({ refresh = true } = {}) {
+  const overlay = document.getElementById("officeEditorOverlay");
+  const frame = document.getElementById("officeEditorFrame");
+  if (!overlay || overlay.hidden) return;
+  if (frame) frame.src = "about:blank";
+  overlay.hidden = true;
+  document.body.classList.remove("office-editor-open");
+  state.officeFile = null;
+  const composeTarget = state.officeComposeAttachment;
+  const mailTarget = state.officeMailAttachment;
+  state.officeComposeAttachment = null;
+  state.officeMailAttachment = null;
+  if (refresh) {
+    setTimeout(() => {
+      if (composeTarget) refreshComposeAttachmentAfterOffice(composeTarget).catch(() => {});
+      else if (mailTarget) refreshMailAttachmentAfterOffice(mailTarget).catch(() => {});
+      else refreshCabinet().catch(() => {});
+    }, 900);
+  }
+}
+
+async function editComposeAttachmentInOffice(sessionId, index) {
+  const session = sessionById(sessionId);
+  const file = session?.files?.[index];
+  if (!session || !file) return;
+  if (!state.office.ready) {
+    showToast("Office is not enabled or healthy for this workspace yet", null, null, { duration: 5000 });
+    return;
+  }
+  if (!file.id) {
+    showToast("This attachment cannot be opened in Office");
+    return;
+  }
+  let sourceFileId = file.sourceFileId || "";
+  if (!sourceFileId) {
+    const data = await api("/api/files", {
+      method: "POST",
+      body: {
+        providerId: "a8m",
+        attachmentId: file.id,
+        name: file.name || "Attachment",
+        description: "Edited in Office from a compose attachment."
+      }
+    });
+    sourceFileId = data.file.id;
+    file.sourceFileId = sourceFileId;
+    await refreshCabinet();
+  }
+  let cabinetFile = (state.files || []).find((item) => item.id === sourceFileId);
+  if (!cabinetFile) {
+    await refreshCabinet();
+    cabinetFile = (state.files || []).find((item) => item.id === sourceFileId);
+  }
+  if (!cabinetFile) {
+    showToast("That document is no longer available in the Cabinet");
+    return;
+  }
+  state.officeComposeAttachment = {
+    sessionId,
+    attachmentId: file.id,
+    sourceFileId,
+    name: file.name || cabinetFile.name,
+    originalVersion: cabinetFile.version || "1"
+  };
+  if (attachPickerSessionId === sessionId && !composeAttachOverlay.hidden) closeComposeAttach();
+  openOfficeEditor(cabinetFile);
+}
+
+async function refreshComposeAttachmentAfterOffice(target, attempt = 0) {
+  if (!target || target.refreshing) return;
+  target.refreshing = true;
+  try {
+    const session = sessionById(target.sessionId);
+    if (!session) return;
+    await refreshCabinet();
+    const index = session.files.findIndex((file) => file.id === target.attachmentId);
+    if (index < 0) return;
+    const current = (state.files || []).find((file) => file.id === target.sourceFileId);
+    if (!current) return;
+    if (String(current.version || "1") === String(target.originalVersion || "1")) {
+      // The Document Server callback can lag behind the editor close. Poll
+      // long enough for a slow save, and also wake early on the editor's
+      // saved-state message.
+      if (attempt < 15) {
+        target.pendingRetry = true;
+        setTimeout(() => {
+          target.pendingRetry = false;
+          target.refreshing = false;
+          refreshComposeAttachmentAfterOffice(target, attempt + 1).catch(() => {});
+        }, 2000);
+      }
+      return;
+    }
+    const response = await fetch(`/api/files/${encodeURIComponent(target.sourceFileId)}/content`, {
+      credentials: "same-origin",
+      headers: delegatedRequestHeaders()
+    });
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const name = current.name || target.name || "Attachment";
+    const upload = new File([blob], name, { type: current.mime || blob.type || "application/octet-stream" });
+    const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
+    if (upload.size > max) {
+      showToast(`Updated ${name} is larger than ${formatBytes(max)}; the message keeps the previous attachment`, null, null, { duration: 6000 });
+      return;
+    }
+    const dataBase64 = await fileToBase64(upload);
+    const data = await api("/api/attachments", {
+      method: "POST",
+      body: { name, mime: upload.type || current.mime || "application/octet-stream", dataBase64 }
+    });
+    const replacement = data.attachment;
+    replacement.sourceFileId = target.sourceFileId;
+    session.files[index] = replacement;
+    updateComposeFiles(session);
+    refreshAttachPickerIfOpen();
+    session.dirty = true;
+    scheduleComposeSave(session);
+    showToast("Compose attachment updated from Office");
+  } finally {
+    if (!target.pendingRetry) target.refreshing = false;
+  }
+}
+
+async function refreshMailAttachmentAfterOffice(target, attempt = 0) {
+  if (!target || target.refreshing) return;
+  target.refreshing = true;
+  try {
+    await refreshCabinet();
+    const current = (state.files || []).find((file) => file.id === target.sourceFileId);
+    if (!current) return;
+    if (String(current.version || "1") === String(target.originalVersion || "1")) {
+      if (attempt < 10) {
+        target.pendingRetry = true;
+        setTimeout(() => {
+          target.pendingRetry = false;
+          target.refreshing = false;
+          refreshMailAttachmentAfterOffice(target, attempt + 1).catch(() => {});
+        }, 2000);
+      }
+      return;
+    }
+    const message = target.messageId ? messageById(target.messageId) : null;
+    showToast(`Updated copy of ${current.name} saved to Cabinet`, "Reply with file", async () => {
+      const session = message
+        ? replyToMessage(message)
+        : openCompose({ subject: `Updated ${current.name}`, bodyText: `Updated ${current.name} is attached.\n\n` });
+      if (!session) return;
+      await attachWorkspaceFile(current.id, session.id);
+      showToast("Updated file attached to the draft");
+    }, { duration: 9000 });
+  } finally {
+    if (!target.pendingRetry) target.refreshing = false;
+  }
+}
+
+function openOfficeNewDialog(options = {}) {
+  if (!state.office.ready) {
+    showToast("Office is not enabled or healthy for this workspace yet", null, null, { duration: 5000 });
+    return;
+  }
+  state.officeNewComposeSession = options.composeSessionId || "";
+  const overlay = document.getElementById("officeNewOverlay");
+  const input = document.getElementById("officeNewName");
+  const type = document.getElementById("officeNewType");
+  const error = document.getElementById("officeNewError");
+  if (!overlay || !input || !type) return;
+  input.value = "";
+  type.value = "docx";
+  input.placeholder = "Untitled document";
+  const folderNote = document.getElementById("officeNewFolderNote");
+  if (folderNote) {
+    const folder = fileFolderById(state.fileFolderId);
+    folderNote.textContent = `Saving to ${folder ? folder.path : "All files"}.`;
+  }
+  if (error) { error.hidden = true; error.textContent = ""; }
+  overlay.hidden = false;
+  setTimeout(() => input.focus(), 40);
+}
+
+function closeOfficeNewDialog() {
+  const overlay = document.getElementById("officeNewOverlay");
+  if (overlay) overlay.hidden = true;
+  state.officeNewComposeSession = "";
+}
+
+async function createOfficeDocument() {
+  const overlay = document.getElementById("officeNewOverlay");
+  const input = document.getElementById("officeNewName");
+  const type = document.getElementById("officeNewType");
+  const error = document.getElementById("officeNewError");
+  const button = document.getElementById("officeNewCreate");
+  if (!overlay || !input || !type || !button) return;
+  const format = type.value;
+  if (error) { error.hidden = true; error.textContent = ""; }
+  button.disabled = true;
+  const label = button.textContent;
+  const composeSessionId = state.officeNewComposeSession;
+  state.officeNewComposeSession = "";
+  button.textContent = "Creating…";
+  try {
+    const data = await api("/api/office/documents", {
+      method: "POST",
+      body: { name: input.value.trim() || input.placeholder || "Untitled", format, folderId: state.fileFolderId || "" }
+    });
+    overlay.hidden = true;
+    await refreshCabinet();
+    if (data.file && composeSessionId) {
+      const attachment = await attachWorkspaceFile(data.file.id, composeSessionId);
+      if (attachment) {
+        state.officeComposeAttachment = {
+          sessionId: composeSessionId,
+          attachmentId: attachment.id,
+          sourceFileId: data.file.id,
+          name: data.file.name || attachment.name,
+          originalVersion: data.file.version || "1"
+        };
+        closeComposeAttach();
+      }
+    }
+    if (data.file) openOfficeEditor(data.file);
+  } catch (err) {
+    if (error) {
+      error.textContent = err.message || "Could not create the document.";
+      error.hidden = false;
+    }
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+async function openOfficeVersions(fileId) {
+  const overlay = document.getElementById("officeVersionsOverlay");
+  const list = document.getElementById("officeVersionList");
+  const meta = document.getElementById("officeVersionsMeta");
+  if (!overlay || !list) return;
+  state.officeVersionsFileId = fileId;
+  const file = (state.files || []).find((item) => item.id === fileId);
+  if (meta) meta.textContent = file ? `${file.name} · every editor save is kept as an immutable version.` : "Every editor save is kept as an immutable version.";
+  list.innerHTML = `<div class="office-version-empty">Loading versions…</div>`;
+  const comparePanel = document.getElementById("officeComparePanel");
+  if (comparePanel) comparePanel.hidden = true;
+  overlay.hidden = false;
+  try {
+    const data = await api(`/api/office/documents/${encodeURIComponent(fileId)}/versions`);
+    renderOfficeVersions(data);
+  } catch (error) {
+    list.innerHTML = `<div class="office-version-empty">${esc(error.message || "Could not load document versions.")}</div>`;
+  }
+}
+
+function renderOfficeVersions(data) {
+  const list = document.getElementById("officeVersionList");
+  if (!list) return;
+  const versions = Array.isArray(data.versions) ? data.versions : [];
+  state.officeVersions = versions;
+  state.officeVersionsAccess = data.access || "owner";
+  const officeDocument = data.document || null;
+  const comparePanel = document.getElementById("officeComparePanel");
+  if (!versions.length) {
+    state.officeVersions = [];
+    if (comparePanel) comparePanel.hidden = true;
+    list.innerHTML = `<div class="office-version-empty">No versions yet. Open this document in Office once to create the first saved version.</div>`;
+    return;
+  }
+  list.innerHTML = versions.map((version) => {
+    const current = Boolean(version.current);
+    const source = OFFICE_VERSION_SOURCE[version.source] || "Saved version";
+    const canRestore = officeDocument && officeDocument.editable && !current;
+    const warnings = Array.isArray(version.dlpWarnings) ? version.dlpWarnings : [];
+    const reviewStatus = version.reviewStatus === "approved" ? "approved" : version.reviewStatus === "changes_requested" ? "changes" : "";
+    const reviewChip = reviewStatus === "approved"
+      ? ` <span class="office-version-chip office-review-approved">Approved</span>`
+      : reviewStatus === "changes"
+        ? ` <span class="office-version-chip office-review-changes">Changes requested</span>`
+        : "";
+    const reviewMeta = version.reviewStatus
+      ? ` · ${reviewStatus === "approved" ? "Approved" : "Changes requested"} by ${esc(version.reviewedBy || "a reviewer")}${version.reviewedAt ? ` ${esc(new Date(version.reviewedAt).toLocaleString())}` : ""}${version.reviewNote ? ` — ${esc(version.reviewNote)}` : ""}`
+      : "";
+    const canReview = state.officeVersionsAccess === "owner" || state.officeVersionsAccess === "edit";
+    const dlp = version.dlpClassification
+      ? ` <span class="office-version-chip office-dlp-chip" title="${esc(warnings.join(" · "))}">${esc(version.dlpClassification)}${warnings.length ? " · review" : ""}</span>`
+      : "";
+    return `<div class="office-version-row${current ? " is-current" : ""}">
+      <div class="office-version-copy">
+        <strong>Version ${esc(String(version.version))}${dlp}${reviewChip}${current ? ' <span class="office-version-chip">Current</span>' : ""}</strong>
+        <span>${esc(source)} · ${esc(formatBytes(version.sizeBytes))} · ${esc(new Date(version.createdAt).toLocaleString())}${warnings.length ? ` · ${esc(warnings.join(" "))}` : ""}${reviewMeta}</span>
+      </div>
+      <div class="office-version-actions">
+        ${canReview ? `<select class="office-review-select" data-office-review-select data-office-review-version="${esc(String(version.version))}" aria-label="Review version ${esc(String(version.version))}"><option value="">Review…</option><option value="approved"${reviewStatus === "approved" ? " selected" : ""}>Approve</option><option value="changes_requested"${reviewStatus === "changes" ? " selected" : ""}>Request changes</option></select>` : ""}
+        <a class="btn-secondary btn-small" href="/api/office/documents/${encodeURIComponent(state.officeVersionsFileId)}/versions/${encodeURIComponent(String(version.version))}/download" download>Download</a>
+        ${!current && versions.length > 1 ? `<button class="btn-secondary btn-small" type="button" data-office-compare="${esc(String(version.version))}">Compare</button>` : ""}
+        ${canRestore ? `<button class="btn-secondary btn-small" type="button" data-office-restore="${esc(String(version.version))}">Restore</button>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+  if (comparePanel) {
+    comparePanel.hidden = versions.length < 2;
+    const from = document.getElementById("officeCompareFrom");
+    const to = document.getElementById("officeCompareTo");
+    const options = versions.map((version) => `<option value="${esc(String(version.version))}">Version ${esc(String(version.version))}${version.current ? " (current)" : ""}</option>`).join("");
+    if (from) {
+      from.innerHTML = options;
+      const previous = versions[1] || versions[0];
+      from.value = String(previous.version);
+    }
+    if (to) {
+      to.innerHTML = options;
+      to.value = String(versions[0].version);
+    }
+    const result = document.getElementById("officeCompareResult");
+    if (result) result.innerHTML = `<div class="office-version-empty">Choose two versions, or use Compare on an older version.</div>`;
+  }
+}
+
+async function runOfficeCompare(fromVersion, toVersion) {
+  if (!state.officeVersionsFileId) return;
+  const fromSelect = document.getElementById("officeCompareFrom");
+  const toSelect = document.getElementById("officeCompareTo");
+  const from = fromVersion || fromSelect?.value || "";
+  const to = toVersion || toSelect?.value || "";
+  const panel = document.getElementById("officeComparePanel");
+  const result = document.getElementById("officeCompareResult");
+  if (panel) panel.hidden = false;
+  if (!from || !to || from === to) {
+    if (result) result.innerHTML = `<div class="office-version-empty">Choose two different versions to compare.</div>`;
+    return;
+  }
+  if (fromSelect) fromSelect.value = from;
+  if (toSelect) toSelect.value = to;
+  if (result) result.innerHTML = `<div class="office-version-empty">Building comparison…</div>`;
+  try {
+    const data = await api(`/api/office/documents/${encodeURIComponent(state.officeVersionsFileId)}/versions/compare?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    renderOfficeCompare(data);
+  } catch (error) {
+    if (result) result.innerHTML = `<div class="office-version-empty">${esc(error.message || "Could not compare these versions.")}</div>`;
+  }
+}
+
+function renderOfficeCompare(data) {
+  const result = document.getElementById("officeCompareResult");
+  if (!result) return;
+  const lines = Array.isArray(data.lines) ? data.lines : [];
+  const changed = lines.filter((line) => line.type !== "equal").length;
+  const head = `<div class="office-compare-summary"><strong>Version ${esc(String(data.from?.version || ""))} → version ${esc(String(data.to?.version || ""))}</strong><span>${changed ? `${changed} changed line${changed === 1 ? "" : "s"}` : "No text differences"}${data.truncated ? " · comparison truncated" : ""}</span></div>`;
+  if (!lines.length) {
+    result.innerHTML = `${head}<div class="office-version-empty">This document has no extractable text in these versions.</div>`;
+    return;
+  }
+  const rows = lines.map((line) => {
+    const sign = line.type === "added" ? "+" : line.type === "removed" ? "−" : " ";
+    const lineNumber = line.type === "removed" ? line.fromLine : line.toLine;
+    return `<div class="office-diff-line ${esc(line.type)}"><span class="office-diff-number">${esc(String(lineNumber || ""))}</span><span class="office-diff-sign">${sign}</span><span class="office-diff-text">${esc(line.text || "")}</span></div>`;
+  }).join("");
+  result.innerHTML = `${head}<div class="office-diff">${rows}</div>`;
+}
+
+async function restoreOfficeVersion(version, button) {
+  if (!state.officeVersionsFileId) return;
+  if (state.officeFile && state.officeFile.id === state.officeVersionsFileId) {
+    showToast("Close the editor before restoring a version", null, null, { duration: 5000 });
+    return;
+  }
+  const confirmOverlay = document.getElementById("confirmOverlay");
+  if (confirmOverlay) confirmOverlay.classList.add("is-office-confirm");
+  const confirmed = await appConfirm({
+    title: `Restore version ${version}?`,
+    message: "The restored content becomes a new latest version. Earlier versions remain available.",
+    confirmLabel: "Restore version",
+    tone: "default",
+    icon: "i-history"
+  });
+  if (confirmOverlay) confirmOverlay.classList.remove("is-office-confirm");
+  if (!confirmed) return;
+  if (button) { button.disabled = true; button.textContent = "Restoring…"; }
+  try {
+    const data = await api(`/api/office/documents/${encodeURIComponent(state.officeVersionsFileId)}/versions/${encodeURIComponent(String(version))}/restore`, { method: "POST", body: {} });
+    showToast(`Restored as version ${data.version}`);
+    await refreshCabinet();
+    await openOfficeVersions(state.officeVersionsFileId);
+  } catch (error) {
+    showError(error);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "Restore"; }
+  }
+}
+
+async function reviewOfficeVersion(version, status, select) {
+  if (!state.officeVersionsFileId) return;
+  const changes = status === "changes_requested";
+  const label = changes ? "Request changes" : "Approve version";
+  const confirmOverlay = document.getElementById("confirmOverlay");
+  if (confirmOverlay) confirmOverlay.classList.add("is-office-confirm");
+  const confirmed = await appConfirm({
+    title: `${changes ? "Request changes to" : "Approve"} version ${version}?`,
+    message: changes
+      ? "The review is recorded against this immutable version. The editor can upload a new version for another review."
+      : "The approval is recorded against this immutable version and shown in version history.",
+    confirmLabel: label,
+    tone: "default",
+    icon: changes ? "i-history" : "i-shield-check"
+  });
+  if (confirmOverlay) confirmOverlay.classList.remove("is-office-confirm");
+  if (!confirmed) {
+    if (select) select.value = "";
+    return;
+  }
+  try {
+    await api(`/api/office/documents/${encodeURIComponent(state.officeVersionsFileId)}/versions/${encodeURIComponent(String(version))}/review`, {
+      method: "POST", body: { status, note: "" }
+    });
+    showToast(changes ? "Changes requested" : `Version ${version} approved`);
+    await openOfficeVersions(state.officeVersionsFileId);
+  } catch (error) {
+    if (select) select.value = "";
+    showError(error);
+  }
+}
+
+async function convertOfficeFile(fileId, button) {
+  if (!state.office.ready) {
+    showToast("Office is not enabled or healthy for this workspace yet", null, null, { duration: 5000 });
+    return;
+  }
+  if (button) { button.disabled = true; }
+  showToast("Converting to PDF…", null, null, { duration: 60000 });
+  try {
+    const data = await api(`/api/office/documents/${encodeURIComponent(fileId)}/convert`, { method: "POST", body: {} });
+    const file = data.file;
+    showToast(file ? `PDF saved to Cabinet as ${file.name}` : "PDF saved to Cabinet");
+    await refreshCabinet();
+  } catch (error) {
+    showError(error);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function closeOfficeUiOnSignOut() {
+  closeOfficeEditor({ refresh: false });
+  const versions = document.getElementById("officeVersionsOverlay");
+  if (versions) versions.hidden = true;
+  const newDialog = document.getElementById("officeNewOverlay");
+  if (newDialog) newDialog.hidden = true;
+  state.office = { enabled: false, ready: false, publicUrl: "", status: "signed_out", formats: {} };
+  state.officeFile = null;
+  state.officeVersionsFileId = "";
+  state.officeComposeAttachment = null;
+  state.officeMailAttachment = null;
+  state.officeNewComposeSession = "";
+  syncOfficeCabinetUi();
+}
+
+function setupOfficeUi() {
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const composeOffice = target.closest("[data-compose-office]");
+    if (composeOffice && !target.closest(".compose")) {
+      event.preventDefault();
+      const sessionId = composeOffice.getAttribute("data-compose-office-session") || attachPickerSessionId;
+      editComposeAttachmentInOffice(sessionId, Number(composeOffice.getAttribute("data-compose-office"))).catch(showError);
+      return;
+    }
+    const edit = target.closest("[data-office-edit]");
+    if (edit) {
+      event.preventDefault();
+      openOfficeEditorById(edit.getAttribute("data-office-edit") || "").catch(showError);
+      return;
+    }
+    const versions = target.closest("[data-office-versions]");
+    if (versions) {
+      event.preventDefault();
+      openOfficeVersions(versions.getAttribute("data-office-versions") || "").catch(showError);
+      return;
+    }
+    const convert = target.closest("[data-office-convert]");
+    if (convert) {
+      event.preventDefault();
+      convertOfficeFile(convert.getAttribute("data-office-convert") || "", convert).catch(showError);
+      return;
+    }
+    if (target.closest("#newOfficeDocBtn")) {
+      event.preventDefault();
+      openOfficeNewDialog();
+      return;
+    }
+    if (target.closest("#officeEditorClose")) {
+      closeOfficeEditor();
+      return;
+    }
+    if (target.closest("#officeEditorVersions")) {
+      if (state.officeFile) openOfficeVersions(state.officeFile.id).catch(showError);
+      return;
+    }
+    if (target.closest("#officeNewClose") || target.closest("#officeNewCancel")) {
+      closeOfficeNewDialog();
+      return;
+    }
+    const restore = target.closest("[data-office-restore]");
+    if (restore) {
+      event.preventDefault();
+      restoreOfficeVersion(Number(restore.getAttribute("data-office-restore")), restore).catch(showError);
+      return;
+    }
+    const compare = target.closest("[data-office-compare]");
+    if (compare) {
+      event.preventDefault();
+      const current = (state.officeVersions || []).find((version) => version.current) || (state.officeVersions || [])[0];
+      runOfficeCompare(compare.getAttribute("data-office-compare"), current ? String(current.version) : "").catch(showError);
+      return;
+    }
+    if (target.closest("#officeCompareRun")) {
+      event.preventDefault();
+      runOfficeCompare().catch(showError);
+      return;
+    }
+    if (target.closest("#officeCompareClose")) {
+      const panel = document.getElementById("officeComparePanel");
+      if (panel) panel.hidden = true;
+      return;
+    }
+    if (target.closest("#officeVersionsClose") || target.closest("#officeVersionsDone")) {
+      const overlay = document.getElementById("officeVersionsOverlay");
+      if (overlay) overlay.hidden = true;
+    }
+  });
+
+  document.addEventListener("change", (event) => {
+    const select = event.target instanceof Element ? event.target.closest("[data-office-review-select]") : null;
+    if (!select || !select.value) return;
+    reviewOfficeVersion(select.getAttribute("data-office-review-version"), select.value, select).catch(showError);
+  });
+  document.getElementById("officeNewCreate")?.addEventListener("click", () => createOfficeDocument().catch(showError));
+  document.getElementById("officeNewName")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    createOfficeDocument().catch(showError);
+  });
+  document.getElementById("officeNewType")?.addEventListener("change", (event) => {
+    const input = document.getElementById("officeNewName");
+    if (!input) return;
+    const placeholder = { docx: "Untitled document", xlsx: "Untitled spreadsheet", pptx: "Untitled presentation" }[event.currentTarget.value] || "Untitled document";
+    input.placeholder = placeholder;
+  });
+  const newOverlay = document.getElementById("officeNewOverlay");
+  if (newOverlay) newOverlay.addEventListener("click", (event) => { if (event.target === newOverlay) closeOfficeNewDialog(); });
+  const versionsOverlay = document.getElementById("officeVersionsOverlay");
+  if (versionsOverlay) versionsOverlay.addEventListener("click", (event) => { if (event.target === versionsOverlay) versionsOverlay.hidden = true; });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const newDialog = document.getElementById("officeNewOverlay");
+    if (newDialog && !newDialog.hidden) { closeOfficeNewDialog(); return; }
+    const versionsDialog = document.getElementById("officeVersionsOverlay");
+    if (versionsDialog && !versionsDialog.hidden) versionsDialog.hidden = true;
+  });
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data || {};
+    if (data.type === "a8m-office-error") showToast(data.detail || "Office could not open the document.");
+    if (data.type === "a8m-office-saved" && state.officeComposeAttachment) {
+      refreshComposeAttachmentAfterOffice(state.officeComposeAttachment).catch(() => {});
+    }
+  });
 }
 
 function setupCabinetInteractions() {
@@ -18593,6 +19379,8 @@ filesView?.addEventListener("dblclick", (event) => {
   }
 });
 setupCabinetInteractions();
+setupOfficeUi();
+setupInternalShareUi();
 
 function colorForString(value) {
   const palette = ["#34557a", "#3d6b62", "#5b4a7e", "#7a4a5c", "#7a5a3a", "#3f6570", "#476b4f", "#4f5673"];
@@ -18866,18 +19654,132 @@ async function loadFileShares(fileId) {
   renderSharePermissions();
 }
 
+function internalSharingAllowed() {
+  const policy = state.tenantPolicy && state.tenantPolicy.office;
+  if (policy && policy.internalSharing === false) return false;
+  const officePolicy = state.office && state.office.policy;
+  return !officePolicy || officePolicy.internalSharing !== false;
+}
+
+async function loadInternalShares(fileId) {
+  const section = document.getElementById("shareInternalSection");
+  const list = document.getElementById("shareInternalList");
+  const count = document.getElementById("shareInternalCount");
+  const file = state.files.find((item) => item.id === fileId);
+  if (!section || !list) return;
+  if (!file || file.shared || !internalSharingAllowed()) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  const people = document.getElementById("shareInternalPeople");
+  if (people) {
+    people.innerHTML = (state.people || [])
+      .filter((person) => person.email && normalizeEmail(person.email) !== normalizeEmail(state.user?.email || ""))
+      .map((person) => `<option value="${esc(person.email)}">${esc(person.name || person.email)}</option>`)
+      .join("");
+  }
+  if (!state.shareGroupsLoaded) {
+    try {
+      const data = await api("/api/files/share-groups");
+      state.shareGroups = data.groups || [];
+      state.shareGroupsLoaded = true;
+    } catch {
+      state.shareGroups = [];
+    }
+  }
+  const groupSelect = document.getElementById("shareInternalGroup");
+  if (groupSelect) {
+    groupSelect.innerHTML = `<option value="">Choose group</option>` + (state.shareGroups || []).map((group) =>
+      `<option value="${esc(group.id)}">${esc(group.name)} · ${group.members || 0}</option>`).join("");
+  }
+  list.innerHTML = `<div class="share-internal-empty">Loading internal access…</div>`;
+  try {
+    const data = await api(`/api/files/${encodeURIComponent(fileId)}/permissions`);
+    state.filePermissionList = data.permissions || [];
+    renderInternalShares();
+  } catch (error) {
+    list.innerHTML = `<div class="share-internal-empty">${esc(error.message || "Could not load internal access.")}</div>`;
+    if (count) count.textContent = "Unavailable";
+  }
+}
+
+function renderInternalShares() {
+  const list = document.getElementById("shareInternalList");
+  const count = document.getElementById("shareInternalCount");
+  if (!list) return;
+  const permissions = state.filePermissionList || [];
+  if (count) count.textContent = permissions.length ? `${permissions.length} ${permissions.length === 1 ? "grant" : "grants"}` : "No internal access";
+  if (!permissions.length) {
+    list.innerHTML = `<div class="share-internal-empty">No colleagues or groups have access yet.</div>`;
+    return;
+  }
+  list.innerHTML = permissions.map((permission) => {
+    const visual = permission.granteeType === "group"
+      ? `<span class="share-internal-avatar"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg></span>`
+      : avatar({ name: permission.name || permission.email, email: permission.email, initials: permission.initials, color: permission.color }, "sm");
+    const detail = permission.granteeType === "group" ? "Group" : (permission.email || "");
+    return `<div class="share-internal-row">${visual}<div class="share-internal-copy"><strong>${esc(permission.name || permission.email || "Group")}</strong><span>${esc(detail)} · Can ${permission.access === "edit" ? "edit" : "view"}</span></div><button class="link-btn danger-link" type="button" data-share-internal-remove="${esc(permission.id)}">Remove</button></div>`;
+  }).join("");
+}
+
+async function addInternalShare() {
+  if (!fileShareTarget) return;
+  const targetInput = document.getElementById("shareInternalTarget");
+  const groupSelect = document.getElementById("shareInternalGroup");
+  const accessSelect = document.getElementById("shareInternalAccess");
+  const email = (targetInput?.value || "").trim();
+  const groupId = (groupSelect?.value || "").trim();
+  const access = accessSelect?.value === "edit" ? "edit" : "view";
+  if (!email && !groupId) {
+    showToast("Choose a person or a group");
+    return;
+  }
+  const body = groupId ? { groupId, access } : { email, access };
+  await api(`/api/files/${encodeURIComponent(fileShareTarget.id)}/permissions`, { method: "POST", body });
+  if (targetInput) targetInput.value = "";
+  if (groupSelect) groupSelect.value = "";
+  await loadInternalShares(fileShareTarget.id);
+  showToast(groupId ? "Group access granted" : "Internal access granted");
+}
+
+async function removeInternalShare(permissionId) {
+  if (!fileShareTarget) return;
+  await api(`/api/files/${encodeURIComponent(fileShareTarget.id)}/permissions/${encodeURIComponent(permissionId)}`, { method: "DELETE" });
+  await loadInternalShares(fileShareTarget.id);
+  showToast("Internal access revoked");
+}
+
+function setupInternalShareUi() {
+  const target = document.getElementById("shareInternalTarget");
+  const group = document.getElementById("shareInternalGroup");
+  const add = document.getElementById("shareInternalAdd");
+  target?.addEventListener("input", () => { if (target.value.trim() && group) group.value = ""; });
+  group?.addEventListener("change", () => { if (group.value && target) target.value = ""; });
+  add?.addEventListener("click", (event) => { event.preventDefault(); addInternalShare().catch(showError); });
+  document.getElementById("shareInternalList")?.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-share-internal-remove]");
+    if (!remove) return;
+    event.preventDefault();
+    removeInternalShare(remove.getAttribute("data-share-internal-remove")).catch(showError);
+  });
+}
+
 function openShareDialog(fileId) {
   const file = state.files.find((item) => item.id === fileId);
   if (!file) return;
+  if (file.shared) { showToast("Only the file owner can manage sharing"); return; }
   fileShareTarget = file;
   shareFileName.textContent = file.name;
   shareResult.hidden = true;
   shareUrl.value = "";
   document.getElementById("createShare").hidden = false;
   state.fileShareList = [];
+  state.filePermissionList = [];
   renderSharePermissions();
   shareOverlay.hidden = false;
   loadFileShares(file.id);
+  loadInternalShares(file.id);
 }
 
 async function createShareLink() {
@@ -18937,6 +19839,7 @@ async function toggleFileLock(fileId) {
 async function toggleFileStar(fileId) {
   const file = state.files.find((item) => item.id === fileId);
   if (!file) return;
+  if (file.shared) { showToast("Only the file owner can change favourites"); return; }
   try {
     const data = await api(`/api/files/${encodeURIComponent(fileId)}`, { method: "PATCH", body: { starred: !file.starred } });
     const index = state.files.findIndex((item) => item.id === fileId);
@@ -18951,6 +19854,7 @@ async function toggleFileStar(fileId) {
 async function deleteFile(fileId) {
   const file = state.files.find((item) => item.id === fileId);
   if (!file) return;
+  if (file.shared) { showToast("Only the file owner can delete this file"); return; }
   if (!(await appConfirm({ title: "Delete this file?", message: `${file.name} will be removed from the Cabinet index.`, confirmLabel: "Delete file", tone: "danger" }))) return;
   try {
     await api(`/api/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
@@ -21127,7 +22031,10 @@ function renderEventAttendeeSuggest() {
 function renderEventAttachments() {
   const holder = document.getElementById("eventAttachments");
   if (!holder) return;
-  holder.innerHTML = state.eventAttachments.length ? state.eventAttachments.map((file, index) => `<div class="event-attachment-card"><span class="file-type ${String(file.mime || "").split("/").pop().replace(/[^a-z0-9]/gi, "").slice(0, 5)}">${esc(String(file.name || "FILE").split(".").pop().slice(0, 4).toUpperCase())}</span><div><strong>${esc(file.name)}</strong><span>${esc(formatBytes(file.sizeBytes || 0))}</span></div><button class="icon-btn" type="button" data-event-attachment-remove="${index}" aria-label="Remove ${esc(file.name)}"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>`).join("") : `<p class="event-attachments-empty">No files attached. Add a proposal, agenda or deck from the Cabinet.</p>`;
+  holder.innerHTML = state.eventAttachments.length ? state.eventAttachments.map((file, index) => {
+    const office = state.office.ready && file.providerId === "a8m" && officeMetaForName(file.name);
+    return `<div class="event-attachment-card"><span class="file-type ${String(file.mime || "").split("/").pop().replace(/[^a-z0-9]/gi, "").slice(0, 5)}">${esc(String(file.name || "FILE").split(".").pop().slice(0, 4).toUpperCase())}</span><div><strong>${esc(file.name)}</strong><span>${esc(formatBytes(file.sizeBytes || 0))}</span></div>${office ? `<button class="icon-btn event-attachment-office" type="button" data-event-office="${esc(file.id)}" aria-label="Open ${esc(file.name)} in Office" title="${office.editable ? "Edit in Office" : "View in Office"}"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></button>` : ""}<button class="icon-btn" type="button" data-event-attachment-remove="${index}" aria-label="Remove ${esc(file.name)}"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>`;
+  }).join("") : `<p class="event-attachments-empty">No files attached. Add a proposal, agenda or deck from the Cabinet.</p>`;
 }
 
 function renderEventAttachmentPicker() {
@@ -22147,6 +23054,13 @@ function setupCalendarInteractions() {
       return;
     }
     const removeAttach = event.target.closest("[data-event-attachment-remove]");
+    const officeAttach = event.target.closest("[data-event-office]");
+    if (officeAttach) {
+      event.preventDefault();
+      event.stopPropagation();
+      openOfficeEditorById(officeAttach.getAttribute("data-event-office") || "").catch(showError);
+      return;
+    }
     if (removeAttach) { state.eventAttachments.splice(Number(removeAttach.getAttribute("data-event-attachment-remove")), 1); renderEventAttachments(); return; }
     const removeResource = event.target.closest("[data-event-resource-remove]");
     if (removeResource) { state.eventResources.splice(Number(removeResource.getAttribute("data-event-resource-remove")), 1); renderEventResources(); return; }
@@ -23658,6 +24572,17 @@ function bindEvents() {
     if (saveAllAttachments) { event.preventDefault(); saveAllAttachmentsToCabinet(saveAllAttachments.getAttribute("data-save-all-attachments")); return; }
     const saveAttachment = target.closest("[data-save-attachment]");
     if (saveAttachment) { event.preventDefault(); saveAttachmentToCabinet(saveAttachment.getAttribute("data-save-attachment"), saveAttachment.getAttribute("data-save-attachment-name")); return; }
+    const officeAttachment = target.closest("[data-office-attachment]");
+    if (officeAttachment) {
+      event.preventDefault();
+      event.stopPropagation();
+      editMailAttachmentInOffice(
+        officeAttachment.getAttribute("data-office-attachment"),
+        officeAttachment.getAttribute("data-office-attachment-name"),
+        officeAttachment.getAttribute("data-office-message")
+      ).catch(showError);
+      return;
+    }
     const attachment = target.closest("[data-attachment]");
     if (attachment) {
       const file = {
@@ -24693,6 +25618,12 @@ function bindEvents() {
       scheduleComposeSave(session);
       return;
     }
+    const composeOffice = event.target.closest("[data-compose-office]");
+    if (composeOffice) {
+      event.preventDefault();
+      editComposeAttachmentInOffice(session.id, Number(composeOffice.getAttribute("data-compose-office"))).catch(showError);
+      return;
+    }
     if (event.target.closest(".compose-file-card")) { openComposeAttach(session.id); return; }
     if (event.target.closest("[data-ai-compose-close]")) {
       session.aiOpen = false;
@@ -24984,12 +25915,23 @@ function bindEvents() {
       }
     }
   });
+  document.getElementById("composeNewOfficeDoc")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!state.office.ready) {
+      showToast("Office is not enabled or healthy for this workspace yet", null, null, { duration: 5000 });
+      return;
+    }
+    openOfficeNewDialog({ composeSessionId: attachPickerSessionId });
+  });
   const dropZone = document.getElementById("composeAttachDrop");
   if (dropZone) {
     dropZone.addEventListener("click", (event) => {
-      if (!event.target.closest("#composeAttachBrowse")) attachInput.click();
+      if (event.target.closest("#composeAttachBrowse") || event.target.closest("#composeNewOfficeDoc")) return;
+      attachInput.click();
     });
     dropZone.addEventListener("keydown", (event) => {
+      if (event.target.closest("#composeAttachBrowse") || event.target.closest("#composeNewOfficeDoc")) return;
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); attachInput.click(); }
     });
     ["dragenter", "dragover"].forEach((name) => dropZone.addEventListener(name, (event) => {

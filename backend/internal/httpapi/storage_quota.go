@@ -85,7 +85,13 @@ func (s *Server) effectiveStoragePolicy(ctx context.Context, user userRecord) st
 func (s *Server) cabinetUsedBytes(ctx context.Context, userID string) int64 {
 	var used int64
 	_ = s.store.DB.QueryRow(ctx, `
-		SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE user_id=$1 AND provider_id='a8m'
+		SELECT COALESCE((SELECT SUM(f.size_bytes) FROM files f
+		                 WHERE f.user_id=$1 AND f.provider_id='a8m'), 0)
+		     + COALESCE((SELECT SUM(v.size_bytes)
+		                 FROM office_document_versions v
+		                 JOIN office_documents d ON d.id=v.document_id
+		                 JOIN files f ON f.id=d.file_id
+		                 WHERE d.user_id=$1 AND v.storage_key <> f.storage_key), 0)
 	`, userID).Scan(&used)
 	return used
 }
@@ -119,6 +125,12 @@ func (s *Server) storageUsageFor(ctx context.Context, user userRecord) storageUs
 	return usage
 }
 
+type storageQuotaError struct {
+	message string
+}
+
+func (e storageQuotaError) Error() string { return e.message }
+
 // enforceStorageQuota is called before a file is written into Alt8Mail Drive.
 // External connectors keep their own provider quota. A zero limit means the
 // organization has not set an enforceable allowance yet.
@@ -135,8 +147,9 @@ func (s *Server) enforceStorageQuota(ctx context.Context, user userRecord, addBy
 		if usage.Policy.Mode == "split" {
 			label = "Your Cabinet allowance"
 		}
-		return fmt.Errorf("%s is full (%s of %s). Remove files or ask an administrator for more storage",
-			label, formatBytes(usage.UsedBytes), formatBytes(usage.LimitBytes))
+		return storageQuotaError{message: fmt.Sprintf(
+			"%s is full (%s of %s). Remove files or ask an administrator for more storage",
+			label, formatBytes(usage.UsedBytes), formatBytes(usage.LimitBytes))}
 	}
 	return nil
 }

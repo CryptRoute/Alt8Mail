@@ -196,6 +196,17 @@ type adminFeaturePolicy struct {
 	Reactions   bool `json:"reactions"`
 }
 
+type adminOfficePolicy struct {
+	Enabled          bool     `json:"enabled"`
+	InternalSharing  bool     `json:"internalSharing"`
+	ExternalEditing  bool     `json:"externalEditing"`
+	AI               bool     `json:"ai"`
+	DLPOnSave        bool     `json:"dlpOnSave"`
+	VersionRetention int      `json:"versionRetention"`
+	AllowedGroups    []string `json:"allowedGroups"`
+	AllowedDomains   []string `json:"allowedDomains"`
+}
+
 type adminTenantPolicy struct {
 	Security  adminSecurityPolicy  `json:"security"`
 	Mail      adminMailPolicy      `json:"mail"`
@@ -204,6 +215,7 @@ type adminTenantPolicy struct {
 	Branding  adminBrandingPolicy  `json:"branding"`
 	DLP       adminDLPPolicy       `json:"dlp"`
 	Features  adminFeaturePolicy   `json:"features"`
+	Office    adminOfficePolicy    `json:"office"`
 }
 
 func defaultTenantPolicy() adminTenantPolicy {
@@ -232,6 +244,10 @@ func defaultTenantPolicy() adminTenantPolicy {
 			Rules: []adminDLPRule{},
 		},
 		Features: adminFeaturePolicy{StickyNotes: true, Reactions: true},
+		Office: adminOfficePolicy{
+			Enabled: true, InternalSharing: true, ExternalEditing: true, AI: true, DLPOnSave: true,
+			VersionRetention: 0, AllowedGroups: []string{}, AllowedDomains: []string{},
+		},
 	}
 }
 
@@ -257,6 +273,12 @@ func tenantPolicyFromSettings(raw json.RawMessage) adminTenantPolicy {
 	}
 	if policy.DLP.Rules == nil {
 		policy.DLP.Rules = []adminDLPRule{}
+	}
+	if policy.Office.AllowedGroups == nil {
+		policy.Office.AllowedGroups = []string{}
+	}
+	if policy.Office.AllowedDomains == nil {
+		policy.Office.AllowedDomains = []string{}
 	}
 	for index := range policy.DLP.Rules {
 		if policy.DLP.Rules[index].Fields == nil {
@@ -487,6 +509,49 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 	if policy.Branding.SupportEmail != "" && !strings.Contains(policy.Branding.SupportEmail, "@") {
 		errors = append(errors, "Support email is not valid")
 	}
+	if policy.Office.VersionRetention < 0 || policy.Office.VersionRetention > 1000 {
+		errors = append(errors, "Office version retention must be between 0 and 1000")
+		if policy.Office.VersionRetention < 0 {
+			policy.Office.VersionRetention = 0
+		} else {
+			policy.Office.VersionRetention = 1000
+		}
+	}
+	officeGroups := []string{}
+	seenOfficeGroups := map[string]bool{}
+	for _, raw := range policy.Office.AllowedGroups {
+		raw = truncate(strings.TrimSpace(raw), 120)
+		key := strings.ToLower(raw)
+		if raw == "" || seenOfficeGroups[key] {
+			continue
+		}
+		seenOfficeGroups[key] = true
+		officeGroups = append(officeGroups, raw)
+	}
+	if len(officeGroups) > 100 {
+		errors = append(errors, "Office policies support at most 100 allowed groups")
+		officeGroups = officeGroups[:100]
+	}
+	policy.Office.AllowedGroups = officeGroups
+	officeDomains := []string{}
+	seenOfficeDomains := map[string]bool{}
+	for _, raw := range policy.Office.AllowedDomains {
+		raw = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(raw, "@")))
+		if raw == "" || seenOfficeDomains[raw] {
+			continue
+		}
+		if !strings.Contains(raw, ".") {
+			errors = append(errors, fmt.Sprintf("Office domain %q is not valid", raw))
+			continue
+		}
+		seenOfficeDomains[raw] = true
+		officeDomains = append(officeDomains, raw)
+	}
+	if len(officeDomains) > 100 {
+		errors = append(errors, "Office policies support at most 100 allowed domains")
+		officeDomains = officeDomains[:100]
+	}
+	policy.Office.AllowedDomains = officeDomains
 	return policy, errors
 }
 

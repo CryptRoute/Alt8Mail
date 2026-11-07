@@ -25,7 +25,7 @@ A8M_REPO="${A8M_REPO:-git@github.com:CryptRoute/Alt8Mail.git}"
 A8M_REPO_HTTPS="${A8M_REPO_HTTPS:-}"
 A8M_GIT_KEY="${A8M_GIT_KEY:-/etc/a8m/github_readonly}"
 A8M_CHANNEL="${A8M_CHANNEL:-stable}"
-A8M_SERVICES="${A8M_SERVICES:-a8m-server a8m-admin alt8mail-control}"
+A8M_SERVICES="${A8M_SERVICES:-a8m-server a8m-admin alt8mail-control a8m-office-agent}"
 A8M_RELEASE_BASE_URL="${A8M_RELEASE_BASE_URL:-https://github.com/CryptRoute/Alt8Mail/releases/download}"
 A8M_PREFER_RELEASE_ASSET="${A8M_PREFER_RELEASE_ASSET:-1}"
 A8M_MIN_FREE_MB="${A8M_MIN_FREE_MB:-1024}"
@@ -396,6 +396,9 @@ for unit in "$TARGET_RELEASE"/deploy/systemd/*.service "$TARGET_RELEASE"/deploy/
   install -m 0644 "$unit" "/etc/systemd/system/$(basename "$unit")"
 done
 systemctl daemon-reload
+if [[ -f /etc/systemd/system/a8m-office-agent.service && " $A8M_SERVICES " != *" a8m-office-agent "* ]]; then
+  A8M_SERVICES="$A8M_SERVICES a8m-office-agent"
+fi
 
 # Install the Redis-backed multimap rules once. Existing administrator rules
 # are preserved; the Alt8Mail block is appended only when it is absent.

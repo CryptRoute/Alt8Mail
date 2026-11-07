@@ -9,7 +9,7 @@ import (
 
 const publicNginxSnippet = "/etc/nginx/snippets/a8m-public-routes.conf"
 
-var publicNginxRoutes = []string{"/files/s/", "/upload/", "/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/"}
+var publicNginxRoutes = []string{"/files/s/", "/upload/", "/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/", "/office-editor"}
 
 func publicNginxRouteState(site, snippet string) (snippetRoutes, missing []string) {
 	routePresent := func(text, route string) bool {
@@ -31,8 +31,12 @@ func publicNginxRouteState(site, snippet string) (snippetRoutes, missing []strin
 
 func publicNginxSnippetText(routes []string, upstream string) string {
 	var snippet strings.Builder
-	snippet.WriteString("# Managed by Alt8Mail. Public download, upload, calendar and OAuth callback routes.\n")
+	snippet.WriteString("# Managed by Alt8Mail. Public download, upload, calendar, OAuth and Office editor routes.\n")
 	for _, route := range routes {
+		if route == "/office-editor" {
+			snippet.WriteString(publicNginxOfficeEditorLocation(upstream))
+			continue
+		}
 		snippet.WriteString("location ^~ " + route + " {\n")
 		snippet.WriteString("        proxy_pass http://" + upstream + ";\n")
 		snippet.WriteString("        proxy_http_version 1.1;\n")
@@ -46,6 +50,31 @@ func publicNginxSnippetText(routes []string, upstream string) string {
 		snippet.WriteString("    }\n")
 	}
 	return snippet.String()
+}
+
+func publicNginxOfficeEditorLocation(upstream string) string {
+	return `location ^~ /office-editor {
+        proxy_pass http://` + upstream + `;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_hide_header Content-Security-Policy;
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Referrer-Policy;
+        proxy_hide_header Permissions-Policy;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https:; connect-src 'self' https: wss:; font-src 'self' data: https:; worker-src 'self' blob:; frame-src 'self' blob: https:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'" always;
+    }
+`
 }
 
 // ensurePublicNginxRoutes repairs an older nginx site that predates the public

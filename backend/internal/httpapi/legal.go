@@ -352,6 +352,92 @@ func (s *Server) adminDiscovery(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) adminOfficeDiscoveryCSV(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireAdminSession(r)
+	filter, err := discoveryFilterFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "DISCOVERY_FILTER", err.Error())
+		return
+	}
+	where := []string{"f.tenant_id=$1"}
+	args := []any{sess.ActiveTenantID}
+	add := func(condition string, value any) {
+		args = append(args, value)
+		where = append(where, fmt.Sprintf(condition, len(args)))
+	}
+	if filter.Query != "" {
+		args = append(args, "%"+escapeLikePattern(truncate(filter.Query, 200))+"%")
+		position := len(args)
+		where = append(where, fmt.Sprintf(
+			`(f.name ILIKE $%d ESCAPE '\' OR f.path ILIKE $%d ESCAPE '\' OR u.email::text ILIKE $%d ESCAPE '\' OR u.name ILIKE $%d ESCAPE '\' OR d.format ILIKE $%d ESCAPE '\')`,
+			position, position, position, position, position))
+	}
+	if !filter.From.IsZero() {
+		add("f.updated_at >= $%d", filter.From)
+	}
+	if !filter.To.IsZero() {
+		add("f.updated_at < $%d", filter.To.Add(24*time.Hour))
+	}
+	if filter.UserID != "" {
+		add("f.user_id = $%d::uuid", filter.UserID)
+	}
+	if filter.UserEmail != "" {
+		add("lower(u.email::text) = lower($%d)", truncate(filter.UserEmail, 320))
+	}
+	if filter.Classification != "" {
+		add("COALESCE(f.metadata->>'dlpClassification','') = $%d", filter.Classification)
+	}
+	rows, err := s.store.DB.Query(r.Context(), `
+		SELECT f.id, u.email::text, u.name, f.name, d.format, f.path, d.current_version,
+		       f.size_bytes, COALESCE(f.metadata->>'dlpClassification',''),
+		       COALESCE(f.metadata->'dlpWarnings','[]'::jsonb)::text,
+		       f.created_at, f.updated_at, d.last_saved_at
+		FROM files f
+		JOIN users u ON u.id=f.user_id
+		JOIN office_documents d ON d.file_id=f.id
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY f.updated_at DESC
+		LIMIT 5000
+	`, args...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DISCOVERY", "Could not export the Office archive")
+		return
+	}
+	defer rows.Close()
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="a8m-office-ediscovery-`+time.Now().UTC().Format("20060102-150405")+`.csv"`)
+	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"File ID", "Mailbox", "User", "File name", "Format", "Path", "Current version", "Size bytes", "Classification", "DLP warnings", "Created", "Updated", "Last saved"})
+	exported := 0
+	for rows.Next() {
+		var id, email, name, fileName, format, path, classification, warnings string
+		var version int
+		var size int64
+		var createdAt, updatedAt time.Time
+		var lastSavedAt *time.Time
+		if rows.Scan(&id, &email, &name, &fileName, &format, &path, &version,
+			&size, &classification, &warnings, &createdAt, &updatedAt, &lastSavedAt) != nil {
+			continue
+		}
+		saved := ""
+		if lastSavedAt != nil {
+			saved = lastSavedAt.UTC().Format(time.RFC3339)
+		}
+		_ = writer.Write([]string{
+			id, email, name, fileName, format, path, strconv.Itoa(version), strconv.FormatInt(size, 10),
+			classification, warnings, createdAt.UTC().Format(time.RFC3339),
+			updatedAt.UTC().Format(time.RFC3339), saved,
+		})
+		exported++
+	}
+	writer.Flush()
+	s.recordAdminAudit(r.Context(), sess, sess.User, "admin.office_ediscovery_exported", "Office eDiscovery export",
+		"Exported Office document metadata and DLP classification",
+		map[string]any{"query": filter.Query, "userId": filter.UserID, "userEmail": filter.UserEmail,
+			"classification": filter.Classification, "from": filter.From, "to": filter.To, "documents": exported})
+}
+
 func (s *Server) adminDiscoveryCSV(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	filter, err := discoveryFilterFromRequest(r)

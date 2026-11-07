@@ -10,13 +10,13 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.21.6">
-<link rel="stylesheet" href="/features.css?v=0.21.6">
-<link rel="stylesheet" href="/workspace.css?v=0.21.6">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.21.6">
-<link rel="stylesheet" href="/features-0.7.css?v=0.21.6">
-<link rel="stylesheet" href="/onboarding.css?v=0.21.6">
-<link rel="stylesheet" href="/email-ui.css?v=0.21.6">
+<link rel="stylesheet" href="/styles.css?v=0.26.0">
+<link rel="stylesheet" href="/features.css?v=0.26.0">
+<link rel="stylesheet" href="/workspace.css?v=0.26.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.26.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.26.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.26.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.26.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -698,6 +698,9 @@
             </button>
             <button class="btn-secondary" id="connectStorageBtn" type="button">
               <svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg>Connect storage
+            </button>
+            <button class="btn-secondary" id="newOfficeDocBtn" type="button" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New document
             </button>
             <button class="btn-secondary" id="newFolderBtn" type="button">
               <svg class="icon" aria-hidden="true"><use href="#i-folder-plus"/></svg>New folder
@@ -1536,6 +1539,7 @@
                         <option value="draft">Drafts</option>
                         <option value="task">Tasks</option>
                         <option value="files">Cabinet</option>
+                        <option value="office">Office</option>
                         <option value="preferences">Preferences</option>
                         <option value="security">Security</option>
                       </select>
@@ -2243,6 +2247,7 @@
         <strong>Drag &amp; drop files here</strong>
         <span>Attach multiple documents, images or archives · up to <span id="composeAttachLimit">8 MB</span> each</span>
         <button class="btn-secondary small" id="composeAttachBrowse" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Browse this device</button>
+        <button class="btn-secondary small" id="composeNewOfficeDoc" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New Office document</button>
       </div>
       <div class="compose-attach-files">
         <div class="compose-attach-files-head"><div class="compose-attach-tabs" role="tablist"><button class="is-active" data-attach-tab="files" type="button" role="tab" aria-selected="true">From Cabinet</button><button data-attach-tab="recent" type="button" role="tab" aria-selected="false">Recent uploads</button></div><label class="compose-attach-source"><span>Attach from</span><select id="composeAttachProviderFilter" class="pref-select" aria-label="Attach from storage"></select></label><span id="composeAttachFileCount"></span></div>
@@ -2403,6 +2408,18 @@
       </div>
       <label class="form-field"><span>Recipient email <small class="muted">(required for domain-restricted sharing)</small></span><input id="shareRecipient" type="email" placeholder="partner@example.com"></label>
       <p class="dialog-note share-recipient-note">When a recipient email is set, the link asks that person to confirm the email on their device before any file is exposed. Lock a file from its details panel to require owner approval instead.</p>
+      <div class="share-internal" id="shareInternalSection">
+        <div class="share-permissions-head"><strong>People in your organization</strong><span id="shareInternalCount">No internal access</span></div>
+        <div class="share-internal-form">
+          <label class="form-field grow"><span>Person</span><input id="shareInternalTarget" list="shareInternalPeople" placeholder="name@company.com" autocomplete="off"><datalist id="shareInternalPeople"></datalist></label>
+          <label class="form-field"><span>or group</span><select id="shareInternalGroup"><option value="">Choose group</option></select></label>
+          <label class="form-field"><span>Access</span><select id="shareInternalAccess"><option value="view">Can view</option><option value="edit">Can edit</option></select></label>
+          <button class="btn-secondary" id="shareInternalAdd" type="button">Add</button>
+        </div>
+        <div class="share-internal-list" id="shareInternalList"></div>
+        <p class="dialog-note">Internal grants are revoked immediately and do not create a public link.</p>
+      </div>
+      <div class="share-divider"><span>External link</span></div>
       <div class="share-permissions" id="sharePermissions"></div>
       <div class="share-result" id="shareResult" hidden>
         <label class="form-field grow"><span>External link</span><input id="shareUrl" type="text" readonly></label>
@@ -3061,10 +3078,73 @@
   </div>
 </div>
 
+<div class="office-editor-overlay" id="officeEditorOverlay" hidden>
+  <div class="office-editor-shell" role="dialog" aria-modal="true" aria-labelledby="officeEditorTitle">
+    <header class="office-editor-head">
+      <div class="office-editor-title">
+        <span class="office-editor-mark"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></span>
+        <div><strong id="officeEditorTitle">Document</strong><span id="officeEditorMeta">Alt8Mail Office</span></div>
+      </div>
+      <div class="office-editor-actions">
+        <button class="btn-secondary btn-small" id="officeEditorVersions" type="button"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg>Versions</button>
+        <button class="btn-secondary btn-small" id="officeEditorClose" type="button"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>Close</button>
+      </div>
+    </header>
+    <div class="office-editor-body">
+      <iframe id="officeEditorFrame" title="Office document editor" allow="clipboard-read; clipboard-write; fullscreen" allowfullscreen></iframe>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="officeNewOverlay" hidden>
+  <div class="dialog office-new-dialog" role="dialog" aria-modal="true" aria-labelledby="officeNewTitle">
+    <div class="dialog-head">
+      <div><h2 id="officeNewTitle">New Office document</h2><p class="dialog-note">Create a blank document in this Cabinet folder.</p></div>
+      <button class="icon-btn" id="officeNewClose" type="button" aria-label="Close new document dialog"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <label class="form-field"><span>Name</span><input id="officeNewName" maxlength="180" placeholder="Untitled document" autocomplete="off"></label>
+      <label class="form-field"><span>Type</span><select id="officeNewType">
+        <option value="docx">Word document (.docx)</option>
+        <option value="xlsx">Excel spreadsheet (.xlsx)</option>
+        <option value="pptx">PowerPoint presentation (.pptx)</option>
+      </select></label>
+      <p class="dialog-note" id="officeNewFolderNote">Saving to All files.</p>
+      <p class="onboarding-inline-error" id="officeNewError" hidden></p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn-secondary" id="officeNewCancel" type="button">Cancel</button>
+      <button class="btn-primary" id="officeNewCreate" type="button">Create and open</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="officeVersionsOverlay" hidden>
+  <div class="dialog office-versions-dialog" role="dialog" aria-modal="true" aria-labelledby="officeVersionsTitle">
+    <div class="dialog-head">
+      <div><h2 id="officeVersionsTitle">Version history</h2><p class="dialog-note" id="officeVersionsMeta">Every editor save is kept as an immutable version.</p></div>
+      <button class="icon-btn" id="officeVersionsClose" type="button" aria-label="Close version history"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="office-version-list" id="officeVersionList"><div class="office-version-empty">Loading versions…</div></div>
+      <div class="office-compare" id="officeComparePanel" hidden>
+        <div class="office-compare-head"><div><strong>Compare versions</strong><span>Plain-text changes. Formatting is ignored.</span></div><button class="icon-btn" id="officeCompareClose" type="button" aria-label="Close comparison"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+        <div class="office-compare-controls">
+          <label><span>From</span><select id="officeCompareFrom"></select></label>
+          <label><span>To</span><select id="officeCompareTo"></select></label>
+          <button class="btn-secondary btn-small" id="officeCompareRun" type="button">Compare</button>
+        </div>
+        <div class="office-compare-result" id="officeCompareResult"><div class="office-version-empty">Choose two versions.</div></div>
+      </div>
+    </div>
+    <div class="dialog-foot"><button class="btn-secondary" id="officeVersionsDone" type="button">Done</button></div>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.21.6"></script>
+<script type="module" src="/app.js?v=0.26.0"></script>
 </body>
 </html>

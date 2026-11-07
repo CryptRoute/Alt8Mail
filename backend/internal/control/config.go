@@ -49,6 +49,10 @@ type Config struct {
 	PolicyListen      string
 	RedisAddr         string
 	RedisPasswordFile string
+	OfficeAgentURL    string
+	OfficeAgentToken  string
+	OfficeImage       string
+	OfficeSecretFile  string
 	IngestInterval    time.Duration
 	HealthInterval    time.Duration
 	MetricsInterval   time.Duration
@@ -96,6 +100,10 @@ func LoadConfig() (Config, error) {
 		PolicyListen:      env("CONTROL_POLICY_LISTEN", "127.0.0.1:10040"),
 		RedisAddr:         env("CONTROL_REDIS_ADDR", "127.0.0.1:6379"),
 		RedisPasswordFile: env("CONTROL_REDIS_PASSWORD_FILE", "/opt/a8m/secrets/redis_password"),
+		OfficeAgentURL:    strings.TrimRight(env("CONTROL_OFFICE_AGENT_URL", "http://127.0.0.1:8098"), "/"),
+		OfficeAgentToken:  env("CONTROL_OFFICE_AGENT_TOKEN_FILE", "/etc/a8m/office-agent-token"),
+		OfficeImage:       env("CONTROL_OFFICE_IMAGE", "onlyoffice/documentserver:9.4.0.1"),
+		OfficeSecretFile:  env("CONTROL_OFFICE_JWT_SECRET_FILE", "/etc/a8m/office-jwt-secret"),
 		IngestInterval:    envDuration("CONTROL_INGEST_INTERVAL", 8*time.Second),
 		HealthInterval:    envDuration("CONTROL_HEALTH_INTERVAL", 15*time.Second),
 		MetricsInterval:   envDuration("CONTROL_METRICS_INTERVAL", 5*time.Second),

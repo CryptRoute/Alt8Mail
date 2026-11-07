@@ -135,6 +135,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/onboarding", s.requireUser(s.getOnboarding))
 	mux.HandleFunc("POST /api/onboarding/complete", s.requireUser(s.completeOnboarding))
 	mux.HandleFunc("GET /api/bootstrap", s.requireUser(s.bootstrap))
+	mux.HandleFunc("GET /api/office/config", s.requireUser(s.officeConfig))
+	s.registerOfficeDocumentRoutes(mux)
+	mux.HandleFunc("GET /office-editor", s.officeEditorHost)
+	mux.HandleFunc("GET /office-editor.js", s.officeEditorScript)
 	mux.HandleFunc("GET /api/addons", s.requireUser(s.getAddons))
 	mux.HandleFunc("POST /api/addons/{id}/connect", s.requireUser(s.connectAddon))
 	mux.HandleFunc("POST /api/addons/{id}/oauth/start", s.requireUser(s.startAddonOAuth))
@@ -218,6 +222,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/files/{id}/share", s.requireUser(s.shareFile))
 	mux.HandleFunc("POST /api/files/{id}/copy", s.requireUser(s.copyFile))
 	mux.HandleFunc("GET /api/files/{id}/shares", s.requireUser(s.listFileShares))
+	mux.HandleFunc("GET /api/files/share-groups", s.requireUser(s.listShareGroups))
+	mux.HandleFunc("GET /api/files/{id}/permissions", s.requireUser(s.listFilePermissions))
+	mux.HandleFunc("POST /api/files/{id}/permissions", s.requireUser(s.createFilePermission))
+	mux.HandleFunc("DELETE /api/files/{id}/permissions/{permissionId}", s.requireUser(s.deleteFilePermission))
 	mux.HandleFunc("POST /api/files/import-url", s.requireUser(s.importFileFromURL))
 	mux.HandleFunc("POST /api/upload-sessions", s.requireUser(s.createUploadSession))
 	mux.HandleFunc("GET /api/upload-sessions/{id}", s.requireUser(s.getUploadSession))
@@ -278,6 +286,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/contacts/{id}", s.requireUser(s.updateContact))
 	mux.HandleFunc("DELETE /api/contacts/{id}", s.requireUser(s.deleteContact))
 	mux.HandleFunc("GET /api/workspace/audit", s.requireUser(s.getWorkspaceAudit))
+	mux.HandleFunc("GET /api/workspace/audit.csv", s.requireUser(s.getWorkspaceAuditCSV))
 
 	mux.HandleFunc("POST /api/attachments", s.requireUser(s.uploadAttachment))
 	mux.HandleFunc("GET /api/attachments/{id}/content", s.requireUser(s.attachmentContent))
@@ -828,6 +837,11 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 			},
 			"features": map[string]any{
 				"stickyNotes": policy.Features.StickyNotes, "reactions": policy.Features.Reactions,
+			},
+			"office": map[string]any{
+				"enabled": policy.Office.Enabled, "internalSharing": policy.Office.InternalSharing,
+				"externalEditing": policy.Office.ExternalEditing, "ai": policy.Office.AI,
+				"dlpOnSave": policy.Office.DLPOnSave, "versionRetention": policy.Office.VersionRetention,
 			},
 			"branding": map[string]any{
 				"productName": policy.Branding.ProductName, "primaryColor": policy.Branding.PrimaryColor,

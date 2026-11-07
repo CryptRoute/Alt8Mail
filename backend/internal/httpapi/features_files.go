@@ -53,6 +53,7 @@ type attachmentUploadBody struct {
 
 type fileRecord struct {
 	ID, ProviderID, ExternalID, Name, MIME, Path, FolderID, Description, StorageKey, AttachmentID, ExternalURL string
+	OwnerID, OwnerName, OwnerEmail, OwnerInitials, OwnerColor, Access                                          string
 	Metadata                                                                                                   []byte
 	SizeBytes                                                                                                  int64
 	Starred, Locked, Previewable                                                                               bool
@@ -189,14 +190,34 @@ func (s *Server) loadFiles(ctx context.Context, user userRecord, providerID stri
 		       f.size_bytes, f.storage_key, COALESCE(f.attachment_id,''), f.external_url,
 		       f.starred, f.locked, f.version, f.previewable, f.checksum, f.metadata,
 		       f.created_at, f.updated_at,
+		       f.user_id::text, owner.name, owner.email::text, owner.initials, owner.color,
+		       CASE WHEN f.user_id = $1 THEN 'owner'
+		            WHEN perm.can_edit THEN 'edit'
+		            WHEN perm.can_view THEN 'view'
+		            ELSE '' END,
 		       COALESCE((SELECT jsonb_agg(
 		         CASE WHEN s2.recipient_email <> '' THEN s2.recipient_email::text ELSE 'External link' END
 		         ORDER BY s2.created_at DESC)
 		         FROM file_shares s2 WHERE s2.file_id = f.id AND s2.revoked_at IS NULL AND s2.expires_at > now()), '[]'::jsonb)
 		FROM files f
-		WHERE f.user_id = $1 AND ($2 = '' OR f.provider_id = $2)
+		JOIN users owner ON owner.id = f.user_id
+		LEFT JOIN LATERAL (
+			SELECT bool_or(p.access = 'edit') AS can_edit, bool_or(p.access = 'view') AS can_view
+			FROM file_permissions p
+			WHERE p.file_id = f.id AND (
+				(p.grantee_type = 'user' AND p.grantee_id = $1) OR
+				(p.grantee_type = 'group' AND p.grantee_id IN (
+					SELECT gm.group_id FROM group_members gm
+					JOIN groups g ON g.id = gm.group_id AND g.status = 'active' AND g.tenant_id = f.tenant_id
+					WHERE gm.user_id = $1
+				))
+			)
+		) perm ON true
+		WHERE f.tenant_id = $3
+		  AND (f.user_id = $1 OR perm.can_edit OR perm.can_view)
+		  AND ($2 = '' OR f.provider_id = $2)
 		ORDER BY f.updated_at DESC
-	`, user.ID, providerID)
+	`, user.ID, providerID, user.TenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +229,9 @@ func (s *Server) loadFiles(ctx context.Context, user userRecord, providerID stri
 		if err := rows.Scan(&file.ID, &file.ProviderID, &file.ExternalID, &file.Name, &file.MIME,
 			&file.Path, &file.FolderID, &file.Description, &file.SizeBytes, &file.StorageKey, &file.AttachmentID,
 			&file.ExternalURL, &file.Starred, &file.Locked, &file.Version, &file.Previewable,
-			&file.Checksum, &file.Metadata, &file.CreatedAt, &file.UpdatedAt, &sharedRaw); err != nil {
+			&file.Checksum, &file.Metadata, &file.CreatedAt, &file.UpdatedAt,
+			&file.OwnerID, &file.OwnerName, &file.OwnerEmail, &file.OwnerInitials, &file.OwnerColor, &file.Access,
+			&sharedRaw); err != nil {
 			continue
 		}
 		files = append(files, s.publicFile(file, user, sharedRaw))
@@ -219,17 +242,55 @@ func (s *Server) loadFiles(ctx context.Context, user userRecord, providerID stri
 func (s *Server) publicFile(file fileRecord, user userRecord, sharedRaw []byte) map[string]any {
 	shared := []any{}
 	_ = jsonUnmarshal(sharedRaw, &shared)
-	owner := map[string]any{"name": user.Name, "email": user.Email, "initials": user.Initials, "color": user.Color}
+	ownerName, ownerEmail := file.OwnerName, file.OwnerEmail
+	ownerInitials, ownerColor := file.OwnerInitials, file.OwnerColor
+	if ownerName == "" && ownerEmail == "" {
+		ownerName, ownerEmail = user.Name, user.Email
+		ownerInitials, ownerColor = user.Initials, user.Color
+	}
+	owner := map[string]any{"name": ownerName, "email": ownerEmail, "initials": ownerInitials, "color": ownerColor}
+	access := file.Access
+	if access == "" {
+		access = "owner"
+	}
+	// External link recipients are owner-only information. A colleague with an
+	// internal grant must not learn who else has been invited by link.
+	starred := file.Starred
+	if access != "owner" {
+		shared = []any{}
+		// Favourites are a per-owner marker in the current schema. Do not leak
+		// the owner's star state to internal recipients.
+		starred = false
+	}
+	metadata := map[string]any{}
+	_ = jsonUnmarshal(file.Metadata, &metadata)
+	dlpClassification, _ := metadata["dlpClassification"].(string)
+	dlpWarnings, ok := metadata["dlpWarnings"].([]any)
+	if !ok {
+		dlpWarnings = []any{}
+	}
+	dlpMatches, ok := metadata["dlpMatches"].([]any)
+	if !ok {
+		dlpMatches = []any{}
+	}
+	if access != "owner" {
+		// The classification is useful to a collaborator; rule names, matched
+		// terms and warning text belong to the owner and administrators.
+		dlpWarnings = []any{}
+		dlpMatches = []any{}
+	}
 	contentURL := "/api/files/" + file.ID + "/content"
 	return map[string]any{
 		"id": file.ID, "name": file.Name, "type": attachmentBadgeType(file.MIME, file.Name),
 		"mime": file.MIME, "size": formatBytes(file.SizeBytes), "sizeBytes": file.SizeBytes,
 		"providerId": file.ProviderID, "path": firstNonEmpty(file.Path, "Files"), "folderId": file.FolderID,
 		"owner": owner, "modifiedAt": file.UpdatedAt.UTC().Format(time.RFC3339),
-		"createdAt": file.CreatedAt.UTC().Format(time.RFC3339), "starred": file.Starred,
+		"createdAt": file.CreatedAt.UTC().Format(time.RFC3339), "starred": starred,
 		"sharedWith": shared, "locked": file.Locked, "version": fmt.Sprint(file.Version),
 		"previewable": file.Previewable, "contentUrl": contentURL, "description": file.Description,
-		"externalId": file.ExternalID, "externalUrl": file.ExternalURL,
+		"externalId": file.ExternalID, "externalUrl": file.ExternalURL, "attachmentId": file.AttachmentID,
+		"access": access, "shared": access != "owner",
+		"dlpClassification": dlpClassification, "dlpWarnings": dlpWarnings, "dlpMatches": dlpMatches,
 	}
 }
 
@@ -504,7 +565,35 @@ func (s *Server) fileShareCount(ctx context.Context, fileID string) (int, error)
 func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	id := r.PathValue("id")
-	if file, err := s.loadFileContent(r.Context(), sess.User.ID, id); err == nil && file.ProviderID == "s3" && file.StorageKey != "" {
+	officeKeys := map[string]bool{}
+	file, fileErr := s.loadFileContent(r.Context(), sess.User.ID, id)
+	if fileErr == nil {
+		if strings.HasPrefix(file.StorageKey, "ofv_") {
+			officeKeys[file.StorageKey] = true
+		}
+		rows, err := s.store.DB.Query(r.Context(), `
+			SELECT v.storage_key FROM office_document_versions v
+			JOIN office_documents d ON d.id = v.document_id
+			WHERE d.file_id = $1 AND d.user_id = $2
+		`, id, sess.User.ID)
+		if err == nil {
+			for rows.Next() {
+				var key string
+				if rows.Scan(&key) == nil && strings.HasPrefix(key, "ofv_") {
+					officeKeys[key] = true
+				}
+			}
+			rows.Close()
+		}
+	}
+	if fileErr == nil {
+		if held, _ := s.userOnLegalHold(r.Context(), sess.User.TenantID, sess.User.ID); held {
+			s.recordWorkspaceAudit(r.Context(), sess, "file.delete_blocked", id, "Delete blocked by an active legal hold")
+			writeError(w, http.StatusConflict, "LEGAL_HOLD", "This file is protected by an active legal hold and cannot be deleted")
+			return
+		}
+	}
+	if fileErr == nil && file.ProviderID == "s3" && file.StorageKey != "" {
 		if err := s.s3DeleteObject(r.Context(), sess.User.TenantID, file.StorageKey); err != nil {
 			s.logger.Warn("S3 object delete failed", "err", err)
 			// Keep the row so the user can retry. Deleting it now would make the
@@ -518,6 +607,9 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "File not found")
 		return
 	}
+	for key := range officeKeys {
+		s.officeRemoveStorage(key)
+	}
 	s.recordWorkspaceAudit(r.Context(), sess, "file.deleted", id, "File removed from the workspace")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -527,9 +619,33 @@ func (s *Server) loadFile(ctx context.Context, user userRecord, id string) (map[
 		SELECT f.id, f.provider_id, f.external_id, f.name, f.mime, f.path, COALESCE(f.folder_id,''), f.description,
 		       f.size_bytes, f.storage_key, COALESCE(f.attachment_id,''), f.external_url,
 		       f.starred, f.locked, f.version, f.previewable, f.checksum, f.metadata,
-		       f.created_at, f.updated_at, '[]'::jsonb
-		FROM files f WHERE f.id=$1 AND f.user_id=$2
-	`, id, user.ID)
+		       f.created_at, f.updated_at,
+		       f.user_id::text, owner.name, owner.email::text, owner.initials, owner.color,
+		       CASE WHEN f.user_id = $2 THEN 'owner'
+		            WHEN perm.can_edit THEN 'edit'
+		            WHEN perm.can_view THEN 'view'
+		            ELSE '' END,
+		       COALESCE((SELECT jsonb_agg(
+		         CASE WHEN s2.recipient_email <> '' THEN s2.recipient_email::text ELSE 'External link' END
+		         ORDER BY s2.created_at DESC)
+		         FROM file_shares s2 WHERE s2.file_id = f.id AND s2.revoked_at IS NULL AND s2.expires_at > now()), '[]'::jsonb)
+		FROM files f
+		JOIN users owner ON owner.id = f.user_id
+		LEFT JOIN LATERAL (
+			SELECT bool_or(p.access = 'edit') AS can_edit, bool_or(p.access = 'view') AS can_view
+			FROM file_permissions p
+			WHERE p.file_id = f.id AND (
+				(p.grantee_type = 'user' AND p.grantee_id = $2) OR
+				(p.grantee_type = 'group' AND p.grantee_id IN (
+					SELECT gm.group_id FROM group_members gm
+					JOIN groups g ON g.id = gm.group_id AND g.status = 'active' AND g.tenant_id = f.tenant_id
+					WHERE gm.user_id = $2
+				))
+			)
+		) perm ON true
+		WHERE f.id=$1 AND f.tenant_id=$3
+		  AND (f.user_id=$2 OR perm.can_edit OR perm.can_view)
+	`, id, user.ID, user.TenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -542,7 +658,8 @@ func (s *Server) loadFile(ctx context.Context, user userRecord, id string) (map[
 	if err := rows.Scan(&file.ID, &file.ProviderID, &file.ExternalID, &file.Name, &file.MIME, &file.Path,
 		&file.FolderID, &file.Description, &file.SizeBytes, &file.StorageKey, &file.AttachmentID, &file.ExternalURL,
 		&file.Starred, &file.Locked, &file.Version, &file.Previewable, &file.Checksum, &file.Metadata,
-		&file.CreatedAt, &file.UpdatedAt, &sharedRaw); err != nil {
+		&file.CreatedAt, &file.UpdatedAt, &file.OwnerID, &file.OwnerName, &file.OwnerEmail,
+		&file.OwnerInitials, &file.OwnerColor, &file.Access, &sharedRaw); err != nil {
 		return nil, err
 	}
 	return s.publicFile(file, user, sharedRaw), nil
@@ -564,17 +681,26 @@ func (s *Server) getFileContent(w http.ResponseWriter, r *http.Request) {
 		}
 		lookupUserID = ownerID
 	}
-	file, err := s.loadFileContent(r.Context(), lookupUserID, r.PathValue("id"))
+	var file contentFile
+	var err error
+	if lookupUserID != sess.User.ID {
+		file, err = s.loadFileContent(r.Context(), lookupUserID, r.PathValue("id"))
+	} else {
+		file, err = s.loadAccessibleFileContent(r.Context(), sess.User, r.PathValue("id"))
+	}
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "File not found")
 		return
 	}
-	s.serveFileContent(w, r, file, file.OwnerID, sess.User.TenantID)
+	tenantID := firstNonEmpty(file.TenantID, sess.User.TenantID)
+	s.serveFileContent(w, r, file, file.OwnerID, tenantID)
 }
 
 type contentFile struct {
 	fileRecord
-	OwnerID string
+	OwnerID  string
+	TenantID string
+	Access   string
 }
 
 func (s *Server) loadFileContent(ctx context.Context, userID, id string) (contentFile, error) {
@@ -582,14 +708,55 @@ func (s *Server) loadFileContent(ctx context.Context, userID, id string) (conten
 	err := s.store.DB.QueryRow(ctx, `
 		SELECT id, provider_id, external_id, name, mime, path, description, size_bytes, storage_key,
 		       COALESCE(attachment_id,''), external_url, starred, locked, version, previewable,
-		       checksum, metadata, created_at, updated_at, user_id::text
+		       checksum, metadata, created_at, updated_at, user_id::text, tenant_id::text
 		FROM files WHERE id=$1 AND user_id=$2
 	`, id, userID).Scan(&file.ID, &file.ProviderID, &file.ExternalID, &file.Name, &file.MIME,
 		&file.Path, &file.Description, &file.SizeBytes, &file.StorageKey, &file.AttachmentID,
 		&file.ExternalURL, &file.Starred, &file.Locked, &file.Version, &file.Previewable,
-		&file.Checksum, &file.Metadata, &file.CreatedAt, &file.UpdatedAt, &file.OwnerID)
+		&file.Checksum, &file.Metadata, &file.CreatedAt, &file.UpdatedAt, &file.OwnerID, &file.TenantID)
 	if err != nil {
 		return contentFile{}, err
+	}
+	file.Access = "owner"
+	return file, nil
+}
+
+// loadAccessibleFileContent returns a file the user owns or can access through
+// an internal user/group grant.
+func (s *Server) loadAccessibleFileContent(ctx context.Context, user userRecord, id string) (contentFile, error) {
+	var file contentFile
+	err := s.store.DB.QueryRow(ctx, `
+		SELECT f.id, f.provider_id, f.external_id, f.name, f.mime, f.path, f.description, f.size_bytes, f.storage_key,
+		       COALESCE(f.attachment_id,''), f.external_url, f.starred, f.locked, f.version, f.previewable,
+		       f.checksum, f.metadata, f.created_at, f.updated_at, f.user_id::text, f.tenant_id::text,
+		       owner.name, owner.email::text, owner.initials, owner.color,
+		       CASE WHEN f.user_id = $2 THEN 'owner'
+		            WHEN perm.can_edit THEN 'edit'
+		            WHEN perm.can_view THEN 'view'
+		            ELSE '' END
+		FROM files f
+		JOIN users owner ON owner.id = f.user_id
+		LEFT JOIN LATERAL (
+			SELECT bool_or(p.access = 'edit') AS can_edit, bool_or(p.access = 'view') AS can_view
+			FROM file_permissions p
+			WHERE p.file_id = f.id AND (
+				(p.grantee_type = 'user' AND p.grantee_id = $2) OR
+				(p.grantee_type = 'group' AND p.grantee_id IN (
+					SELECT gm.group_id FROM group_members gm
+					JOIN groups g ON g.id = gm.group_id AND g.status = 'active' AND g.tenant_id = f.tenant_id
+					WHERE gm.user_id = $2
+				))
+			)
+		) perm ON true
+		WHERE f.id=$1 AND f.tenant_id=$3
+		  AND (f.user_id=$2 OR perm.can_edit OR perm.can_view)
+	`, id, user.ID, user.TenantID).Scan(&file.ID, &file.ProviderID, &file.ExternalID, &file.Name, &file.MIME,
+		&file.Path, &file.Description, &file.SizeBytes, &file.StorageKey, &file.AttachmentID,
+		&file.ExternalURL, &file.Starred, &file.Locked, &file.Version, &file.Previewable,
+		&file.Checksum, &file.Metadata, &file.CreatedAt, &file.UpdatedAt, &file.OwnerID, &file.TenantID,
+		&file.OwnerName, &file.OwnerEmail, &file.OwnerInitials, &file.OwnerColor, &file.Access)
+	if err != nil || file.Access == "" {
+		return contentFile{}, fmt.Errorf("file not found")
 	}
 	return file, nil
 }

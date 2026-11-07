@@ -236,6 +236,69 @@ test("delegated mailbox windows use a scoped session revoked with the primary si
   assert.equal(revoked.status, 401);
 });
 
+test("office: foundation feature flag stays hidden until the Control Plane enables it", async () => {
+  const result = await client.request("/api/office/config");
+  assert.equal(result.status, 200);
+  assert.equal(result.body.enabled, false);
+  assert.equal(result.body.ready, false);
+  assert.equal(result.body.mode, "editor");
+  assert.deepEqual(result.body.formats.word.includes("docx"), true);
+});
+
+test("office: creates, opens, versions and converts Cabinet documents", async () => {
+  const originalOffice = app.db.office;
+  const originalFiles = app.db.files.slice();
+  const originalDocuments = app.db.officeDocuments.slice();
+  const originalAudit = app.db.audit.slice();
+  try {
+    app.db.office = {
+      enabled: true, ready: true, publicUrl: "https://office.a8m.example",
+      status: "running", version: "9.4.0.1", secretConfigured: true
+    };
+    let result = await client.request("/api/office/documents", {
+      method: "POST",
+      body: { name: "Quarterly plan", format: "docx" }
+    });
+    assert.equal(result.status, 201);
+    assert.equal(result.body.file.name, "Quarterly plan.docx");
+    assert.equal(result.body.document.documentType, "word");
+    assert.equal(result.body.document.currentVersion, 1);
+    const fileId = result.body.file.id;
+
+    result = await client.request(`/api/office/documents/${fileId}/open`, { method: "POST", body: {} });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.documentServerUrl, "https://office.a8m.example");
+    assert.equal(result.body.config.token, "mock-token");
+    assert.equal(result.body.config.editorConfig.mode, "edit");
+    assert.equal(result.body.config.document.fileType, "docx");
+
+    result = await client.request(`/api/office/documents/${fileId}/versions`);
+    assert.equal(result.status, 200);
+    assert.equal(result.body.versions.length, 1);
+    assert.equal(result.body.versions[0].current, true);
+
+    result = await client.request(`/api/office/documents/${fileId}/versions/1/restore`, { method: "POST", body: {} });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.version, 2);
+
+    result = await client.request(`/api/office/documents/${fileId}/versions`);
+    assert.equal(result.status, 200);
+    assert.equal(result.body.versions.length, 2);
+    assert.equal(result.body.document.currentVersion, 2);
+    assert.equal(result.body.versions.find((version) => version.current).version, 2);
+
+    result = await client.request(`/api/office/documents/${fileId}/convert`, { method: "POST", body: {} });
+    assert.equal(result.status, 201);
+    assert.equal(result.body.file.mime, "application/pdf");
+    assert.equal(result.body.file.name, "Quarterly plan.pdf");
+  } finally {
+    app.db.office = originalOffice;
+    app.db.files = originalFiles;
+    app.db.officeDocuments = originalDocuments;
+    app.db.audit = originalAudit;
+  }
+});
+
 test("add-ons: catalog, connections, installs, actions and admin requests", async () => {
   const originalAdmin = app.db.user.isSystemAdmin;
   const originalRole = app.db.user.role;
@@ -796,6 +859,26 @@ test("storage connectors and enterprise files: connect, share, star and remove",
     body: { access: "view", expiresDays: 2, recipientEmail: "reviewer@example.com" }
   });
   assert.equal(recipientShare.body.share.recipientEmail, "reviewer@example.com");
+  const shareGroups = await client.request("/api/files/share-groups");
+  assert.equal(shareGroups.status, 200);
+  assert.ok(shareGroups.body.groups.some((group) => group.name === "Team"));
+  const internal = await client.request("/api/files/file_roadmap/permissions", {
+    method: "POST", body: { email: "nora.patel@a8m.example", access: "edit" }
+  });
+  assert.equal(internal.status, 201);
+  assert.equal(internal.body.permission.granteeType, "user");
+  assert.equal(internal.body.permission.access, "edit");
+  const updatedInternal = await client.request("/api/files/file_roadmap/permissions", {
+    method: "POST", body: { email: "nora.patel@a8m.example", access: "view" }
+  });
+  assert.equal(updatedInternal.body.permission.access, "view");
+  const internalList = await client.request("/api/files/file_roadmap/permissions");
+  assert.equal(internalList.status, 200);
+  assert.equal(internalList.body.permissions.length, 1);
+  assert.equal(internalList.body.permissions[0].email, "nora.patel@a8m.example");
+  const internalRemoved = await client.request(`/api/files/file_roadmap/permissions/${encodeURIComponent(internal.body.permission.id)}`, { method: "DELETE" });
+  assert.equal(internalRemoved.status, 200);
+  assert.equal((await client.request("/api/files/file_roadmap/permissions")).body.permissions.length, 0);
   const locked = await client.request("/api/files/file_roadmap", {
     method: "PATCH",
     body: { locked: true }

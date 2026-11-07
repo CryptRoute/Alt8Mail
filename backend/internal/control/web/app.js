@@ -14,7 +14,8 @@ import { renderSecurityReports } from './views-security-reports.js';
 import { renderWebPush } from './views-push.js';
 import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
-import { renderAddons } from './views-addons.js?v=0.11.34-control';
+import { renderAddons } from './views-addons.js?v=0.11.36-control';
+import { renderOffice } from './views-office.js?v=0.11.36-control';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
@@ -77,6 +78,7 @@ const NAV_GROUPS = [
   { label: 'Infrastructure', items: [
     { key: 'system', label: 'System', icon: 'power', href: '#/system', perm: 'server.read', desc: 'Release updates, version history and host reboot' },
     { key: 'addons', label: 'Add-ons', icon: 'plug', href: '#/addons', perm: 'server.read', desc: 'System-wide first-party connector catalog' },
+    { key: 'office', label: 'Office', icon: 'file-code', href: '#/office', perm: 'server.read', desc: 'OnlyOffice lifecycle and webmail Office feature flag' },
     { key: 'services', label: 'Services', icon: 'server', href: '#/services', perm: 'services.read', desc: 'systemd health and lifecycle actions' },
     { key: 'updates', label: 'Software updates', icon: 'download', href: '#/updates', perm: 'server.read', desc: 'OS package updates with live command output' },
     { key: 'terminal', label: 'Terminal', icon: 'terminal', href: '#/terminal', perm: 'server.manage', desc: 'Authenticated SSH shell on this host' },
@@ -116,6 +118,7 @@ const ROUTE_DEFS = {
   services: { title: 'Services', crumb: 'Infrastructure', nav: 'services', perm: 'services.read', render: renderServices },
   system: { title: 'System', crumb: 'Infrastructure', nav: 'system', perm: 'server.read', render: renderSystem },
   addons: { title: 'Add-ons', crumb: 'Infrastructure', nav: 'addons', perm: 'server.read', render: renderAddons },
+  office: { title: 'Office', crumb: 'Infrastructure', nav: 'office', perm: 'server.read', render: renderOffice },
   updates: { title: 'Software updates', crumb: 'Infrastructure', nav: 'updates', perm: 'server.read', render: renderUpdates },
   terminal: { title: 'Terminal', crumb: 'Infrastructure', nav: 'terminal', perm: 'server.manage', render: renderTerminal },
   ports: { title: 'Mail listeners', crumb: 'Infrastructure', nav: 'ports', perm: 'services.read', render: renderPorts },

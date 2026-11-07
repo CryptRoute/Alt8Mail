@@ -279,8 +279,10 @@ func webNetWebmailLocations(upstream string) string {
 	builder.WriteString(nginxProxyLocation("^~ /calendar/poll/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /calendar/feed/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /oauth/", upstream, "", ""))
+	builder.WriteString(nginxProxyLocation("^~ /api/office/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /api/", upstream, "", ""))
 	builder.WriteString(nginxProxyLocation("^~ /system/api/", upstream, "/api/", ""))
+	builder.WriteString(webNetOfficeEditorLocation(upstream))
 	builder.WriteString("    location = /admin { return 404; }\n")
 	builder.WriteString("    location ^~ /admin/ { return 404; }\n")
 	builder.WriteString("    location = /sw.js { add_header Cache-Control \"no-cache\"; try_files $uri =404; }\n")
@@ -307,6 +309,34 @@ func nginxProxyLocation(match, upstream, proxyPath, clientMaxBody string) string
 	}
 	builder.WriteString("    }\n")
 	return builder.String()
+}
+
+// webNetOfficeEditorLocation proxies the isolated OnlyOffice editor host. Its
+// own CSP is intentionally scoped to this page so the mail shell keeps a strict
+// script-src 'self' policy.
+func webNetOfficeEditorLocation(upstream string) string {
+	return `    location ^~ /office-editor {
+        proxy_pass http://` + upstream + `;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_hide_header Content-Security-Policy;
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header Referrer-Policy;
+        proxy_hide_header Permissions-Policy;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https:; connect-src 'self' https: wss:; font-src 'self' data: https:; worker-src 'self' blob:; frame-src 'self' blob: https:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'" always;
+    }
+`
 }
 
 func webNetAdminLocations(upstream string) string {

@@ -445,6 +445,9 @@ func filterStateAudit(state map[string]any, category string) []any {
 			return strings.HasPrefix(action, "preferences.")
 		case "security":
 			return strings.HasPrefix(action, "security.") || strings.HasPrefix(action, "auth.")
+		case "office":
+			// Office events live in workspace_audit, not app-state audit.
+			return false
 		case "tasks":
 			return strings.HasPrefix(action, "task.")
 		}

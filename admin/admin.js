@@ -33,6 +33,7 @@ const state = {
   users: { items: [], total: 0 },
   domains: [],
   drawerUser: null,
+  auditSource: "admin",
   commandOpen: false,
   theme: localStorage.getItem("a8m_admin_theme") || "light"
 };
@@ -1219,7 +1220,7 @@ async function renderPolicies() {
     const data = await api("policies");
     state.policy = data.policy;
     const policy = data.policy;
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Policies</h1><p>Organization-wide guardrails for authentication, mail, sharing and directory.</p></div><div class="view-actions"><span class="badge system">Enforced at sign-in where applicable</span></div></div><div class="policy-layout"><nav class="policy-nav"><button class="active" data-policy-tab="security">Security</button><button data-policy-tab="mail">Mail</button><button data-policy-tab="sharing">Sharing</button><button data-policy-tab="directory">Directory</button><button data-policy-tab="dlp">Classification &amp; DLP</button><button data-policy-tab="features">Features</button><button data-policy-tab="branding">Branding</button></nav><div><form id="policyForm">${policySections(policy)}</form><div class="policy-save"><span>Changes apply to the whole organization. Sensitive changes are audited.</span><button class="btn secondary" type="button" data-action="run-retention" title="Save the retention policy first">Run retention</button><button class="btn secondary" type="button" data-action="reload-policies">Reset changes</button><button class="btn primary" type="button" data-action="save-policies">${icon("check")}Save policies</button></div></div></div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Policies</h1><p>Organization-wide guardrails for authentication, mail, sharing and directory.</p></div><div class="view-actions"><span class="badge system">Enforced at sign-in where applicable</span></div></div><div class="policy-layout"><nav class="policy-nav"><button class="active" data-policy-tab="security">Security</button><button data-policy-tab="mail">Mail</button><button data-policy-tab="sharing">Sharing</button><button data-policy-tab="office">Office</button><button data-policy-tab="directory">Directory</button><button data-policy-tab="dlp">Classification &amp; DLP</button><button data-policy-tab="features">Features</button><button data-policy-tab="branding">Branding</button></nav><div><form id="policyForm">${policySections(policy)}</form><div class="policy-save"><span>Changes apply to the whole organization. Sensitive changes are audited.</span><button class="btn secondary" type="button" data-action="run-retention" title="Save the retention policy first">Run retention</button><button class="btn secondary" type="button" data-action="reload-policies">Reset changes</button><button class="btn primary" type="button" data-action="save-policies">${icon("check")}Save policies</button></div></div></div>`;
     bindPolicyForm();
   } catch (error) { viewError(error); }
 }
@@ -1236,6 +1237,7 @@ function policySections(policy) {
   const branding = policy.branding;
   const dlp = policy.dlp || { enabled: true, defaultClassification: "Internal", rules: [] };
   const features = policy.features || { stickyNotes: true, reactions: true };
+  const office = policy.office || { enabled: true, internalSharing: true, externalEditing: true, ai: true, dlpOnSave: true, versionRetention: 0, allowedGroups: [], allowedDomains: [] };
   return `<section class="card policy-panel active" data-policy-panel="security">
     <div class="policy-section"><h3>Password policy</h3><p>Applied to new users and password resets issued from this console.</p>
       <div class="setting-row"><div class="setting-copy"><b>Minimum length</b><small>Passwords shorter than this are rejected.</small></div><div class="setting-control"><div class="input-group"><input class="input" type="number" min="8" max="64" data-policy-input="security.passwordMinLength" value="${security.passwordMinLength}"><span class="muted">chars</span></div></div></div>
@@ -1279,6 +1281,20 @@ function policySections(policy) {
       ${toggleRow("Guest invitations", "Allow guest accounts to collaborate on shared files.", "sharing.guestInvites", sharing.guestInvites)}
       <div class="setting-row"><div class="setting-copy"><b>Default link access</b><small>Default permission for newly created links.</small></div><div class="setting-control"><select class="input" data-policy-input="sharing.linkDefault">${[["view", "View only"], ["edit", "Can edit"], ["disabled", "Disabled"]].map(([value, label]) => `<option value="${value}" ${sharing.linkDefault === value ? "selected" : ""}>${label}</option>`).join("")}</select></div></div>
       <div class="setting-row"><div class="setting-copy"><b>Allowed sharing domains</b><small>Comma-separated domains permitted for external sharing.</small></div><div class="setting-control"><input class="input" data-policy-input="sharing.allowedDomains" value="${esc((sharing.allowedDomains || []).join(", "))}" placeholder="partner.com"></div></div>
+    </div>
+  </section>
+  <section class="card policy-panel" data-policy-panel="office">
+    <div class="policy-section"><h3>Alt8Mail Office</h3><p>Control document editing, internal collaboration and content inspection for the Office editor.</p>
+      ${toggleRow("Office enabled", "Allow the Office editor, document creation, conversion and guest document links.", "office.enabled", office.enabled)}
+      ${toggleRow("Internal sharing", "Let file owners grant view or edit access to colleagues and groups from the Cabinet.", "office.internalSharing", office.internalSharing)}
+      ${toggleRow("Guest editing", "Allow edit links to change Office documents. When off, guest links are always view-only.", "office.externalEditing", office.externalEditing)}
+      ${toggleRow("AI assistant", "Show the Office AI panel to users. Requires an AI provider in System Control.", "office.ai", office.ai)}
+      ${toggleRow("DLP on save", "Scan document text when the Office editor saves a version and record the classification and matches.", "office.dlpOnSave", office.dlpOnSave)}
+      <div class="setting-row"><div class="setting-copy"><b>Version retention</b><small>Keep this many newest versions per Office document. 0 keeps every version. Retention is applied after each save and releases version storage.</small></div><div class="setting-control"><div class="input-group"><input class="input" type="number" min="0" max="1000" data-policy-input="office.versionRetention" value="${Number(office.versionRetention) || 0}"><span class="muted">versions</span></div></div></div>
+    </div>
+    <div class="policy-section"><h3>Office audience</h3><p>Empty lists allow everyone in the organization. When either list is set, a user must match a domain or belong to one of the listed groups.</p>
+      <div class="setting-row"><div class="setting-copy"><b>Allowed groups</b><small>Comma-separated group names, for example Legal, Finance. Group names are matched case-insensitively.</small></div><div class="setting-control"><input class="input" data-policy-input="office.allowedGroups" value="${esc((office.allowedGroups || []).join(", "))}" placeholder="Legal, Finance"></div></div>
+      <div class="setting-row"><div class="setting-copy"><b>Allowed domains</b><small>Comma-separated email domains for internal users and verified guest recipients.</small></div><div class="setting-control"><input class="input" data-policy-input="office.allowedDomains" value="${esc((office.allowedDomains || []).join(", "))}" placeholder="company.com"></div></div>
     </div>
   </section>
   <section class="card policy-panel" data-policy-panel="directory">
@@ -1362,6 +1378,9 @@ function bindPolicyForm() {
 
 function collectPolicy() {
   const policy = JSON.parse(JSON.stringify(state.policy));
+  if (!policy.office) {
+    policy.office = { enabled: true, internalSharing: true, externalEditing: true, ai: true, dlpOnSave: true, versionRetention: 0, allowedGroups: [], allowedDomains: [] };
+  }
   $$("[data-policy-input]").forEach((input) => {
     const path = input.dataset.policyInput.split(".");
     let target = policy;
@@ -1661,9 +1680,19 @@ async function releaseQuarantine(button) {
 async function renderAudit() {
   loading("Audit log");
   try {
-    const data = await api("audit?limit=100" + (state.auditQuery ? "&q=" + encodeURIComponent(state.auditQuery) : ""));
+    const source = state.auditSource === "office" ? "office" : "admin";
+    const endpoint = source === "office" ? "audit/office" : "audit";
+    const query = state.auditQuery ? "&q=" + encodeURIComponent(state.auditQuery) : "";
+    const data = await api(endpoint + "?limit=100" + query);
     const entries = data.entries || [];
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Audit log</h1><p>Immutable administrative activity for ${esc(state.activeTenant.name)}.</p></div><div class="view-actions"><a class="btn secondary" href="./api/audit.csv" download>${icon("download")}Export CSV</a></div></div><div class="toolbar"><div class="search-box">${icon("search")}<input id="auditSearch" type="search" placeholder="Search actor, target or detail…" value="${esc(state.auditQuery || "")}"></div><span class="muted" style="font-size:11px">${data.total} event${data.total === 1 ? "" : "s"}</span></div><div class="table-wrap"><div class="table-scroll"><table class="data audit-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead><tbody>${entries.map(auditRow).join("") || `<tr><td colspan="6"><div class="empty">${icon("list")}<h3>No audit events</h3><p>Administrative changes will appear here.</p></div></td></tr>`}</tbody></table></div></div>`;
+    const officeSource = source === "office";
+    const exportName = officeSource ? "audit/office.csv" : "audit.csv";
+    const exportHref = "./api/" + exportName + (state.auditQuery ? "?q=" + encodeURIComponent(state.auditQuery) : "");
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Audit log</h1><p>${officeSource ? `Office document, sharing and AI activity for ${esc(state.activeTenant.name)}.` : `Immutable administrative activity for ${esc(state.activeTenant.name)}.`}</p></div><div class="view-actions"><a class="btn secondary" href="${exportHref}" download>${icon("download")}Export CSV</a></div></div><div class="toolbar"><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn small ${officeSource ? "secondary" : "primary"}" type="button" data-audit-source="admin">Administrator actions</button><button class="btn small ${officeSource ? "primary" : "secondary"}" type="button" data-audit-source="office">Office activity</button></div><div class="search-box">${icon("search")}<input id="auditSearch" type="search" placeholder="Search actor, target or detail…" value="${esc(state.auditQuery || "")}"></div><span class="muted" style="font-size:11px">${data.total} event${data.total === 1 ? "" : "s"}</span></div><div class="table-wrap"><div class="table-scroll"><table class="data audit-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead><tbody>${entries.map(auditRow).join("") || `<tr><td colspan="6"><div class="empty">${icon("list")}<h3>No audit events</h3><p>${officeSource ? "Office document opens, saves, shares, DLP blocks and reviews will appear here." : "Administrative changes will appear here."}</p></div></td></tr>`}</tbody></table></div></div>`;
+    $$("[data-audit-source]").forEach((button) => button.addEventListener("click", () => {
+      state.auditSource = button.dataset.auditSource === "office" ? "office" : "admin";
+      renderAudit();
+    }));
     let timer;
     $("#auditSearch")?.addEventListener("input", (event) => { clearTimeout(timer); timer = setTimeout(() => { state.auditQuery = event.target.value.trim(); renderAudit(); }, 350); });
   } catch (error) { viewError(error); }
@@ -1693,7 +1722,7 @@ async function renderCompliance() {
         <div class="stat-card"><span class="stat-label">${icon("mail")}Archive scope</span><span class="stat-value">${esc(state.activeTenant.name)}</span><span class="stat-meta">Every synchronized mailbox</span></div>
       </div>
       <div class="card"><div class="card-head"><div><h2>Legal holds</h2><p>Held mailboxes cannot be permanently deleted or purged by retention.</p></div><span class="badge ${stats.active ? "system" : "neutral"}">${stats.active || 0} active</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Matter</th><th>Scope</th><th>Mailbox</th><th>Reason</th><th>Placed</th><th>Status</th><th></th></tr></thead><tbody>${holds.map((hold) => `<tr><td><b>${esc(hold.name || "Untitled hold")}</b>${hold.reason ? `<br><small class="muted">${esc(hold.reason)}</small>` : ""}</td><td>${esc(hold.scope === "tenant" ? "Tenant-wide" : "Mailbox")}</td><td>${esc(hold.userEmail || "All mailboxes")}${hold.userName ? `<br><small class="muted">${esc(hold.userName)}</small>` : ""}</td><td class="cell-sub">${esc(hold.createdBy || "—")}</td><td class="cell-sub">${formatDate(hold.createdAt, { time: true })}</td><td>${hold.status === "active" ? badge("active") : `<span class="badge neutral">Released</span>`}</td><td>${canManage && hold.status === "active" ? `<button class="btn small ghost" data-release-hold="${esc(hold.id)}">Release</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="7"><div class="empty">${icon("shield")}<h3>No legal holds</h3><p>Place a hold before an employee leaves or when litigation is reasonably anticipated.</p></div></td></tr>`}</tbody></table></div></div></div>
-      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>eDiscovery search</h2><p>Search subjects, participants and message bodies across every mailbox in this organization.</p></div><span class="badge system">Read-only</span></div><div class="card-pad"><form id="discoveryForm"><div class="field-row"><label class="field"><span>Keywords</span><input id="discoveryQuery" placeholder="contract, account number, project name" autocomplete="off"></label><label class="field"><span>Mailbox email</span><input id="discoveryUserEmail" type="email" placeholder="person@company.com" autocomplete="off"></label></div><div class="field-row"><label class="field"><span>Sent from</span><input id="discoveryFrom" type="date"></label><label class="field"><span>Sent to</span><input id="discoveryTo" type="date"></label></div><div class="field-row"><label class="field"><span>Folder</span><input id="discoveryFolder" placeholder="inbox, sent, archive"></label><label class="field"><span>Classification</span><select id="discoveryClassification"><option value="">Any classification</option>${dlpClassificationOptions("")}</select></label></div><div style="display:flex;align-items:center;justify-content:flex-end;gap:8px"><a class="btn secondary" id="discoveryExport" href="./api/legal/discovery.csv" download>${icon("download")}Export CSV</a><button class="btn primary" type="submit">${icon("search")}Search archive</button></div></form><div id="discoveryResults" style="margin-top:18px"><div class="empty-mini">Enter a keyword or mailbox to search the archive.</div></div></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>eDiscovery search</h2><p>Search subjects, participants and message bodies across every mailbox in this organization.</p></div><span class="badge system">Read-only</span></div><div class="card-pad"><form id="discoveryForm"><div class="field-row"><label class="field"><span>Keywords</span><input id="discoveryQuery" placeholder="contract, account number, project name" autocomplete="off"></label><label class="field"><span>Mailbox email</span><input id="discoveryUserEmail" type="email" placeholder="person@company.com" autocomplete="off"></label></div><div class="field-row"><label class="field"><span>Sent from</span><input id="discoveryFrom" type="date"></label><label class="field"><span>Sent to</span><input id="discoveryTo" type="date"></label></div><div class="field-row"><label class="field"><span>Folder</span><input id="discoveryFolder" placeholder="inbox, sent, archive"></label><label class="field"><span>Classification</span><select id="discoveryClassification"><option value="">Any classification</option>${dlpClassificationOptions("")}</select></label></div><div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap"><a class="btn secondary" id="discoveryExport" href="./api/legal/discovery.csv" download>${icon("download")}Export mail CSV</a><a class="btn secondary" id="officeDiscoveryExport" href="./api/legal/discovery-office.csv" download>${icon("download")}Export Office CSV</a><button class="btn primary" type="submit">${icon("search")}Search archive</button></div></form><div id="discoveryResults" style="margin-top:18px"><div class="empty-mini">Enter a keyword or mailbox to search the archive.</div></div></div></div>
       <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Recent offboarding</h2><p>Accounts closed through the one-click workflow, including mailbox handoff and preservation choices.</p></div><span class="badge neutral">${jobs.length} recent</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Time</th><th>User</th><th>Transfer</th><th>Preservation</th><th>Status</th></tr></thead><tbody>${jobs.slice(0, 10).map((job) => `<tr><td class="cell-sub">${formatDate(job.createdAt, { time: true })}</td><td><b>${esc(job.userEmail || "—")}</b><br><small class="muted">${esc(job.userName || "")}</small></td><td>${esc(job.transferToEmail || "No delegate")}</td><td>${job.createLegalHold ? "Legal hold" : job.retainMailbox ? "Mailbox retained" : "Mailbox deactivated"}${job.autoReply ? " · auto-reply" : ""}</td><td>${job.status === "completed" ? badge("active") : badge("failed")}</td></tr>`).join("") || `<tr><td colspan="5"><div class="empty-mini">No offboarding jobs yet.</div></td></tr>`}</tbody></table></div></div></div>`;
     $("#createHoldBtn")?.addEventListener("click", openHoldModal);
     $$("[data-release-hold]").forEach((button) => button.addEventListener("click", () => releaseLegalHold(button.dataset.releaseHold)));
@@ -1728,11 +1757,12 @@ async function searchDiscovery(offset = 0) {
   params.set("limit", "25");
   const results = $("#discoveryResults");
   if (results) results.innerHTML = `<div class="empty-mini">${icon("refresh")}Searching the archive…</div>`;
+  const exportParams = discoverySearchParams();
+  const exportQuery = exportParams.toString() ? "?" + exportParams.toString() : "";
   const exportLink = $("#discoveryExport");
-  if (exportLink) {
-    const exportParams = discoverySearchParams();
-    exportLink.href = "./api/legal/discovery.csv" + (exportParams.toString() ? "?" + exportParams.toString() : "");
-  }
+  if (exportLink) exportLink.href = "./api/legal/discovery.csv" + exportQuery;
+  const officeExportLink = $("#officeDiscoveryExport");
+  if (officeExportLink) officeExportLink.href = "./api/legal/discovery-office.csv" + exportQuery;
   const data = await api("legal/discovery?" + params.toString());
   if (!results) return;
   const messages = data.messages || [];

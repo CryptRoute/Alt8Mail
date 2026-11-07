@@ -145,7 +145,7 @@ func (s *Server) getAudit(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	entries := filterStateAudit(state, category)
+	entries := s.mergeWorkspaceAudit(r.Context(), sess.User.ID, category, filterStateAudit(state, category))
 	total := len(entries)
 	end := offset + limit
 	if end > total {
@@ -165,7 +165,7 @@ func (s *Server) getAuditCSV(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
-	entries := filterStateAudit(state, r.URL.Query().Get("category"))
+	entries := s.mergeWorkspaceAudit(r.Context(), sess.User.ID, r.URL.Query().Get("category"), filterStateAudit(state, r.URL.Query().Get("category")))
 	var builder strings.Builder
 	writer := csv.NewWriter(&builder)
 	writer.UseCRLF = true

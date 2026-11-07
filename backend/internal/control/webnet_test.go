@@ -183,6 +183,8 @@ func TestRenderWebNetNginx(t *testing.T) {
 		"proxy_pass http://127.0.0.1:8081;",
 		"location ^~ /admin/ { return 404; }",
 		"location ^~ /oauth/ {",
+		"location ^~ /office-editor {",
+		"frame-ancestors 'self'",
 		"return 444;",
 		"allow 203.0.113.0/24;",
 		"deny 192.0.2.0/24;",

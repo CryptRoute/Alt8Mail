@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,10 +16,89 @@ func (s *Server) recordWorkspaceAudit(ctx context.Context, sess *sessionRecord, 
 	if sess == nil {
 		return
 	}
+	target = truncate(target, 240)
+	detail = truncate(detail, 500)
 	_, _ = s.store.DB.Exec(ctx, `
 		INSERT INTO workspace_audit (tenant_id, user_id, actor, action, target, detail)
 		VALUES ($1, $2, $3, $4, $5, $6)
-	`, sess.User.TenantID, sess.User.ID, sess.User.Name, action, truncate(target, 240), truncate(detail, 500))
+	`, sess.User.TenantID, sess.User.ID, sess.User.Name, action, target, detail)
+	// Office and internal-sharing events also go to the tenant audit stream so
+	// SIEM receivers see them alongside mailbox events. Other workspace events
+	// remain in workspace_audit only, avoiding duplicate audit_log entries.
+	if strings.HasPrefix(action, "office.") || strings.HasPrefix(action, "file.permission_") {
+		s.insertAudit(sess.User, action, target, detail, "", "")
+	}
+}
+
+func workspaceAuditWhere(userID, category, query string) (string, []any) {
+	where := []string{"user_id = $1"}
+	args := []any{userID}
+	if category == "office" {
+		where = append(where, "(action LIKE 'office.%' OR action LIKE 'file.permission_%')")
+	} else if category == "files" {
+		where = append(where, "(action LIKE 'file.%' OR action LIKE 'office.%' OR action LIKE 'storage.%')")
+	}
+	if query != "" {
+		args = append(args, "%"+escapeLikePattern(truncate(query, 200))+"%")
+		position := len(args)
+		where = append(where, fmt.Sprintf(
+			`(action ILIKE $%d ESCAPE '\' OR target ILIKE $%d ESCAPE '\' OR detail ILIKE $%d ESCAPE '\' OR actor ILIKE $%d ESCAPE '\')`,
+			position, position, position, position))
+	}
+	return strings.Join(where, " AND "), args
+}
+
+func (s *Server) workspaceAuditEntries(ctx context.Context, userID, category, query string, limit, offset int) ([]map[string]any, int, error) {
+	where, args := workspaceAuditWhere(userID, category, query)
+	var total int
+	if err := s.store.DB.QueryRow(ctx, `SELECT count(*) FROM workspace_audit WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT id, actor, action, target, detail, created_at
+		FROM workspace_audit WHERE `+where+`
+		ORDER BY id DESC LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args))+`
+	`, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	entries := []map[string]any{}
+	for rows.Next() {
+		var id int64
+		var actor, action, target, detail string
+		var created time.Time
+		if rows.Scan(&id, &actor, &action, &target, &detail, &created) == nil {
+			entries = append(entries, map[string]any{
+				"id": fmt.Sprint(id), "ts": created.UTC().Format(time.RFC3339),
+				"createdAt": created.UTC().Format(time.RFC3339),
+				"actor":     actor, "action": action, "target": target, "detail": detail, "ip": "",
+			})
+		}
+	}
+	return entries, total, rows.Err()
+}
+
+// mergeWorkspaceAudit augments the app-state audit stream with the durable
+// workspace_audit stream for categories that contain Office or Cabinet work.
+func (s *Server) mergeWorkspaceAudit(ctx context.Context, userID, category string, entries []any) []any {
+	if category != "" && category != "office" && category != "files" {
+		return entries
+	}
+	workspaceEntries, _, err := s.workspaceAuditEntries(ctx, userID, category, "", 500, 0)
+	if err != nil {
+		return entries
+	}
+	for _, entry := range workspaceEntries {
+		entries = append(entries, entry)
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		left, _ := entries[i].(map[string]any)
+		right, _ := entries[j].(map[string]any)
+		return stateString(left, "ts") > stateString(right, "ts")
+	})
+	return entries
 }
 
 func (s *Server) getWorkspaceAudit(w http.ResponseWriter, r *http.Request) {
@@ -28,28 +109,43 @@ func (s *Server) getWorkspaceAudit(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
-	rows, err := s.store.DB.Query(r.Context(), `
-		SELECT id, actor, action, target, detail, created_at
-		FROM workspace_audit WHERE user_id = $1 ORDER BY id DESC LIMIT $2
-	`, sess.User.ID, limit)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	entries, total, err := s.workspaceAuditEntries(r.Context(), sess.User.ID,
+		strings.TrimSpace(r.URL.Query().Get("category")), strings.TrimSpace(r.URL.Query().Get("q")), limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "AUDIT", "Could not load workspace audit")
 		return
 	}
-	defer rows.Close()
-	entries := []map[string]any{}
-	for rows.Next() {
-		var id int64
-		var actor, action, target, detail string
-		var created time.Time
-		if rows.Scan(&id, &actor, &action, &target, &detail, &created) == nil {
-			entries = append(entries, map[string]any{
-				"id": fmt.Sprint(id), "actor": actor, "action": action, "target": target,
-				"detail": detail, "createdAt": created.UTC().Format(time.RFC3339),
-			})
-		}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entries": entries, "audit": entries, "count": len(entries),
+		"total": total, "limit": limit, "offset": offset,
+	})
+}
+
+func (s *Server) getWorkspaceAuditCSV(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	entries, _, err := s.workspaceAuditEntries(r.Context(), sess.User.ID,
+		strings.TrimSpace(r.URL.Query().Get("category")), strings.TrimSpace(r.URL.Query().Get("q")), 5000, 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "AUDIT", "Could not export workspace audit")
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"audit": entries, "count": len(entries)})
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="a8m-office-audit-`+time.Now().UTC().Format("20060102-150405")+`.csv"`)
+	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"time", "action", "target", "actor", "detail"})
+	for _, entry := range entries {
+		_ = writer.Write([]string{
+			csvSafe(stateString(entry, "ts")), csvSafe(stateString(entry, "action")),
+			csvSafe(stateString(entry, "target")), csvSafe(stateString(entry, "actor")),
+			csvSafe(stateString(entry, "detail")),
+		})
+	}
+	writer.Flush()
 }
 
 func (s *Server) directoryPeople(ctx context.Context, sess *sessionRecord, includeSelf bool) ([]map[string]any, error) {

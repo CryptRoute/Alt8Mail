@@ -26,3 +26,6 @@
 *.woff2 binary
 *.tgz binary
 *.tar.gz binary
+*.docx binary
+*.xlsx binary
+*.pptx binary

@@ -1,21 +1,21 @@
 /* Alt8Mail — offline app shell.
    API calls are always network-only; mailbox data is never cached here. */
-const VERSION = "2026.11.06-2";
+const VERSION = "2026.11.07-4";
 const CACHE = `a8m-shell-${VERSION}`;
 const SHELL = [
   "/",
-  "/styles.css?v=0.21.6",
-  "/features.css?v=0.21.6",
-  "/workspace.css?v=0.21.6",
-  "/cabinet-calendar.css?v=0.21.6",
-  "/features-0.7.css?v=0.21.6",
-  "/onboarding.css?v=0.21.6",
-  "/email-ui.css?v=0.21.6",
+  "/styles.css?v=0.26.0",
+  "/features.css?v=0.26.0",
+  "/workspace.css?v=0.26.0",
+  "/cabinet-calendar.css?v=0.26.0",
+  "/features-0.7.css?v=0.26.0",
+  "/onboarding.css?v=0.26.0",
+  "/email-ui.css?v=0.26.0",
   "/vendor/typo.js",
   "/vendor/qrcode.min.js",
   "/vendor/en_US.aff",
   "/vendor/en_US.dic",
-  "/app.js?v=0.21.6",
+  "/app.js?v=0.26.0",
   "/search.mjs",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
@@ -108,6 +108,12 @@ self.addEventListener("fetch", (event) => {
 
   // The mailbox API, auth and draft autosave are never served from cache.
   if (url.pathname.startsWith("/api/")) return;
+  // The Office editor host is a dynamic capability page. It must never replace
+  // the cached webmail shell or be served stale from the shell cache.
+  if (url.pathname.startsWith("/office-editor")) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   if (request.mode === "navigate") {
     // Public share and upload pages are not part of the webmail shell. Never

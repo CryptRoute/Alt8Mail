@@ -477,7 +477,7 @@ A8M_REPO=git@github.com:CryptRoute/Alt8Mail.git
 A8M_REPO_HTTPS=https://github.com/CryptRoute/Alt8Mail.git
 A8M_GIT_KEY=$UPDATE_KEY
 A8M_CHANNEL=stable
-A8M_SERVICES="a8m-server a8m-admin alt8mail-control"
+A8M_SERVICES="a8m-server a8m-admin alt8mail-control a8m-office-agent"
 A8M_RELEASE_BASE_URL=https://github.com/CryptRoute/Alt8Mail/releases/download
 A8M_PREFER_RELEASE_ASSET=1
 A8M_MIN_FREE_MB=1024
@@ -555,6 +555,7 @@ ALT8MAIL_IMAP_IDLE=true
 ALT8MAIL_ORPHAN_SWEEP_SECONDS=3600
 ALT8MAIL_ORPHAN_GRACE_SECONDS=300
 ALT8MAIL_DEMO_MODE=false
+ALT8MAIL_OFFICE_JWT_SECRET_FILE=/etc/a8m/office-jwt-secret
 EOF
 if [[ "$WEB_NET_MANAGED" -eq 1 ]]; then
   restore_env_file_value ALT8MAIL_PUBLIC_URL "$PRESERVE_PUBLIC_URL"
@@ -601,6 +602,10 @@ CONTROL_SMTP_ADDR=127.0.0.1:25
 CONTROL_POLICY_LISTEN=127.0.0.1:10040
 CONTROL_REDIS_ADDR=127.0.0.1:6379
 CONTROL_REDIS_PASSWORD_FILE=$SECRETS_DIR/redis_password
+CONTROL_OFFICE_AGENT_URL=http://127.0.0.1:8098
+CONTROL_OFFICE_AGENT_TOKEN_FILE=/etc/a8m/office-agent-token
+CONTROL_OFFICE_IMAGE=onlyoffice/documentserver:9.4.0.1
+CONTROL_OFFICE_JWT_SECRET_FILE=/etc/a8m/office-jwt-secret
 CONTROL_RETENTION_DAYS=365
 CONTROL_TRUSTED_PROXY=false
 EOF
@@ -612,6 +617,30 @@ if [[ "$WEB_NET_MANAGED" -eq 1 && -n "$PRESERVE_CONTROL_WEBMAIL_URL" ]]; then
 fi
 chown root:root "$CONFIG_ROOT/control.env"
 chmod 0600 "$CONFIG_ROOT/control.env"
+
+# Optional local OnlyOffice lifecycle agent. It is safe to run without Docker;
+# the install action reports a clear error until Docker is installed.
+install -d -m 0750 "$CONFIG_ROOT/office"
+install -d -m 0750 -o root -g "$SERVICE_USER" /var/lib/a8m-office
+if [[ ! -f "$CONFIG_ROOT/office-agent.env" ]]; then
+  cat > "$CONFIG_ROOT/office-agent.env" <<'EOF'
+OFFICE_AGENT_LISTEN=127.0.0.1:8098
+OFFICE_AGENT_TOKEN_FILE=/etc/a8m/office-agent-token
+OFFICE_AGENT_COMPOSE_FILE=/etc/a8m/office/docker-compose.yml
+OFFICE_AGENT_SECRET_FILE=/etc/a8m/office-jwt-secret
+OFFICE_AGENT_STATE_FILE=/var/lib/a8m-office/state.json
+OFFICE_AGENT_IMAGE=onlyoffice/documentserver:9.4.0.1
+OFFICE_AGENT_CONTAINER=a8m-office
+OFFICE_AGENT_HTTP_PORT=8082
+OFFICE_AGENT_NGINX_SITE=/etc/nginx/sites-available/a8m-office
+OFFICE_AGENT_NGINX_ENABLED=/etc/nginx/sites-enabled/a8m-office
+EOF
+fi
+if [[ ! -s "$CONFIG_ROOT/office-agent-token" ]]; then
+  rand_hex 48 > "$CONFIG_ROOT/office-agent-token"
+fi
+chown root:"$SERVICE_USER" "$CONFIG_ROOT/office-agent.env" "$CONFIG_ROOT/office-agent-token"
+chmod 0640 "$CONFIG_ROOT/office-agent.env" "$CONFIG_ROOT/office-agent-token"
 
 # ---------------------------------------------------------------------------
 # TLS
@@ -845,6 +874,7 @@ WHERE control.settings.value IS NULL
    OR control.settings.value = '""'::jsonb;
 SQL
 systemctl enable --now alt8mail-control >/dev/null
+systemctl enable --now a8m-office-agent >/dev/null 2>&1 || warn "Office agent did not start; install Docker, then run systemctl start a8m-office-agent"
 systemctl restart alt8mail-control
 
 # DKIM keys and DNS record material.

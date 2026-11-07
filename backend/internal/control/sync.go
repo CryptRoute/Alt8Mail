@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
+	"github.com/jackc/pgx/v5"
 )
 
 func (s *Server) latestConfigSync(ctx context.Context) (map[string]any, error) {

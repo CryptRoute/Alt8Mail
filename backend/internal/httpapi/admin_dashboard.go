@@ -480,6 +480,78 @@ func (s *Server) adminAuditPage(ctx context.Context, tenantID, action, query str
 	return total, entries
 }
 
+func (s *Server) adminOfficeAuditPage(ctx context.Context, tenantID, query string, limit, offset int) (int, []map[string]any) {
+	where := []string{"tenant_id = $1", "(action LIKE 'office.%' OR action LIKE 'file.permission_%')"}
+	args := []any{tenantID}
+	position := 2
+	if query != "" {
+		where = append(where, fmt.Sprintf(
+			`(actor ILIKE $%d ESCAPE '\' OR action ILIKE $%d ESCAPE '\' OR target ILIKE $%d ESCAPE '\' OR detail ILIKE $%d ESCAPE '\')`,
+			position, position, position, position))
+		args = append(args, "%"+escapeLikePattern(truncate(query, 200))+"%")
+		position++
+	}
+	condition := strings.Join(where, " AND ")
+	var total int
+	_ = s.store.DB.QueryRow(ctx, "SELECT COUNT(*) FROM workspace_audit WHERE "+condition, args...).Scan(&total)
+	args = append(args, limit, offset)
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT id, actor, action, target, detail, ip, created_at
+		FROM workspace_audit
+		WHERE `+condition+`
+		ORDER BY created_at DESC
+		LIMIT $`+strconv.Itoa(position)+` OFFSET $`+strconv.Itoa(position+1), args...)
+	if err != nil {
+		return total, []map[string]any{}
+	}
+	defer rows.Close()
+	entries := []map[string]any{}
+	for rows.Next() {
+		var id int64
+		var actor, actionValue, target, detail, ip string
+		var created time.Time
+		if err := rows.Scan(&id, &actor, &actionValue, &target, &detail, &ip, &created); err != nil {
+			continue
+		}
+		entries = append(entries, map[string]any{
+			"id": id, "actor": actor, "action": actionValue, "target": target, "detail": detail,
+			"ip": ip, "createdAt": created.UTC().Format(time.RFC3339),
+		})
+	}
+	return total, entries
+}
+
+func (s *Server) adminListOfficeAudit(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireAdminSession(r)
+	page := parseIntDefault(r.URL.Query().Get("page"), 1)
+	limit := parseIntDefault(r.URL.Query().Get("limit"), 50)
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	total, entries := s.adminOfficeAuditPage(r.Context(), sess.ActiveTenantID, query, limit, (page-1)*limit)
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "total": total, "page": page, "limit": limit})
+}
+
+func (s *Server) adminExportOfficeAudit(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireAdminSession(r)
+	_, entries := s.adminOfficeAuditPage(r.Context(), sess.ActiveTenantID, strings.TrimSpace(r.URL.Query().Get("q")), 5000, 0)
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="a8m-office-audit.csv"`)
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"created_at", "actor", "action", "target", "detail", "ip"})
+	for _, entry := range entries {
+		_ = writer.Write([]string{
+			fmt.Sprint(entry["createdAt"]), fmt.Sprint(entry["actor"]), fmt.Sprint(entry["action"]),
+			fmt.Sprint(entry["target"]), fmt.Sprint(entry["detail"]), fmt.Sprint(entry["ip"]),
+		})
+	}
+	writer.Flush()
+}
+
 func (s *Server) adminExportAudit(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	_, entries := s.adminAuditPage(r.Context(), sess.ActiveTenantID, strings.TrimSpace(r.URL.Query().Get("action")), strings.TrimSpace(r.URL.Query().Get("q")), 5000, 0)

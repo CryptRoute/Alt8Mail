@@ -284,7 +284,8 @@ input[type=file]{max-width:100%;color:var(--muted)}
 <h1>{{.Name}}</h1>
 <div class="meta">{{.SizeLabel}} · expiring {{.ExpiresLabel}}{{if .Recipient}} · intended for {{.Recipient}}{{end}}</div>
 <div class="preview">{{if .Image}}<img src="{{.ContentURL}}" alt="{{.Name}}">{{else if .PDF}}<iframe src="{{.ContentURL}}" title="{{.Name}}"></iframe>{{else}}<span class="filemark">{{.Type}}</span>{{end}}</div>
-<div class="actions"><a class="btn" href="{{.ContentURL}}?download=1">Download file</a></div>
+<div class="actions"><a class="btn" href="{{.ContentURL}}?download=1">Download file</a>{{if .CanUseOffice}}<a class="btn secondary" href="{{.OfficeURL}}" target="_blank" rel="noopener">{{.OfficeLabel}}</a>{{end}}</div>
+{{if .CanUseOffice}}<p class="note">{{if eq .OfficeLabel "Edit in Office"}}This link saves Office edits as new versions in the owner's Cabinet. Shared edit links allow co-editing.{{else}}This link opens the document in a read-only Office viewer.{{end}}</p>{{end}}
 {{if .CanEdit}}<div class="edit"><h2 style="font-size:15px;margin:0 0 10px">Replace this file</h2><form method="post" enctype="multipart/form-data" action="{{.ReplaceURL}}"><input type="file" name="file" required><button type="submit">Upload new version</button></form><p class="note">This link has edit access. The new file replaces the shared version.</p></div>{{end}}
 <p class="note">Shared by {{.OwnerName}} through {{.TenantName}}. Do not forward this link if the sender asked you to keep it private.</p>
 </div></main></body></html>`))
@@ -323,6 +324,7 @@ func (s *Server) publicSharePage(w http.ResponseWriter, r *http.Request) {
 		"ReplaceURL": "/api/public/shares/" + r.PathValue("token") + "/replace",
 		"CanEdit":    share.Access == "edit",
 	}
+	data["CanUseOffice"], data["OfficeLabel"], data["OfficeURL"] = s.officeShareAction(r.Context(), share, token)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
