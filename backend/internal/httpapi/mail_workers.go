@@ -190,6 +190,7 @@ func (p *mailWorkerPool) runCheck(ctx context.Context, user userRecord) {
 	}
 	if imported > 0 {
 		p.server.logger.Info("new mail imported", "user", user.Email, "messages", imported)
+		p.server.publishRealtimeTo(user.ID, "mail")
 	}
 }
 
@@ -240,7 +241,12 @@ func (p *mailWorkerPool) runFullSync(ctx context.Context, user userRecord) error
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	_, err := p.server.syncUserMailbox(ctx, user)
+	result, err := p.server.syncUserMailbox(ctx, user)
+	if err == nil {
+		if imported, ok := result["imported"].(int); ok && imported > 0 {
+			p.server.publishRealtimeTo(user.ID, "mail")
+		}
+	}
 	return err
 }
 

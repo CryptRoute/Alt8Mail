@@ -233,8 +233,37 @@ func (s *Server) officeCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if state == "processing" {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": 1, "message": "Save already in progress"})
-		return
+		// Autosave and the editor's Save button can deliver overlapping
+		// callbacks for the same content. Wait briefly for the in-flight save
+		// instead of reporting a false failure to the Document Server.
+		deadline := time.Now().Add(8 * time.Second)
+		for {
+			var current string
+			_ = s.store.DB.QueryRow(r.Context(), `
+				SELECT state FROM office_callback_events WHERE id=$1
+			`, eventID).Scan(&current)
+			if current == "done" {
+				writeJSON(w, http.StatusOK, map[string]any{"error": 0})
+				return
+			}
+			if current == "failed" {
+				eventID, state, err = s.officeClaimCallbackEvent(r.Context(), document.ID, key, status, eventKey)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "OFFICE_CALLBACK", "Could not retry the Office callback")
+					return
+				}
+				if state == "done" {
+					writeJSON(w, http.StatusOK, map[string]any{"error": 0})
+					return
+				}
+				break
+			}
+			if time.Now().After(deadline) {
+				writeJSON(w, http.StatusConflict, map[string]any{"error": 1, "message": "Save already in progress"})
+				return
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
 	}
 	// OnlyOffice often reports its cache URL with an internal Docker hostname.
 	// Rewrite that origin to the configured Office public URL, not the webmail
@@ -545,9 +574,13 @@ func officeDocumentFetchURL(raw, publicBase string) string {
 		return raw
 	}
 	host := strings.ToLower(parsed.Hostname())
-	internal := host == "localhost" || host == "127.0.0.1" || host == "::1" || !strings.Contains(host, ".")
-	if addr, err := netip.ParseAddr(host); err == nil {
-		internal = addr.IsLoopback() || addr.IsPrivate() || addr.IsUnspecified() || addr.IsLinkLocalUnicast()
+	internal := host == "localhost" || host == "::1" || !strings.Contains(host, ".")
+	if _, err := netip.ParseAddr(host); err == nil {
+		// Container names, loopback, private addresses and a raw public IP can
+		// all appear in the Document Server cache URL. The raw IP especially
+		// cannot complete the gateway TLS handshake, so route it through the
+		// configured Office origin.
+		internal = true
 	}
 	if internal {
 		parsed.Scheme = base.Scheme

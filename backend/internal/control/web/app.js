@@ -1,5 +1,5 @@
 /* Alt8Mail System Control — application shell, authentication and core views. */
-import * as ui from './ui.js?v=0.11.44-control';
+import * as ui from './ui.js?v=0.11.46-control';
 import {
   renderDomains, renderDomainDetail, renderMailboxes, renderMailboxDetail,
   renderAliases, renderImports,
@@ -14,8 +14,8 @@ import { renderSecurityReports } from './views-security-reports.js';
 import { renderWebPush } from './views-push.js';
 import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
-import { renderAddons } from './views-addons.js?v=0.11.44-control';
-import { renderOffice } from './views-office.js?v=0.11.44-control';
+import { renderAddons } from './views-addons.js?v=0.11.46-control';
+import { renderOffice } from './views-office.js?v=0.11.46-control';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,

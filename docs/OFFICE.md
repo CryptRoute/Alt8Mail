@@ -125,6 +125,15 @@ Phase 6:
   load/memory, root and Office-data disk usage, polling on the Office page and an
   Office performance card on the dashboard. Monitoring can be disabled from the
   Office page.
+- Up to six Office documents in the shared compose dock, with one active editor
+  at a time; the previous tab and its loaded editor survive switching.
+- **Browse from PC** on the Office home uploads a local Word, Excel or PowerPoint
+  file to Cabinet and opens it immediately.
+- Control Plane **Document fonts** action installs Carlito, Caladea, Liberation,
+  DejaVu and Noto, mounts the font directory into OnlyOffice and regenerates the
+  font cache.
+- Callback download URLs now normalize raw IP/container hosts through the Office
+  gateway origin, and the Office page reports the latest failed save callback.
 - Migration `0056_office_monitoring`.
 
 ## Requirements
@@ -265,14 +274,20 @@ welcome page at the root URL.
 ## Webmail Office workspace
 
 - The editor header has **Minimize**, **Maximize/Restore** and **Close** controls.
-  Minimize keeps the editor loaded and adds a tab to the Office dock above the
-  status bar. The dock survives sign-out and sign-in in the same browser; closing
-  the tab destroys the dock entry.
+  Minimize keeps the editor loaded and adds a tab to the shared compose dock below
+  the workspace. Up to six Office documents can stay in the dock; only one editor
+  is visible at a time, and switching tabs preserves each loaded editor session.
+  The dock survives sign-out/sign-in per user; closing a tab destroys only that
+  entry.
 - The editor follows the webmail theme at open time and receives live
-  `theme-light`/`theme-dark` updates when the account theme changes.
+  `theme-light`/`theme-dark` updates when the account theme changes. If the
+  Documents API cannot switch themes in place, the editor host reloads itself
+  after the active document reports a saved state.
 - The rail exposes **Docs**, **Sheets** and **Slides** launchers. Each opens a
-  draggable Office home with a blank-create action, recent Cabinet files of that
-  type, and recent inbox messages carrying a matching attachment.
+  draggable Office home with a blank-create action, **Browse Cabinet**, **Browse
+  from PC**, recent Cabinet files of that type, and recent inbox messages carrying
+  a matching attachment. Browse from PC uploads the chosen file to Cabinet and
+  opens it immediately in the matching editor.
 - The **New mail** split menu also creates Word, Excel and PowerPoint documents
   directly.
 - New documents carry the author's full name, the document title and the custom
@@ -280,6 +295,9 @@ welcome page at the root URL.
   `docProps/custom.xml`.
 - Native selects use a shared modern, theme-aware control style; the new-document
   dialog uses selectable type cards with Word/Excel/PowerPoint iconography.
+- The Control Plane Office page shows the most recent failed save callback with
+  its file name, error and timestamp so an administrator can diagnose Document
+  Server storage or callback problems.
 
 ## Office monitoring
 
@@ -293,6 +311,24 @@ every 12 seconds while visible; the dashboard refreshes with its normal interval
 Disable monitoring with the switch in the Office performance card. The setting
 does not stop the Document Server or the agent. Remote deployments need a
 reconfigure after upgrading to upload the agent build that includes `/metrics`.
+
+## Document fonts
+
+OnlyOffice includes a limited font set. **System Control → Office → Document
+fonts → Install compatible fonts** installs open metric-compatible families on
+the Office host and regenerates the Document Server font cache:
+
+- Carlito (Calibri metrics), Caladea (Cambria metrics)
+- Liberation Sans, Serif and Mono (Arial, Times New Roman, Courier New metrics)
+- DejaVu and Noto families
+
+Microsoft's proprietary font files are not redistributed. The agent copies the
+font files into `/var/lib/a8m-office/fonts`, mounts that directory read-only at
+`/usr/share/fonts/truetype/custom`, runs
+`documentserver-generate-allfonts.sh`, and restarts the container. Remote hosts
+must be Debian/Ubuntu with working `apt`; local installs use the same agent path.
+The action is explicit and interrupts open editor sessions. Custom font files can
+be placed in the same host directory and the action run again to refresh them.
 
 ## Remote deployment
 
@@ -697,6 +733,7 @@ POST   /control/api/office/rotate-jwt
 POST   /control/api/office/gateway
 GET    /control/api/office/logs
 GET    /control/api/office/metrics
+POST   /control/api/office/fonts
 ```
 
 `PATCH /control/api/office` accepts `enabled`, `publicUrl` and
@@ -709,6 +746,7 @@ object only while monitoring is enabled and Office is recorded as running.
 GET  /healthz
 GET  /status
 GET  /metrics
+POST /fonts
 POST /install
 POST /start
 POST /stop

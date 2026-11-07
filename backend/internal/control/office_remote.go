@@ -820,6 +820,7 @@ OFFICE_AGENT_NGINX_ENABLED=/etc/nginx/sites-enabled/a8m-office
 OFFICE_AGENT_CERTBOT=certbot
 OFFICE_AGENT_CERTBOT_DIR=/etc/letsencrypt/live
 OFFICE_AGENT_CERTBOT_WEBROOT=/var/www/certbot
+OFFICE_AGENT_FONTS_DIR=/var/lib/a8m-office/fonts
 `, image)
 }
 

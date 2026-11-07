@@ -392,23 +392,58 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 				if !valid {
 					return fail(http.StatusBadRequest, "PREFERENCES", "Office dock must be an object or null")
 				}
-				idValue, _ := raw["id"].(string)
-				nameValue, _ := raw["name"].(string)
-				typeValue, _ := raw["documentType"].(string)
-				minimizedValue, _ := raw["minimized"].(bool)
-				id := truncate(strings.TrimSpace(idValue), 120)
-				name := truncate(strings.TrimSpace(nameValue), 180)
-				documentType := strings.TrimSpace(typeValue)
-				if id == "" || name == "" {
-					return fail(http.StatusBadRequest, "PREFERENCES", "Office dock needs a file id and name")
+				normalizeTab := func(item map[string]any) (map[string]any, string) {
+					idValue, _ := item["id"].(string)
+					nameValue, _ := item["name"].(string)
+					typeValue, _ := item["documentType"].(string)
+					minimizedValue, _ := item["minimized"].(bool)
+					id := truncate(strings.TrimSpace(idValue), 120)
+					name := truncate(strings.TrimSpace(nameValue), 180)
+					documentType := strings.TrimSpace(typeValue)
+					if documentType != "word" && documentType != "cell" && documentType != "slide" {
+						documentType = ""
+					}
+					return map[string]any{
+						"id": id, "name": name, "documentType": documentType, "minimized": minimizedValue,
+					}, id
 				}
-				if documentType != "word" && documentType != "cell" && documentType != "slide" {
-					return fail(http.StatusBadRequest, "PREFERENCES", "Office dock document type is invalid")
+				tabsValue, hasTabs := raw["tabs"].([]any)
+				if !hasTabs {
+					// The first release stored a single tab object.
+					tab, id := normalizeTab(raw)
+					if id != "" {
+						tabsValue = []any{tab}
+					}
 				}
-				assign("officeDock", map[string]any{
-					"id": id, "name": name, "documentType": documentType,
-					"minimized": minimizedValue,
-				})
+				if len(tabsValue) > 6 {
+					return fail(http.StatusBadRequest, "PREFERENCES", "The Office dock can hold at most 6 documents")
+				}
+				tabs := make([]any, 0, len(tabsValue))
+				seen := map[string]bool{}
+				for _, item := range tabsValue {
+					tabRaw, ok := item.(map[string]any)
+					if !ok {
+						continue
+					}
+					tab, id := normalizeTab(tabRaw)
+					if id == "" || tab["name"] == "" || tab["documentType"] == "" || seen[id] {
+						continue
+					}
+					seen[id] = true
+					tabs = append(tabs, tab)
+				}
+				activeValue, _ := raw["activeId"].(string)
+				activeID := strings.TrimSpace(activeValue)
+				if !seen[activeID] && len(tabs) > 0 {
+					if first, ok := tabs[0].(map[string]any); ok {
+						activeID, _ = first["id"].(string)
+					}
+				}
+				if len(tabs) == 0 {
+					assign("officeDock", nil)
+				} else {
+					assign("officeDock", map[string]any{"tabs": tabs, "activeId": activeID})
+				}
 			}
 		}
 		if value, ok := patch["composePosition"]; ok {

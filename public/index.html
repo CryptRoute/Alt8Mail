@@ -10,14 +10,14 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.27.0">
-<link rel="stylesheet" href="/features.css?v=0.27.0">
-<link rel="stylesheet" href="/workspace.css?v=0.27.0">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.27.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.27.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.27.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.27.0">
-<link rel="stylesheet" href="/selects.css?v=0.27.0">
+<link rel="stylesheet" href="/styles.css?v=0.28.0">
+<link rel="stylesheet" href="/features.css?v=0.28.0">
+<link rel="stylesheet" href="/workspace.css?v=0.28.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.28.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.28.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.28.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.28.0">
+<link rel="stylesheet" href="/selects.css?v=0.28.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -287,7 +287,7 @@
       </div>
       <div class="login-card-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>First-time enrollment · TOTP or WebAuthn</div>
     </form>
-    <div class="login-legal">Alt8Mail · staging environment</div>
+    <div class="login-legal">Alt8Mail · workspace environment</div>
   </section>
 </div>
 
@@ -1852,10 +1852,6 @@
     </main>
   </div>
 
-  <div class="compose-dock office-dock" id="officeDock" hidden>
-    <div class="compose-dock-tabs" id="officeDockTabs"></div>
-  </div>
-
   <div class="compose-dock" id="composeDock" hidden>
     <div class="compose-dock-tabs" id="composeDockTabs"></div>
   </div>
@@ -3117,8 +3113,8 @@
         </div>
       </div>
     </header>
-    <div class="office-editor-body">
-      <iframe id="officeEditorFrame" title="Office document editor" allow="clipboard-read; clipboard-write; fullscreen" allowfullscreen></iframe>
+    <div class="office-editor-body" id="officeEditorBody">
+      <div class="office-editor-frames" id="officeEditorFrames"></div>
     </div>
   </div>
 </div>
@@ -3138,6 +3134,7 @@
     <div class="office-hub-body" id="officeHubBody"></div>
   </div>
 </div>
+<input type="file" id="officeHubFileInput" hidden>
 
 <div class="overlay" id="officeNewOverlay" hidden>
   <div class="dialog office-new-dialog" role="dialog" aria-modal="true" aria-labelledby="officeNewTitle">
@@ -3205,6 +3202,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.27.0"></script>
+<script type="module" src="/app.js?v=0.28.0"></script>
 </body>
 </html>

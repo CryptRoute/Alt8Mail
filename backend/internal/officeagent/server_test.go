@@ -55,12 +55,13 @@ func writeTestCertificate(t *testing.T, dir, hostname string) (string, string) {
 }
 
 func TestComposeContents(t *testing.T) {
-	text := composeContents("onlyoffice/documentserver:9.4.0.1", "test-secret", "a8m-office", 8082)
+	text := composeContents("onlyoffice/documentserver:9.4.0.1", "test-secret", "a8m-office", 8082, "/var/lib/a8m-office/fonts")
 	for _, expected := range []string{
 		"image: onlyoffice/documentserver:9.4.0.1",
 		"JWT_SECRET: \"test-secret\"",
 		"127.0.0.1:8082:80",
 		"/var/lib/a8m-office/data:/var/www/onlyoffice/Data",
+		"/var/lib/a8m-office/fonts:/usr/share/fonts/truetype/custom:ro",
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("compose file is missing %q:\n%s", expected, text)

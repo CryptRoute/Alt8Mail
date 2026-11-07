@@ -84,6 +84,7 @@ func (s *Server) registerOfficeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /control/api/office/gateway", s.require("server.manage", s.handleOfficeGateway))
 	mux.HandleFunc("GET /control/api/office/logs", s.require("server.read", s.handleOfficeLogs))
 	mux.HandleFunc("GET /control/api/office/metrics", s.require("server.read", s.handleOfficeMetrics))
+	mux.HandleFunc("POST /control/api/office/fonts", s.require("server.manage", s.handleOfficeFonts))
 }
 
 func (s *Server) officeSettings(ctx context.Context) (officeSettings, error) {
@@ -151,9 +152,27 @@ func (s *Server) handleOfficeGet(w http.ResponseWriter, r *http.Request, sess *s
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settings": settings, "agent": agent, "agentError": agentError,
 		"certificates": certificates, "defaultImage": s.cfg.OfficeImage,
-		"host":     s.probe.hostMetrics(r.Context(), false),
-		"tlsEmail": s.settingString(r.Context(), "ssl.admin_email", ""),
+		"host":            s.probe.hostMetrics(r.Context(), false),
+		"tlsEmail":        s.settingString(r.Context(), "ssl.admin_email", ""),
+		"lastSaveFailure": s.officeLastSaveFailure(r.Context()),
 	})
+}
+
+func (s *Server) officeLastSaveFailure(ctx context.Context) map[string]any {
+	var fileName, detail string
+	var at time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(f.name,'Office document'), COALESCE(e.error,''), e.updated_at
+		FROM office_callback_events e
+		JOIN office_documents d ON d.id=e.document_id
+		JOIN files f ON f.id=d.file_id
+		WHERE e.state='failed' AND COALESCE(e.error,'') <> ''
+		ORDER BY e.updated_at DESC LIMIT 1
+	`).Scan(&fileName, &detail, &at)
+	if err != nil {
+		return nil
+	}
+	return map[string]any{"file": fileName, "error": detail, "at": at.UTC().Format(time.RFC3339)}
 }
 
 type officePreflightResult struct {
@@ -758,6 +777,33 @@ func (s *Server) handleOfficeGateway(w http.ResponseWriter, r *http.Request, ses
 	s.actorAudit(r, sess, "office.gateway", "office", "Configured the Office gateway", map[string]any{"host": host})
 	settings, _ = s.officeSettings(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"settings": settings, "agent": agent})
+}
+
+func (s *Server) handleOfficeFonts(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
+	raw, status, err := s.officeAgentRaw(r.Context(), http.MethodPost, "/fonts", map[string]any{}, 30*time.Minute)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "OFFICE_FONTS", err.Error())
+		return
+	}
+	var result struct {
+		OK       bool     `json:"ok"`
+		Files    []string `json:"files"`
+		Message  string   `json:"message"`
+		Packages bool     `json:"packagesInstalled"`
+	}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &result)
+	}
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		message := result.Message
+		if message == "" {
+			message = fmt.Sprintf("Office agent returned HTTP %d while installing fonts", status)
+		}
+		writeError(w, http.StatusBadGateway, "OFFICE_FONTS", message)
+		return
+	}
+	s.actorAudit(r, sess, "office.fonts", "office", result.Message, map[string]any{"fontFiles": len(result.Files)})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleOfficeLogs(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {

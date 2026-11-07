@@ -1,5 +1,5 @@
 /* Office / OnlyOffice lifecycle and feature flag. */
-import * as ui from './ui.js?v=0.11.44-control';
+import * as ui from './ui.js?v=0.11.46-control';
 
 const esc = ui.esc;
 
@@ -125,6 +125,7 @@ export async function renderOffice(ctx) {
         <button class="btn btn-secondary" type="button" id="office-logs">${ui.icon('terminal', 14)} View logs</button>
       </div>
       <p class="form-note" style="margin-top:12px">The JWT secret is stored at <span class="mono">/etc/a8m/office-jwt-secret</span> with <span class="mono">0640 root:a8m</span>. Rotating it invalidates open editor sessions.</p>
+      ${payload.lastSaveFailure ? `<div class="notice tone-warning" style="margin-top:12px">${ui.icon('alert', 16)}<div><strong>Last Office save failure</strong><p>${esc(payload.lastSaveFailure.file || 'Office document')} · ${esc(payload.lastSaveFailure.error || 'Unknown error')} · ${esc(ui.timeAgo(payload.lastSaveFailure.at))}</p></div></div>` : ''}
     </div>
   </section>
   <section class="card office-monitor-card" id="office-monitor-card" style="margin-top:16px">
@@ -136,6 +137,17 @@ export async function renderOffice(ctx) {
       </div>
     </header>
     <div class="card-body" id="office-monitor-body">${ui.loadingState('Sampling Office metrics…', 3)}</div>
+  </section>
+
+  <section class="card office-fonts-card" id="office-fonts-card" style="margin-top:16px">
+    <header class="card-head"><div><h3>Document fonts</h3><p>Metric-compatible fonts for Word, Excel and PowerPoint</p></div><span class="badge tone-neutral">${settings.deploymentMode === 'remote' ? 'Remote Office host' : 'Local Office host'}</span></header>
+    <div class="card-body">
+      <p class="form-note" style="margin-top:0">OnlyOffice ships with a small font set. Install open, metric-compatible families so documents created in Microsoft Office keep their intended layout: <strong>Carlito</strong> (Calibri), <strong>Caladea</strong> (Cambria), <strong>Liberation Sans/Serif/Mono</strong> (Arial, Times New Roman, Courier New), <strong>DejaVu</strong> and <strong>Noto</strong>. Microsoft's proprietary font files are not redistributed by Alt8Mail.</p>
+      <div class="form-actions">
+        <span class="form-note" id="office-fonts-result">${installed ? 'Install or refresh the compatible font set on the Office host.' : 'Install Office first, then add the font set.'}</span>
+        <button class="btn btn-secondary" type="button" id="office-fonts-install" ${canManage && installed ? '' : 'disabled'}>${ui.icon('download', 14)} Install compatible fonts</button>
+      </div>
+    </div>
   </section>
 
   <section class="card" id="office-logs-card" style="margin-top:16px" hidden>
@@ -244,6 +256,33 @@ export async function renderOffice(ctx) {
     }
   });
   syncOfficeMonitorPolling();
+  document.getElementById('office-fonts-install')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const host = settings.deploymentMode === 'remote' ? 'the remote Office host' : 'this server';
+    if (!(await ctx.confirm({
+      title: 'Install compatible document fonts?',
+      message: `This installs open font packages on ${host}, mounts the font directory into OnlyOffice, and restarts the Document Server so the fonts appear in the editor. Open editor sessions will be interrupted.`,
+      confirmLabel: 'Install fonts',
+      tone: 'danger',
+    }))) return;
+    const label = button.innerHTML;
+    button.disabled = true;
+    button.textContent = 'Installing fonts…';
+    const result = document.getElementById('office-fonts-result');
+    if (result) result.textContent = 'Installing packages and regenerating the OnlyOffice font cache. This can take several minutes.';
+    try {
+      const data = await ctx.api('/control/api/office/fonts', { method: 'POST' });
+      ui.toast(data.message || 'Compatible fonts installed.', 'good');
+      if (result) result.textContent = data.message || `${data.files?.length || 0} font files installed.`;
+      button.disabled = false;
+      button.innerHTML = label;
+    } catch (error) {
+      ui.toast(error.message || 'Could not install Office fonts.', 'critical', { title: 'Office fonts' });
+      if (result) result.textContent = error.message || 'Font installation failed.';
+      button.disabled = false;
+      button.innerHTML = label;
+    }
+  });
 
   const reload = () => renderOffice(ctx);
   document.getElementById('office-refresh')?.addEventListener('click', reload);

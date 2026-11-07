@@ -1947,8 +1947,10 @@ body.office-editor-open { overflow: hidden; }
 }
 .office-editor-mark svg { width: 15px; height: 15px; }
 .office-editor-actions { display: flex; align-items: center; gap: 8px; flex: none; }
-.office-editor-body { flex: 1; min-height: 0; background: var(--surface); }
-.office-editor-body iframe { width: 100%; height: 100%; border: 0; display: block; }
+.office-editor-body { flex: 1; min-height: 0; position: relative; background: var(--surface); }
+.office-editor-frames { position: absolute; inset: 0; }
+.office-editor-body iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--surface); }
+.office-editor-body iframe[hidden] { display: none; }
 
 .office-new-dialog { width: min(460px, 100%); }
 .office-versions-dialog { width: min(680px, 100%); }
@@ -2053,7 +2055,6 @@ body.office-editor-open { overflow: hidden; }
 .office-window-close:hover { background: var(--danger-soft); color: var(--danger); }
 .office-window-btn svg { width: 15px; height: 15px; }
 
-.office-dock { background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }
 .office-tab { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
 .office-tab .compose-tab-icon svg { width: 15px; height: 15px; }
 .office-tab .office-tab-kind { color: var(--text-3); }

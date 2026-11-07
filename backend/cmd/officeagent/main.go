@@ -37,6 +37,7 @@ func main() {
 		CertbotBin:     os.Getenv("OFFICE_AGENT_CERTBOT"),
 		CertbotDir:     os.Getenv("OFFICE_AGENT_CERTBOT_DIR"),
 		CertbotWebroot: os.Getenv("OFFICE_AGENT_CERTBOT_WEBROOT"),
+		FontsDir:       os.Getenv("OFFICE_AGENT_FONTS_DIR"),
 		DockerBin:      os.Getenv("OFFICE_AGENT_DOCKER"),
 	})
 	if err != nil {

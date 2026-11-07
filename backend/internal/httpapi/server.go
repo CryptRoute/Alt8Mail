@@ -249,6 +249,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/calendar/events/{id}/proposals/{proposalId}/accept", s.requireUser(s.acceptCalendarProposal))
 	mux.HandleFunc("POST /api/calendar/events/{id}/proposals/{proposalId}/decline", s.requireUser(s.declineCalendarProposal))
 	mux.HandleFunc("GET /api/calendar/stream", s.requireUser(s.calendarStream))
+	mux.HandleFunc("GET /api/mail/stream", s.requireUser(s.mailStream))
 	mux.HandleFunc("POST /api/calendar/calendars", s.requireUser(s.createCalendar))
 	mux.HandleFunc("PATCH /api/calendar/calendars/{id}", s.requireUser(s.updateCalendar))
 	mux.HandleFunc("DELETE /api/calendar/calendars/{id}", s.requireUser(s.deleteCalendar))
@@ -1376,7 +1377,7 @@ func capabilities() []string {
 		"scheduled-send", "sieve", "automatic-replies", "sender-trust", "outbound-caps",
 		"quota", "audit-log", "pwa", "calendar", "directory", "tasks", "files",
 		"storage-connectors", "attachment-preview", "two-factor", "passkeys", "preferences",
-		"labels", "message-filters", "calendar-realtime", "cabinet-folders", "storage-policy", "file-context-menu",
+		"labels", "message-filters", "calendar-realtime", "mail-realtime", "cabinet-folders", "storage-policy", "file-context-menu",
 		"web-push", "mail-pulse", "sticky-notes", "reaction-catalog",
 	}
 }

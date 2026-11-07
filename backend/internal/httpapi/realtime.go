@@ -64,6 +64,14 @@ func (s *Server) publishRealtimeTo(userID, topic string) {
 }
 
 func (s *Server) calendarStream(w http.ResponseWriter, r *http.Request) {
+	s.eventStream(w, r)
+}
+
+func (s *Server) mailStream(w http.ResponseWriter, r *http.Request) {
+	s.eventStream(w, r)
+}
+
+func (s *Server) eventStream(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	flusher, ok := w.(http.Flusher)
 	if !ok {

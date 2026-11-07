@@ -51,6 +51,8 @@ func TestOfficeDocumentFetchURL(t *testing.T) {
 	cases := map[string]string{
 		"http://127.0.0.1:8082/cache/files/1": "https://office.example.com/cache/files/1",
 		"http://onlyoffice/cache/files/1":     "https://office.example.com/cache/files/1",
+		"http://38.60.215.235/cache/files/1":  "https://office.example.com/cache/files/1",
+		"http://[2001:db8::1]/cache/files/1":  "https://office.example.com/cache/files/1",
 		"/cache/files/1":                      "https://office.example.com/cache/files/1",
 		"https://office.example.com/cache/1":  "https://office.example.com/cache/1",
 		"https://cdn.example.com/cache/1":     "https://cdn.example.com/cache/1",

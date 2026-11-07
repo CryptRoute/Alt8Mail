@@ -44,6 +44,7 @@ type Config struct {
 	CertbotBin     string
 	CertbotDir     string
 	CertbotWebroot string
+	FontsDir       string
 	DockerBin      string
 	Runner         Runner
 	Health         func(ctx context.Context, address string) error
@@ -151,6 +152,10 @@ func New(cfg Config) (*Server, error) {
 		strings.ContainsAny(cfg.CertbotWebroot, "\r\n\t ;{}") {
 		return nil, fmt.Errorf("certbot webroot must be an absolute path without shell/nginx metacharacters")
 	}
+	cfg.FontsDir = strings.TrimSpace(cfg.FontsDir)
+	if cfg.FontsDir == "" {
+		cfg.FontsDir = officeFontsDir
+	}
 	cfg.DockerBin = strings.TrimSpace(cfg.DockerBin)
 	if cfg.DockerBin == "" {
 		cfg.DockerBin = "docker"
@@ -226,6 +231,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /rotate-jwt", s.auth(s.handleRotateJWT))
 	mux.HandleFunc("POST /gateway", s.auth(s.handleGateway))
 	mux.HandleFunc("GET /logs", s.auth(s.handleLogs))
+	mux.HandleFunc("POST /fonts", s.auth(s.handleFonts))
 	return s.securityHeaders(mux)
 }
 
@@ -337,7 +343,10 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	if err := os.MkdirAll(filepath.Dir(s.cfg.ComposeFile), 0o750); err != nil {
 		return Status{}, err
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(image, secret, s.cfg.ContainerName, s.cfg.HTTPPort)), 0o640); err != nil {
+	if err := os.MkdirAll(s.cfg.FontsDir, 0o755); err != nil {
+		return Status{}, fmt.Errorf("could not prepare the Office font directory: %w", err)
+	}
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(image, secret, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir)), 0o640); err != nil {
 		return Status{}, err
 	}
 	st := state{PublicURL: publicURL, Image: image, TLSCert: tlsCert, TLSKey: tlsKey, PortalURL: portalURL}
@@ -438,7 +447,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "SECRET", err.Error())
 		return
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(image, secret, s.cfg.ContainerName, s.cfg.HTTPPort)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(image, secret, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir)), 0o640); err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
@@ -478,7 +487,7 @@ func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 	if st.Image == "" {
 		st.Image = s.cfg.DefaultImage
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(st.Image, secret, s.cfg.ContainerName, s.cfg.HTTPPort)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(st.Image, secret, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir)), 0o640); err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
@@ -1025,7 +1034,7 @@ func redactLogs(value string) []string {
 	return out
 }
 
-func composeContents(image, secret, container string, port int) string {
+func composeContents(image, secret, container string, port int, fontsDir string) string {
 	return fmt.Sprintf(`services:
   documentserver:
     image: %s
@@ -1041,7 +1050,8 @@ func composeContents(image, secret, container string, port int) string {
     volumes:
       - /var/lib/a8m-office/data:/var/www/onlyoffice/Data
       - /var/lib/a8m-office/logs:/var/log/onlyoffice
-`, image, container, port, secret)
+      - %s:/usr/share/fonts/truetype/custom:ro
+`, image, container, port, secret, fontsDir)
 }
 
 func nginxContents(host, cert, key, portalURL string, port int, webroot string) string {
