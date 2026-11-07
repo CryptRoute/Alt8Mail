@@ -18,6 +18,11 @@ import (
 
 func startOfficeSSHTestServer(t *testing.T) (string, string) {
 	t.Helper()
+	return startOfficeSSHTestServerWithOutput(t, officeSSHTestOutput)
+}
+
+func startOfficeSSHTestServerWithOutput(t *testing.T, outputFor func(string) string) (string, string) {
+	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +108,7 @@ func startOfficeSSHTestServer(t *testing.T) (string, string) {
 							var payload struct{ Command string }
 							_ = ssh.Unmarshal(request.Payload, &payload)
 							_ = request.Reply(true, nil)
-							output := officeSSHTestOutput(payload.Command)
+							output := outputFor(payload.Command)
 							if output != "" {
 								_, _ = channel.Write([]byte(output + "\n"))
 							}
@@ -138,6 +143,8 @@ func officeSSHTestOutput(command string) string {
 		return "4194304"
 	case strings.Contains(command, "MemAvailable"):
 		return "2097152"
+	case strings.Contains(command, "command -v apt-get"):
+		return "/usr/bin/apt-get"
 	case strings.Contains(command, "command -v docker"):
 		return "/usr/bin/docker"
 	case strings.Contains(command, "docker compose version"):
@@ -172,13 +179,16 @@ func TestOfficeRemotePreflightOverSSH(t *testing.T) {
 		Host: host, Port: port, User: "root", Auth: "password",
 		Secret: "test-password", HostKey: fingerprint,
 	}
-	result, err := server.officeRemotePreflight(context.Background(), target, "")
+	result, err := server.officeRemotePreflight(context.Background(), target, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.HostKeyTrusted || !result.Sudo || !result.MemoryOK || !result.Docker ||
 		!result.DockerCompose || !result.Nginx || !result.Certbot || !result.Systemd || !result.DiskOK {
 		t.Fatalf("unexpected preflight result: %#v", result)
+	}
+	if result.HostKeyType != ssh.KeyAlgoED25519 {
+		t.Fatalf("host key type = %q, want %q", result.HostKeyType, ssh.KeyAlgoED25519)
 	}
 	if result.MemoryTotalBytes != 4<<30 {
 		t.Fatalf("memory = %d", result.MemoryTotalBytes)
@@ -237,6 +247,56 @@ func TestOfficeRemoteAgentHTTPOverSSHTunnel(t *testing.T) {
 	}
 }
 
+func TestOfficeRemotePreflightAllowsAutoInstallOnEmptyHost(t *testing.T) {
+	address, fingerprint := startOfficeSSHTestServerWithOutput(t, func(command string) string {
+		switch {
+		case strings.Contains(command, "command -v docker"),
+			strings.Contains(command, "docker compose version"),
+			strings.Contains(command, "command -v nginx"),
+			strings.Contains(command, "command -v certbot"):
+			return ""
+		default:
+			return officeSSHTestOutput(command)
+		}
+	})
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var port int
+	_, _ = fmt.Sscanf(portText, "%d", &port)
+	server := &Server{cfg: Config{}}
+	target := officeRemoteTarget{
+		Host: host, Port: port, User: "root", Auth: "password",
+		Secret: "test-password", HostKey: fingerprint,
+	}
+	auto, err := server.officeRemotePreflight(context.Background(), target, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !auto.AutoInstallSupported || len(auto.MissingPackages) != 4 {
+		t.Fatalf("empty host auto preflight = %#v", auto)
+	}
+	if auto.PackageManager != "apt" {
+		t.Fatalf("package manager = %q", auto.PackageManager)
+	}
+	for _, blocker := range auto.Blockers {
+		if strings.Contains(blocker, "not installed on the remote host") {
+			t.Fatalf("installable package was reported as a blocker: %v", auto.Blockers)
+		}
+	}
+	if !remotePackagesReady(auto, true) {
+		t.Fatalf("auto-install should make package checks ready: %v", auto)
+	}
+	strict, err := server.officeRemotePreflight(context.Background(), target, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(strict.MissingPackages) != 4 || remotePackagesReady(strict, false) {
+		t.Fatalf("strict preflight should block missing packages: %#v", strict)
+	}
+}
+
 func TestOfficeRemotePreflightRequiresTrustedHostKey(t *testing.T) {
 	address, fingerprint := startOfficeSSHTestServer(t)
 	host, portText, err := net.SplitHostPort(address)
@@ -250,11 +310,12 @@ func TestOfficeRemotePreflightRequiresTrustedHostKey(t *testing.T) {
 		Host: host, Port: port, User: "root", Auth: "password",
 		Secret: "test-password",
 	}
-	result, err := server.officeRemotePreflight(context.Background(), target, "")
+	result, err := server.officeRemotePreflight(context.Background(), target, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.HostKeyTrusted || result.Ready || result.HostKeyFingerprint != fingerprint {
+	if result.HostKeyTrusted || result.Ready || result.HostKeyFingerprint != fingerprint ||
+		result.HostKeyType != ssh.KeyAlgoED25519 {
 		t.Fatalf("untrusted preflight = %#v, want fingerprint %s", result, fingerprint)
 	}
 }

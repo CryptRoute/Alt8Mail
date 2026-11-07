@@ -34,47 +34,59 @@ type officeRemoteTarget struct {
 }
 
 type officeRemoteRequest struct {
-	PublicURL    string `json:"publicUrl"`
-	Host         string `json:"host"`
-	Port         int    `json:"port"`
-	User         string `json:"user"`
-	Auth         string `json:"auth"`
-	Secret       string `json:"secret"`
-	Passphrase   string `json:"passphrase"`
-	HostKey      string `json:"hostKey"`
-	PublicIP     string `json:"publicIp"`
-	ClearHostKey bool   `json:"clearHostKey"`
+	PublicURL           string `json:"publicUrl"`
+	Host                string `json:"host"`
+	Port                int    `json:"port"`
+	User                string `json:"user"`
+	Auth                string `json:"auth"`
+	Secret              string `json:"secret"`
+	Passphrase          string `json:"passphrase"`
+	HostKey             string `json:"hostKey"`
+	PublicIP            string `json:"publicIp"`
+	ClearHostKey        bool   `json:"clearHostKey"`
+	InstallDependencies *bool  `json:"installDependencies"`
+}
+
+type officeRemoteHostKey struct {
+	Fingerprint string
+	Type        string
 }
 
 type officeRemotePreflight struct {
-	Host               string   `json:"host"`
-	HostKeyFingerprint string   `json:"hostKeyFingerprint"`
-	HostKeyTrusted     bool     `json:"hostKeyTrusted"`
-	MemoryTotalBytes   uint64   `json:"memoryTotalBytes"`
-	MemoryUsedBytes    uint64   `json:"memoryUsedBytes"`
-	MemoryPercent      float64  `json:"memoryPercent"`
-	MemoryOK           bool     `json:"memoryOk"`
-	MemoryDetail       string   `json:"memoryDetail"`
-	Docker             bool     `json:"docker"`
-	DockerCompose      bool     `json:"dockerCompose"`
-	Nginx              bool     `json:"nginx"`
-	Certbot            bool     `json:"certbot"`
-	Systemd            bool     `json:"systemd"`
-	Architecture       string   `json:"architecture"`
-	Sudo               bool     `json:"sudo"`
-	DiskFreeBytes      uint64   `json:"diskFreeBytes"`
-	DiskOK             bool     `json:"diskOk"`
-	DNSOK              bool     `json:"dnsOk"`
-	Resolved           []string `json:"resolved"`
-	Expected           []string `json:"expected"`
-	DNSDetail          string   `json:"dnsDetail"`
-	Blockers           []string `json:"blockers"`
-	Detail             string   `json:"detail"`
-	Ready              bool     `json:"ready"`
+	Host                 string   `json:"host"`
+	HostKeyFingerprint   string   `json:"hostKeyFingerprint"`
+	HostKeyType          string   `json:"hostKeyType"`
+	HostKeyTrusted       bool     `json:"hostKeyTrusted"`
+	MemoryTotalBytes     uint64   `json:"memoryTotalBytes"`
+	MemoryUsedBytes      uint64   `json:"memoryUsedBytes"`
+	MemoryPercent        float64  `json:"memoryPercent"`
+	MemoryOK             bool     `json:"memoryOk"`
+	MemoryDetail         string   `json:"memoryDetail"`
+	Docker               bool     `json:"docker"`
+	DockerCompose        bool     `json:"dockerCompose"`
+	Nginx                bool     `json:"nginx"`
+	Certbot              bool     `json:"certbot"`
+	Systemd              bool     `json:"systemd"`
+	Architecture         string   `json:"architecture"`
+	Sudo                 bool     `json:"sudo"`
+	DiskFreeBytes        uint64   `json:"diskFreeBytes"`
+	DiskOK               bool     `json:"diskOk"`
+	DNSOK                bool     `json:"dnsOk"`
+	Resolved             []string `json:"resolved"`
+	Expected             []string `json:"expected"`
+	DNSDetail            string   `json:"dnsDetail"`
+	PackageManager       string   `json:"packageManager"`
+	MissingPackages      []string `json:"missingPackages"`
+	InstallDependencies  bool     `json:"installDependencies"`
+	AutoInstallSupported bool     `json:"autoInstallSupported"`
+	Blockers             []string `json:"blockers"`
+	Detail               string   `json:"detail"`
+	Ready                bool     `json:"ready"`
 }
 
 type officeHostKeyError struct {
 	fingerprint string
+	keyType     string
 	mismatch    bool
 }
 
@@ -107,57 +119,57 @@ func (s *Server) officeRemoteTargetFromSettings(settings officeSettings) (office
 	return target, nil
 }
 
-func (s *Server) dialOfficeRemote(ctx context.Context, target officeRemoteTarget) (*ssh.Client, string, error) {
+func (s *Server) dialOfficeRemote(ctx context.Context, target officeRemoteTarget) (*ssh.Client, officeRemoteHostKey, error) {
 	host := strings.TrimSpace(target.Host)
 	if host == "" {
-		return nil, "", fmt.Errorf("enter the remote Office host")
+		return nil, officeRemoteHostKey{}, fmt.Errorf("enter the remote Office host")
 	}
 	host = strings.Trim(host, "[]")
 	if strings.ContainsAny(host, " \t\r\n/") {
-		return nil, "", fmt.Errorf("the remote SSH host is invalid")
+		return nil, officeRemoteHostKey{}, fmt.Errorf("the remote SSH host is invalid")
 	}
 	port := target.Port
 	if port == 0 {
 		port = 22
 	}
 	if port < 1 || port > 65535 {
-		return nil, "", fmt.Errorf("choose a valid SSH port")
+		return nil, officeRemoteHostKey{}, fmt.Errorf("choose a valid SSH port")
 	}
 	user := strings.TrimSpace(target.User)
 	if user == "" || !systemAccountPattern.MatchString(user) {
-		return nil, "", fmt.Errorf("enter a valid SSH system account")
+		return nil, officeRemoteHostKey{}, fmt.Errorf("enter a valid SSH system account")
 	}
 	var auth ssh.AuthMethod
 	switch strings.ToLower(strings.TrimSpace(target.Auth)) {
 	case "password":
 		if target.Secret == "" {
-			return nil, "", fmt.Errorf("enter the SSH password")
+			return nil, officeRemoteHostKey{}, fmt.Errorf("enter the SSH password")
 		}
 		auth = ssh.Password(target.Secret)
 	case "key", "":
 		signer, err := parseTerminalKey(target.Secret, target.Passphrase)
 		if err != nil {
-			return nil, "", err
+			return nil, officeRemoteHostKey{}, err
 		}
 		auth = ssh.PublicKeys(signer)
 	default:
-		return nil, "", fmt.Errorf("SSH authentication must be password or key")
+		return nil, officeRemoteHostKey{}, fmt.Errorf("SSH authentication must be password or key")
 	}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	dialer := net.Dialer{Timeout: 12 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return nil, "", fmt.Errorf("SSH connection to %s failed: %w", addr, err)
+		return nil, officeRemoteHostKey{}, fmt.Errorf("SSH connection to %s failed: %w", addr, err)
 	}
-	var fingerprint string
+	var observed officeRemoteHostKey
 	hostKeyCallback := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-		fingerprint = ssh.FingerprintSHA256(key)
+		observed = officeRemoteHostKey{Fingerprint: ssh.FingerprintSHA256(key), Type: key.Type()}
 		pinned := strings.TrimSpace(target.HostKey)
 		if pinned == "" {
-			return &officeHostKeyError{fingerprint: fingerprint}
+			return &officeHostKeyError{fingerprint: observed.Fingerprint, keyType: observed.Type}
 		}
-		if !strings.EqualFold(pinned, fingerprint) {
-			return &officeHostKeyError{fingerprint: fingerprint, mismatch: true}
+		if !strings.EqualFold(pinned, observed.Fingerprint) {
+			return &officeHostKeyError{fingerprint: observed.Fingerprint, keyType: observed.Type, mismatch: true}
 		}
 		return nil
 	}
@@ -171,11 +183,11 @@ func (s *Server) dialOfficeRemote(ctx context.Context, target officeRemoteTarget
 		_ = conn.Close()
 		var hostKeyErr *officeHostKeyError
 		if errors.As(err, &hostKeyErr) {
-			return nil, fingerprint, hostKeyErr
+			return nil, observed, hostKeyErr
 		}
-		return nil, fingerprint, fmt.Errorf("SSH authentication failed: %w", err)
+		return nil, observed, fmt.Errorf("SSH authentication failed: %w", err)
 	}
-	return ssh.NewClient(sshConn, chans, reqs), fingerprint, nil
+	return ssh.NewClient(sshConn, chans, reqs), observed, nil
 }
 
 func remotePrivilege(ctx context.Context, client *ssh.Client) (root bool, canSudo bool) {
@@ -358,7 +370,11 @@ func (s *Server) handleOfficeRemotePreflight(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	result, err := s.officeRemotePreflight(r.Context(), target, publicURL)
+	installDependencies := true
+	if body.InstallDependencies != nil {
+		installDependencies = *body.InstallDependencies
+	}
+	result, err := s.officeRemotePreflight(r.Context(), target, publicURL, installDependencies)
 	if err != nil {
 		var hostKeyErr *officeHostKeyError
 		if errors.As(err, &hostKeyErr) && hostKeyErr.mismatch {
@@ -371,18 +387,175 @@ func (s *Server) handleOfficeRemotePreflight(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) officeRemotePreflight(ctx context.Context, target officeRemoteTarget, publicURL string) (officeRemotePreflight, error) {
-	result := officeRemotePreflight{Resolved: []string{}, Expected: []string{}, Blockers: []string{}}
+func remotePrepareCommand() string {
+	return `set -eu
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "This host is not Debian/Ubuntu; install Docker Engine, the Compose plugin, nginx and certbot manually." >&2
+  exit 1
+fi
+apt_opts="-o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+packages=""
+if ! command -v docker >/dev/null 2>&1; then
+  packages="$packages docker.io"
+fi
+if ! docker compose version >/dev/null 2>&1; then
+  if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
+    packages="$packages docker-compose-v2"
+  elif apt-cache show docker-compose-plugin >/dev/null 2>&1; then
+    packages="$packages docker-compose-plugin"
+  else
+    echo "No Docker Compose v2 package is available in apt." >&2
+    exit 1
+  fi
+fi
+if ! command -v nginx >/dev/null 2>&1; then
+  packages="$packages nginx"
+fi
+if ! command -v certbot >/dev/null 2>&1; then
+  packages="$packages certbot"
+fi
+if [ -n "$packages" ]; then
+  dpkg --configure -a >/dev/null 2>&1 || true
+  tries=0
+  until apt-get $apt_opts update; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 3 ]; then
+      echo "apt-get update failed after three attempts" >&2
+      exit 1
+    fi
+    sleep 5
+  done
+  apt-get $apt_opts install -y --no-install-recommends $packages
+fi
+if command -v docker >/dev/null 2>&1; then
+  systemctl enable --now docker >/dev/null 2>&1 || true
+  tries=0
+  until docker info >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 30 ]; then
+      echo "Docker daemon did not become ready" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+fi
+if command -v nginx >/dev/null 2>&1; then
+  systemctl enable --now nginx >/dev/null 2>&1 || true
+  nginx -t >/dev/null
+  systemctl is-active --quiet nginx || {
+    echo "nginx is installed but not running" >&2
+    exit 1
+  }
+fi
+command -v certbot >/dev/null 2>&1
+docker compose version >/dev/null 2>&1
+`
+}
+
+func missingRemotePackages(docker, compose, nginx, certbot bool) []string {
+	missing := []string{}
+	if !docker {
+		missing = append(missing, "Docker Engine")
+	}
+	if !compose {
+		missing = append(missing, "Docker Compose plugin")
+	}
+	if !nginx {
+		missing = append(missing, "nginx")
+	}
+	if !certbot {
+		missing = append(missing, "certbot")
+	}
+	return missing
+}
+
+func remotePackagesReady(result officeRemotePreflight, installDependencies bool) bool {
+	packagesOK := result.Docker && result.DockerCompose && result.Nginx && result.Certbot
+	canInstallMissing := len(result.MissingPackages) > 0 && installDependencies && result.AutoInstallSupported
+	return packagesOK || canInstallMissing
+}
+
+func prepareOfficeRemote(ctx context.Context, client *ssh.Client) (string, error) {
+	root, canSudo := remotePrivilege(ctx, client)
+	if !root && !canSudo {
+		return "", fmt.Errorf("the SSH account needs root or passwordless sudo")
+	}
+	output, err := runRemote(ctx, client, remotePrepareCommand(), 20*time.Minute, !root)
+	if err != nil {
+		return output, fmt.Errorf("could not install remote prerequisites: %s", remoteCommandDetail(output))
+	}
+	return output, nil
+}
+
+func remoteCommandDetail(output string) string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return "the remote command failed"
+	}
+	lines := strings.Split(output, "\n")
+	if len(lines) > 12 {
+		lines = lines[len(lines)-12:]
+	}
+	return strings.Join(lines, " | ")
+}
+
+func (s *Server) handleOfficeRemotePrepare(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
+	var body officeRemoteRequest
+	if err := decodeJSON(w, r, &body, 512<<10); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
+		return
+	}
+	target, settings, err := s.officeRemoteTargetForRequest(r.Context(), body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "OFFICE_REMOTE", err.Error())
+		return
+	}
+	if strings.TrimSpace(target.HostKey) == "" {
+		writeError(w, http.StatusConflict, "SSH_HOST_KEY", "Trust the SSH host key before preparing the remote host")
+		return
+	}
+	client, _, err := s.dialOfficeRemote(r.Context(), target)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "SSH_PREPARE", err.Error())
+		return
+	}
+	defer client.Close()
+	if _, prepareErr := prepareOfficeRemote(r.Context(), client); prepareErr != nil {
+		writeError(w, http.StatusBadGateway, "OFFICE_REMOTE_PREPARE", prepareErr.Error())
+		return
+	}
+	publicURL := strings.TrimRight(strings.TrimSpace(body.PublicURL), "/")
+	if publicURL == "" {
+		publicURL = settings.PublicURL
+	}
+	preflight, preflightErr := s.officeRemotePreflight(r.Context(), target, publicURL, false)
+	if preflightErr != nil {
+		writeError(w, http.StatusBadGateway, "OFFICE_REMOTE_PREFLIGHT", "Prerequisites were installed, but verification failed: "+preflightErr.Error())
+		return
+	}
+	s.actorAudit(r, sess, "office.remote.prepare", "office", "Installed remote Office prerequisites", map[string]any{
+		"remoteHost": target.Host, "remoteUser": target.User,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "preflight": preflight})
+}
+
+func (s *Server) officeRemotePreflight(ctx context.Context, target officeRemoteTarget, publicURL string, installDependencies bool) (officeRemotePreflight, error) {
+	result := officeRemotePreflight{
+		Resolved: []string{}, Expected: []string{}, Blockers: []string{}, MissingPackages: []string{},
+		InstallDependencies: installDependencies,
+	}
 	host := strings.TrimSpace(target.Host)
 	if host == "" {
 		return result, fmt.Errorf("enter the remote Office host")
 	}
 	result.Host = host
-	client, fingerprint, err := s.dialOfficeRemote(ctx, target)
+	client, hostKey, err := s.dialOfficeRemote(ctx, target)
 	if err != nil {
 		var hostKeyErr *officeHostKeyError
 		if errors.As(err, &hostKeyErr) {
 			result.HostKeyFingerprint = hostKeyErr.fingerprint
+			result.HostKeyType = hostKeyErr.keyType
 			if hostKeyErr.mismatch {
 				return result, hostKeyErr
 			}
@@ -392,7 +565,8 @@ func (s *Server) officeRemotePreflight(ctx context.Context, target officeRemoteT
 		return result, err
 	}
 	defer client.Close()
-	result.HostKeyFingerprint = fingerprint
+	result.HostKeyFingerprint = hostKey.Fingerprint
+	result.HostKeyType = hostKey.Type
 	result.HostKeyTrusted = true
 
 	root, canSudo := remotePrivilege(ctx, client)
@@ -444,16 +618,32 @@ func (s *Server) officeRemotePreflight(ctx context.Context, target officeRemoteT
 	result.Nginx = read("command -v nginx", 10*time.Second) != ""
 	result.Certbot = read("command -v certbot", 10*time.Second) != ""
 	result.Systemd = read("command -v systemctl", 10*time.Second) != ""
-	if !result.Docker {
-		result.Blockers = append(result.Blockers, "Docker Engine is not installed on the remote host")
-	} else if !result.DockerCompose {
-		result.Blockers = append(result.Blockers, "The Docker Compose plugin is not installed on the remote host")
+	switch {
+	case read("command -v apt-get", 10*time.Second) != "":
+		result.PackageManager = "apt"
+	case read("command -v dnf", 10*time.Second) != "":
+		result.PackageManager = "dnf"
+	case read("command -v yum", 10*time.Second) != "":
+		result.PackageManager = "yum"
 	}
-	if !result.Nginx {
-		result.Blockers = append(result.Blockers, "nginx is not installed on the remote host")
-	}
-	if !result.Certbot {
-		result.Blockers = append(result.Blockers, "certbot is not installed on the remote host")
+	result.AutoInstallSupported = result.PackageManager == "apt"
+	result.MissingPackages = missingRemotePackages(result.Docker, result.DockerCompose, result.Nginx, result.Certbot)
+	canInstallMissing := len(result.MissingPackages) > 0 && installDependencies && result.AutoInstallSupported
+	if len(result.MissingPackages) > 0 && !canInstallMissing {
+		if !result.Docker {
+			result.Blockers = append(result.Blockers, "Docker Engine is not installed on the remote host")
+		} else if !result.DockerCompose {
+			result.Blockers = append(result.Blockers, "The Docker Compose plugin is not installed on the remote host")
+		}
+		if !result.Nginx {
+			result.Blockers = append(result.Blockers, "nginx is not installed on the remote host")
+		}
+		if !result.Certbot {
+			result.Blockers = append(result.Blockers, "certbot is not installed on the remote host")
+		}
+		if installDependencies && !result.AutoInstallSupported {
+			result.Blockers = append(result.Blockers, "Automatic dependency installation requires apt-get on a Debian/Ubuntu host")
+		}
 	}
 	if !result.Systemd {
 		result.Blockers = append(result.Blockers, "systemd is not available on the remote host")
@@ -526,12 +716,16 @@ func (s *Server) officeRemotePreflight(ctx context.Context, target officeRemoteT
 		result.Blockers = append(result.Blockers, result.DNSDetail)
 	}
 	if len(result.Blockers) == 0 {
-		result.Detail = "Remote host is ready for the Office agent"
+		if len(result.MissingPackages) > 0 {
+			result.Detail = "Remote host is ready; missing dependencies will be installed during the install"
+		} else {
+			result.Detail = "Remote host is ready for the Office agent"
+		}
 	} else {
 		result.Detail = strings.Join(result.Blockers, " · ")
 	}
-	result.Ready = result.HostKeyTrusted && result.Sudo && result.MemoryOK && result.Docker && result.DockerCompose &&
-		result.Nginx && result.Certbot && result.Systemd && archOK && result.DiskOK && result.DNSOK
+	result.Ready = result.HostKeyTrusted && result.Sudo && result.MemoryOK && result.Systemd &&
+		archOK && result.DiskOK && result.DNSOK && remotePackagesReady(result, installDependencies)
 	return result, nil
 }
 

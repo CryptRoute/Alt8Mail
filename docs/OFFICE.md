@@ -112,19 +112,21 @@ Phase 5:
 
 - Docker Engine and the Docker Compose plugin on the Office host.
 - For remote deployment: SSH access from the Control Plane to the Office host,
-  a root or passwordless-sudo account, `nginx`, `certbot` and systemd on the
-  remote host, a CPU architecture matching the Control Plane build, and the
-  `a8m-office-agent` binary in the same release bin directory as the Control
-  Plane. SSH TCP forwarding must be allowed; the agent is reached through a
-  `direct-tcpip` tunnel to remote loopback.
+  a root or passwordless-sudo account, systemd, a CPU architecture matching the
+  Control Plane build, and the `a8m-office-agent` binary in the same release bin
+  directory as the Control Plane. Docker Engine, the Compose v2 plugin, `nginx`
+  and `certbot` may be installed automatically on Debian/Ubuntu during the
+  remote install. SSH TCP forwarding must be allowed; the agent is reached
+  through a `direct-tcpip` tunnel to remote loopback.
 - A dedicated `office.<domain>` A/AAAA record pointing at the Office host before
   installation. The Control Plane blocks install/reconfigure/enable until DNS
   resolves to a known local or configured public address.
 - A valid TLS certificate for that hostname. Control Plane can select an existing
   certificate or issue a new Let's Encrypt certificate through the Office agent
-  using the HTTP-01 webroot challenge. `certbot` must be installed on the Office
-  host for automatic issuance. Existing certificates are rejected unless their
-  SAN list covers the public Office hostname.
+  using the HTTP-01 webroot challenge. `certbot` is required on the Office host
+  for automatic issuance and can be installed by the remote preparation step.
+  Existing certificates are rejected unless their SAN list covers the public
+  Office hostname.
 - The webmail public URL (`ALT8MAIL_PUBLIC_URL`) must be reachable from the
   Document Server. OnlyOffice fetches document content from that origin and
   posts save callbacks back to it.
@@ -184,25 +186,41 @@ nginx reload deploy hook.
    the preflight, uploads `a8m-office-agent`, installs its systemd unit and keeps
    the agent API on remote loopback behind an SSH tunnel.
 4. Enter the public URL, for example `https://office.example.com`.
-5. Run **Install preflight**. Local checks DNS and local RAM. Remote checks DNS
-   against the remote/public address, SSH privilege (root or passwordless sudo),
-   memory, Docker/Compose, nginx, certbot, systemd, disk, CPU architecture and the
-   SSH host key. Installation is blocked unless the deployment target passes.
-6. Choose the OnlyOffice image tag.
-7. Choose TLS: **Automatic Let's Encrypt** (default), an existing local
+5. Run **Install preflight**. The first remote probe only discovers the SSH host
+   key; the remaining rows stay **Pending** because credentials are not sent to
+   an untrusted host. Review the fingerprint, including its key type, and click
+   **Trust fingerprint & run checks**. Certificates may publish several host
+   keys, so an OpenSSH client can display a different fingerprint if it chooses
+   a different algorithm. After trust, the remote checks DNS against the
+   remote/public address, SSH privilege (root or passwordless sudo), memory,
+   Docker/Compose, nginx, certbot, systemd, disk, CPU architecture and the SSH
+   host key. Installation is blocked unless the deployment target passes.
+6. For a standalone/empty remote server, leave **Install missing dependencies
+   automatically** enabled (the default). During **Install / reconfigure**, the
+   Control Plane installs only the missing pieces from `Docker Engine`, the
+   Compose v2 plugin, `nginx` and `certbot` through the remote host's `apt-get`,
+   enables Docker/nginx, and verifies them before bootstrapping the agent. The
+   package step is idempotent, waits on apt/dpkg locks, retries `apt-get update`,
+   and fails with the remote command output if a package cannot be installed.
+   It requires a Debian/Ubuntu host with root or passwordless sudo. When
+   auto-install is off, preflight blocks on missing packages and an explicit
+   **Install missing packages** button runs the same preparation. systemd and
+   SSH privilege cannot be installed this way.
+7. Choose the OnlyOffice image tag.
+8. Choose TLS: **Automatic Let's Encrypt** (default), an existing local
    certificate, keep the current gateway certificate, or install without a
    public gateway. Remote deployments support automatic Let's Encrypt, keep and
    no-gateway; local certificate paths cannot be used on a remote host.
    Automatic mode requires a Let's Encrypt account email and runs certbot on the
    Office host through the agent.
-8. Click **Install / reconfigure**. The agent issues the certificate when
+9. Click **Install / reconfigure**. The agent issues the certificate when
    automatic TLS is selected, writes a temporary HTTP-01 challenge site, pulls
    the image, starts the container, waits up to three minutes for `/healthcheck`,
    then writes `/etc/nginx/sites-available/a8m-office`, validates nginx and
    reloads it.
-9. Start/stop/restart/update from the lifecycle card. **Reconfigure gateway**
-   re-runs the deployment preflight and can issue or replace the certificate.
-10. Enable **Office for webmail** only when the service is running, healthy and
+10. Start/stop/restart/update from the lifecycle card. **Reconfigure gateway**
+    re-runs the deployment preflight and can issue or replace the certificate.
+11. Enable **Office for webmail** only when the service is running, healthy and
     has a configured gateway. Enabling also re-checks the deployment preflight.
 
 Remote SSH credentials are sealed with AES-256-GCM using `CONTROL_SECRET_KEY`
@@ -247,10 +265,18 @@ agent:
    Plane reads the remote JWT secret and writes it to its local webmail secret
    file so editor config signing stays in sync.
 
-Remote prerequisites are intentional: Docker Engine, the Compose plugin, nginx,
-certbot, systemd and an SSH account with root or passwordless sudo must already
-be present. Preflight lists anything missing; this release does not silently run
-distribution package managers or install a remote Docker repository.
+Docker Engine, the Compose plugin, nginx, certbot, systemd and an SSH account
+with root or passwordless sudo are required. A standalone Debian/Ubuntu server
+can start empty: preflight distinguishes missing packages from hard blockers,
+and the install prepares them automatically when the remote auto-install option
+is enabled. Other distributions must install those packages manually. systemd
+must be provided by the base image and cannot be installed by the Control
+Plane.
+
+The remote preflight and install APIs accept `installDependencies` (default
+`true`). It is honored only when `apt-get` is available; missing packages are
+installed during the install before the Office agent is bootstrapped. Set it to
+`false` to require a pre-provisioned host.
 
 ## Cabinet editor
 
@@ -604,6 +630,7 @@ Office is disabled in delegated mailbox windows.
 GET    /control/api/office
 GET    /control/api/office/preflight?publicUrl=...
 POST   /control/api/office/remote/preflight
+POST   /control/api/office/remote/prepare
 PATCH  /control/api/office
 POST   /control/api/office/install
 POST   /control/api/office/start

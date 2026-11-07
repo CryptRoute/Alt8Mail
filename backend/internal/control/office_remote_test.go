@@ -55,6 +55,53 @@ func TestMergeOfficeRemoteTargetHonorsClearHostKey(t *testing.T) {
 	}
 }
 
+func TestRemotePackageReadiness(t *testing.T) {
+	missing := missingRemotePackages(false, false, false, false)
+	if len(missing) != 4 {
+		t.Fatalf("missing packages = %v", missing)
+	}
+	empty := officeRemotePreflight{Docker: true, DockerCompose: true, Nginx: true, Certbot: true, MissingPackages: []string{}}
+	if !remotePackagesReady(empty, false) {
+		t.Fatal("fully installed host should be ready")
+	}
+	mixed := officeRemotePreflight{
+		Docker: true, DockerCompose: false, Nginx: true, Certbot: true,
+		AutoInstallSupported: true, MissingPackages: []string{"Docker Compose plugin"},
+	}
+	if remotePackagesReady(mixed, false) {
+		t.Fatal("missing packages must block when automatic installation is disabled")
+	}
+	if !remotePackagesReady(mixed, true) {
+		t.Fatal("missing packages should be installable when apt is available")
+	}
+	mixed.AutoInstallSupported = false
+	if remotePackagesReady(mixed, true) {
+		t.Fatal("missing packages must block without a supported package manager")
+	}
+}
+
+func TestRemotePrepareCommandInstallsOfficePrerequisites(t *testing.T) {
+	command := remotePrepareCommand()
+	for _, expected := range []string{
+		"apt-get update",
+		"dpkg --configure -a",
+		"DPkg::Lock::Timeout=300",
+		"docker-compose-v2",
+		"nginx",
+		"certbot",
+		"systemctl enable --now docker",
+		"docker info",
+		"systemctl is-active --quiet nginx",
+	} {
+		if !strings.Contains(command, expected) {
+			t.Fatalf("prepare command is missing %q:\n%s", expected, command)
+		}
+	}
+	if detail := remoteCommandDetail("first\nsecond\nthird"); detail != "first | second | third" {
+		t.Fatalf("remoteCommandDetail = %q", detail)
+	}
+}
+
 func TestRemoteOfficeAgentEnvUsesImage(t *testing.T) {
 	text := remoteOfficeAgentEnv("onlyoffice/documentserver:9.4.0.1")
 	for _, expected := range []string{

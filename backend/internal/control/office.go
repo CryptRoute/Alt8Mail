@@ -72,6 +72,7 @@ func (s *Server) registerOfficeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /control/api/office", s.require("server.read", s.handleOfficeGet))
 	mux.HandleFunc("GET /control/api/office/preflight", s.require("server.read", s.handleOfficePreflight))
 	mux.HandleFunc("POST /control/api/office/remote/preflight", s.require("server.manage", s.handleOfficeRemotePreflight))
+	mux.HandleFunc("POST /control/api/office/remote/prepare", s.require("server.manage", s.handleOfficeRemotePrepare))
 	mux.HandleFunc("PATCH /control/api/office", s.require("server.manage", s.handleOfficePatch))
 	mux.HandleFunc("POST /control/api/office/install", s.require("server.manage", s.handleOfficeInstall))
 	mux.HandleFunc("POST /control/api/office/start", s.require("server.manage", s.handleOfficeAction("start")))
@@ -305,7 +306,7 @@ func (s *Server) handleOfficePatch(w http.ResponseWriter, r *http.Request, sess 
 				writeError(w, http.StatusConflict, "OFFICE_REMOTE", targetErr.Error())
 				return
 			}
-			preflight, preflightErr := s.officeRemotePreflight(r.Context(), target, publicURL)
+			preflight, preflightErr := s.officeRemotePreflight(r.Context(), target, publicURL, false)
 			if preflightErr != nil || !preflight.Ready {
 				detail := "The remote Office host is not ready"
 				if preflightErr != nil {
@@ -343,14 +344,15 @@ func (s *Server) handleOfficePatch(w http.ResponseWriter, r *http.Request, sess 
 
 func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	var body struct {
-		PublicURL      string              `json:"publicUrl"`
-		Image          string              `json:"image"`
-		TLSMode        string              `json:"tlsMode"`
-		TLSEmail       string              `json:"tlsEmail"`
-		TLSCert        string              `json:"tlsCert"`
-		TLSKey         string              `json:"tlsKey"`
-		DeploymentMode string              `json:"deploymentMode"`
-		Remote         officeRemoteRequest `json:"remote"`
+		PublicURL           string              `json:"publicUrl"`
+		Image               string              `json:"image"`
+		TLSMode             string              `json:"tlsMode"`
+		TLSEmail            string              `json:"tlsEmail"`
+		TLSCert             string              `json:"tlsCert"`
+		TLSKey              string              `json:"tlsKey"`
+		DeploymentMode      string              `json:"deploymentMode"`
+		InstallDependencies *bool               `json:"installDependencies"`
+		Remote              officeRemoteRequest `json:"remote"`
 	}
 	if err := decodeJSON(w, r, &body, 512<<10); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
@@ -420,8 +422,13 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 		writeError(w, http.StatusBadRequest, "OFFICE_TLS", "Existing certificates are local to this server. Use automatic Let's Encrypt or install without a public gateway on a remote host")
 		return
 	}
+	installDependencies := true
+	if body.InstallDependencies != nil {
+		installDependencies = *body.InstallDependencies
+	}
 	var remoteTarget officeRemoteTarget
 	var previousSettings officeSettings
+	var remotePreflight officeRemotePreflight
 	if body.DeploymentMode == "remote" {
 		body.Remote.PublicURL = body.PublicURL
 		var targetErr error
@@ -430,7 +437,7 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 			writeError(w, http.StatusInternalServerError, "OFFICE_REMOTE", targetErr.Error())
 			return
 		}
-		preflight, preflightErr := s.officeRemotePreflight(r.Context(), remoteTarget, body.PublicURL)
+		preflight, preflightErr := s.officeRemotePreflight(r.Context(), remoteTarget, body.PublicURL, installDependencies)
 		if preflightErr != nil {
 			writeError(w, http.StatusBadGateway, "OFFICE_REMOTE_PREFLIGHT", preflightErr.Error())
 			return
@@ -442,6 +449,7 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 			})
 			return
 		}
+		remotePreflight = preflight
 		if strings.TrimSpace(remoteTarget.HostKey) == "" {
 			remoteTarget.HostKey = preflight.HostKeyFingerprint
 		}
@@ -479,6 +487,13 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 		if dialErr != nil {
 			writeError(w, http.StatusBadGateway, "OFFICE_REMOTE", dialErr.Error())
 			return
+		}
+		if installDependencies {
+			if _, prepareErr := prepareOfficeRemote(r.Context(), client); prepareErr != nil {
+				client.Close()
+				writeError(w, http.StatusBadGateway, "OFFICE_REMOTE_PREPARE", prepareErr.Error())
+				return
+			}
 		}
 		agentToken, agentPath, bootstrapErr := s.bootstrapRemoteAgent(r.Context(), client, image)
 		client.Close()
@@ -554,6 +569,9 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 	if body.DeploymentMode == "remote" {
 		auditDetails["remoteHost"] = remoteTarget.Host
 		auditDetails["remoteUser"] = remoteTarget.User
+		if len(remotePreflight.MissingPackages) > 0 {
+			auditDetails["installedDependencies"] = remotePreflight.MissingPackages
+		}
 	}
 	s.actorAudit(r, sess, "office.install", "office", "Installed or reconfigured OnlyOffice", auditDetails)
 	settings, _ := s.officeSettings(r.Context())
@@ -679,7 +697,7 @@ func (s *Server) handleOfficeGateway(w http.ResponseWriter, r *http.Request, ses
 			writeError(w, http.StatusConflict, "OFFICE_REMOTE", targetErr.Error())
 			return
 		}
-		preflight, preflightErr := s.officeRemotePreflight(r.Context(), target, body.PublicURL)
+		preflight, preflightErr := s.officeRemotePreflight(r.Context(), target, body.PublicURL, false)
 		if preflightErr != nil || !preflight.Ready {
 			detail := "The remote Office host is not ready"
 			if preflightErr != nil {

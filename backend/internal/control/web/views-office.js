@@ -1,5 +1,5 @@
 /* Office / OnlyOffice lifecycle and feature flag. */
-import * as ui from './ui.js?v=0.11.40-control';
+import * as ui from './ui.js?v=0.11.43-control';
 
 const esc = ui.esc;
 
@@ -30,6 +30,7 @@ export async function renderOffice(ctx) {
     .concat([{ value: 'none', label: 'Install without a public gateway' }]);
   const defaultTls = settings.gatewayStatus === 'configured' ? 'keep' : 'auto';
   let preflightReady = false;
+  let preflightGeneration = 0;
   const statusTone = running ? 'good' : settings.enabled ? 'warning' : 'neutral';
   ctx.root.innerHTML = `${ui.pageHeader({
     eyebrow: 'Infrastructure',
@@ -91,6 +92,7 @@ export async function renderOffice(ctx) {
             ${ui.field({ label: 'SSH user', name: 'office-remote-user', value: settings.remoteUser || 'root', placeholder: 'root', help: 'Root or an account with passwordless sudo.' })}
             ${ui.field({ label: 'SSH authentication', name: 'office-remote-auth', type: 'select', value: settings.remoteAuth || 'key', options: [{ value: 'key', label: 'Private key' }, { value: 'password', label: 'Password' }] })}
           </div>
+          ${ui.field({ label: 'Install missing dependencies automatically', name: 'office-remote-autoinstall', type: 'checkbox', value: true, help: 'During install, apt-get installs Docker Engine, the Compose v2 plugin, nginx and certbot when they are missing. Requires a Debian/Ubuntu host with root or passwordless sudo.' })}
           <label class="field"><span>SSH private key or password</span><textarea class="input" name="office-remote-secret" rows="4" placeholder="${settings.remoteHasSecret ? 'A credential is saved; leave blank to keep it' : 'Paste an OpenSSH private key or the SSH password'}" autocomplete="new-password"></textarea><small class="muted">Stored encrypted with AES-256-GCM and never returned by the API.</small></label>
           <div class="office-fields">
             ${ui.field({ label: 'Key passphrase', name: 'office-remote-passphrase', type: 'password', value: '', placeholder: settings.remoteHasSecret ? 'Leave blank to keep the saved passphrase' : 'Optional for encrypted private keys' })}
@@ -100,14 +102,14 @@ export async function renderOffice(ctx) {
         </div>
         <div class="notice tone-info" id="officeDeploymentNote" style="margin-top:12px">${ui.icon('server', 16)}<div><strong>Deployment target</strong><p>Local mode uses the loopback agent on this server. Remote mode opens SSH, runs the same agent on the remote host, and keeps the agent API on remote loopback.</p></div></div>
         <div class="form-actions">
-          <span class="form-note">Pull and first start can take several minutes. DNS and memory are checked before the agent is called. The agent waits up to three minutes for the health endpoint.</span>
+          <span class="form-note">Pull and first start can take several minutes. DNS and memory are checked before the agent is called. With remote auto-install enabled, missing Docker, Compose, nginx and certbot are installed first. The agent waits up to three minutes for the health endpoint.</span>
           <button class="btn btn-primary" type="button" id="office-install" ${canManage ? '' : 'disabled'}>${ui.icon('download', 15)} Install / reconfigure</button>
         </div>
       </div>
     </section>
   </div>
   <section class="card" style="margin-top:16px">
-    <header class="card-head"><div><h3>Install preflight</h3><p>DNS A/AAAA, host memory and TLS readiness</p></div><button class="btn btn-secondary btn-sm" type="button" id="office-preflight-run">${ui.icon('refresh', 13)} Run checks</button></header>
+    <header class="card-head"><div><h3>Install preflight</h3><p>DNS, host resources, SSH and dependency readiness</p></div><button class="btn btn-secondary btn-sm" type="button" id="office-preflight-run">${ui.icon('refresh', 13)} Run checks</button></header>
     <div class="card-body" id="office-preflight-body"><div class="empty-mini">Enter the public Office URL, then run the preflight.</div></div>
   </section>
   <section class="card" style="margin-top:16px">
@@ -152,6 +154,9 @@ export async function renderOffice(ctx) {
   document.querySelector('[name="office-remote-hostkey"]')?.addEventListener('input', () => {
     setPreflightReady(false);
   });
+  document.querySelector('[name="office-remote-autoinstall"]')?.addEventListener('change', () => {
+    setPreflightReady(false);
+  });
   const deploymentSelect = document.querySelector('[name="office-deployment"]');
   deploymentSelect?.addEventListener('change', () => {
     syncDeploymentFields();
@@ -183,6 +188,10 @@ export async function renderOffice(ctx) {
   function deploymentMode() {
     return document.querySelector('[name="office-deployment"]')?.value || 'local';
   }
+  function autoInstallDependencies() {
+    const input = document.querySelector('[name="office-remote-autoinstall"]');
+    return input ? input.checked : true;
+  }
   function remoteTargetValues() {
     const hostKey = document.querySelector('[name="office-remote-hostkey"]')?.value.trim() || '';
     return {
@@ -211,8 +220,11 @@ export async function renderOffice(ctx) {
       if (targetChanged && certSelect.value === 'keep') certSelect.value = 'auto';
     }
   }
-  function preflightItem(title, ok, detail) {
-    return `<div class="timeline-item"><span class="timeline-dot" style="background:${ok ? 'var(--status-good)' : 'var(--status-critical)'}"></span><div class="timeline-copy"><strong>${esc(title)}</strong><small>${esc(detail)}</small></div><span class="badge ${ok ? 'tone-good' : 'tone-critical'}">${ok ? 'Pass' : 'Blocked'}</span></div>`;
+  function preflightItem(title, ok, detail, status = '') {
+    const tone = status === 'Pending' ? 'neutral' : status === 'Review' || status === 'Will install' ? 'warning' : ok ? 'good' : 'critical';
+    const dot = status === 'Pending' ? 'var(--text-muted)' : status === 'Review' || status === 'Will install' ? 'var(--status-warning)' : ok ? 'var(--status-good)' : 'var(--status-critical)';
+    const label = status || (ok ? 'Pass' : 'Blocked');
+    return `<div class="timeline-item"><span class="timeline-dot" style="background:${dot}"></span><div class="timeline-copy"><strong>${esc(title)}</strong><small>${esc(detail)}</small></div><span class="badge tone-${tone}">${esc(label)}</span></div>`;
   }
   function setPreflightReady(ready) {
     preflightReady = Boolean(ready);
@@ -237,29 +249,77 @@ export async function renderOffice(ctx) {
     }
     const expected = Array.isArray(data.expected) && data.expected.length ? data.expected.join(', ') : 'no remote address discovered';
     const resolved = Array.isArray(data.resolved) && data.resolved.length ? data.resolved.join(', ') : 'none';
-    const memory = data.memoryTotalBytes ? `${ui.bytes(data.memoryTotalBytes)} total · ${Number(data.memoryPercent || 0).toFixed(0)}% used` : 'unavailable';
+    const memory = data.memoryTotalBytes ? `${ui.bytes(data.memoryTotalBytes)} total · ${Number(data.memoryPercent || 0).toFixed(0)}% used` : 'not checked yet';
+    const awaitingTrust = !data.hostKeyTrusted;
+    const pending = awaitingTrust ? 'Will run after the SSH host key is trusted.' : '';
+    const keyLabel = data.hostKeyType ? ` (${data.hostKeyType})` : '';
+    const autoInstall = Boolean(data.installDependencies) && Boolean(data.autoInstallSupported);
+    const dockerMissing = !data.docker || !data.dockerCompose;
+    const webMissing = !data.nginx || !data.certbot;
+    const dockerState = awaitingTrust ? 'Pending' : dockerMissing && autoInstall ? 'Will install' : '';
+    const webState = awaitingTrust ? 'Pending' : webMissing && autoInstall ? 'Will install' : '';
+    const dockerDetail = awaitingTrust ? pending : dockerMissing
+      ? autoInstall ? 'Docker Engine and/or the Compose v2 plugin will be installed during the install.' : data.docker ? 'Docker is present but the Compose plugin is missing' : 'Docker Engine is missing'
+      : 'Docker Engine and Compose are present';
+    const webDetail = awaitingTrust ? pending : webMissing
+      ? autoInstall ? `nginx ${data.nginx ? 'present' : 'missing'} · certbot ${data.certbot ? 'present' : 'missing'} · missing packages will be installed during the install` : `nginx ${data.nginx ? 'present' : 'missing'} · certbot ${data.certbot ? 'present' : 'missing'}`
+      : 'nginx and certbot are present';
     const rows = [
-      preflightItem('SSH host key', data.hostKeyTrusted, data.hostKeyTrusted ? `Pinned ${data.hostKeyFingerprint}` : `Review the fingerprint ${data.hostKeyFingerprint || '—'} before trusting it`),
-      preflightItem('SSH privilege', data.sudo, data.sudo ? 'Root or passwordless sudo is available' : 'The SSH account needs root or passwordless sudo'),
-      preflightItem('Host memory', data.memoryOk, `${memory}`),
-      preflightItem('Docker Compose', data.docker && data.dockerCompose, data.docker ? (data.dockerCompose ? 'Docker Engine and Compose are present' : 'Docker is present but the Compose plugin is missing') : 'Docker Engine is missing'),
-      preflightItem('nginx and certbot', data.nginx && data.certbot, `nginx ${data.nginx ? 'present' : 'missing'} · certbot ${data.certbot ? 'present' : 'missing'}`),
-      preflightItem('systemd', data.systemd, data.systemd ? 'systemd is available' : 'systemd is missing'),
-      preflightItem('Disk space', data.diskOk, data.diskFreeBytes ? `${ui.bytes(data.diskFreeBytes)} free on /` : 'Could not read free disk space'),
-      preflightItem('DNS record', data.dnsOk, `${data.dnsDetail || ''} · resolved ${resolved} · expected ${expected}`),
+      preflightItem('SSH host key', data.hostKeyTrusted, data.hostKeyTrusted ? `Pinned ${data.hostKeyFingerprint}${keyLabel}` : `Review the fingerprint ${data.hostKeyFingerprint || '—'}${keyLabel} before trusting it`, awaitingTrust ? 'Review' : ''),
+      preflightItem('SSH privilege', data.sudo, awaitingTrust ? pending : data.sudo ? 'Root or passwordless sudo is available' : 'The SSH account needs root or passwordless sudo', awaitingTrust ? 'Pending' : ''),
+      preflightItem('Host memory', data.memoryOk, awaitingTrust ? pending : memory, awaitingTrust ? 'Pending' : ''),
+      preflightItem('Docker Compose', data.docker && data.dockerCompose, dockerDetail, dockerState),
+      preflightItem('nginx and certbot', data.nginx && data.certbot, webDetail, webState),
+      preflightItem('systemd', data.systemd, awaitingTrust ? pending : data.systemd ? 'systemd is available' : 'systemd is missing', awaitingTrust ? 'Pending' : ''),
+      preflightItem('Disk space', data.diskOk, awaitingTrust ? pending : data.diskFreeBytes ? `${ui.bytes(data.diskFreeBytes)} free on /` : 'Could not read free disk space', awaitingTrust ? 'Pending' : ''),
+      preflightItem('DNS record', data.dnsOk, awaitingTrust ? pending : `${data.dnsDetail || ''} · resolved ${resolved} · expected ${expected}`, awaitingTrust ? 'Pending' : ''),
     ];
     const trust = data.hostKeyFingerprint && !data.hostKeyTrusted
-      ? `<button class="btn btn-secondary btn-sm" type="button" id="office-trust-hostkey" data-fingerprint="${esc(data.hostKeyFingerprint)}">${ui.icon('shield', 13)} Trust fingerprint</button>`
+      ? `<button class="btn btn-primary btn-sm" type="button" id="office-trust-hostkey" data-fingerprint="${esc(data.hostKeyFingerprint)}">${ui.icon('shield', 13)} Trust fingerprint &amp; run checks</button>`
       : '';
-    body.innerHTML = `<div class="timeline">${rows.join('')}</div>${data.blockers && data.blockers.length ? `<div class="notice tone-warning" style="margin-top:12px">${ui.icon('alert', 16)}<div><strong>Blockers</strong><p>${esc(data.blockers.join(' · '))}</p></div></div>` : ''}<div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap"><span class="form-note">${data.ready ? 'Remote preflight passed. Installation can proceed.' : (data.detail || 'Fix the blocked checks before installing.')}</span>${trust}</div>`;
-    document.getElementById('office-trust-hostkey')?.addEventListener('click', () => {
+    const missingPackages = !awaitingTrust && (dockerMissing || webMissing);
+    const prepare = missingPackages && data.autoInstallSupported && !autoInstall
+      ? `<button class="btn btn-secondary btn-sm" type="button" id="office-prepare-remote">${ui.icon('download', 13)} Install missing packages</button>`
+      : '';
+    const note = awaitingTrust
+      ? 'The SSH password or key is not sent until you trust this host key. Compare the fingerprint with the remote host, then trust it to unlock the remaining checks.'
+      : data.detail || 'Fix the blocked checks before installing.';
+    body.innerHTML = `<div class="timeline">${rows.join('')}</div>${data.blockers && data.blockers.length && !awaitingTrust ? `<div class="notice tone-warning" style="margin-top:12px">${ui.icon('alert', 16)}<div><strong>Blockers</strong><p>${esc(data.blockers.join(' · '))}</p></div></div>` : ''}<div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap"><span class="form-note">${esc(note)}</span>${trust}${prepare}</div>`;
+    document.getElementById('office-trust-hostkey')?.addEventListener('click', async (event) => {
+      const button = event.currentTarget;
       const input = document.querySelector('[name="office-remote-hostkey"]');
       if (input) input.value = data.hostKeyFingerprint;
-      runPreflight();
+      button.disabled = true;
+      button.textContent = 'Running checks…';
+      await runPreflight();
+    });
+    document.getElementById('office-prepare-remote')?.addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      const host = document.querySelector('[name="office-remote-host"]')?.value.trim() || data.host || 'the remote host';
+      if (!(await ctx.confirm({
+        title: 'Install remote prerequisites?',
+        message: `This runs apt-get on ${host} and installs Docker Engine, the Docker Compose plugin, nginx and certbot. It requires root or passwordless sudo and can take several minutes.`,
+        confirmLabel: 'Install packages',
+        tone: 'danger',
+      }))) return;
+      const publicUrl = document.querySelector('[name="office-url"]')?.value.trim() || '';
+      button.disabled = true;
+      button.textContent = 'Installing…';
+      try {
+        const result = await ctx.api('/control/api/office/remote/prepare', { method: 'POST', body: { publicUrl, ...remoteTargetValues() } });
+        ui.toast('Remote prerequisites installed.', 'good');
+        if (result && result.preflight) renderRemotePreflight(result.preflight);
+        else await runPreflight({ quiet: true });
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = 'Install missing packages';
+        ui.toast(error.message || 'Could not install remote prerequisites.', 'critical', { title: 'Remote preparation' });
+      }
     });
     setPreflightReady(data.ready);
   }
   async function runPreflight({ quiet = false } = {}) {
+    const generation = ++preflightGeneration;
     const publicUrl = document.querySelector('[name="office-url"]')?.value.trim() || '';
     const body = document.getElementById('office-preflight-body');
     if (!publicUrl) {
@@ -280,20 +340,23 @@ export async function renderOffice(ctx) {
         }
         const target = remoteTargetValues();
         if (!target.host) { ui.toast('Enter the remote host first.', 'warning'); setPreflightReady(false); return null; }
-        data = await ctx.api('/control/api/office/remote/preflight', { method: 'POST', body: { publicUrl, ...target } });
+        data = await ctx.api('/control/api/office/remote/preflight', { method: 'POST', body: { publicUrl, ...target, installDependencies: autoInstallDependencies() } });
+        if (generation !== preflightGeneration) return null;
         renderRemotePreflight(data);
       } else {
         data = await ctx.api('/control/api/office/preflight?publicUrl=' + encodeURIComponent(publicUrl));
+        if (generation !== preflightGeneration) return null;
         renderPreflight(data);
       }
       return data;
     } catch (error) {
+      if (generation !== preflightGeneration) return null;
       setPreflightReady(false);
       if (body) body.innerHTML = `<div class="notice tone-critical">${ui.icon('alert-circle', 16)}<div><strong>Preflight failed</strong><p>${esc(error.message || String(error))}</p></div></div>`;
       if (!quiet) ui.toast(error.message || 'Preflight failed.', 'critical');
       return null;
     } finally {
-      if (button) button.disabled = false;
+      if (button && generation === preflightGeneration) button.disabled = false;
     }
   }
   async function install() {
@@ -317,6 +380,7 @@ export async function renderOffice(ctx) {
       publicUrl, image, tlsMode: mode.startsWith('cert:') ? 'existing' : mode,
       tlsEmail, tlsCert: cert?.certPath || '', tlsKey: cert?.keyPath || '',
       deploymentMode: deployment,
+      installDependencies: deployment === 'remote' ? autoInstallDependencies() : false,
     };
     if (deployment === 'remote') body.remote = remoteTargetValues();
     const label = button?.innerHTML;
