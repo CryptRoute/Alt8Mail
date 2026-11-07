@@ -109,6 +109,7 @@ func TestStatusAndInstallWithFakeDocker(t *testing.T) {
 		StateFile:    filepath.Join(temp, "office", "state.json"),
 		NginxSite:    filepath.Join(temp, "nginx", "a8m-office"),
 		NginxEnabled: filepath.Join(temp, "nginx-enabled", "a8m-office"),
+		FontsDir:     filepath.Join(temp, "office", "fonts"),
 		Runner:       runner,
 		Health:       func(context.Context, string) error { return nil },
 	})
@@ -204,6 +205,7 @@ func TestInstallReusesPreviousGatewayCertificate(t *testing.T) {
 		NginxSite:    site,
 		NginxEnabled: filepath.Join(temp, "nginx-enabled", "a8m-office"),
 		CertRoots:    []string{temp},
+		FontsDir:     filepath.Join(temp, "office", "fonts"),
 		Runner: func(context.Context, time.Duration, string, ...string) (string, string, error) {
 			return "", "", nil
 		},
