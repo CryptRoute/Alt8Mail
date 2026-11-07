@@ -19,7 +19,7 @@ UMask=0027
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=/etc/a8m /etc/nginx -/var/lib/a8m-office -/var/www/certbot
+ReadWritePaths=/etc/a8m /etc/nginx -/etc/letsencrypt -/var/lib/letsencrypt -/var/log/letsencrypt -/var/lib/a8m-office -/var/www/certbot
 
 [Install]
 WantedBy=multi-user.target

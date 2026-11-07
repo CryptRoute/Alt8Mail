@@ -2,8 +2,15 @@ package officeagent
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +19,40 @@ import (
 	"testing"
 	"time"
 )
+
+func writeTestCertificate(t *testing.T, dir, hostname string) (string, string) {
+	t.Helper()
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: hostname},
+		DNSNames:     []string{hostname},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPath := filepath.Join(dir, "office.crt")
+	keyPath := filepath.Join(dir, "office.key")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certPath, keyPath
+}
 
 func TestComposeContents(t *testing.T) {
 	text := composeContents("onlyoffice/documentserver:9.4.0.1", "test-secret", "a8m-office", 8082)
@@ -77,7 +118,7 @@ func TestStatusAndInstallWithFakeDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"publicUrl":"https://office.example.com","image":"onlyoffice/documentserver:9.4.0.1"}`
+	payload := `{"publicUrl":"https://office.example.com","image":"onlyoffice/documentserver:9.4.0.1","disableGateway":true}`
 	request := httptest.NewRequest(http.MethodPost, "/install", strings.NewReader(payload))
 	request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
 	response := httptest.NewRecorder()
@@ -129,7 +170,7 @@ func TestAgentRequiresBearerToken(t *testing.T) {
 }
 
 func TestNginxContentsProxiesWebSockets(t *testing.T) {
-	text := nginxContents("office.example.com", "/etc/ssl/office.crt", "/etc/ssl/office.key", 8082)
+	text := nginxContents("office.example.com", "/etc/ssl/office.crt", "/etc/ssl/office.key", 8082, "/var/www/certbot")
 	for _, expected := range []string{"server_name office.example.com;", "proxy_pass http://127.0.0.1:8082;", "Upgrade $http_upgrade", "proxy_read_timeout 3600s"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("nginx contents are missing %q", expected)
@@ -139,14 +180,7 @@ func TestNginxContentsProxiesWebSockets(t *testing.T) {
 
 func TestInstallReusesPreviousGatewayCertificate(t *testing.T) {
 	temp := t.TempDir()
-	cert := filepath.Join(temp, "office.crt")
-	key := filepath.Join(temp, "office.key")
-	if err := os.WriteFile(cert, []byte("cert"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(key, []byte("key"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	cert, key := writeTestCertificate(t, temp, "office.example.com")
 	site := filepath.Join(temp, "nginx", "a8m-office")
 	server, err := New(Config{
 		TokenFile:    filepath.Join(temp, "token"),
@@ -172,7 +206,7 @@ func TestInstallReusesPreviousGatewayCertificate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.install(context.Background(), "https://office.example.com", "onlyoffice/documentserver:9.4.0.1", "", ""); err != nil {
+	if _, err := server.install(context.Background(), installRequest{PublicURL: "https://office.example.com", Image: "onlyoffice/documentserver:9.4.0.1"}); err != nil {
 		t.Fatal(err)
 	}
 	st, err := server.loadState()
@@ -190,14 +224,7 @@ func TestInstallReusesPreviousGatewayCertificate(t *testing.T) {
 
 func TestGatewayRestoresPreviousConfigWhenNginxRejects(t *testing.T) {
 	temp := t.TempDir()
-	cert := filepath.Join(temp, "office.crt")
-	key := filepath.Join(temp, "office.key")
-	if err := os.WriteFile(cert, []byte("cert"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(key, []byte("key"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	cert, key := writeTestCertificate(t, temp, "office.example.com")
 	site := filepath.Join(temp, "nginx", "a8m-office")
 	if err := os.MkdirAll(filepath.Dir(site), 0o755); err != nil {
 		t.Fatal(err)

@@ -24,17 +24,20 @@ func main() {
 		port = value
 	}
 	server, err := officeagent.New(officeagent.Config{
-		Listen:        os.Getenv("OFFICE_AGENT_LISTEN"),
-		TokenFile:     os.Getenv("OFFICE_AGENT_TOKEN_FILE"),
-		ComposeFile:   os.Getenv("OFFICE_AGENT_COMPOSE_FILE"),
-		SecretFile:    os.Getenv("OFFICE_AGENT_SECRET_FILE"),
-		StateFile:     os.Getenv("OFFICE_AGENT_STATE_FILE"),
-		DefaultImage:  os.Getenv("OFFICE_AGENT_IMAGE"),
-		ContainerName: os.Getenv("OFFICE_AGENT_CONTAINER"),
-		HTTPPort:      port,
-		NginxSite:     os.Getenv("OFFICE_AGENT_NGINX_SITE"),
-		NginxEnabled:  os.Getenv("OFFICE_AGENT_NGINX_ENABLED"),
-		DockerBin:     os.Getenv("OFFICE_AGENT_DOCKER"),
+		Listen:         os.Getenv("OFFICE_AGENT_LISTEN"),
+		TokenFile:      os.Getenv("OFFICE_AGENT_TOKEN_FILE"),
+		ComposeFile:    os.Getenv("OFFICE_AGENT_COMPOSE_FILE"),
+		SecretFile:     os.Getenv("OFFICE_AGENT_SECRET_FILE"),
+		StateFile:      os.Getenv("OFFICE_AGENT_STATE_FILE"),
+		DefaultImage:   os.Getenv("OFFICE_AGENT_IMAGE"),
+		ContainerName:  os.Getenv("OFFICE_AGENT_CONTAINER"),
+		HTTPPort:       port,
+		NginxSite:      os.Getenv("OFFICE_AGENT_NGINX_SITE"),
+		NginxEnabled:   os.Getenv("OFFICE_AGENT_NGINX_ENABLED"),
+		CertbotBin:     os.Getenv("OFFICE_AGENT_CERTBOT"),
+		CertbotDir:     os.Getenv("OFFICE_AGENT_CERTBOT_DIR"),
+		CertbotWebroot: os.Getenv("OFFICE_AGENT_CERTBOT_WEBROOT"),
+		DockerBin:      os.Getenv("OFFICE_AGENT_DOCKER"),
 	})
 	if err != nil {
 		logger.Error("office agent configuration", "err", err)
@@ -49,7 +52,7 @@ func main() {
 		Handler:           server.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      10 * time.Minute,
+		WriteTimeout:      30 * time.Minute,
 		IdleTimeout:       90 * time.Second,
 	}
 	go func() {

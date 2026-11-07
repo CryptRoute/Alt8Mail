@@ -7,12 +7,15 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"os"
 	"os/exec"
@@ -27,20 +30,23 @@ import (
 type Runner func(ctx context.Context, timeout time.Duration, name string, args ...string) (stdout, stderr string, err error)
 
 type Config struct {
-	Listen        string
-	TokenFile     string
-	ComposeFile   string
-	SecretFile    string
-	StateFile     string
-	DefaultImage  string
-	ContainerName string
-	HTTPPort      int
-	NginxSite     string
-	NginxEnabled  string
-	CertRoots     []string
-	DockerBin     string
-	Runner        Runner
-	Health        func(ctx context.Context, address string) error
+	Listen         string
+	TokenFile      string
+	ComposeFile    string
+	SecretFile     string
+	StateFile      string
+	DefaultImage   string
+	ContainerName  string
+	HTTPPort       int
+	NginxSite      string
+	NginxEnabled   string
+	CertRoots      []string
+	CertbotBin     string
+	CertbotDir     string
+	CertbotWebroot string
+	DockerBin      string
+	Runner         Runner
+	Health         func(ctx context.Context, address string) error
 }
 
 type Server struct {
@@ -115,6 +121,34 @@ func New(cfg Config) (*Server, error) {
 	}
 	if len(cfg.CertRoots) == 0 {
 		cfg.CertRoots = []string{"/etc/letsencrypt/live", "/etc/ssl"}
+	}
+	cfg.CertbotBin = strings.TrimSpace(cfg.CertbotBin)
+	if cfg.CertbotBin == "" {
+		cfg.CertbotBin = "certbot"
+	}
+	cfg.CertbotDir = strings.TrimSpace(cfg.CertbotDir)
+	if cfg.CertbotDir == "" {
+		cfg.CertbotDir = "/etc/letsencrypt/live"
+	}
+	certbotRootAllowed := false
+	for _, root := range cfg.CertRoots {
+		if filepath.Clean(root) == filepath.Clean(cfg.CertbotDir) {
+			certbotRootAllowed = true
+			break
+		}
+	}
+	if !certbotRootAllowed {
+		// Certificates issued below the configured certbot directory must pass
+		// the same gateway path validation as operator-supplied certificates.
+		cfg.CertRoots = append(cfg.CertRoots, cfg.CertbotDir)
+	}
+	cfg.CertbotWebroot = strings.TrimSpace(cfg.CertbotWebroot)
+	if cfg.CertbotWebroot == "" {
+		cfg.CertbotWebroot = "/var/www/certbot"
+	}
+	if (!filepath.IsAbs(cfg.CertbotWebroot) && !strings.HasPrefix(cfg.CertbotWebroot, "/")) ||
+		strings.ContainsAny(cfg.CertbotWebroot, "\r\n\t ;{}") {
+		return nil, fmt.Errorf("certbot webroot must be an absolute path without shell/nginx metacharacters")
 	}
 	cfg.DockerBin = strings.TrimSpace(cfg.DockerBin)
 	if cfg.DockerBin == "" {
@@ -224,20 +258,25 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
+type installRequest struct {
+	PublicURL      string `json:"publicUrl"`
+	Image          string `json:"image"`
+	TLSCert        string `json:"tlsCert"`
+	TLSKey         string `json:"tlsKey"`
+	TLSEmail       string `json:"tlsEmail"`
+	AutoTLS        bool   `json:"autoTls"`
+	DisableGateway bool   `json:"disableGateway"`
+}
+
 func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		PublicURL string `json:"publicUrl"`
-		Image     string `json:"image"`
-		TLSCert   string `json:"tlsCert"`
-		TLSKey    string `json:"tlsKey"`
-	}
+	var body installRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", "Invalid install request")
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	status, err := s.install(r.Context(), body.PublicURL, body.Image, body.TLSCert, body.TLSKey)
+	status, err := s.install(r.Context(), body)
 	if err != nil {
 		status.Error = err.Error()
 		writeJSON(w, http.StatusBadGateway, status)
@@ -246,28 +285,40 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
-func (s *Server) install(ctx context.Context, publicURL, image, tlsCert, tlsKey string) (Status, error) {
-	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
+func (s *Server) install(ctx context.Context, opts installRequest) (Status, error) {
+	publicURL := strings.TrimRight(strings.TrimSpace(opts.PublicURL), "/")
 	if err := validPublicURL(publicURL); err != nil {
 		return Status{}, err
 	}
-	image = strings.TrimSpace(image)
+	image := strings.TrimSpace(opts.Image)
 	if image == "" {
 		image = s.cfg.DefaultImage
 	}
 	if err := validImage(image); err != nil {
 		return Status{}, err
 	}
-	tlsCert = strings.TrimSpace(tlsCert)
-	tlsKey = strings.TrimSpace(tlsKey)
+	tlsCert := strings.TrimSpace(opts.TLSCert)
+	tlsKey := strings.TrimSpace(opts.TLSKey)
 	if (tlsCert == "") != (tlsKey == "") {
 		return Status{}, fmt.Errorf("choose both a TLS certificate and key, or neither")
 	}
 	// A reinstall without new TLS fields keeps the gateway that was configured
 	// previously, so changing the public URL also updates that gateway.
 	previous, _ := s.loadState()
-	if tlsCert == "" && tlsKey == "" {
+	if opts.DisableGateway {
+		tlsCert, tlsKey = "", ""
+	} else if tlsCert == "" && tlsKey == "" && !opts.AutoTLS {
 		tlsCert, tlsKey = previous.TLSCert, previous.TLSKey
+	}
+	if !opts.DisableGateway && !opts.AutoTLS && (tlsCert == "" || tlsKey == "") {
+		return Status{}, fmt.Errorf("no previous gateway certificate is available; choose automatic Let's Encrypt or install without a public gateway")
+	}
+	if !opts.DisableGateway && opts.AutoTLS && (tlsCert == "" || tlsKey == "") {
+		var certErr error
+		tlsCert, tlsKey, certErr = s.ensureLetsEncrypt(ctx, publicURL, opts.TLSEmail)
+		if certErr != nil {
+			return Status{}, certErr
+		}
 	}
 	secret, err := s.ensureSecret()
 	if err != nil {
@@ -289,7 +340,11 @@ func (s *Server) install(ctx context.Context, publicURL, image, tlsCert, tlsKey 
 	if _, stderr, err := s.run(ctx, 5*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d"); err != nil {
 		return Status{Error: commandFailure("Starting OnlyOffice", err, stderr)}, fmt.Errorf("start OnlyOffice: %w", err)
 	}
-	if st.TLSCert != "" || st.TLSKey != "" {
+	if opts.DisableGateway {
+		_ = os.Remove(s.cfg.NginxEnabled)
+		_ = os.Remove(s.cfg.NginxSite)
+		_, _, _ = s.run(ctx, 30*time.Second, "systemctl", "reload", "nginx")
+	} else if st.TLSCert != "" || st.TLSKey != "" {
 		if err := s.configureGateway(st); err != nil {
 			status, _ := s.status(ctx)
 			status.Error = err.Error()
@@ -436,6 +491,8 @@ func (s *Server) handleGateway(w http.ResponseWriter, r *http.Request) {
 		PublicURL string `json:"publicUrl"`
 		TLSCert   string `json:"tlsCert"`
 		TLSKey    string `json:"tlsKey"`
+		TLSEmail  string `json:"tlsEmail"`
+		AutoTLS   bool   `json:"autoTls"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", "Invalid gateway request")
@@ -451,11 +508,20 @@ func (s *Server) handleGateway(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(body.PublicURL) != "" {
 		st.PublicURL = strings.TrimRight(strings.TrimSpace(body.PublicURL), "/")
 	}
-	if strings.TrimSpace(body.TLSCert) != "" {
-		st.TLSCert = strings.TrimSpace(body.TLSCert)
-	}
-	if strings.TrimSpace(body.TLSKey) != "" {
-		st.TLSKey = strings.TrimSpace(body.TLSKey)
+	if body.AutoTLS && strings.TrimSpace(body.TLSCert) == "" && strings.TrimSpace(body.TLSKey) == "" {
+		cert, key, err := s.ensureLetsEncrypt(r.Context(), st.PublicURL, body.TLSEmail)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "CERTIFICATE", err.Error())
+			return
+		}
+		st.TLSCert, st.TLSKey = cert, key
+	} else {
+		if strings.TrimSpace(body.TLSCert) != "" {
+			st.TLSCert = strings.TrimSpace(body.TLSCert)
+		}
+		if strings.TrimSpace(body.TLSKey) != "" {
+			st.TLSKey = strings.TrimSpace(body.TLSKey)
+		}
 	}
 	if err := s.configureGateway(st); err != nil {
 		writeError(w, http.StatusBadGateway, "GATEWAY", err.Error())
@@ -530,6 +596,105 @@ func (s *Server) status(ctx context.Context) (Status, error) {
 	return status, nil
 }
 
+func (s *Server) ensureLetsEncrypt(ctx context.Context, publicURL, email string) (string, string, error) {
+	host, err := publicHost(publicURL)
+	if err != nil {
+		return "", "", err
+	}
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "", "", fmt.Errorf("a Let's Encrypt account email is required for automatic TLS")
+	}
+	if _, err := mail.ParseAddress(email); err != nil {
+		return "", "", fmt.Errorf("the Let's Encrypt account email is invalid")
+	}
+	certName := "a8m-office-" + strings.ReplaceAll(host, ".", "-")
+	certPath := filepath.Join(s.cfg.CertbotDir, certName, "fullchain.pem")
+	keyPath := filepath.Join(s.cfg.CertbotDir, certName, "privkey.pem")
+	if err := os.MkdirAll(s.cfg.CertbotWebroot, 0o755); err != nil {
+		return "", "", fmt.Errorf("could not prepare the ACME webroot: %w", err)
+	}
+
+	// Certbot HTTP-01 needs a matching port-80 server before the HTTPS
+	// gateway exists. Install a temporary challenge site and roll it back if
+	// issuance fails.
+	previous, previousErr := os.ReadFile(s.cfg.NginxSite)
+	hadPrevious := previousErr == nil
+	hadEnabled := fileExists(s.cfg.NginxEnabled)
+	restore := func() {
+		if hadPrevious {
+			_ = os.WriteFile(s.cfg.NginxSite, previous, 0o644)
+		} else {
+			_ = os.Remove(s.cfg.NginxSite)
+		}
+		if !hadEnabled {
+			_ = os.Remove(s.cfg.NginxEnabled)
+		}
+		// The challenge site may currently be loaded by nginx. Restore the
+		// previous listeners immediately so a later pull or container failure
+		// cannot leave the public hostname pointed at an HTTPS server that does
+		// not exist yet.
+		_, _, _ = s.run(context.Background(), 30*time.Second, "systemctl", "reload", "nginx")
+	}
+	// Certificate issuance temporarily replaces the gateway. Always put the
+	// previous site back before returning; callers that need the gateway write
+	// the final configuration once the container is running.
+	defer restore()
+	if err := os.MkdirAll(filepath.Dir(s.cfg.NginxSite), 0o755); err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(s.cfg.NginxSite, []byte(acmeNginxContents(host, s.cfg.CertbotWebroot)), 0o644); err != nil {
+		return "", "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.cfg.NginxEnabled), 0o755); err != nil {
+		return "", "", err
+	}
+	_ = os.Remove(s.cfg.NginxEnabled)
+	if err := os.Symlink(s.cfg.NginxSite, s.cfg.NginxEnabled); err != nil {
+		return "", "", err
+	}
+	if _, stderr, err := s.run(ctx, 30*time.Second, "nginx", "-t"); err != nil {
+		return "", "", fmt.Errorf("nginx rejected the ACME challenge site: %s", trim(stderr))
+	}
+	if _, stderr, err := s.run(ctx, 30*time.Second, "systemctl", "reload", "nginx"); err != nil {
+		return "", "", fmt.Errorf("nginx reload failed before certificate issuance: %s", trim(stderr))
+	}
+	args := []string{
+		"certonly", "--webroot", "-w", s.cfg.CertbotWebroot,
+		"--non-interactive", "--agree-tos", "--no-eff-email",
+		"--keep-until-expiring", "--cert-name", certName,
+		"--email", email, "--deploy-hook", "systemctl reload nginx",
+		"-d", host,
+	}
+	output, stderr, certErr := s.run(ctx, 5*time.Minute, s.cfg.CertbotBin, args...)
+	if certErr != nil {
+		detail := trim(stderr)
+		if detail == "" {
+			detail = trim(output)
+		}
+		if detail == "" {
+			detail = certErr.Error()
+		}
+		return "", "", fmt.Errorf("certbot could not issue a certificate for %s: %s", host, detail)
+	}
+	if !fileExists(certPath) || !fileExists(keyPath) {
+		return "", "", fmt.Errorf("certbot completed but the certificate files for %s were not found", host)
+	}
+	return certPath, keyPath, nil
+}
+
+func acmeNginxContents(host, webroot string) string {
+	return fmt.Sprintf(`# Managed by the Alt8Mail Office Agent for ACME HTTP-01.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name %s;
+    location /.well-known/acme-challenge/ { root %s; }
+    location / { return 301 https://$host$request_uri; }
+}
+`, host, webroot)
+}
+
 func (s *Server) configureGateway(st state) error {
 	if err := validPublicURL(st.PublicURL); err != nil {
 		return err
@@ -544,7 +709,10 @@ func (s *Server) configureGateway(st state) error {
 	if !fileExists(st.TLSCert) || !fileExists(st.TLSKey) {
 		return fmt.Errorf("TLS certificate or key file is missing")
 	}
-	config := nginxContents(host, st.TLSCert, st.TLSKey, s.cfg.HTTPPort)
+	if err := certificateCoversHost(st.TLSCert, host); err != nil {
+		return err
+	}
+	config := nginxContents(host, st.TLSCert, st.TLSKey, s.cfg.HTTPPort, s.cfg.CertbotWebroot)
 	if err := os.MkdirAll(filepath.Dir(s.cfg.NginxSite), 0o755); err != nil {
 		return err
 	}
@@ -724,6 +892,41 @@ func validImage(value string) error {
 	return nil
 }
 
+func certificateCoversHost(certPath, hostname string) error {
+	raw, err := os.ReadFile(certPath)
+	if err != nil {
+		return fmt.Errorf("could not read the TLS certificate: %w", err)
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return fmt.Errorf("the TLS certificate is not valid PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("the TLS certificate could not be parsed: %w", err)
+	}
+	if time.Now().After(cert.NotAfter) {
+		return fmt.Errorf("the TLS certificate expired on %s", cert.NotAfter.UTC().Format(time.RFC3339))
+	}
+	hostname = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(hostname), "."))
+	for _, rawName := range cert.DNSNames {
+		name := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(rawName), "."))
+		if name == hostname {
+			return nil
+		}
+		if strings.HasPrefix(name, "*.") {
+			suffix := strings.TrimPrefix(name, "*")
+			if strings.HasSuffix(hostname, suffix) {
+				prefix := strings.TrimSuffix(hostname, suffix)
+				if prefix != "" && !strings.Contains(prefix, ".") {
+					return nil
+				}
+			}
+		}
+	}
+	return fmt.Errorf("the TLS certificate does not cover %s", hostname)
+}
+
 func validGatewayPath(path string, roots []string) bool {
 	if !filepath.IsAbs(path) || strings.Contains(path, "..") {
 		return false
@@ -808,13 +1011,13 @@ func composeContents(image, secret, container string, port int) string {
 `, image, container, port, secret)
 }
 
-func nginxContents(host, cert, key string, port int) string {
+func nginxContents(host, cert, key string, port int, webroot string) string {
 	return fmt.Sprintf(`# Managed by the Alt8Mail Office Agent.
 server {
     listen 80;
     listen [::]:80;
     server_name %s;
-    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location /.well-known/acme-challenge/ { root %s; }
     location / { return 301 https://$host$request_uri; }
 }
 server {
@@ -843,7 +1046,7 @@ server {
         proxy_send_timeout 3600s;
     }
 }
-`, host, host, cert, key, port)
+`, host, webroot, host, cert, key, port)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

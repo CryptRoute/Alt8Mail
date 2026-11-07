@@ -7,7 +7,8 @@ callbacks, idempotent saves, immutable versions and PDF conversion. Phase 3 adds
 guest Office links, compose/attachment/calendar integration, co-editing through
 shared edit links, and an in-editor Alt8Mail AI assistant. Phase 4 adds internal
 user/group sharing, organization Office policies, DLP scanning on save, legal
-hold protection, eDiscovery export and text version comparison.
+hold protection, eDiscovery export and text version comparison. Phase 5 adds
+remote Office hosts over SSH with agent bootstrap and an HTTP-over-SSH tunnel.
 
 ## Architecture
 
@@ -100,12 +101,30 @@ Phase 4:
 - Office audit surfaces in webmail and Customer Admin, plus SIEM coverage.
 - Migration `0054_office_enterprise`.
 
+Phase 5:
+
+- Remote Office hosts: SSH preflight, host-key pinning, sealed SSH credentials,
+  agent bootstrap over SSH, remote JWT-secret synchronization and an
+  HTTP-over-SSH tunnel to the remote loopback agent.
+- Migration `0055_office_remote`.
+
 ## Requirements
 
 - Docker Engine and the Docker Compose plugin on the Office host.
-- A dedicated `office.<domain>` DNS name pointing at the gateway host.
-- A valid TLS certificate for that hostname, imported or issued under
-  System Control → TLS certificates.
+- For remote deployment: SSH access from the Control Plane to the Office host,
+  a root or passwordless-sudo account, `nginx`, `certbot` and systemd on the
+  remote host, a CPU architecture matching the Control Plane build, and the
+  `a8m-office-agent` binary in the same release bin directory as the Control
+  Plane. SSH TCP forwarding must be allowed; the agent is reached through a
+  `direct-tcpip` tunnel to remote loopback.
+- A dedicated `office.<domain>` A/AAAA record pointing at the Office host before
+  installation. The Control Plane blocks install/reconfigure/enable until DNS
+  resolves to a known local or configured public address.
+- A valid TLS certificate for that hostname. Control Plane can select an existing
+  certificate or issue a new Let's Encrypt certificate through the Office agent
+  using the HTTP-01 webroot challenge. `certbot` must be installed on the Office
+  host for automatic issuance. Existing certificates are rejected unless their
+  SAN list covers the public Office hostname.
 - The webmail public URL (`ALT8MAIL_PUBLIC_URL`) must be reachable from the
   Document Server. OnlyOffice fetches document content from that origin and
   posts save callbacks back to it.
@@ -135,28 +154,103 @@ The agent creates `/etc/a8m/office-agent-token` on first start if the installer
 did not create it. The token is `root:a8m`, mode `0640`, and is used only by the
 Control Plane on loopback.
 
-The agent does not install Docker. If Docker is missing, install actions fail
-with a clear error. The compose file, state and JWT secret may already have been
-written by then, but no container is started.
+The agent does not install Docker or certbot. If Docker is missing, install
+actions fail with a clear error. If automatic TLS is selected and certbot is
+missing, certificate issuance fails before the container is changed. The compose
+file, state and JWT secret may already have been written by then, but no
+container is started.
+
+Automatic certificate issuance uses:
+
+```text
+OFFICE_AGENT_CERTBOT=certbot
+OFFICE_AGENT_CERTBOT_DIR=/etc/letsencrypt/live
+OFFICE_AGENT_CERTBOT_WEBROOT=/var/www/certbot
+```
+
+The systemd unit grants write access to `/etc/letsencrypt`,
+`/var/lib/letsencrypt`, `/var/log/letsencrypt`, `/etc/nginx` and the ACME
+webroot. The certificate is named `a8m-office-<hostname-with-dashes>` and is
+reused on later installs/reconfigures. Certbot's renewal configuration keeps the
+nginx reload deploy hook.
 
 ## System Control workflow
 
 1. Open **Infrastructure → Office**.
-2. Enter the public URL, for example `https://office.example.com`.
-3. Choose the OnlyOffice image tag.
-4. Optionally choose a TLS certificate for the gateway.
-5. Click **Install / reconfigure**. The agent pulls the image, starts the
-   container, waits up to three minutes for `/healthcheck` and, when a
-   certificate is selected (or one was configured earlier), writes
-   `/etc/nginx/sites-available/a8m-office`, validates nginx and reloads it.
-6. Start/stop/restart/update from the lifecycle card. **Reconfigure gateway**
-   re-writes and reloads nginx using the public URL and certificate currently in
-   the form, without touching the container. If no certificate is selected, the
-   previously configured one is reused.
-7. Enable **Office for webmail** only when the service is running and healthy.
+2. Choose **Local Docker host** or **Remote server over SSH**.
+3. For a remote host, provide the SSH hostname/IP, port, system user, private key
+   or password, optional key passphrase, remote public IP when NAT is used, and
+   pin the SSH host key fingerprint. The Control Plane SSHes to the host, runs
+   the preflight, uploads `a8m-office-agent`, installs its systemd unit and keeps
+   the agent API on remote loopback behind an SSH tunnel.
+4. Enter the public URL, for example `https://office.example.com`.
+5. Run **Install preflight**. Local checks DNS and local RAM. Remote checks DNS
+   against the remote/public address, SSH privilege (root or passwordless sudo),
+   memory, Docker/Compose, nginx, certbot, systemd, disk, CPU architecture and the
+   SSH host key. Installation is blocked unless the deployment target passes.
+6. Choose the OnlyOffice image tag.
+7. Choose TLS: **Automatic Let's Encrypt** (default), an existing local
+   certificate, keep the current gateway certificate, or install without a
+   public gateway. Remote deployments support automatic Let's Encrypt, keep and
+   no-gateway; local certificate paths cannot be used on a remote host.
+   Automatic mode requires a Let's Encrypt account email and runs certbot on the
+   Office host through the agent.
+8. Click **Install / reconfigure**. The agent issues the certificate when
+   automatic TLS is selected, writes a temporary HTTP-01 challenge site, pulls
+   the image, starts the container, waits up to three minutes for `/healthcheck`,
+   then writes `/etc/nginx/sites-available/a8m-office`, validates nginx and
+   reloads it.
+9. Start/stop/restart/update from the lifecycle card. **Reconfigure gateway**
+   re-runs the deployment preflight and can issue or replace the certificate.
+10. Enable **Office for webmail** only when the service is running, healthy and
+    has a configured gateway. Enabling also re-checks the deployment preflight.
+
+Remote SSH credentials are sealed with AES-256-GCM using `CONTROL_SECRET_KEY`
+and are never returned by the API. The SSH host key must be pinned; a first
+preflight only reports the fingerprint and runs no remote commands until the
+operator trusts it. After bootstrap, every lifecycle request uses an HTTP client
+whose transport dials the remote agent through the SSH connection; port 8098 is
+never exposed publicly.
+
+After a remote install or JWT rotation, the Control Plane reads the remote
+`/etc/a8m/office-jwt-secret` over SSH and writes the same value to its local
+`CONTROL_OFFICE_JWT_SECRET_FILE`. This keeps the webmail editor-config signer and
+the remote Document Server using the same JWT secret.
 
 Rotating the JWT secret recreates the container. Open editor sessions are
 invalidated; the webmail API reads the new secret from the shared file.
+
+## Remote deployment
+
+Remote mode is a first-class deployment target, not a pointer to a pre-installed
+agent:
+
+1. The Control Plane connects to `host:port` as the supplied SSH user using a
+   sealed password or private key. The SSH host key must be pinned after the
+   first fingerprint-only probe.
+2. Preflight runs fixed commands to check Linux, CPU architecture (must match the
+   Control Plane build), root or passwordless sudo, RAM, free disk, Docker and
+   the Compose plugin, nginx, certbot, systemd, remote/public addresses and the
+   Office DNS record.
+3. Bootstrap creates `/opt/a8m-office`, uploads the matching
+   `a8m-office-agent` binary from the Control Plane release, writes the agent
+   environment, a generated bearer token and the systemd unit, then starts and
+   health-checks `a8m-office-agent` on remote loopback.
+4. The Control Plane stores the SSH credential, passphrase and agent token
+   sealed with AES-256-GCM. The SSH secret is decrypted only while opening a
+   connection. The agent token is sent only through the SSH tunnel.
+5. Every later status, install, start/stop/restart/update, gateway, log and JWT
+   rotation request uses HTTP over the SSH connection to `127.0.0.1:8098`. The
+   remote agent port is never exposed publicly.
+6. The remote agent performs the same Docker Compose, nginx and certbot
+   operations as a local install. After install or JWT rotation, the Control
+   Plane reads the remote JWT secret and writes it to its local webmail secret
+   file so editor config signing stays in sync.
+
+Remote prerequisites are intentional: Docker Engine, the Compose plugin, nginx,
+certbot, systemd and an SSH account with root or passwordless sudo must already
+be present. Preflight lists anything missing; this release does not silently run
+distribution package managers or install a remote Docker repository.
 
 ## Cabinet editor
 
@@ -181,8 +275,8 @@ and version files stay inside the Cabinet upload directory.
 Opening a document:
 
 1. Webmail calls `POST /api/office/documents/{fileId}/open`.
-2. The API ensures an `office_documents` row, copies the current bytes into an
-   initial immutable version, and mints two HMAC-signed URLs:
+2. The API ensures an `office_documents` row, reuses the current Cabinet blob
+   for the initial immutable version, and mints two HMAC-signed URLs:
    - a 10-minute content URL for the Document Server to download;
    - a 24-hour callback URL for save events. Reopen documents that stay in the
      editor longer than the callback window.
@@ -442,8 +536,16 @@ mail shell keeps `script-src 'self'`.
 - The JWT secret is generated by the agent and stored at
   `/etc/a8m/office-jwt-secret`, `root:a8m`, `0640`. It is never stored in the
   webmail database or returned by an API.
-- The agent token is stored at `/etc/a8m/office-agent-token`, `root:a8m`, `0640`.
-- The Control Plane never receives a root password.
+- The agent token is stored at `/etc/a8m/office-agent-token` (`root:a8m 0640`
+  locally; `root:root 0600` on a remotely bootstrapped host).
+- A remote SSH private key or password entered in the Control Plane is sealed
+  with AES-256-GCM using `CONTROL_SECRET_KEY`; it is never returned by the API.
+  The first SSH preflight only reports the host-key fingerprint and executes no
+  remote commands until the operator trusts it. Later connections require the
+  pinned fingerprint.
+- The Control Plane does not keep a general-purpose remote shell. It runs a
+  fixed set of preflight/bootstrap commands and then uses HTTP-over-SSH to the
+  narrow agent API on remote loopback.
 - The Office agent has no general-purpose Docker or shell endpoint. It only
   accepts the lifecycle operations in `backend/internal/officeagent`.
 - Content and callback URLs are HMAC-signed capabilities bound to the file or
@@ -500,6 +602,8 @@ Office is disabled in delegated mailbox windows.
 
 ```text
 GET    /control/api/office
+GET    /control/api/office/preflight?publicUrl=...
+POST   /control/api/office/remote/preflight
 PATCH  /control/api/office
 POST   /control/api/office/install
 POST   /control/api/office/start
@@ -565,9 +669,8 @@ publicly. The public editor gateway is `office.<domain>` on 443.
 
 ## What comes next
 
-Phase 5 will add remote Office hosts. The remote host will run the same narrow
-agent, reached over mTLS or a restricted SSH user, and the Control Plane will
-continue to avoid an unrestricted root session or a raw Docker socket across the
-network. Review workflow enhancements (assignments, approvals and comment
-summaries) build on the version comparison endpoint rather than changing the
-storage model.
+Remote Office hosts are managed through the same narrow agent over an SSH
+tunnel. Future work can add mTLS as an alternative transport, automated
+installation of missing remote packages, and per-document review assignments on
+top of the version comparison endpoint. The remote agent never exposes a raw
+Docker socket or a public lifecycle API.

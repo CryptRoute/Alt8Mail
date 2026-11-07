@@ -22,6 +22,20 @@ func TestValidOfficeURL(t *testing.T) {
 	}
 }
 
+func TestOfficeCertificateCovers(t *testing.T) {
+	cert := officeCertificate{SANs: []string{"office.example.com", "*.docs.example.net"}}
+	for _, host := range []string{"office.example.com", "team.docs.example.net"} {
+		if !officeCertificateCovers(cert, host) {
+			t.Errorf("certificate did not cover %s", host)
+		}
+	}
+	for _, host := range []string{"mail.example.com", "deep.team.docs.example.net", "example.com"} {
+		if officeCertificateCovers(cert, host) {
+			t.Errorf("certificate unexpectedly covered %s", host)
+		}
+	}
+}
+
 func TestOfficeAgentStatusClient(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "office-agent-token")
 	if err := os.WriteFile(tokenFile, []byte("test-agent-token\n"), 0o600); err != nil {

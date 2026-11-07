@@ -412,7 +412,7 @@ export function field({ label, name, type = 'text', value = '', placeholder = ''
   if (type === 'textarea') {
     control = `<textarea ${common} rows="${rows}" placeholder="${attr(placeholder)}">${esc(value)}</textarea>`;
   } else if (type === 'select') {
-    control = `<select ${common}>${(options || []).map((opt) => `<option value="${attr(opt.value)}"${String(opt.value) === String(value) ? ' selected' : ''}>${esc(opt.label)}</option>`).join('')}</select>`;
+    control = `<select ${common}>${(options || []).map((opt) => `<option value="${attr(opt.value)}"${String(opt.value) === String(value) ? ' selected' : ''}${opt.disabled ? ' disabled' : ''}>${esc(opt.label)}</option>`).join('')}</select>`;
   } else if (type === 'checkbox') {
     return `<label class="check-field"><input type="checkbox" name="${attr(name)}"${value ? ' checked' : ''}${disabled ? ' disabled' : ''}><span>${esc(label)}</span>${help ? `<small>${esc(help)}</small>` : ''}</label>`;
   } else {

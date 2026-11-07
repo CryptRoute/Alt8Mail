@@ -486,9 +486,10 @@ storage model, [`docs/ADMIN.md`](docs/ADMIN.md) for the admin console, RBAC,
 policy matrix, API and subdomain deployment,
 [`docs/ADDONS.md`](docs/ADDONS.md) for the curated add-on lifecycle, security
 model and connector guide,
-[`docs/OFFICE.md`](docs/OFFICE.md) for the OnlyOffice lifecycle agent, Cabinet
-editor, guest and internal sharing, policies, DLP on save, legal hold,
-eDiscovery, version comparison and review, PDF conversion and AI assistant,
+[`docs/OFFICE.md`](docs/OFFICE.md) for the OnlyOffice lifecycle agent, local and
+remote SSH deployment, automatic TLS, Cabinet editor, guest and internal sharing,
+policies, DLP on save, legal hold, eDiscovery, version comparison and review, PDF
+conversion and AI assistant,
 [`docs/PLATFORM_BUILD_PLAN.md`](docs/PLATFORM_BUILD_PLAN.md),
 [`docs/PHASE_REVIEW.md`](docs/PHASE_REVIEW.md),
 [`docs/THREAT_INTELLIGENCE.md`](docs/THREAT_INTELLIGENCE.md) and
