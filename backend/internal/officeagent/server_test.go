@@ -170,10 +170,23 @@ func TestAgentRequiresBearerToken(t *testing.T) {
 }
 
 func TestNginxContentsProxiesWebSockets(t *testing.T) {
-	text := nginxContents("office.example.com", "/etc/ssl/office.crt", "/etc/ssl/office.key", 8082, "/var/www/certbot")
-	for _, expected := range []string{"server_name office.example.com;", "proxy_pass http://127.0.0.1:8082;", "Upgrade $http_upgrade", "proxy_read_timeout 3600s"} {
+	text := nginxContents("office.example.com", "/etc/ssl/office.crt", "/etc/ssl/office.key", "https://mail.example.com", 8082, "/var/www/certbot")
+	for _, expected := range []string{"server_name office.example.com;", "proxy_pass http://127.0.0.1:8082;", "Upgrade $http_upgrade", "proxy_read_timeout 3600s", "location = / { return 302 https://mail.example.com; }", "location = /welcome/ { return 302 https://mail.example.com; }"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("nginx contents are missing %q", expected)
+		}
+	}
+}
+
+func TestValidPortalURL(t *testing.T) {
+	for _, value := range []string{"", "https://mail.example.com", "http://mail.example.com/workspace"} {
+		if err := validPortalURL(value); err != nil {
+			t.Fatalf("valid portal URL %q was rejected: %v", value, err)
+		}
+	}
+	for _, value := range []string{"mail.example.com", "https://mail.example.com; return 301 https://evil.example", "https://mail.example.com/$host", "https://mail.example.com/\"quoted\""} {
+		if err := validPortalURL(value); err == nil {
+			t.Fatalf("invalid portal URL %q was accepted", value)
 		}
 	}
 }

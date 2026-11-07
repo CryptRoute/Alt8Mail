@@ -60,6 +60,7 @@ type state struct {
 	Image     string `json:"image"`
 	TLSCert   string `json:"tlsCert,omitempty"`
 	TLSKey    string `json:"tlsKey,omitempty"`
+	PortalURL string `json:"portalUrl,omitempty"`
 }
 
 type Status struct {
@@ -216,6 +217,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /status", s.auth(s.handleStatus))
+	mux.HandleFunc("GET /metrics", s.auth(s.handleMetrics))
 	mux.HandleFunc("POST /install", s.auth(s.handleInstall))
 	mux.HandleFunc("POST /start", s.auth(s.handleStart))
 	mux.HandleFunc("POST /stop", s.auth(s.handleStop))
@@ -264,6 +266,7 @@ type installRequest struct {
 	TLSCert        string `json:"tlsCert"`
 	TLSKey         string `json:"tlsKey"`
 	TLSEmail       string `json:"tlsEmail"`
+	PortalURL      string `json:"portalUrl"`
 	AutoTLS        bool   `json:"autoTls"`
 	DisableGateway bool   `json:"disableGateway"`
 }
@@ -305,6 +308,13 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	// A reinstall without new TLS fields keeps the gateway that was configured
 	// previously, so changing the public URL also updates that gateway.
 	previous, _ := s.loadState()
+	portalURL := strings.TrimSpace(opts.PortalURL)
+	if portalURL == "" {
+		portalURL = previous.PortalURL
+	}
+	if err := validPortalURL(portalURL); err != nil {
+		return Status{}, err
+	}
 	if opts.DisableGateway {
 		tlsCert, tlsKey = "", ""
 	} else if tlsCert == "" && tlsKey == "" && !opts.AutoTLS {
@@ -330,7 +340,7 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(image, secret, s.cfg.ContainerName, s.cfg.HTTPPort)), 0o640); err != nil {
 		return Status{}, err
 	}
-	st := state{PublicURL: publicURL, Image: image, TLSCert: tlsCert, TLSKey: tlsKey}
+	st := state{PublicURL: publicURL, Image: image, TLSCert: tlsCert, TLSKey: tlsKey, PortalURL: portalURL}
 	if err := s.saveState(st); err != nil {
 		return Status{}, err
 	}
@@ -492,6 +502,7 @@ func (s *Server) handleGateway(w http.ResponseWriter, r *http.Request) {
 		TLSCert   string `json:"tlsCert"`
 		TLSKey    string `json:"tlsKey"`
 		TLSEmail  string `json:"tlsEmail"`
+		PortalURL string `json:"portalUrl"`
 		AutoTLS   bool   `json:"autoTls"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&body); err != nil {
@@ -507,6 +518,13 @@ func (s *Server) handleGateway(w http.ResponseWriter, r *http.Request) {
 	st, _ := s.loadState()
 	if strings.TrimSpace(body.PublicURL) != "" {
 		st.PublicURL = strings.TrimRight(strings.TrimSpace(body.PublicURL), "/")
+	}
+	if portalURL := strings.TrimSpace(body.PortalURL); portalURL != "" {
+		st.PortalURL = portalURL
+	}
+	if err := validPortalURL(st.PortalURL); err != nil {
+		writeError(w, http.StatusBadRequest, "PORTAL_URL", err.Error())
+		return
 	}
 	if body.AutoTLS && strings.TrimSpace(body.TLSCert) == "" && strings.TrimSpace(body.TLSKey) == "" {
 		cert, key, err := s.ensureLetsEncrypt(r.Context(), st.PublicURL, body.TLSEmail)
@@ -712,7 +730,7 @@ func (s *Server) configureGateway(st state) error {
 	if err := certificateCoversHost(st.TLSCert, host); err != nil {
 		return err
 	}
-	config := nginxContents(host, st.TLSCert, st.TLSKey, s.cfg.HTTPPort, s.cfg.CertbotWebroot)
+	config := nginxContents(host, st.TLSCert, st.TLSKey, st.PortalURL, s.cfg.HTTPPort, s.cfg.CertbotWebroot)
 	if err := os.MkdirAll(filepath.Dir(s.cfg.NginxSite), 0o755); err != nil {
 		return err
 	}
@@ -839,6 +857,21 @@ func httpHealth(ctx context.Context, address string) error {
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("healthcheck returned %d", response.StatusCode)
+	}
+	return nil
+}
+
+func validPortalURL(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("the webmail portal URL must be an absolute http(s) URL")
+	}
+	if strings.ContainsAny(value, " \t\r\n;{}\"'\\$") {
+		return fmt.Errorf("the webmail portal URL contains unsupported characters")
 	}
 	return nil
 }
@@ -1011,7 +1044,17 @@ func composeContents(image, secret, container string, port int) string {
 `, image, container, port, secret)
 }
 
-func nginxContents(host, cert, key string, port int, webroot string) string {
+func nginxContents(host, cert, key, portalURL string, port int, webroot string) string {
+	rootLocations := `    location = / { return 404; }
+    location = /welcome { return 404; }
+    location = /welcome/ { return 404; }
+`
+	if portalURL != "" {
+		rootLocations = fmt.Sprintf(`    location = / { return 302 %s; }
+    location = /welcome { return 302 %s; }
+    location = /welcome/ { return 302 %s; }
+`, portalURL, portalURL, portalURL)
+	}
 	return fmt.Sprintf(`# Managed by the Alt8Mail Office Agent.
 server {
     listen 80;
@@ -1031,7 +1074,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Content-Type-Options nosniff always;
     client_max_body_size 100m;
-    location / {
+%s    location / {
         proxy_pass http://127.0.0.1:%d;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -1046,7 +1089,7 @@ server {
         proxy_send_timeout 3600s;
     }
 }
-`, host, webroot, host, cert, key, port)
+`, host, webroot, host, cert, key, rootLocations, port)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

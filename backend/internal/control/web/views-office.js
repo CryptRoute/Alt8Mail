@@ -1,5 +1,5 @@
 /* Office / OnlyOffice lifecycle and feature flag. */
-import * as ui from './ui.js?v=0.11.43-control';
+import * as ui from './ui.js?v=0.11.44-control';
 
 const esc = ui.esc;
 
@@ -127,10 +127,123 @@ export async function renderOffice(ctx) {
       <p class="form-note" style="margin-top:12px">The JWT secret is stored at <span class="mono">/etc/a8m/office-jwt-secret</span> with <span class="mono">0640 root:a8m</span>. Rotating it invalidates open editor sessions.</p>
     </div>
   </section>
+  <section class="card office-monitor-card" id="office-monitor-card" style="margin-top:16px">
+    <header class="card-head">
+      <div><h3>Office performance</h3><p>Container and host telemetry from the Office agent${settings.deploymentMode === 'remote' ? ' on the remote host' : ''}</p></div>
+      <div class="card-actions">
+        <label class="switch-field office-monitor-toggle"><span class="switch"><input type="checkbox" data-office-monitoring ${settings.monitoringEnabled ? 'checked' : ''} ${canManage ? '' : 'disabled'}><span class="switch-track"><span></span></span></span><span>Monitoring</span></label>
+        <span class="badge ${installed && running ? 'tone-good' : 'tone-neutral'}" id="office-monitor-state">${installed ? (running ? 'Live' : 'Stopped') : 'Not installed'}</span>
+      </div>
+    </header>
+    <div class="card-body" id="office-monitor-body">${ui.loadingState('Sampling Office metrics…', 3)}</div>
+  </section>
+
   <section class="card" id="office-logs-card" style="margin-top:16px" hidden>
     <header class="card-head"><div><h3>Container logs</h3><p>Last 120 lines, JWT lines redacted</p></div><button class="btn btn-secondary btn-sm" type="button" id="office-logs-close">${ui.icon('x', 13)} Close</button></header>
     <div class="card-body"><pre class="code-block office-logs" id="office-logs-output">Loading…</pre></div>
   </section>`;
+
+  const monitorHistory = { cpu: [], memory: [], disk: [] };
+  let monitorTimer = null;
+  const pushMetric = (values, value) => {
+    values.push(Number(value) || 0);
+    if (values.length > 24) values.shift();
+  };
+  function renderOfficeMonitor(payload) {
+    const body = document.getElementById('office-monitor-body');
+    const state = document.getElementById('office-monitor-state');
+    if (!body) return;
+    if (state) {
+      if (!settings.monitoringEnabled) {
+        state.className = 'badge tone-neutral';
+        state.textContent = 'Off';
+      } else {
+        state.className = `badge ${payload.metrics?.running ? 'tone-good' : 'tone-neutral'}`;
+        state.textContent = payload.metrics?.running ? 'Live' : (installed ? 'Stopped' : 'Not installed');
+      }
+    }
+    if (!settings.monitoringEnabled) {
+      body.innerHTML = `<div class="notice tone-info">${ui.icon('activity', 16)}<div><strong>Monitoring is off</strong><p>Turn on Office monitoring to collect container and host performance here and on the dashboard.</p></div></div>`;
+      return;
+    }
+    if (!installed) {
+      body.innerHTML = ui.emptyState('Office is not installed', 'Install or reconfigure Office, then monitoring will begin automatically.', '', 'activity');
+      return;
+    }
+    if (!running) {
+      body.innerHTML = `<div class="notice tone-warning">${ui.icon('alert', 16)}<div><strong>Container is stopped</strong><p>Start Office from the lifecycle panel to resume live metrics.</p></div></div>`;
+      return;
+    }
+    if (payload.error) {
+      body.innerHTML = ui.inlineNotice('warning', 'Metrics are temporarily unavailable', payload.error);
+      return;
+    }
+    const metrics = payload.metrics;
+    if (!metrics) {
+      body.innerHTML = ui.loadingState('Sampling Office metrics…', 3);
+      return;
+    }
+    pushMetric(monitorHistory.cpu, metrics.cpuPercent);
+    pushMetric(monitorHistory.memory, metrics.memoryPercent);
+    pushMetric(monitorHistory.disk, metrics.diskPercent);
+    const meter = (label, value, detail, history, iconName) => `<div class="host-metric">${ui.meter({ label, value, detail, iconName })}${history.length > 1 ? ui.sparkline(history, { width: 220, height: 30, label: `${label} trend` }) : ''}</div>`;
+    body.innerHTML = `
+      <div class="host-metrics office-metrics">
+        ${meter('Container CPU', metrics.cpuPercent, `${ui.num(metrics.cpuPercent)}% of one core · ${ui.num(metrics.hostCpus)} host CPU${Number(metrics.hostCpus) === 1 ? '' : 's'}`, monitorHistory.cpu, 'activity')}
+        ${meter('Container memory', metrics.memoryPercent, `${ui.bytes(metrics.memoryUsedBytes)} of ${ui.bytes(metrics.memoryLimitBytes)}`, monitorHistory.memory, 'activity')}
+        ${meter('Host memory', metrics.hostMemoryPercent, `${ui.bytes(metrics.hostMemoryUsedBytes)} of ${ui.bytes(metrics.hostMemoryTotalBytes)}`, [], 'server')}
+        ${meter('Root disk', metrics.diskPercent, `${ui.bytes(metrics.diskUsedBytes)} of ${ui.bytes(metrics.diskTotalBytes)}`, monitorHistory.disk, 'database')}
+        ${metrics.dataDiskTotalBytes ? meter('Office data disk', metrics.dataDiskPercent, `${ui.bytes(metrics.dataDiskUsedBytes)} of ${ui.bytes(metrics.dataDiskTotalBytes)}`, [], 'database') : ''}
+      </div>
+      <div class="host-summary office-metrics-summary">
+        <span>Network <b>${ui.bytes(metrics.networkRxBytes)} RX</b> · ${ui.bytes(metrics.networkTxBytes)} TX</span>
+        <span>Block I/O <b>${ui.bytes(metrics.blockReadBytes)} read</b> · ${ui.bytes(metrics.blockWriteBytes)} written</span>
+        <span>PIDs <b>${ui.num(metrics.pids)}</b></span>
+        <span>Load <b>${Number(metrics.hostLoad1 || 0).toFixed(2)} / ${Number(metrics.hostLoad5 || 0).toFixed(2)} / ${Number(metrics.hostLoad15 || 0).toFixed(2)}</b></span>
+        <span>Uptime <b>${esc(ui.duration(metrics.uptimeSeconds))}</b></span>
+        <span class="mono">${esc(metrics.container || 'a8m-office')}</span>
+      </div>
+      <p class="form-note office-monitor-foot">${settings.deploymentMode === 'remote' ? 'Remote Office host' : 'Local Office host'} · sampled ${metrics.checkedAt ? esc(new Date(metrics.checkedAt).toLocaleTimeString()) : 'just now'} · refreshes every 12 seconds while this page is open.</p>`;
+  }
+  async function loadOfficeMonitor() {
+    if (!ctx.isCurrent() || !settings.monitoringEnabled || !installed || !running) return;
+    if (document.visibilityState !== 'visible') return;
+    try {
+      const payload = await ctx.api('/control/api/office/metrics');
+      if (ctx.isCurrent()) renderOfficeMonitor(payload);
+    } catch (error) {
+      if (!ctx.isCurrent()) return;
+      const body = document.getElementById('office-monitor-body');
+      if (body) body.innerHTML = ui.inlineNotice('warning', 'Metrics are temporarily unavailable', error.message || String(error));
+    }
+  }
+  function syncOfficeMonitorPolling() {
+    if (monitorTimer) { clearInterval(monitorTimer); monitorTimer = null; }
+    if (!settings.monitoringEnabled || !installed || !running) {
+      renderOfficeMonitor({ enabled: settings.monitoringEnabled, metrics: null });
+      return;
+    }
+    loadOfficeMonitor();
+    monitorTimer = setInterval(() => { if (ctx.isCurrent() && document.visibilityState === 'visible') loadOfficeMonitor(); }, 12000);
+  }
+  ctx.onCleanup(() => { if (monitorTimer) clearInterval(monitorTimer); });
+  document.querySelector('[data-office-monitoring]')?.addEventListener('change', async (event) => {
+    const input = event.currentTarget;
+    const next = input.checked;
+    input.disabled = true;
+    try {
+      await ctx.api('/control/api/office', { method: 'PATCH', body: { monitoringEnabled: next } });
+      settings.monitoringEnabled = next;
+      ui.toast(next ? 'Office monitoring enabled.' : 'Office monitoring disabled.', next ? 'good' : 'warning');
+      syncOfficeMonitorPolling();
+    } catch (error) {
+      input.checked = !next;
+      ui.toast(error.message || 'Could not change Office monitoring.', 'critical');
+    } finally {
+      input.disabled = !canManage;
+    }
+  });
+  syncOfficeMonitorPolling();
 
   const reload = () => renderOffice(ctx);
   document.getElementById('office-refresh')?.addEventListener('click', reload);

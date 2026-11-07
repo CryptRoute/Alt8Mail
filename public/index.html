@@ -10,13 +10,14 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.26.0">
-<link rel="stylesheet" href="/features.css?v=0.26.0">
-<link rel="stylesheet" href="/workspace.css?v=0.26.0">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.26.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.26.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.26.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.26.0">
+<link rel="stylesheet" href="/styles.css?v=0.27.0">
+<link rel="stylesheet" href="/features.css?v=0.27.0">
+<link rel="stylesheet" href="/workspace.css?v=0.27.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.27.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.27.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.27.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.27.0">
+<link rel="stylesheet" href="/selects.css?v=0.27.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -55,6 +56,11 @@
     <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.5 21V4.5M5.5 5h11l-1.5 3 1.5 3h-11"/></symbol>
     <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 3.5h6l-1 6 4.5 3.5v2H5.5v-2L10 9.5Z"/><path d="M12 15v5.5"/></symbol>
     <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3.5h7l5 5V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19Z"/><path d="M13 3.5V9h5"/></symbol>
+    <symbol id="i-office-word" viewBox="0 0 24 24"><path d="M6 3.5h7l5 5V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19Z"/><path d="M13 3.5V9h5"/><path d="m9 12.2 1 5 1.7-3.4 1.7 3.4 1-5"/></symbol>
+    <symbol id="i-office-sheet" viewBox="0 0 24 24"><path d="M6 3.5h7l5 5V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19Z"/><path d="M13 3.5V9h5"/><path d="M8.5 12.5h7v5h-7Z"/><path d="M8.5 15h7M12 12.5v5"/></symbol>
+    <symbol id="i-office-slides" viewBox="0 0 24 24"><path d="M6 3.5h7l5 5V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19Z"/><path d="M13 3.5V9h5"/><rect x="8.2" y="12" width="7.6" height="5.2" rx="1"/><path d="m11 13.3 2.2 1.3-2.2 1.3Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-window-maximize" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></symbol>
+    <symbol id="i-window-restore" viewBox="0 0 24 24"><rect x="7.5" y="9.5" width="10" height="10" rx="1.6"/><path d="M10 7V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-1"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><circle cx="12" cy="8" r=".9" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5"/><circle cx="12" cy="16.2" r=".9" fill="currentColor" stroke="none"/></symbol>
@@ -372,6 +378,15 @@
         <svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg><span class="rail-label" data-i18n="nav.files">Cabinet</span>
       </button>
       <div class="rail-rule" aria-hidden="true"></div>
+      <button class="rail-btn has-label rail-office-btn rail-office-word" data-office-hub="word" type="button" aria-label="Word documents" title="Word documents">
+        <svg class="icon" aria-hidden="true"><use href="#i-office-word"/></svg><span class="rail-label">Docs</span>
+      </button>
+      <button class="rail-btn has-label rail-office-btn rail-office-sheet" data-office-hub="cell" type="button" aria-label="Excel spreadsheets" title="Excel spreadsheets">
+        <svg class="icon" aria-hidden="true"><use href="#i-office-sheet"/></svg><span class="rail-label">Sheets</span>
+      </button>
+      <button class="rail-btn has-label rail-office-btn rail-office-slide" data-office-hub="slide" type="button" aria-label="PowerPoint presentations" title="PowerPoint presentations">
+        <svg class="icon" aria-hidden="true"><use href="#i-office-slides"/></svg><span class="rail-label">Slides</span>
+      </button>
       <button class="rail-btn has-label rail-addon-btn" id="railAddons" type="button" aria-label="Add-on" title="Open Add-ons">
         <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span class="rail-label">Add-on</span>
       </button>
@@ -1515,7 +1530,7 @@
                   <div class="settings-block">
                     <details class="script-details">
                       <summary>
-                        <span><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>Generated Sieve script</span>
+                        <span><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg>Generated Rule script</span>
                         <span class="policy-chip">Managed by Alt8Mail</span>
                       </summary>
                       <pre id="sieveScript" class="sieve-script">Loading…</pre>
@@ -1837,6 +1852,10 @@
     </main>
   </div>
 
+  <div class="compose-dock office-dock" id="officeDock" hidden>
+    <div class="compose-dock-tabs" id="officeDockTabs"></div>
+  </div>
+
   <div class="compose-dock" id="composeDock" hidden>
     <div class="compose-dock-tabs" id="composeDockTabs"></div>
   </div>
@@ -1941,6 +1960,10 @@
   <button data-new="message" type="button"><svg class="icon" aria-hidden="true"><use href="#i-compose"/></svg>New mail</button>
   <button data-new="event" type="button"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg>New event</button>
   <button data-new="sticky" type="button"><span class="newmenu-emoji" aria-hidden="true">📌</span>New sticky note</button>
+  <div class="newmenu-rule" aria-hidden="true"></div>
+  <button data-new="office-docx" type="button"><svg class="icon office-menu-word" aria-hidden="true"><use href="#i-office-word"/></svg>New Word document</button>
+  <button data-new="office-xlsx" type="button"><svg class="icon office-menu-sheet" aria-hidden="true"><use href="#i-office-sheet"/></svg>New Excel spreadsheet</button>
+  <button data-new="office-pptx" type="button"><svg class="icon office-menu-slide" aria-hidden="true"><use href="#i-office-slides"/></svg>New PowerPoint presentation</button>
 </div>
 
 <div class="cmd-newmenu" id="moveMenu" hidden></div>
@@ -3087,7 +3110,11 @@
       </div>
       <div class="office-editor-actions">
         <button class="btn-secondary btn-small" id="officeEditorVersions" type="button"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg>Versions</button>
-        <button class="btn-secondary btn-small" id="officeEditorClose" type="button"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>Close</button>
+        <div class="office-window-controls" role="group" aria-label="Window controls">
+          <button class="icon-btn office-window-btn" id="officeEditorMinimize" type="button" aria-label="Minimize to dock" title="Minimize to dock"><svg class="icon" aria-hidden="true"><use href="#i-minimize"/></svg></button>
+          <button class="icon-btn office-window-btn" id="officeEditorMaximize" type="button" aria-label="Maximize editor" title="Maximize editor"><svg class="icon" aria-hidden="true"><use href="#i-window-maximize"/></svg></button>
+          <button class="icon-btn office-window-btn office-window-close" id="officeEditorClose" type="button" aria-label="Close editor" title="Close editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+        </div>
       </div>
     </header>
     <div class="office-editor-body">
@@ -3096,25 +3123,58 @@
   </div>
 </div>
 
+<div class="overlay office-hub-overlay" id="officeHubOverlay" hidden>
+  <div class="office-hub-window" role="dialog" aria-modal="true" aria-labelledby="officeHubTitle">
+    <header class="office-hub-head" id="officeHubHead">
+      <div class="office-hub-brand">
+        <span class="office-hub-mark" id="officeHubMark"><svg class="icon" aria-hidden="true"><use href="#i-office-word"/></svg></span>
+        <div><h2 id="officeHubTitle">Word documents</h2><p id="officeHubSubtitle">Create, open and return to your workspace documents.</p></div>
+      </div>
+      <div class="office-hub-actions">
+        <span class="office-hub-grip" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-more"/></svg></span>
+        <button class="icon-btn" id="officeHubClose" type="button" aria-label="Close Office home"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+    </header>
+    <div class="office-hub-body" id="officeHubBody"></div>
+  </div>
+</div>
+
 <div class="overlay" id="officeNewOverlay" hidden>
   <div class="dialog office-new-dialog" role="dialog" aria-modal="true" aria-labelledby="officeNewTitle">
     <div class="dialog-head">
-      <div><h2 id="officeNewTitle">New Office document</h2><p class="dialog-note">Create a blank document in this Cabinet folder.</p></div>
+      <div><h2 id="officeNewTitle">New Office document</h2><p class="dialog-note" id="officeNewIntro">Create a blank document in this Cabinet folder.</p></div>
       <button class="icon-btn" id="officeNewClose" type="button" aria-label="Close new document dialog"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
     </div>
     <div class="dialog-body">
       <label class="form-field"><span>Name</span><input id="officeNewName" maxlength="180" placeholder="Untitled document" autocomplete="off"></label>
-      <label class="form-field"><span>Type</span><select id="officeNewType">
-        <option value="docx">Word document (.docx)</option>
-        <option value="xlsx">Excel spreadsheet (.xlsx)</option>
-        <option value="pptx">PowerPoint presentation (.pptx)</option>
-      </select></label>
+      <div class="form-field office-type-field"><span>Type</span>
+        <div class="office-type-grid" id="officeNewTypeGroup" role="radiogroup" aria-label="Document type">
+          <label class="office-type-option is-selected" data-office-type-option="docx">
+            <input type="radio" name="officeNewType" value="docx" checked>
+            <span class="office-type-option-icon office-type-word"><svg class="icon" aria-hidden="true"><use href="#i-office-word"/></svg></span>
+            <span class="office-type-option-copy"><strong>Document</strong><small>Word · .docx</small></span>
+            <span class="office-type-option-check"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>
+          </label>
+          <label class="office-type-option" data-office-type-option="xlsx">
+            <input type="radio" name="officeNewType" value="xlsx">
+            <span class="office-type-option-icon office-type-sheet"><svg class="icon" aria-hidden="true"><use href="#i-office-sheet"/></svg></span>
+            <span class="office-type-option-copy"><strong>Spreadsheet</strong><small>Excel · .xlsx</small></span>
+            <span class="office-type-option-check"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>
+          </label>
+          <label class="office-type-option" data-office-type-option="pptx">
+            <input type="radio" name="officeNewType" value="pptx">
+            <span class="office-type-option-icon office-type-slide"><svg class="icon" aria-hidden="true"><use href="#i-office-slides"/></svg></span>
+            <span class="office-type-option-copy"><strong>Presentation</strong><small>PowerPoint · .pptx</small></span>
+            <span class="office-type-option-check"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>
+          </label>
+        </div>
+      </div>
       <p class="dialog-note" id="officeNewFolderNote">Saving to All files.</p>
       <p class="onboarding-inline-error" id="officeNewError" hidden></p>
     </div>
     <div class="dialog-foot">
       <button class="btn-secondary" id="officeNewCancel" type="button">Cancel</button>
-      <button class="btn-primary" id="officeNewCreate" type="button">Create and open</button>
+      <button class="btn-primary" id="officeNewCreate" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Create and open</button>
     </div>
   </div>
 </div>
@@ -3145,6 +3205,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.26.0"></script>
+<script type="module" src="/app.js?v=0.27.0"></script>
 </body>
 </html>

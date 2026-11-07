@@ -6,7 +6,40 @@
   var fileId = params.get("file") || "";
   var shareToken = params.get("share") || "";
   var theme = params.get("theme") === "dark" ? "theme-dark" : "theme-light";
+  var loadedTheme = theme;
   var editor = null;
+  var documentDirty = false;
+  var pendingThemeReload = false;
+  function applyHostTheme() {
+    document.documentElement.setAttribute("data-theme", theme === "theme-dark" ? "dark" : "light");
+  }
+  function reloadWithTheme() {
+    pendingThemeReload = false;
+    var next = new URL(window.location.href);
+    next.searchParams.set("theme", theme === "theme-dark" ? "dark" : "light");
+    window.location.replace(next.toString());
+  }
+  function applyEditorTheme() {
+    if (!editor) return;
+    if (typeof editor.setTheme === "function") {
+      try { editor.setTheme(theme); return; } catch (_error) {}
+    }
+    // The Docs API does not expose a reliable runtime theme switch. Reload the
+    // editor host only after the current document reports a clean saved state.
+    if (documentDirty) pendingThemeReload = true;
+    else reloadWithTheme();
+  }
+  applyHostTheme();
+  window.addEventListener("message", function (event) {
+    if (event.origin !== window.location.origin) return;
+    var data = event.data || {};
+    if (data.type !== "a8m-office-theme") return;
+    var nextTheme = data.theme === "dark" ? "theme-dark" : "theme-light";
+    if (nextTheme === theme) return;
+    theme = nextTheme;
+    applyHostTheme();
+    applyEditorTheme();
+  });
   var state = document.getElementById("state");
   var spinner = document.getElementById("spinner");
   var stateMark = document.getElementById("stateMark");
@@ -70,6 +103,7 @@
       : "/api/office/documents/" + encodeURIComponent(fileId) + "/open";
     var headers = { "Content-Type": "application/json" };
     if (!shareToken) headers["X-CSRF-Token"] = csrfToken();
+    loadedTheme = theme;
     var response;
     try {
       response = await fetch(endpoint, {
@@ -105,7 +139,6 @@
     }
     state.hidden = true;
     try {
-      var documentDirty = false;
       data.config.events = Object.assign({}, data.config.events || {}, {
         onDocumentStateChange: function (event) {
           if (event && event.data) {
@@ -115,10 +148,12 @@
           if (documentDirty) {
             documentDirty = false;
             notifyParent("a8m-office-saved", fileId || shareToken);
+            if (pendingThemeReload) reloadWithTheme();
           }
         }
       });
       editor = new window.DocsAPI.DocEditor("editor", data.config);
+      if (theme !== loadedTheme) applyEditorTheme();
       notifyParent("a8m-office-ready", fileId || shareToken);
       if (!shareToken && data.aiEnabled && typeof window.Alt8OfficeAI === "function") {
         window.Alt8OfficeAI(editor);

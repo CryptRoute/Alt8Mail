@@ -23,6 +23,10 @@ func (s *Server) registerDashboardRoutes(mux *http.ServeMux) {
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	ctx := r.Context()
 	host := s.probe.hostMetrics(ctx, false)
+	officeMonitor := officeMonitorPayload{}
+	if settings, ok := s.officeMonitoringEnabled(ctx); ok {
+		officeMonitor = s.officeMonitor(ctx, settings, 6*time.Second)
+	}
 	services := s.probe.serviceStatuses(ctx, false)
 	queue, _ := s.probe.queue(ctx, false)
 	syncRun, _ := s.latestConfigSync(ctx)
@@ -134,7 +138,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, sess *s
 	writeJSON(w, http.StatusOK, map[string]any{
 		"traffic": traffic, "bounces": bounces, "deferrals": deferrals,
 		"topDomains": topDomains, "volume": volume, "counts": counts,
-		"host": host, "hostHistory": s.probe.hostHistory(), "queueMessages": queue,
+		"host": host, "hostHistory": s.probe.hostHistory(), "officeMonitor": officeMonitor, "queueMessages": queue,
 		"services": services, "configSync": syncRun, "recentAudit": recentAudit,
 		"certificates": certificates, "deliverabilityHealth": s.deliverabilityHealth(ctx),
 		"securityReports": s.securityReportSummary(ctx),

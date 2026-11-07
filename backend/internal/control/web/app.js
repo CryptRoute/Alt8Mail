@@ -1,5 +1,5 @@
 /* Alt8Mail System Control — application shell, authentication and core views. */
-import * as ui from './ui.js?v=0.11.43-control';
+import * as ui from './ui.js?v=0.11.44-control';
 import {
   renderDomains, renderDomainDetail, renderMailboxes, renderMailboxDetail,
   renderAliases, renderImports,
@@ -14,8 +14,8 @@ import { renderSecurityReports } from './views-security-reports.js';
 import { renderWebPush } from './views-push.js';
 import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
-import { renderAddons } from './views-addons.js?v=0.11.43-control';
-import { renderOffice } from './views-office.js?v=0.11.43-control';
+import { renderAddons } from './views-addons.js?v=0.11.44-control';
+import { renderOffice } from './views-office.js?v=0.11.44-control';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
@@ -1066,6 +1066,8 @@ async function renderDashboard(ctx, params, query) {
   const recentAudit = Array.isArray(data.recentAudit) ? data.recentAudit : [];
   const deliverability = data.deliverabilityHealth || {};
   const deliverabilityIps = Array.isArray(deliverability.ips) ? deliverability.ips : [];
+  const officeMonitor = data.officeMonitor || {};
+  const officeMetrics = officeMonitor.metrics || null;
   const securityReports = data.securityReports || {};
   const pendingReports = Number(securityReports.counts?.pending || 0);
   const latestReport = Array.isArray(securityReports.recent) ? securityReports.recent[0] : null;
@@ -1143,6 +1145,28 @@ async function renderDashboard(ctx, params, query) {
         </div>
       </section>
     </div>
+
+    ${officeMonitor.enabled ? `<section class="card mt-4" id="dashboard-office-monitor">
+      <header class="card-head"><div><h3>Office Document Server</h3><p>${officeMonitor.deploymentMode === 'remote' ? 'Remote Office host' : 'Local Office host'} · container and host telemetry</p></div><div class="card-actions"><span class="badge ${officeMetrics?.running ? 'tone-good' : 'tone-neutral'}">${officeMetrics?.running ? 'Live' : 'Stopped'}</span><a class="btn btn-ghost btn-sm" href="#/office">Open Office ${ui.icon('arrow-up-right', 12)}</a></div></header>
+      <div class="card-body">
+        ${officeMonitor.error ? ui.inlineNotice('warning', 'Office metrics are unavailable', officeMonitor.error, `<a class="btn btn-secondary btn-sm" href="#/office">${ui.icon('activity', 13)} Office monitoring</a>`) : officeMetrics ? `
+          <div class="host-metrics">
+            <div class="host-metric">${ui.meter({ label: 'Container CPU', value: officeMetrics.cpuPercent, detail: `${ui.num(officeMetrics.cpuPercent)}% of one core` })}</div>
+            <div class="host-metric">${ui.meter({ label: 'Container memory', value: officeMetrics.memoryPercent, detail: `${ui.bytes(officeMetrics.memoryUsedBytes)} of ${ui.bytes(officeMetrics.memoryLimitBytes)}` })}</div>
+            <div class="host-metric">${ui.meter({ label: 'Host memory', value: officeMetrics.hostMemoryPercent, detail: `${ui.bytes(officeMetrics.hostMemoryUsedBytes)} of ${ui.bytes(officeMetrics.hostMemoryTotalBytes)}` })}</div>
+            <div class="host-metric">${ui.meter({ label: 'Root disk', value: officeMetrics.diskPercent, detail: `${ui.bytes(officeMetrics.diskUsedBytes)} of ${ui.bytes(officeMetrics.diskTotalBytes)}` })}</div>
+            ${officeMetrics.dataDiskTotalBytes ? `<div class="host-metric">${ui.meter({ label: 'Office data disk', value: officeMetrics.dataDiskPercent, detail: `${ui.bytes(officeMetrics.dataDiskUsedBytes)} of ${ui.bytes(officeMetrics.dataDiskTotalBytes)}` })}</div>` : ''}
+          </div>
+          <div class="host-summary">
+            <span>Network <b>${ui.bytes(officeMetrics.networkRxBytes)} RX</b> · ${ui.bytes(officeMetrics.networkTxBytes)} TX</span>
+            <span>PIDs <b>${ui.num(officeMetrics.pids)}</b></span>
+            <span>Load <b>${Number(officeMetrics.hostLoad1 || 0).toFixed(2)} / ${Number(officeMetrics.hostLoad5 || 0).toFixed(2)} / ${Number(officeMetrics.hostLoad15 || 0).toFixed(2)}</b></span>
+            <span>Uptime <b>${esc(fmt.duration(officeMetrics.uptimeSeconds))}</b></span>
+          </div>
+          <p class="form-note" style="margin-top:10px">Sampled ${officeMetrics.checkedAt ? esc(fmt.timeAgo(officeMetrics.checkedAt)) : 'just now'} · <span class="mono">${esc(officeMetrics.container || 'a8m-office')}</span></p>
+        ` : ui.loadingState('Sampling Office metrics…', 2)}
+      </div>
+    </section>` : ''}
 
     <div class="grid grid-main mt-4">
       <section class="card">

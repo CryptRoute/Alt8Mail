@@ -18,6 +18,7 @@ import (
 type officeSettings struct {
 	ID                  string     `json:"id"`
 	Enabled             bool       `json:"enabled"`
+	MonitoringEnabled   bool       `json:"monitoringEnabled"`
 	DeploymentMode      string     `json:"deploymentMode"`
 	PublicURL           string     `json:"publicUrl"`
 	Status              string     `json:"status"`
@@ -82,19 +83,20 @@ func (s *Server) registerOfficeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /control/api/office/rotate-jwt", s.require("server.manage", s.handleOfficeAction("rotate-jwt")))
 	mux.HandleFunc("POST /control/api/office/gateway", s.require("server.manage", s.handleOfficeGateway))
 	mux.HandleFunc("GET /control/api/office/logs", s.require("server.read", s.handleOfficeLogs))
+	mux.HandleFunc("GET /control/api/office/metrics", s.require("server.read", s.handleOfficeMetrics))
 }
 
 func (s *Server) officeSettings(ctx context.Context) (officeSettings, error) {
 	var settings officeSettings
 	err := s.db.QueryRow(ctx, `
-		SELECT id, enabled, deployment_mode, public_url, status, container_status, version,
+		SELECT id, enabled, monitoring_enabled, deployment_mode, public_url, status, container_status, version,
 		       image, gateway_status, gateway_host, last_error, last_health_at,
 		       COALESCE(remote_host,''), COALESCE(remote_port,22), COALESCE(remote_user,'root'),
 		       COALESCE(remote_auth,'key'), COALESCE(remote_secret,''), COALESCE(remote_passphrase,''),
 		       COALESCE(remote_host_key,''), COALESCE(remote_public_ip,''), COALESCE(remote_agent_token,''),
 		       COALESCE(remote_agent_path,'')
 		FROM public.office_settings WHERE id = 'default'
-	`).Scan(&settings.ID, &settings.Enabled, &settings.DeploymentMode, &settings.PublicURL,
+	`).Scan(&settings.ID, &settings.Enabled, &settings.MonitoringEnabled, &settings.DeploymentMode, &settings.PublicURL,
 		&settings.Status, &settings.ContainerStatus, &settings.Version, &settings.Image,
 		&settings.GatewayStatus, &settings.GatewayHost, &settings.LastError, &settings.LastHealthAt,
 		&settings.RemoteHost, &settings.RemotePort, &settings.RemoteUser, &settings.RemoteAuth,
@@ -103,6 +105,16 @@ func (s *Server) officeSettings(ctx context.Context) (officeSettings, error) {
 	settings.RemoteHasSecret = strings.TrimSpace(settings.RemoteSecret) != ""
 	settings.RemoteHasAgentToken = strings.TrimSpace(settings.RemoteAgentToken) != ""
 	return settings, err
+}
+
+func (s *Server) officePortalURL(ctx context.Context) string {
+	if value := strings.TrimSpace(s.cfg.WebmailURL); value != "" {
+		return strings.TrimRight(value, "/")
+	}
+	if host := strings.TrimSpace(s.mailHostname(ctx)); host != "" {
+		return "https://" + host
+	}
+	return ""
 }
 
 func (s *Server) handleOfficeGet(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
@@ -254,14 +266,15 @@ func (s *Server) handleOfficePreflight(w http.ResponseWriter, r *http.Request, s
 
 func (s *Server) handleOfficePatch(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	var body struct {
-		Enabled   *bool   `json:"enabled"`
-		PublicURL *string `json:"publicUrl"`
+		Enabled           *bool   `json:"enabled"`
+		PublicURL         *string `json:"publicUrl"`
+		MonitoringEnabled *bool   `json:"monitoringEnabled"`
 	}
 	if err := decodeJSON(w, r, &body, 16<<10); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 		return
 	}
-	if body.Enabled == nil && body.PublicURL == nil {
+	if body.Enabled == nil && body.PublicURL == nil && body.MonitoringEnabled == nil {
 		writeError(w, http.StatusBadRequest, "OFFICE", "Choose an office setting to change")
 		return
 	}
@@ -282,7 +295,11 @@ func (s *Server) handleOfficePatch(w http.ResponseWriter, r *http.Request, sess 
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
-	if enabled {
+	monitoringEnabled := settings.MonitoringEnabled
+	if body.MonitoringEnabled != nil {
+		monitoringEnabled = *body.MonitoringEnabled
+	}
+	if enabled && (body.Enabled != nil || body.PublicURL != nil) {
 		agent, err := s.officeAgentStatus(r.Context())
 		if err != nil {
 			writeError(w, http.StatusConflict, "OFFICE_AGENT", "The Office agent is not reachable; install and start Office first")
@@ -331,15 +348,19 @@ func (s *Server) handleOfficePatch(w http.ResponseWriter, r *http.Request, sess 
 	}
 	_, err = s.db.Exec(r.Context(), `
 		UPDATE public.office_settings
-		SET enabled = $1, public_url = $2, updated_at = now()
+		SET enabled = $1, public_url = $2, monitoring_enabled = $3, updated_at = now()
 		WHERE id = 'default'
-	`, enabled, publicURL)
+	`, enabled, publicURL, monitoringEnabled)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "OFFICE", "Could not update office settings")
 		return
 	}
-	s.actorAudit(r, sess, "office.policy", "office", fmt.Sprintf("Office %s for webmail", map[bool]string{true: "enabled", false: "disabled"}[enabled]), map[string]any{"enabled": enabled, "publicUrl": publicURL})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": enabled, "publicUrl": publicURL})
+	if body.MonitoringEnabled != nil && body.Enabled == nil && body.PublicURL == nil {
+		s.actorAudit(r, sess, "office.monitoring", "office", fmt.Sprintf("Office monitoring %s", map[bool]string{true: "enabled", false: "disabled"}[monitoringEnabled]), map[string]any{"monitoringEnabled": monitoringEnabled})
+	} else {
+		s.actorAudit(r, sess, "office.policy", "office", fmt.Sprintf("Office %s for webmail", map[bool]string{true: "enabled", false: "disabled"}[enabled]), map[string]any{"enabled": enabled, "publicUrl": publicURL, "monitoringEnabled": monitoringEnabled})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": enabled, "publicUrl": publicURL, "monitoringEnabled": monitoringEnabled})
 }
 
 func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
@@ -524,7 +545,7 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 		"publicUrl": body.PublicURL, "image": image,
 		"tlsCert": body.TLSCert, "tlsKey": body.TLSKey,
 		"autoTls": body.TLSMode == "auto", "tlsEmail": body.TLSEmail,
-		"disableGateway": body.TLSMode == "none",
+		"disableGateway": body.TLSMode == "none", "portalUrl": s.officePortalURL(r.Context()),
 	}
 	agent, err := s.officeAgentRequest(r.Context(), http.MethodPost, "/install", agentBody, 30*time.Minute)
 	if err != nil {
@@ -718,6 +739,7 @@ func (s *Server) handleOfficeGateway(w http.ResponseWriter, r *http.Request, ses
 	agentBody := map[string]any{
 		"publicUrl": body.PublicURL, "tlsCert": body.TLSCert, "tlsKey": body.TLSKey,
 		"autoTls": body.TLSMode == "auto", "tlsEmail": body.TLSEmail,
+		"portalUrl": s.officePortalURL(r.Context()),
 	}
 	agent, err := s.officeAgentRequest(r.Context(), http.MethodPost, "/gateway", agentBody, 5*time.Minute)
 	if err != nil {

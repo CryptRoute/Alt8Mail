@@ -2041,3 +2041,139 @@ body.office-editor-open { overflow: hidden; }
 .share-internal-empty { padding: 8px 2px; color: var(--text-3); font-size: 0.625rem; }
 .share-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 12px; color: var(--text-3); font-size: 0.5625rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .share-divider::before, .share-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+/* ============================================================
+   Alt8Mail Office — window controls, dock, launcher and hub
+   ============================================================ */
+.office-editor-overlay.is-maximized { padding: 0; }
+.office-editor-overlay.is-maximized .office-editor-shell { border: 0; border-radius: 0; }
+.office-window-controls { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.office-window-btn { width: 30px; height: 28px; border-radius: 7px; color: var(--text-2); }
+.office-window-btn:hover { background: var(--surface-3); color: var(--text); }
+.office-window-close:hover { background: var(--danger-soft); color: var(--danger); }
+.office-window-btn svg { width: 15px; height: 15px; }
+
+.office-dock { background: color-mix(in srgb, var(--accent) 7%, var(--surface-2)); }
+.office-tab { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
+.office-tab .compose-tab-icon svg { width: 15px; height: 15px; }
+.office-tab .office-tab-kind { color: var(--text-3); }
+.office-tab.is-minimized .office-tab-kind { color: rgba(255,255,255,.82); }
+.office-tab.is-minimized .office-tab-icon svg { color: #fff; }
+.office-tab-close { flex: none; }
+
+.rail-office-btn .icon { transition: transform .16s ease, color .16s ease; }
+.rail-office-word .icon { color: #2b579a; }
+.rail-office-sheet .icon { color: #217346; }
+.rail-office-slide .icon { color: #c34624; }
+.rail-office-btn:hover .icon { transform: translateY(-1px) scale(1.04); }
+:root[data-theme="dark"] .rail-office-word .icon { color: #7fb0ee; }
+:root[data-theme="dark"] .rail-office-sheet .icon { color: #6fcf9f; }
+:root[data-theme="dark"] .rail-office-slide .icon { color: #ffad8f; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .rail-office-word .icon { color: #7fb0ee; }
+  :root:not([data-theme="light"]) .rail-office-sheet .icon { color: #6fcf9f; }
+  :root:not([data-theme="light"]) .rail-office-slide .icon { color: #ffad8f; }
+}
+.newmenu-rule { height: 1px; margin: 5px 8px; background: var(--border); }
+#newMenu { width: 232px; }
+.cmd-newmenu .office-menu-word { color: #2b579a; }
+.cmd-newmenu .office-menu-sheet { color: #217346; }
+.cmd-newmenu .office-menu-slide { color: #c34624; }
+
+.office-hub-overlay { z-index: 1200; padding: 24px; align-items: center; justify-content: center; background: color-mix(in srgb, #06101d 64%, transparent); backdrop-filter: blur(5px); }
+.office-hub-window { width: min(980px, calc(100vw - 32px)); max-height: min(820px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--raised-border); border-radius: 20px; background: var(--surface); box-shadow: 0 30px 90px rgba(0,0,0,.34); transform: translate(0,0); }
+.office-hub-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 11%, var(--surface)), var(--surface) 58%); cursor: grab; user-select: none; touch-action: none; }
+.office-hub-head:active { cursor: grabbing; }
+.office-hub-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.office-hub-mark { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--accent-soft); color: var(--accent-ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent); }
+.office-hub-mark svg { width: 21px; height: 21px; }
+.office-hub-brand > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.office-hub-brand h2 { margin: 0; font-family: var(--font-display); font-size: 1.05rem; font-weight: 650; letter-spacing: -.015em; }
+.office-hub-brand p { margin: 0; color: var(--text-3); font-size: .65rem; }
+.office-hub-actions { display: flex; align-items: center; gap: 7px; flex: none; }
+.office-hub-grip { display: grid; place-items: center; width: 26px; height: 26px; color: var(--text-3); }
+.office-hub-grip svg { width: 15px; height: 15px; }
+.office-hub-body { flex: 1; min-height: 0; overflow: auto; }
+.office-hub-hero { padding: 28px 28px 24px; border-bottom: 1px solid var(--border); background: radial-gradient(90% 140% at 12% 0%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 62%); }
+.office-hub-kicker { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-ink); font-size: .55rem; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
+.office-hub-hero h1 { margin: 8px 0 5px; font-family: var(--font-display); font-size: clamp(1.35rem, 3vw, 1.85rem); font-weight: 650; letter-spacing: -.025em; color: var(--text); }
+.office-hub-hero > p { margin: 0; max-width: 660px; color: var(--text-2); font-size: .72rem; line-height: 1.55; }
+.office-hub-create { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 19px; }
+.office-hub-create-btn { display: flex; align-items: center; gap: 11px; min-width: 190px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); text-align: left; cursor: pointer; box-shadow: var(--shadow); transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.office-hub-create-btn:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: var(--shadow-pop); }
+.office-hub-create-btn.primary { border-color: transparent; background: var(--accent); color: #fff; }
+.office-hub-create-btn.primary:hover { background: var(--accent-hover); }
+.office-hub-create-btn .office-type-option-icon { width: 34px; height: 34px; }
+.office-hub-create-btn.primary .office-type-option-icon { background: rgba(255,255,255,.16); color: #fff; }
+.office-hub-create-btn span:last-child { display: flex; flex-direction: column; gap: 1px; }
+.office-hub-create-btn strong { font-size: .72rem; font-weight: 650; }
+.office-hub-create-btn small { color: var(--text-3); font-size: .58rem; }
+.office-hub-create-btn.primary small { color: rgba(255,255,255,.76); }
+.office-hub-section { padding: 20px 28px 24px; }
+.office-hub-section + .office-hub-section { border-top: 1px solid var(--border); }
+.office-hub-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.office-hub-section-head > div { display: flex; flex-direction: column; gap: 2px; }
+.office-hub-section-head h3 { margin: 0; font-size: .78rem; font-weight: 650; }
+.office-hub-section-head span { color: var(--text-3); font-size: .6rem; }
+.office-hub-list { display: flex; flex-direction: column; gap: 5px; }
+.office-hub-row { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: inherit; width: 100%; text-align: left; cursor: pointer; }
+.office-hub-row:hover { border-color: var(--border); background: var(--surface-2); }
+.office-hub-row .office-type-option-icon { width: 31px; height: 31px; }
+.office-hub-row-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.office-hub-row-copy strong { color: var(--text); font-size: .68rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.office-hub-row-copy span { color: var(--text-3); font-size: .58rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.office-hub-row-meta { flex: none; color: var(--text-3); font-size: .58rem; text-align: right; }
+.office-hub-row-meta b { display: block; color: var(--text-2); font-weight: 600; }
+.office-hub-empty { display: flex; align-items: center; gap: 11px; padding: 15px 13px; border: 1px dashed var(--border-strong); border-radius: 11px; color: var(--text-3); font-size: .65rem; }
+.office-hub-empty svg { width: 18px; height: 18px; flex: none; }
+.office-hub-empty button { margin-left: auto; flex: none; }
+.office-hub-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 28px; border-top: 1px solid var(--border); background: var(--surface-2); color: var(--text-3); font-size: .6rem; }
+
+.office-type-field { display: flex; flex-direction: column; gap: 8px; }
+.office-type-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.office-type-option { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; padding: 11px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); cursor: pointer; transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
+.office-type-option:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); background: var(--surface-2); }
+.office-type-option.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent); }
+.office-type-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.office-type-option input { position: absolute; opacity: 0; pointer-events: none; }
+.office-type-option-icon { width: 34px; height: 34px; display: grid; place-items: center; flex: none; border-radius: 9px; }
+.office-type-option-icon svg { width: 18px; height: 18px; }
+.office-type-word { background: color-mix(in srgb, #2b579a 13%, var(--surface)); color: #2b579a; }
+.office-type-sheet { background: color-mix(in srgb, #217346 13%, var(--surface)); color: #217346; }
+.office-type-slide { background: color-mix(in srgb, #c34624 13%, var(--surface)); color: #c34624; }
+.office-type-mail { background: var(--surface-3); color: var(--text-3); }
+:root[data-theme="dark"] .office-type-word { color: #7fb0ee; background: color-mix(in srgb, #2b579a 26%, var(--surface)); }
+:root[data-theme="dark"] .office-type-sheet { color: #6fcf9f; background: color-mix(in srgb, #217346 26%, var(--surface)); }
+:root[data-theme="dark"] .office-type-slide { color: #ffad8f; background: color-mix(in srgb, #c34624 26%, var(--surface)); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .office-type-word { color: #7fb0ee; background: color-mix(in srgb, #2b579a 26%, var(--surface)); }
+  :root:not([data-theme="light"]) .office-type-sheet { color: #6fcf9f; background: color-mix(in srgb, #217346 26%, var(--surface)); }
+  :root:not([data-theme="light"]) .office-type-slide { color: #ffad8f; background: color-mix(in srgb, #c34624 26%, var(--surface)); }
+}
+.office-type-option-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.office-type-option-copy strong { color: var(--text); font-size: .66rem; font-weight: 650; }
+.office-type-option-copy small { color: var(--text-3); font-size: .55rem; }
+.office-type-option-check { position: absolute; top: 8px; right: 8px; width: 18px; height: 18px; display: none; place-items: center; border-radius: 50%; background: var(--accent); color: #fff; }
+.office-type-option-check svg { width: 11px; height: 11px; }
+.office-type-option.is-selected .office-type-option-check { display: grid; }
+.office-new-dialog { width: min(560px, 100%); }
+.office-new-dialog .dialog-body { display: flex; flex-direction: column; gap: 14px; }
+
+@media (max-width: 760px) {
+  .office-hub-overlay { padding: 0; }
+  .office-hub-window { width: 100%; max-height: 100%; height: 100%; border-radius: 0; border: 0; }
+  .office-hub-hero, .office-hub-section { padding-left: 18px; padding-right: 18px; }
+  .office-hub-head { padding: 12px 14px; cursor: default; }
+  .office-hub-grip { display: none; }
+  .office-hub-create { flex-direction: column; }
+  .office-hub-create-btn { width: 100%; }
+  .office-type-grid { grid-template-columns: 1fr; }
+  .office-type-option { flex-direction: row; align-items: center; }
+  .office-type-option-check { top: 50%; transform: translateY(-50%); }
+  .office-window-controls { gap: 1px; }
+  .office-window-btn { width: 28px; }
+}
+@media (max-width: 520px) {
+  .office-editor-actions { gap: 5px; }
+  .office-editor-actions .btn-small { padding-left: 8px; padding-right: 8px; }
+}

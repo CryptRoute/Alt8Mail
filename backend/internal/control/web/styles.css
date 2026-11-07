@@ -639,6 +639,12 @@ a.stat-tile:hover { border-color: var(--border-strong); box-shadow: var(--shadow
 .host-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .host-metric .meter-head { font-size: 11px; }
 .host-metric .sparkline { margin-top: 6px; width: 100%; height: 30px; }
+.office-metrics { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.office-metrics-summary { flex-wrap: wrap; gap: 6px 18px; }
+.office-monitor-toggle { align-items: center; gap: 7px; font-size: 10.5px; color: var(--text-2); white-space: nowrap; }
+.office-monitor-toggle .switch { margin-top: 0; }
+.office-monitor-foot { margin-top: 10px; margin-bottom: 0; }
+.office-monitor-card .card-actions { align-items: center; }
 
 .progress-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .progress { flex: 1; height: 5px; border-radius: 999px; background: var(--track); overflow: hidden; }

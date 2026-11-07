@@ -101,6 +101,15 @@ func (s *Server) createOfficeDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "OFFICE_TEMPLATE", "The blank document template is unavailable")
 		return
 	}
+	author := strings.TrimSpace(sess.User.Name)
+	if author == "" {
+		author = sess.User.Email
+	}
+	data, err = office.SetDocumentProperties(data, author, strings.TrimSuffix(name, "."+format.Ext))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "OFFICE_PROPERTIES", "Could not prepare the document properties")
+		return
+	}
 	if err := s.enforceStorageQuota(r.Context(), sess.User, int64(len(data))); err != nil {
 		writeError(w, http.StatusInsufficientStorage, "STORAGE_QUOTA", err.Error())
 		return

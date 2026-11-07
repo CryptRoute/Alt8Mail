@@ -384,6 +384,33 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 			}
 			assign("composeWidth", width)
 		}
+		if value, ok := patch["officeDock"]; ok {
+			if value == nil {
+				assign("officeDock", nil)
+			} else {
+				raw, valid := value.(map[string]any)
+				if !valid {
+					return fail(http.StatusBadRequest, "PREFERENCES", "Office dock must be an object or null")
+				}
+				idValue, _ := raw["id"].(string)
+				nameValue, _ := raw["name"].(string)
+				typeValue, _ := raw["documentType"].(string)
+				minimizedValue, _ := raw["minimized"].(bool)
+				id := truncate(strings.TrimSpace(idValue), 120)
+				name := truncate(strings.TrimSpace(nameValue), 180)
+				documentType := strings.TrimSpace(typeValue)
+				if id == "" || name == "" {
+					return fail(http.StatusBadRequest, "PREFERENCES", "Office dock needs a file id and name")
+				}
+				if documentType != "word" && documentType != "cell" && documentType != "slide" {
+					return fail(http.StatusBadRequest, "PREFERENCES", "Office dock document type is invalid")
+				}
+				assign("officeDock", map[string]any{
+					"id": id, "name": name, "documentType": documentType,
+					"minimized": minimizedValue,
+				})
+			}
+		}
 		if value, ok := patch["composePosition"]; ok {
 			position := fmt.Sprint(value)
 			if position != "center" && position != "bottom-right" && position != "bottom-left" {
@@ -397,8 +424,11 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		encoded = payload
-		appendStateAudit(state, "preferences.updated", "Workspace preferences", sess.User.Name,
-			"Updated "+strings.Join(changed, ", "), clientIP(r), sanitizeUserAgent(r.UserAgent()))
+		_, dockOnly := patch["officeDock"]
+		if !dockOnly || len(patch) != 1 {
+			appendStateAudit(state, "preferences.updated", "Workspace preferences", sess.User.Name,
+				"Updated "+strings.Join(changed, ", "), clientIP(r), sanitizeUserAgent(r.UserAgent()))
+		}
 		result = map[string]any{"preferences": current, "changed": changed}
 		return nil
 	})
@@ -415,6 +445,7 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 func (s *Server) resetPreferencesState(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	defaults := preferencesFor(userRecord{})
+	defaults["officeDock"] = nil
 	var result map[string]any
 	err := s.withState(sess.User.ID, sess.User.TenantID, func(state map[string]any) error {
 		ensureStateCollections(state)

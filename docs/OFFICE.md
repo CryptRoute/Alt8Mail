@@ -108,6 +108,25 @@ Phase 5:
   HTTP-over-SSH tunnel to the remote loopback agent.
 - Migration `0055_office_remote`.
 
+Phase 6:
+
+- Webmail Office workspace: minimize/maximize/close window controls, a persistent
+  Office dock across sign-out/sign-in, live light/dark theme following, Word /
+  Excel / PowerPoint launcher hubs with recent Cabinet files and matching inbox
+  attachments, and Office creation entries in the New mail menu.
+- New documents receive core OOXML properties: the signed-in user's full name as
+  author and last-modified-by, the document title, and a custom `Platform`
+  property with `Alt8Mail Workspace`.
+- Modern theme-aware select controls across webmail and a visual document-type
+  picker in the new-document dialog.
+- The office gateway root and `/welcome/` paths redirect to the Alt8Mail webmail
+  portal instead of the OnlyOffice welcome page.
+- Control Plane Office telemetry: container CPU/memory/network/block I/O, host
+  load/memory, root and Office-data disk usage, polling on the Office page and an
+  Office performance card on the dashboard. Monitoring can be disabled from the
+  Office page.
+- Migration `0056_office_monitoring`.
+
 ## Requirements
 
 - Docker Engine and the Docker Compose plugin on the Office host.
@@ -237,6 +256,43 @@ the remote Document Server using the same JWT secret.
 
 Rotating the JWT secret recreates the container. Open editor sessions are
 invalidated; the webmail API reads the new secret from the shared file.
+
+The gateway's exact `/`, `/welcome` and `/welcome/` locations redirect to the
+webmail portal. Reconfigure the gateway after upgrading so the generated nginx
+site includes the redirect; an older gateway continues to show the OnlyOffice
+welcome page at the root URL.
+
+## Webmail Office workspace
+
+- The editor header has **Minimize**, **Maximize/Restore** and **Close** controls.
+  Minimize keeps the editor loaded and adds a tab to the Office dock above the
+  status bar. The dock survives sign-out and sign-in in the same browser; closing
+  the tab destroys the dock entry.
+- The editor follows the webmail theme at open time and receives live
+  `theme-light`/`theme-dark` updates when the account theme changes.
+- The rail exposes **Docs**, **Sheets** and **Slides** launchers. Each opens a
+  draggable Office home with a blank-create action, recent Cabinet files of that
+  type, and recent inbox messages carrying a matching attachment.
+- The **New mail** split menu also creates Word, Excel and PowerPoint documents
+  directly.
+- New documents carry the author's full name, the document title and the custom
+  `Platform = Alt8Mail Workspace` property in `docProps/core.xml` and
+  `docProps/custom.xml`.
+- Native selects use a shared modern, theme-aware control style; the new-document
+  dialog uses selectable type cards with Word/Excel/PowerPoint iconography.
+
+## Office monitoring
+
+When monitoring is enabled in **System Control → Office**, the Office agent
+samples its container through Docker and its host through `/proc` and `df`. No
+shell is exposed. The Office page shows live CPU, memory, network, block I/O,
+PIDs, load, uptime, root disk and the `/var/lib/a8m-office` data disk; the
+dashboard adds an Office Document Server performance card. The Office page polls
+every 12 seconds while visible; the dashboard refreshes with its normal interval.
+
+Disable monitoring with the switch in the Office performance card. The setting
+does not stop the Document Server or the agent. Remote deployments need a
+reconfigure after upgrading to upload the agent build that includes `/metrics`.
 
 ## Remote deployment
 
@@ -640,13 +696,19 @@ POST   /control/api/office/update
 POST   /control/api/office/rotate-jwt
 POST   /control/api/office/gateway
 GET    /control/api/office/logs
+GET    /control/api/office/metrics
 ```
+
+`PATCH /control/api/office` accepts `enabled`, `publicUrl` and
+`monitoringEnabled`. `GET /control/api/dashboard` includes an `officeMonitor`
+object only while monitoring is enabled and Office is recorded as running.
 
 ### Office agent (loopback, bearer token)
 
 ```text
 GET  /healthz
 GET  /status
+GET  /metrics
 POST /install
 POST /start
 POST /stop

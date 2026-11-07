@@ -3345,6 +3345,7 @@ function syncThemeUI() {
   });
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = mode === "dark" ? "#0b1a2b" : "#093256";
+  syncOfficeEditorTheme();
 }
 
 function setAccent(key, save = true) {
@@ -5233,6 +5234,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   ensureAddonsSettingsUi();
   if (!state.delegatedMode) loadAddons({ silent: !state.addonsLoaded }).catch(() => {});
   if (!state.delegatedMode) loadOfficeConfig({ silent: true }).catch(() => {});
+  if (firstUserLoad && !state.delegatedMode) restoreOfficeDockFromStorage();
   renderFolders();
   renderList();
   renderNotifications();
@@ -18704,6 +18706,262 @@ function officeTypeLabel(type) {
   return { word: "Document", cell: "Spreadsheet", slide: "Presentation", pdf: "PDF" }[type] || "Document";
 }
 
+function officeTypeIcon(type) {
+  return { word: "i-office-word", cell: "i-office-sheet", slide: "i-office-slides", pdf: "i-file" }[type] || "i-file";
+}
+
+function officeTypeClass(type) {
+  return { word: "office-type-word", cell: "office-type-sheet", slide: "office-type-slide" }[type] || "office-type-word";
+}
+
+const OFFICE_HUB_META = {
+  word: { label: "Word documents", singular: "document", format: "docx", icon: "i-office-word", kicker: "Documents", description: "Draft letters, plans and contracts — then return to any recent file from here." },
+  cell: { label: "Excel spreadsheets", singular: "spreadsheet", format: "xlsx", icon: "i-office-sheet", kicker: "Spreadsheets", description: "Build budgets, trackers and models with your workspace files and email attachments close at hand." },
+  slide: { label: "PowerPoint presentations", singular: "presentation", format: "pptx", icon: "i-office-slides", kicker: "Presentations", description: "Create decks, pitches and reports, with recent work and relevant mail ready to reopen." },
+};
+
+let officeHubType = "word";
+let officeHubOffset = { x: 0, y: 0 };
+let officeDockState = null;
+const OFFICE_DOCK_KEY_PREFIX = "a8m.officeDock.v1";
+
+function officeDockStorageKey() {
+  return `${OFFICE_DOCK_KEY_PREFIX}.${normalizeEmail(state.user?.email || "guest")}`;
+}
+
+function readOfficeDockStorage() {
+  const prefs = state.user?.preferences || {};
+  let value = null;
+  if (Object.prototype.hasOwnProperty.call(prefs, "officeDock")) {
+    value = prefs.officeDock;
+    if (!value) {
+      try { localStorage.removeItem(officeDockStorageKey()); } catch {}
+    }
+  } else {
+    try {
+      const raw = localStorage.getItem(officeDockStorageKey());
+      value = raw ? JSON.parse(raw) : null;
+    } catch {
+      value = null;
+    }
+  }
+  if (!value || !value.id || !value.name) return null;
+  const meta = officeMetaForName(value.name);
+  return {
+    id: String(value.id),
+    name: String(value.name),
+    documentType: meta?.documentType || value.documentType || "word",
+    minimized: value.minimized !== false,
+  };
+}
+
+function persistOfficeDockPreference(value) {
+  if (!state.user || !state.csrf) return;
+  api("/api/preferences", { method: "PATCH", body: { officeDock: value } })
+    .then((data) => {
+      if (!data || !data.preferences) return;
+      state.preferences = { ...state.preferences, ...data.preferences };
+      if (state.user) state.user.preferences = state.preferences;
+    })
+    .catch(() => {});
+}
+
+function writeOfficeDockStorage(meta) {
+  try {
+    localStorage.setItem(officeDockStorageKey(), JSON.stringify(meta));
+  } catch {}
+  persistOfficeDockPreference(meta);
+}
+
+function saveOfficeDock(meta) {
+  if (!meta || !meta.id) return;
+  officeDockState = {
+    id: meta.id,
+    name: meta.name || "Document",
+    documentType: meta.documentType || officeMetaForName(meta.name)?.documentType || "word",
+    minimized: meta.minimized !== false,
+  };
+  writeOfficeDockStorage(officeDockState);
+  renderOfficeDock();
+}
+
+function clearOfficeDock() {
+  officeDockState = null;
+  try { localStorage.removeItem(officeDockStorageKey()); } catch {}
+  persistOfficeDockPreference(null);
+  renderOfficeDock();
+}
+
+function renderOfficeDock() {
+  const dock = document.getElementById("officeDock");
+  const tabs = document.getElementById("officeDockTabs");
+  if (!dock || !tabs) return;
+  if (state.delegatedMode) {
+    dock.hidden = true;
+    tabs.innerHTML = "";
+    return;
+  }
+  if (!officeDockState) {
+    dock.hidden = true;
+    tabs.innerHTML = "";
+    return;
+  }
+  const meta = OFFICE_HUB_META[officeDockState.documentType] || OFFICE_HUB_META.word;
+  const minimized = officeDockState.minimized;
+  dock.hidden = false;
+  tabs.innerHTML = `<div class="compose-tab office-tab${minimized ? " is-minimized" : " is-active"}" data-office-dock-tab role="button" tabindex="0" title="${minimized ? "Minimized Office document — click to reopen" : "Office document is open"}">
+    <span class="compose-tab-icon"><svg class="icon" aria-hidden="true"><use href="#${officeTypeIcon(officeDockState.documentType)}"/></svg></span>
+    <span class="compose-tab-text"><strong>${esc(officeDockState.name)}</strong><span class="office-tab-kind">${esc(meta.singular)} · ${minimized ? "Minimized" : "Open in editor"}</span></span>
+    <button class="compose-tab-close office-tab-close" data-office-dock-close type="button" aria-label="Close ${esc(meta.singular)}"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </div>`;
+}
+
+function restoreOfficeDockFromStorage() {
+  officeDockState = readOfficeDockStorage();
+  renderOfficeDock();
+}
+
+function minimizeOfficeEditor() {
+  const overlay = document.getElementById("officeEditorOverlay");
+  if (!overlay || !state.officeFile) return;
+  saveOfficeDock({ ...state.officeFile, minimized: true });
+  overlay.hidden = true;
+  document.body.classList.remove("office-editor-open");
+  showToast("Office document minimized — reopen it from the Office dock below", null, null, { duration: 3600 });
+}
+
+function restoreOfficeEditor() {
+  const overlay = document.getElementById("officeEditorOverlay");
+  if (!officeDockState) return;
+  if (state.officeFile && state.officeFile.id === officeDockState.id && overlay) {
+    overlay.hidden = false;
+    document.body.classList.add("office-editor-open");
+    officeDockState.minimized = false;
+    writeOfficeDockStorage(officeDockState);
+    renderOfficeDock();
+    syncOfficeEditorTheme();
+    setTimeout(() => document.getElementById("officeEditorMaximize")?.focus(), 40);
+    return;
+  }
+  openOfficeEditorById(officeDockState.id).catch(showError);
+}
+
+function parkOfficeEditorForSignOut() {
+  if (state.officeFile) {
+    saveOfficeDock({ ...state.officeFile, minimized: true });
+  }
+  const overlay = document.getElementById("officeEditorOverlay");
+  const frame = document.getElementById("officeEditorFrame");
+  if (frame) frame.src = "about:blank";
+  if (overlay) overlay.hidden = true;
+  document.body.classList.remove("office-editor-open");
+  state.officeFile = null;
+  officeDockState = null;
+  renderOfficeDock();
+}
+
+function syncOfficeEditorTheme() {
+  const frame = document.getElementById("officeEditorFrame");
+  if (!frame || !frame.contentWindow) return;
+  try {
+    frame.contentWindow.postMessage({ type: "a8m-office-theme", theme: effectiveTheme() }, window.location.origin);
+  } catch {}
+}
+
+function openOfficeHub(type) {
+  if (state.delegatedMode) {
+    showToast("Office is available in your primary mailbox, not a delegated mailbox", null, null, { duration: 5000 });
+    return;
+  }
+  officeHubType = OFFICE_HUB_META[type] ? type : "word";
+  const overlay = document.getElementById("officeHubOverlay");
+  const windowEl = overlay?.querySelector(".office-hub-window");
+  if (!overlay || !windowEl) return;
+  officeHubOffset = { x: 0, y: 0 };
+  windowEl.style.transform = "translate(0px, 0px)";
+  overlay.hidden = false;
+  renderOfficeHub();
+  if (!(state.files || []).length) {
+    refreshCabinet().then(() => { if (!overlay.hidden) renderOfficeHub(); }).catch(() => {});
+  }
+  setTimeout(() => document.getElementById("officeHubClose")?.focus(), 40);
+}
+
+function closeOfficeHub() {
+  const overlay = document.getElementById("officeHubOverlay");
+  if (overlay) overlay.hidden = true;
+}
+
+function renderOfficeHub() {
+  const overlay = document.getElementById("officeHubOverlay");
+  const body = document.getElementById("officeHubBody");
+  const mark = document.getElementById("officeHubMark");
+  const title = document.getElementById("officeHubTitle");
+  const subtitle = document.getElementById("officeHubSubtitle");
+  if (!overlay || !body) return;
+  const type = OFFICE_HUB_META[officeHubType] ? officeHubType : "word";
+  const meta = OFFICE_HUB_META[type];
+  if (mark) mark.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#${meta.icon}"/></svg>`;
+  if (title) title.textContent = meta.label;
+  if (subtitle) subtitle.textContent = meta.description;
+  const ready = Boolean(state.office.ready);
+  const files = (state.files || [])
+    .filter((file) => file.kind !== "folder" && officeMetaForFile(file)?.documentType === type)
+    .slice()
+    .sort((a, b) => Date.parse(b.modifiedAt || b.updatedAt || b.createdAt || 0) - Date.parse(a.modifiedAt || a.updatedAt || a.createdAt || 0))
+    .slice(0, 8);
+  const mails = (state.messages || [])
+    .filter((message) => !message.delegatedOwnerId && (message.attachments || []).some((file) => officeMetaForName(file.name)?.documentType === type))
+    .slice()
+    .sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0))
+    .slice(0, 6);
+  const fileRows = files.length ? files.map((file) => `<button class="office-hub-row" type="button" data-office-hub-open="${esc(file.id)}">
+    <span class="office-type-option-icon ${officeTypeClass(type)}"><svg class="icon" aria-hidden="true"><use href="#${officeTypeIcon(type)}"/></svg></span>
+    <span class="office-hub-row-copy"><strong>${esc(file.name)}</strong><span>${esc(file.path || "Files")}${file.shared ? " · Shared with me" : ""}</span></span>
+    <span class="office-hub-row-meta"><b>${esc(formatDateOnly(file.modifiedAt || file.updatedAt || file.createdAt) || "—")}</b>${file.version ? `v${esc(file.version)}` : ""}</span>
+  </button>`).join("") : `<div class="office-hub-empty"><svg class="icon" aria-hidden="true"><use href="#${meta.icon}"/></svg><span>No ${esc(meta.label.toLowerCase())} yet. Create the first one.</span><button class="btn-secondary small" type="button" data-office-hub-create="${meta.format}">Create ${esc(meta.singular)}</button></div>`;
+  const mailRows = mails.length ? mails.map((message) => {
+    const attachments = (message.attachments || []).filter((file) => officeMetaForName(file.name)?.documentType === type);
+    const names = attachments.map((file) => file.name).join(", ");
+    return `<button class="office-hub-row" type="button" data-office-hub-mail="${esc(message.threadId || message.id)}">
+      <span class="office-type-option-icon office-type-mail"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg></span>
+      <span class="office-hub-row-copy"><strong>${esc(message.subject || "(no subject)")}</strong><span>${esc(message.fromName || message.fromEmail || "Unknown sender")} · ${esc(names)}</span></span>
+      <span class="office-hub-row-meta"><b>${esc(formatDateOnly(message.date) || "—")}</b>${attachments.length} attachment${attachments.length === 1 ? "" : "s"}</span>
+    </button>`;
+  }).join("") : `<div class="office-hub-empty"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span>No recent mail with ${esc(meta.singular)} attachments.</span></div>`;
+  body.innerHTML = `
+    <div class="office-hub-hero">
+      <span class="office-hub-kicker">${svgUse("i-sparkles")} Alt8Mail Office</span>
+      <h1>${type === "word" ? "What would you like to write today?" : type === "cell" ? "What would you like to build today?" : "What would you like to present today?"}</h1>
+      <p>${esc(meta.description)} Recent Cabinet files and relevant email attachments are gathered here so you can pick up where you left off.</p>
+      <div class="office-hub-create">
+        <button class="office-hub-create-btn primary" type="button" data-office-hub-create="${meta.format}" ${ready ? "" : "disabled"}>
+          <span class="office-type-option-icon ${officeTypeClass(type)}"><svg class="icon" aria-hidden="true"><use href="#${meta.icon}"/></svg></span>
+          <span><strong>New blank ${esc(meta.singular)}</strong><small>Create and open in Office</small></span>
+        </button>
+        <button class="office-hub-create-btn" type="button" data-office-hub-cabinet>
+          <span class="office-type-option-icon"><svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg></span>
+          <span><strong>Browse Cabinet</strong><small>Open an existing file</small></span>
+        </button>
+      </div>
+      ${ready ? "" : `<div class="office-hub-empty" style="margin-top:14px"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Office is not available in this workspace yet. A Control Plane administrator can enable it.</span></div>`}
+    </div>
+    <section class="office-hub-section">
+      <div class="office-hub-section-head"><div><h3>Recent ${esc(meta.label.toLowerCase())}</h3><span>${files.length ? `Last ${files.length} file${files.length === 1 ? "" : "s"} from your Cabinet` : "Your recent work will appear here"}</span></div><button class="link-btn" type="button" data-office-hub-cabinet>Open Cabinet</button></div>
+      <div class="office-hub-list">${fileRows}</div>
+    </section>
+    <section class="office-hub-section">
+      <div class="office-hub-section-head"><div><h3>From your inbox</h3><span>Messages carrying a ${esc(meta.singular)} attachment</span></div></div>
+      <div class="office-hub-list">${mailRows}</div>
+    </section>
+    <div class="office-hub-foot"><span>Minimize an Office editor to keep it in the dock while you read mail or work elsewhere.</span><span>${esc(state.organizationName || "Alt8Mail Workspace")}</span></div>`;
+  body.scrollTop = 0;
+}
+
+function svgUse(id) {
+  return `<svg class="icon" aria-hidden="true"><use href="#${id}"/></svg>`;
+}
+
 async function openOfficeEditorById(fileId) {
   let file = (state.files || []).find((item) => item.id === fileId);
   if (!file) {
@@ -18712,6 +18970,7 @@ async function openOfficeEditorById(fileId) {
   }
   if (!file) {
     showToast("That file is no longer available in this Cabinet");
+    if (officeDockState && officeDockState.id === fileId) clearOfficeDock();
     return;
   }
   openOfficeEditor(file);
@@ -18728,22 +18987,34 @@ function openOfficeEditor(file) {
   if (!overlay || !frame) return;
   document.getElementById("officeEditorTitle").textContent = file.name || "Document";
   document.getElementById("officeEditorMeta").textContent = `${officeTypeLabel(meta.documentType)} · Alt8Mail Office`;
-  state.officeFile = { id: file.id, name: file.name || "Document" };
+  state.officeFile = { id: file.id, name: file.name || "Document", documentType: meta.documentType };
   const theme = effectiveTheme() === "dark" ? "dark" : "light";
   frame.src = `/office-editor?file=${encodeURIComponent(file.id)}&theme=${theme}`;
+  overlay.classList.remove("is-maximized");
+  const maximizeButton = document.getElementById("officeEditorMaximize");
+  maximizeButton?.querySelector("use")?.setAttribute("href", "#i-window-maximize");
+  if (maximizeButton) {
+    maximizeButton.setAttribute("aria-label", "Maximize editor");
+    maximizeButton.title = "Maximize editor";
+  }
   overlay.hidden = false;
   document.body.classList.add("office-editor-open");
-  setTimeout(() => document.getElementById("officeEditorClose")?.focus(), 40);
+  saveOfficeDock({ ...state.officeFile, minimized: false });
+  setTimeout(() => document.getElementById("officeEditorMinimize")?.focus(), 40);
 }
 
-function closeOfficeEditor({ refresh = true } = {}) {
+function closeOfficeEditor({ refresh = true, preserveDock = false } = {}) {
   const overlay = document.getElementById("officeEditorOverlay");
   const frame = document.getElementById("officeEditorFrame");
-  if (!overlay || overlay.hidden) return;
+  if (!overlay) return;
+  const hadOpenDocument = Boolean(state.officeFile) || !overlay.hidden;
   if (frame) frame.src = "about:blank";
   overlay.hidden = true;
+  overlay.classList.remove("is-maximized");
   document.body.classList.remove("office-editor-open");
   state.officeFile = null;
+  if (!preserveDock) clearOfficeDock();
+  if (!hadOpenDocument) return;
   const composeTarget = state.officeComposeAttachment;
   const mailTarget = state.officeMailAttachment;
   state.officeComposeAttachment = null;
@@ -18892,6 +19163,32 @@ async function refreshMailAttachmentAfterOffice(target, attempt = 0) {
   }
 }
 
+const OFFICE_NEW_FORMATS = {
+  docx: { label: "document", placeholder: "Untitled document", title: "New Word document", intro: "Create a blank Word document in this Cabinet folder." },
+  xlsx: { label: "spreadsheet", placeholder: "Untitled spreadsheet", title: "New Excel spreadsheet", intro: "Create a blank spreadsheet in this Cabinet folder." },
+  pptx: { label: "presentation", placeholder: "Untitled presentation", title: "New PowerPoint presentation", intro: "Create a blank presentation in this Cabinet folder." },
+};
+
+function selectedOfficeNewFormat() {
+  return document.querySelector('input[name="officeNewType"]:checked')?.value || "docx";
+}
+
+function syncOfficeNewFormat(format, { focus = false } = {}) {
+  const next = OFFICE_NEW_FORMATS[format] ? format : "docx";
+  const input = document.getElementById("officeNewName");
+  const title = document.getElementById("officeNewTitle");
+  const intro = document.getElementById("officeNewIntro");
+  const meta = OFFICE_NEW_FORMATS[next];
+  document.querySelectorAll("input[name=officeNewType]").forEach((radio) => { radio.checked = radio.value === next; });
+  document.querySelectorAll("[data-office-type-option]").forEach((option) => {
+    option.classList.toggle("is-selected", option.getAttribute("data-office-type-option") === next);
+  });
+  if (input) input.placeholder = meta.placeholder;
+  if (title) title.textContent = meta.title;
+  if (intro) intro.textContent = meta.intro;
+  if (focus && input) input.focus();
+}
+
 function openOfficeNewDialog(options = {}) {
   if (!state.office.ready) {
     showToast("Office is not enabled or healthy for this workspace yet", null, null, { duration: 5000 });
@@ -18900,12 +19197,10 @@ function openOfficeNewDialog(options = {}) {
   state.officeNewComposeSession = options.composeSessionId || "";
   const overlay = document.getElementById("officeNewOverlay");
   const input = document.getElementById("officeNewName");
-  const type = document.getElementById("officeNewType");
   const error = document.getElementById("officeNewError");
-  if (!overlay || !input || !type) return;
+  if (!overlay || !input) return;
   input.value = "";
-  type.value = "docx";
-  input.placeholder = "Untitled document";
+  syncOfficeNewFormat(options.format || "docx");
   const folderNote = document.getElementById("officeNewFolderNote");
   if (folderNote) {
     const folder = fileFolderById(state.fileFolderId);
@@ -18925,14 +19220,13 @@ function closeOfficeNewDialog() {
 async function createOfficeDocument() {
   const overlay = document.getElementById("officeNewOverlay");
   const input = document.getElementById("officeNewName");
-  const type = document.getElementById("officeNewType");
   const error = document.getElementById("officeNewError");
   const button = document.getElementById("officeNewCreate");
-  if (!overlay || !input || !type || !button) return;
-  const format = type.value;
+  if (!overlay || !input || !button) return;
+  const format = selectedOfficeNewFormat();
   if (error) { error.hidden = true; error.textContent = ""; }
   button.disabled = true;
-  const label = button.textContent;
+  const label = button.innerHTML;
   const composeSessionId = state.officeNewComposeSession;
   state.officeNewComposeSession = "";
   button.textContent = "Creating…";
@@ -18964,7 +19258,7 @@ async function createOfficeDocument() {
     }
   } finally {
     button.disabled = false;
-    button.textContent = label;
+    button.innerHTML = label;
   }
 }
 
@@ -19176,7 +19470,7 @@ async function convertOfficeFile(fileId, button) {
 }
 
 function closeOfficeUiOnSignOut() {
-  closeOfficeEditor({ refresh: false });
+  parkOfficeEditorForSignOut();
   const versions = document.getElementById("officeVersionsOverlay");
   if (versions) versions.hidden = true;
   const newDialog = document.getElementById("officeNewOverlay");
@@ -19194,6 +19488,79 @@ function setupOfficeUi() {
   document.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+    const officeHub = target.closest("[data-office-hub]");
+    if (officeHub) {
+      event.preventDefault();
+      openOfficeHub(officeHub.getAttribute("data-office-hub") || "word");
+      return;
+    }
+    const officeDockClose = target.closest("[data-office-dock-close]");
+    if (officeDockClose) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeOfficeEditor();
+      return;
+    }
+    const officeDockTab = target.closest("[data-office-dock-tab]");
+    if (officeDockTab) {
+      event.preventDefault();
+      restoreOfficeEditor();
+      return;
+    }
+    if (target.closest("#officeEditorMinimize")) {
+      event.preventDefault();
+      minimizeOfficeEditor();
+      return;
+    }
+    if (target.closest("#officeEditorMaximize")) {
+      event.preventDefault();
+      const overlay = document.getElementById("officeEditorOverlay");
+      const button = target.closest("#officeEditorMaximize");
+      const use = button.querySelector("use");
+      const maximized = !overlay.classList.contains("is-maximized");
+      overlay.classList.toggle("is-maximized", maximized);
+      if (use) use.setAttribute("href", maximized ? "#i-window-restore" : "#i-window-maximize");
+      button.setAttribute("aria-label", maximized ? "Restore editor size" : "Maximize editor");
+      button.title = maximized ? "Restore editor size" : "Maximize editor";
+      return;
+    }
+    const hubClose = target.closest("#officeHubClose");
+    if (hubClose) {
+      event.preventDefault();
+      closeOfficeHub();
+      return;
+    }
+    const hubCreate = target.closest("[data-office-hub-create]");
+    if (hubCreate) {
+      event.preventDefault();
+      const format = hubCreate.getAttribute("data-office-hub-create") || "docx";
+      closeOfficeHub();
+      openOfficeNewDialog({ format });
+      return;
+    }
+    const hubOpen = target.closest("[data-office-hub-open]");
+    if (hubOpen) {
+      event.preventDefault();
+      const fileId = hubOpen.getAttribute("data-office-hub-open");
+      closeOfficeHub();
+      openOfficeEditorById(fileId).catch(showError);
+      return;
+    }
+    const hubMail = target.closest("[data-office-hub-mail]");
+    if (hubMail) {
+      event.preventDefault();
+      const threadId = hubMail.getAttribute("data-office-hub-mail");
+      closeOfficeHub();
+      setTask("mail");
+      ensureThreadLoaded(threadId).then((loaded) => { if (loaded) selectThread(threadId); }).catch(showError);
+      return;
+    }
+    if (target.closest("[data-office-hub-cabinet]")) {
+      event.preventDefault();
+      closeOfficeHub();
+      setTask("files");
+      return;
+    }
     const composeOffice = target.closest("[data-compose-office]");
     if (composeOffice && !target.closest(".compose")) {
       event.preventDefault();
@@ -19276,27 +19643,61 @@ function setupOfficeUi() {
     event.preventDefault();
     createOfficeDocument().catch(showError);
   });
-  document.getElementById("officeNewType")?.addEventListener("change", (event) => {
-    const input = document.getElementById("officeNewName");
-    if (!input) return;
-    const placeholder = { docx: "Untitled document", xlsx: "Untitled spreadsheet", pptx: "Untitled presentation" }[event.currentTarget.value] || "Untitled document";
-    input.placeholder = placeholder;
+  document.getElementById("officeNewTypeGroup")?.addEventListener("change", (event) => {
+    if (!(event.target instanceof Element) || !event.target.matches('input[name="officeNewType"]')) return;
+    syncOfficeNewFormat(event.target.value);
   });
   const newOverlay = document.getElementById("officeNewOverlay");
   if (newOverlay) newOverlay.addEventListener("click", (event) => { if (event.target === newOverlay) closeOfficeNewDialog(); });
   const versionsOverlay = document.getElementById("officeVersionsOverlay");
   if (versionsOverlay) versionsOverlay.addEventListener("click", (event) => { if (event.target === versionsOverlay) versionsOverlay.hidden = true; });
+  const hubOverlay = document.getElementById("officeHubOverlay");
+  if (hubOverlay) hubOverlay.addEventListener("click", (event) => { if (event.target === hubOverlay) closeOfficeHub(); });
+  const hubHead = document.getElementById("officeHubHead");
+  const hubWindow = hubOverlay?.querySelector(".office-hub-window");
+  if (hubHead && hubWindow) {
+    let drag = null;
+    hubHead.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || event.target.closest("button") || window.matchMedia("(max-width: 760px)").matches) return;
+      drag = { x: event.clientX, y: event.clientY, originX: officeHubOffset.x, originY: officeHubOffset.y };
+      hubHead.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+    hubHead.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      const limitX = Math.max(0, (window.innerWidth - hubWindow.offsetWidth) / 2 - 30);
+      const limitY = Math.max(0, (window.innerHeight - hubWindow.offsetHeight) / 2 - 30);
+      officeHubOffset = {
+        x: Math.max(-limitX, Math.min(limitX, drag.originX + event.clientX - drag.x)),
+        y: Math.max(-limitY, Math.min(limitY, drag.originY + event.clientY - drag.y)),
+      };
+      hubWindow.style.transform = `translate(${officeHubOffset.x}px, ${officeHubOffset.y}px)`;
+    });
+    const endDrag = () => { drag = null; };
+    hubHead.addEventListener("pointerup", endDrag);
+    hubHead.addEventListener("pointercancel", endDrag);
+  }
   document.addEventListener("keydown", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const dockTab = event.target.closest("[data-office-dock-tab]");
+    if (dockTab && !event.target.closest("button") && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      restoreOfficeEditor();
+      return;
+    }
     if (event.key !== "Escape") return;
     const newDialog = document.getElementById("officeNewOverlay");
     if (newDialog && !newDialog.hidden) { closeOfficeNewDialog(); return; }
     const versionsDialog = document.getElementById("officeVersionsOverlay");
-    if (versionsDialog && !versionsDialog.hidden) versionsDialog.hidden = true;
+    if (versionsDialog && !versionsDialog.hidden) { versionsDialog.hidden = true; return; }
+    const hubDialog = document.getElementById("officeHubOverlay");
+    if (hubDialog && !hubDialog.hidden) closeOfficeHub();
   });
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin) return;
     const data = event.data || {};
     if (data.type === "a8m-office-error") showToast(data.detail || "Office could not open the document.");
+    if (data.type === "a8m-office-ready") syncOfficeEditorTheme();
     if (data.type === "a8m-office-saved" && state.officeComposeAttachment) {
       refreshComposeAttachmentAfterOffice(state.officeComposeAttachment).catch(() => {});
     }
@@ -24751,6 +25152,9 @@ function bindEvents() {
       if (kind === "message") openCompose();
       else if (kind === "event") { setTask("calendar"); openEventDialog(); }
       else if (kind === "sticky") openStickyNoteEditor(stickyNoteOwnerId());
+      else if (kind === "office-docx") openOfficeNewDialog({ format: "docx" });
+      else if (kind === "office-xlsx") openOfficeNewDialog({ format: "xlsx" });
+      else if (kind === "office-pptx") openOfficeNewDialog({ format: "pptx" });
       return;
     }
     const moveFolder = target.closest("[data-move-folder]");
