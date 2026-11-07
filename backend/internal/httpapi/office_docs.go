@@ -750,8 +750,8 @@ func (s *Server) restoreOfficeVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `
-		UPDATE files SET storage_key=$2, size_bytes=$3, checksum=$4, version=$5, updated_at=now() WHERE id=$6
-	`, document.FileID, newKey, len(data), checksum, nextVersion); err != nil {
+		UPDATE files SET storage_key=$1, size_bytes=$2, checksum=$3, version=$4, updated_at=now() WHERE id=$5
+	`, newKey, len(data), checksum, nextVersion, document.FileID); err != nil {
 		s.officeRemoveStorage(newKey)
 		writeError(w, http.StatusInternalServerError, "OFFICE_VERSION", "Could not restore the version")
 		return

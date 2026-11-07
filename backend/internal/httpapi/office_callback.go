@@ -475,16 +475,16 @@ func (s *Server) officeSaveCallbackVersion(ctx context.Context, document officeD
 			"dlpMatches":        dlp.Matches,
 		})
 		if _, err := tx.Exec(ctx, `
-			UPDATE files SET storage_key=$2, size_bytes=$3, checksum=$4, version=$5, updated_at=now(),
-			  metadata = COALESCE(metadata,'{}'::jsonb) || $6::jsonb
-			WHERE id=$7
-		`, fileID, storageKey, len(data), checksum, nextVersion, string(metadataJSON), fileID); err != nil {
+			UPDATE files SET storage_key=$1, size_bytes=$2, checksum=$3, version=$4, updated_at=now(),
+			  metadata = COALESCE(metadata,'{}'::jsonb) || $5::jsonb
+			WHERE id=$6
+		`, storageKey, len(data), checksum, nextVersion, string(metadataJSON), fileID); err != nil {
 			s.officeRemoveStorage(storageKey)
 			return 0, "", "", err
 		}
 	} else if _, err := tx.Exec(ctx, `
-		UPDATE files SET storage_key=$2, size_bytes=$3, checksum=$4, version=$5, updated_at=now() WHERE id=$6
-	`, fileID, storageKey, len(data), checksum, nextVersion, fileID); err != nil {
+		UPDATE files SET storage_key=$1, size_bytes=$2, checksum=$3, version=$4, updated_at=now() WHERE id=$5
+	`, storageKey, len(data), checksum, nextVersion, fileID); err != nil {
 		s.officeRemoveStorage(storageKey)
 		return 0, "", "", err
 	}
