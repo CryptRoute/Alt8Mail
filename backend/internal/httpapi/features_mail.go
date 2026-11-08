@@ -46,6 +46,7 @@ type draftBody struct {
 	BodyText        *string `json:"bodyText"`
 	BodyHTML        *string `json:"bodyHtml"`
 	Body            *string `json:"body"`
+	AccountID       string  `json:"accountId"`
 	FromEmail       string  `json:"fromEmail"`
 	Attachments     []any   `json:"attachments"`
 	Mentions        []any   `json:"mentions"`
@@ -68,6 +69,12 @@ func (s *Server) getFolders(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
+	scope, scopeErr := s.resolveMailReadScope(r.Context(), sess, requestedMailAccountID(r))
+	if scopeErr == nil && !scope.Unified && scope.Account.Kind == mailAccountKindExternal {
+		folders, _ := s.externalFolderViews(r.Context(), scope.Account)
+		writeJSON(w, http.StatusOK, map[string]any{"folders": toAnyFolders(folders)})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"folders": toAnyFolders(stateFolderList(state))})
 }
 
@@ -88,13 +95,18 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
+	scope, scopeErr := s.resolveMailReadScope(r.Context(), sess, requestedMailAccountID(r))
+	if scopeErr != nil {
+		writeError(w, http.StatusInternalServerError, "MAIL_ACCOUNT", "Could not resolve the mailbox account")
+		return
+	}
 	repairEncodedSubjects(state)
 	folder := r.URL.Query().Get("folder")
 	if folder == "" {
 		folder = "inbox"
 	}
 	if threadID := strings.TrimSpace(r.URL.Query().Get("thread")); threadID != "" {
-		messages, canonicalThreadID, loadErr := s.loadMailMessageThread(r.Context(), sess.User.ID, threadID)
+		messages, canonicalThreadID, loadErr := s.loadMailMessageThread(r.Context(), sess.User.ID, threadID, folder)
 		if loadErr != nil {
 			writeError(w, http.StatusInternalServerError, "MESSAGES", "Could not load the conversation")
 			return
@@ -132,10 +144,11 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 	total := 0
 	hasMore := false
 	if query != "" {
-		matched, _, err = s.searchMailMessages(r.Context(), sess.User.ID, query)
+		matched, _, err = s.searchMailMessages(r.Context(), sess.User.ID, scope.AccountID, query)
+		matched = dedupeThreadMessages(matched, folder)
 		total = len(matched)
 	} else {
-		page, err = s.loadMailThreadPage(r.Context(), sess.User.ID, folder, filter, limit, offset)
+		page, err = s.loadMailThreadPage(r.Context(), sess.User.ID, scope.AccountID, folder, filter, limit, offset)
 		matched = page.Messages
 		total = page.Total
 		hasMore = page.HasMore
@@ -173,7 +186,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 			all = append(all, publicStateMessage(state, message))
 		}
 	} else {
-		siblings, _, siblingErr := s.loadMailMessagesByThreads(r.Context(), sess.User.ID, uniqueStrings(threadIDs, 1000))
+		siblings, _, siblingErr := s.loadMailMessagesByThreadsPreferred(r.Context(), sess.User.ID, uniqueStrings(threadIDs, 1000), folder)
 		if siblingErr != nil {
 			siblings = nil
 		}
@@ -195,7 +208,7 @@ func (s *Server) getMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) loadMailMessageThread(ctx context.Context, userID, target string) ([]map[string]any, string, error) {
+func (s *Server) loadMailMessageThread(ctx context.Context, userID, target, preferredFolder string) ([]map[string]any, string, error) {
 	target = strings.TrimSpace(target)
 	var threadID string
 	err := s.store.DB.QueryRow(ctx, `
@@ -224,7 +237,7 @@ func (s *Server) loadMailMessageThread(ctx context.Context, userID, target strin
 	if threadID == "" {
 		threadID = target
 	}
-	messages, _, err := s.loadMailMessagesByThreads(ctx, userID, []string{threadID})
+	messages, _, err := s.loadMailMessagesByThreadsPreferred(ctx, userID, []string{threadID}, preferredFolder)
 	return messages, threadID, err
 }
 
@@ -1040,7 +1053,12 @@ func (s *Server) getDrafts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
-	stored, _, err := s.loadMailMessagesByFolder(r.Context(), sess.User.ID, "drafts", "")
+	scope, err := s.resolveMailReadScope(r.Context(), sess, requestedMailAccountID(r))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "MAIL_ACCOUNT", "Could not resolve the mailbox account")
+		return
+	}
+	stored, _, err := s.loadMailMessagesByFolder(r.Context(), sess.User.ID, scope.AccountID, "drafts", "")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "DRAFTS", "Could not load drafts")
 		return
@@ -1063,11 +1081,26 @@ func (s *Server) saveDraft(w http.ResponseWriter, r *http.Request) {
 	var response map[string]any
 	var savedDraft map[string]any
 	var attachmentRecords map[string]any
+	var savedAccount mailAccountRecord
+	haveAccount := false
 	err := s.withMailState(r.Context(), sess.User, []string{id}, false, func(state map[string]any) error {
 		existing := findMessageIn(state, id)
 		if existing != nil && stateString(existing, "folder") != "drafts" {
 			return fail(http.StatusConflict, "NOT_A_DRAFT", "That id belongs to a message, not a draft")
 		}
+		accountID := body.AccountID
+		if accountID == "" && existing != nil {
+			accountID = stateString(existing, "accountId")
+		}
+		account, accountErr := s.resolveMailAccount(r.Context(), sess.User.ID, accountID)
+		if accountErr != nil {
+			account, accountErr = s.resolveMailAccount(r.Context(), sess.User.ID, "")
+		}
+		if accountErr != nil {
+			return accountErr
+		}
+		savedAccount = account
+		haveAccount = true
 		attachmentIDs := []string{}
 		if body.Attachments == nil && existing != nil {
 			attachmentIDs = attachmentIDsFromValue(existing["attachments"])
@@ -1075,7 +1108,7 @@ func (s *Server) saveDraft(w http.ResponseWriter, r *http.Request) {
 			attachmentIDs = attachmentIDsFromValue(body.Attachments)
 		}
 		s.preloadAttachments(r.Context(), sess.User.ID, state, attachmentIDs)
-		draft, err := drainDraft(state, body, existing)
+		draft, err := drainDraft(state, body, existing, account)
 		if err != nil {
 			return err
 		}
@@ -1099,8 +1132,13 @@ func (s *Server) saveDraft(w http.ResponseWriter, r *http.Request) {
 		writeFromError(w, err)
 		return
 	}
-	if savedDraft != nil {
-		s.persistDraftToIMAP(sess.User, savedDraft, attachmentRecords)
+	if savedDraft != nil && haveAccount {
+		switch savedAccount.Kind {
+		case mailAccountKindNative:
+			s.persistDraftToIMAP(sess.User, savedDraft, attachmentRecords)
+		case mailAccountKindExternal:
+			s.persistExternalDraft(r.Context(), savedAccount, savedDraft, attachmentRecords)
+		}
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -1109,10 +1147,17 @@ func (s *Server) deleteDraft(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	id := r.PathValue("id")
 	messageID := ""
+	var draftAccount mailAccountRecord
+	haveAccount := false
 	err := s.withMailState(r.Context(), sess.User, []string{id}, false, func(state map[string]any) error {
 		existing := findMessageIn(state, id)
 		if existing == nil || stateString(existing, "folder") != "drafts" {
 			return fail(http.StatusNotFound, "NOT_FOUND", "Draft not found")
+		}
+		account, accountErr := s.resolveMailAccount(r.Context(), sess.User.ID, stateString(existing, "accountId"))
+		if accountErr == nil {
+			draftAccount = account
+			haveAccount = true
 		}
 		messageID = stateString(existing, "messageId")
 		removeMessage(state, id)
@@ -1124,11 +1169,18 @@ func (s *Server) deleteDraft(w http.ResponseWriter, r *http.Request) {
 		writeFromError(w, err)
 		return
 	}
-	s.deleteIMAPDraft(sess.User, messageID)
+	if haveAccount {
+		switch draftAccount.Kind {
+		case mailAccountKindNative:
+			s.deleteIMAPDraft(sess.User, messageID)
+		case mailAccountKindExternal:
+			s.deleteExternalDraft(r.Context(), draftAccount, messageID)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func drainDraft(state map[string]any, body draftBody, existing map[string]any) (map[string]any, error) {
+func drainDraft(state map[string]any, body draftBody, existing map[string]any, account mailAccountRecord) (map[string]any, error) {
 	subject := ""
 	bodyText := ""
 	bodyHTML := ""
@@ -1189,9 +1241,22 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 	if fromEmail == "" {
 		fromEmail = stateString(stateMap(state, "user"), "email")
 	}
-	alias := aliasFor(state, fromEmail)
-	if alias == nil || alias["canSend"] == false {
-		return nil, fail(http.StatusForbidden, "BAD_FROM", "That From identity is not available for sending")
+	var fromPerson map[string]any
+	if account.Kind == mailAccountKindExternal {
+		if !strings.EqualFold(strings.TrimSpace(fromEmail), account.Email) {
+			return nil, fail(http.StatusForbidden, "BAD_FROM", "Choose the connected account address as the From identity")
+		}
+		fromPerson = map[string]any{
+			"name": account.DisplayName, "email": account.Email,
+			"initials": initialsFor(account.DisplayName, account.Email), "color": account.Color,
+			"kind": "connected",
+		}
+	} else {
+		alias := aliasFor(state, fromEmail)
+		if alias == nil || alias["canSend"] == false {
+			return nil, fail(http.StatusForbidden, "BAD_FROM", "That From identity is not available for sending")
+		}
+		fromPerson = aliasPerson(alias)
 	}
 	to, _ := parseRecipients(toText, state)
 	cc, _ := parseRecipients(ccText, state)
@@ -1273,7 +1338,8 @@ func drainDraft(state map[string]any, body draftBody, existing map[string]any) (
 		}
 	}
 	return map[string]any{
-		"id": nil, "folder": "drafts", "from": aliasPerson(alias), "fromEmail": stateString(alias, "email"),
+		"id": nil, "folder": "drafts", "accountId": account.ID,
+		"from": fromPerson, "fromEmail": stateString(fromPerson, "email"),
 		"to": to, "toText": toText, "cc": cc, "ccText": ccText, "bcc": bcc, "bccText": bccText,
 		"subject": subject, "snippet": snippet(firstNonEmpty(bodyText, subject, "Draft")),
 		"bodyHtml": bodyHTML, "bodyText": bodyText,
@@ -1319,11 +1385,17 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
-	matched, parsed, err := s.searchMailMessages(r.Context(), sess.User.ID, query)
+	scope, scopeErr := s.resolveMailReadScope(r.Context(), sess, requestedMailAccountID(r))
+	if scopeErr != nil {
+		writeError(w, http.StatusInternalServerError, "MAIL_ACCOUNT", "Could not resolve the mailbox account")
+		return
+	}
+	matched, parsed, err := s.searchMailMessages(r.Context(), sess.User.ID, scope.AccountID, query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "SEARCH", "Could not search the mailbox")
 		return
 	}
+	matched = dedupeThreadMessages(matched, "")
 	messages := make([]any, 0, len(matched))
 	for _, message := range matched {
 		messages = append(messages, publicStateMessage(state, message))

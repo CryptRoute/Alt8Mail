@@ -142,8 +142,20 @@ type storageAccountSummary struct {
 }
 
 func (s *Server) workspaceKey() []byte {
-	sum := sha256.Sum256([]byte(s.cfg.SessionSecret + "|a8m-workspace-token-v1"))
+	return workspaceKeyForSecret(s.cfg.SessionSecret)
+}
+
+func workspaceKeyForSecret(secret string) []byte {
+	sum := sha256.Sum256([]byte(secret + "|a8m-workspace-token-v1"))
 	return sum[:]
+}
+
+func (s *Server) workspaceKeys() [][]byte {
+	keys := [][]byte{workspaceKeyForSecret(s.cfg.SessionSecret)}
+	if previous := s.cfg.SessionSecretPrevious; previous != "" && previous != s.cfg.SessionSecret {
+		keys = append(keys, workspaceKeyForSecret(previous))
+	}
+	return keys
 }
 
 func (s *Server) sealWorkspaceToken(value string) (string, error) {
@@ -174,23 +186,27 @@ func (s *Server) openWorkspaceToken(value string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	block, err := aes.NewCipher(s.workspaceKey())
-	if err != nil {
-		return "", err
+	var lastErr error
+	for _, key := range s.workspaceKeys() {
+		block, err := aes.NewCipher(key)
+		if err != nil {
+			return "", err
+		}
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			return "", err
+		}
+		if len(raw) < gcm.NonceSize() {
+			return "", fmt.Errorf("encrypted workspace token is truncated")
+		}
+		nonce, ciphertext := raw[:gcm.NonceSize()], raw[gcm.NonceSize():]
+		plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+		if err == nil {
+			return string(plain), nil
+		}
+		lastErr = err
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-	if len(raw) < gcm.NonceSize() {
-		return "", fmt.Errorf("encrypted workspace token is truncated")
-	}
-	nonce, ciphertext := raw[:gcm.NonceSize()], raw[gcm.NonceSize():]
-	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return "", err
-	}
-	return string(plain), nil
+	return "", lastErr
 }
 
 func (s *Server) oauthRedirectURL(providerID string) string {

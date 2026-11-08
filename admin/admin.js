@@ -1264,6 +1264,7 @@ function policySections(policy) {
       ${toggleRow("IMAP access", "Permit IMAP clients to authenticate.", "mail.imapAccess", mail.imapAccess)}
       ${toggleRow("POP access", "Permit POP3 clients to authenticate.", "mail.popAccess", mail.popAccess)}
       ${toggleRow("SMTP submission", "Permit authenticated outbound SMTP.", "mail.smtpAccess", mail.smtpAccess)}
+      ${toggleRow("Connected accounts", "Allow users to add their own IMAP accounts and send through those providers. Credentials are encrypted and never returned.", "mail.externalAccounts", mail.externalAccounts)}
     </div>
     <div class="policy-section"><h3>Content protection</h3><p>Attachment, spam and retention restrictions.</p>
       <div class="setting-row"><div class="setting-copy"><b>Attachment size limit</b><small>Maximum message attachment size in megabytes.</small></div><div class="setting-control"><input class="input" type="number" min="1" max="100" data-policy-input="mail.maxAttachmentMB" value="${mail.maxAttachmentMB}"></div></div>

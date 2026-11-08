@@ -2178,3 +2178,28 @@ body.office-editor-open { overflow: hidden; }
   .office-editor-actions { gap: 5px; }
   .office-editor-actions .btn-small { padding-left: 8px; padding-right: 8px; }
 }
+
+/* Connected mail accounts */
+.account-switcher-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.account-switcher-row select { flex: 1; min-width: 0; height: 34px; border-radius: 8px; }
+.account-add-btn { flex: none; width: 34px; height: 34px; }
+.connected-account-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.connected-account-empty { padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); font-size: 13px; }
+.connected-account-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.connected-account-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.connected-account-copy strong, .connected-account-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connected-account-copy span { color: var(--muted); font-size: 12px; }
+.connected-account-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.connected-account-actions button { font-size: 12px; padding: 5px 9px; }
+.connected-account-status.is-reauth { color: #b15c00; font-weight: 600; }
+.connected-account-status.is-error { color: #b42318; font-weight: 600; }
+.account-dialog { width: min(620px, calc(100vw - 32px)); }
+.account-dialog .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.account-dialog .form-grid .span-2 { grid-column: 1 / -1; }
+.account-dialog-status { min-height: 20px; margin: 10px 0; color: var(--muted); font-size: 13px; }
+.account-dialog-status.is-error { color: #b42318; }
+.account-server-fields { display: contents; }
+@media (max-width: 640px) { .account-dialog .form-grid { grid-template-columns: 1fr; } }
+.account-switcher-row[hidden] { display: none; }
+.account-add-btn[hidden] { display: none; }
+.settings-nav-item[hidden] { display: none; }

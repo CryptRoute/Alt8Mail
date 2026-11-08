@@ -22,10 +22,18 @@ func (s *Server) userMailLock(userID string) *sync.Mutex {
 }
 
 type mailWorker struct {
-	userID string
-	email  string
-	cancel context.CancelFunc
-	done   chan struct{}
+	accountID string
+	kind      string
+	email     string
+	user      userRecord
+	account   mailAccountRecord
+	cancel    context.CancelFunc
+	done      chan struct{}
+}
+
+type mailWorkerAccount struct {
+	account mailAccountRecord
+	user    userRecord
 }
 
 type mailWorkerPool struct {
@@ -63,42 +71,101 @@ func (p *mailWorkerPool) run() {
 }
 
 func (p *mailWorkerPool) refresh() {
-	users, err := p.server.activeMailUsers(p.ctx)
+	accounts, err := p.server.activeMailWorkerAccounts(p.ctx)
 	if err != nil {
-		p.server.logger.Warn("mail worker user refresh failed", "err", err)
+		p.server.logger.Warn("mail worker account refresh failed", "err", err)
 		return
 	}
-	active := map[string]userRecord{}
+	active := map[string]mailWorkerAccount{}
 	policies := map[string]adminTenantPolicy{}
-	for _, user := range users {
-		policy, ok := policies[user.TenantID]
+	for _, item := range accounts {
+		policy, ok := policies[item.user.TenantID]
 		if !ok {
-			policy = p.server.tenantPolicyFor(p.ctx, user.TenantID)
-			policies[user.TenantID] = policy
+			policy = p.server.tenantPolicyFor(p.ctx, item.user.TenantID)
+			policies[item.user.TenantID] = policy
 		}
-		if !policy.Mail.IMAPAccess || !p.server.mailAccountConfigured(user.Email) {
+		if !policy.Mail.IMAPAccess {
 			continue
 		}
-		active[user.ID] = user
+		if item.account.Kind == mailAccountKindNative {
+			if !p.server.mailAccountConfigured(item.user.Email) {
+				continue
+			}
+		} else if !policy.Mail.ExternalAccounts {
+			continue
+		}
+		active[item.account.ID] = item
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for id, worker := range p.workers {
-		user, wanted := active[id]
-		if wanted && user.Email == worker.email {
+		item, wanted := active[id]
+		if wanted && item.user.ID == worker.user.ID && item.user.Email == worker.email {
 			delete(active, id)
 			continue
 		}
 		worker.cancel()
 		delete(p.workers, id)
 	}
-	for id, user := range active {
+	for id, item := range active {
 		workerCtx, cancel := context.WithCancel(p.ctx)
-		worker := &mailWorker{userID: id, email: user.Email, cancel: cancel, done: make(chan struct{})}
+		worker := &mailWorker{
+			accountID: id, kind: item.account.Kind, email: item.user.Email,
+			user: item.user, account: item.account, cancel: cancel, done: make(chan struct{}),
+		}
 		p.workers[id] = worker
-		go p.runWorker(workerCtx, worker, user)
+		go p.runWorker(workerCtx, worker)
 	}
+}
+
+func (s *Server) activeMailWorkerAccounts(ctx context.Context) ([]mailWorkerAccount, error) {
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT a.id, a.tenant_id::text, a.user_id::text, a.kind, a.provider, a.email::text,
+		       a.display_name, a.color, a.status, a.auth_type, a.imap_host, a.imap_port, a.imap_tls,
+		       a.smtp_host, a.smtp_port, a.smtp_tls, a.username, a.settings, a.last_sync_at,
+		       a.last_error, a.created_at, a.updated_at,
+		       u.email::text, u.name, u.initials, u.color, u.role, u.status, u.preferences, u.security,
+		       u.quota_bytes, u.used_bytes, u.enrollment_required, u.force_password_change, u.password_expires_at
+		FROM public.mail_accounts a
+		JOIN public.users u ON u.id = a.user_id
+		JOIN public.tenants t ON t.id = a.tenant_id
+		WHERE a.status = 'active' AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'
+		  AND (a.kind <> 'native' OR EXISTS (
+			SELECT 1 FROM public.mailboxes m WHERE m.user_id = a.user_id AND m.active
+		  ))
+		ORDER BY a.id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []mailWorkerAccount{}
+	for rows.Next() {
+		var item mailWorkerAccount
+		var settings []byte
+		if err := rows.Scan(
+			&item.account.ID, &item.account.TenantID, &item.account.UserID, &item.account.Kind,
+			&item.account.Provider, &item.account.Email, &item.account.DisplayName, &item.account.Color,
+			&item.account.Status, &item.account.AuthType, &item.account.IMAPHost, &item.account.IMAPPort,
+			&item.account.IMAPTLS, &item.account.SMTPHost, &item.account.SMTPPort, &item.account.SMTPTLS,
+			&item.account.Username, &settings, &item.account.LastSyncAt, &item.account.LastError,
+			&item.account.CreatedAt, &item.account.UpdatedAt,
+			&item.user.Email, &item.user.Name, &item.user.Initials, &item.user.Color, &item.user.Role,
+			&item.user.Status, &item.user.Preferences, &item.user.Security, &item.user.QuotaBytes,
+			&item.user.UsedBytes, &item.user.EnrollmentRequired, &item.user.ForcePasswordChange,
+			&item.user.PasswordExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		item.user.ID = item.account.UserID
+		item.user.TenantID = item.account.TenantID
+		if len(settings) > 0 {
+			item.account.Settings = settings
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func (p *mailWorkerPool) stopAll() {
@@ -110,8 +177,13 @@ func (p *mailWorkerPool) stopAll() {
 	}
 }
 
-func (p *mailWorkerPool) runWorker(ctx context.Context, worker *mailWorker, user userRecord) {
+func (p *mailWorkerPool) runWorker(ctx context.Context, worker *mailWorker) {
 	defer close(worker.done)
+	if worker.kind == mailAccountKindExternal {
+		p.runExternalWorker(ctx, worker)
+		return
+	}
+	user := worker.user
 	poll := p.server.cfg.IMAPPollInterval
 	full := p.server.cfg.IMAPSyncInterval
 	if poll <= 0 {
@@ -173,6 +245,42 @@ func (p *mailWorkerPool) runWorker(ctx context.Context, worker *mailWorker, user
 		case <-fullTicker.C:
 			runFull()
 		}
+	}
+}
+
+func (p *mailWorkerPool) runExternalWorker(ctx context.Context, worker *mailWorker) {
+	jitter := 5*time.Second + time.Duration(rand.Int63n(int64(25*time.Second)))
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(jitter):
+	}
+	p.syncExternalWorker(ctx, worker)
+	pollTicker := time.NewTicker(60 * time.Second)
+	defer pollTicker.Stop()
+	fullTicker := time.NewTicker(10 * time.Minute)
+	defer fullTicker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-pollTicker.C:
+			p.syncExternalWorker(ctx, worker)
+		case <-fullTicker.C:
+			p.syncExternalWorker(ctx, worker)
+		}
+	}
+}
+
+func (p *mailWorkerPool) syncExternalWorker(ctx context.Context, worker *mailWorker) {
+	select {
+	case p.sem <- struct{}{}:
+		defer func() { <-p.sem }()
+	case <-ctx.Done():
+		return
+	}
+	if err := p.server.syncExternalAccount(ctx, worker.account, worker.user); err != nil {
+		p.server.logger.Debug("connected account sync failed", "account", worker.account.Email, "err", err)
 	}
 }
 

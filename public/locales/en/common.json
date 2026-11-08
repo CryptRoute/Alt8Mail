@@ -55,5 +55,18 @@
   "common.close": "Close",
   "common.done": "Done",
   "common.saved": "Preferences saved",
-  "notify.newMail": "New Alt8Mail"
+  "notify.newMail": "New Alt8Mail",
+  "accounts.all": "All accounts",
+  "accounts.connected": "Connected accounts",
+  "accounts.add": "Add mail account",
+  "accounts.sync": "Sync",
+  "accounts.servers": "Servers",
+  "accounts.reconnect": "Reconnect",
+  "accounts.password": "Password",
+  "accounts.remove": "Remove",
+  "accounts.connectedHint": "Read your other mailboxes and send through their own IMAP and SMTP servers.",
+  "accounts.provider": "Provider",
+  "accounts.gmailOAuth": "Gmail — sign in with Google",
+  "accounts.microsoftOAuth": "Microsoft 365 / Outlook — sign in",
+  "accounts.gmailAppPassword": "Gmail — app password"
 }

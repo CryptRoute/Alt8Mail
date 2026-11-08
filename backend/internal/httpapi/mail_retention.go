@@ -210,7 +210,9 @@ func (s *Server) expungeRetainedMessages(ctx context.Context, user userRecord, c
 		}
 		result, err := s.store.DB.Exec(ctx, `
 			DELETE FROM mail_messages
-			WHERE user_id=$1 AND imap_folder=$2 AND uid_validity=$3 AND uid = ANY($4)
+			WHERE user_id=$1 AND account_id=(
+				SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+			) AND imap_folder=$2 AND uid_validity=$3 AND uid = ANY($4)
 		`, user.ID, folder, int64(validityByFolder[folder]), uidList)
 		if err != nil {
 			return removed, folders, fmt.Errorf("mail removed from Dovecot but database cleanup failed: %w", err)

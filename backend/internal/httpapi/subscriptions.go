@@ -176,7 +176,7 @@ type subscriptionSendResult struct {
 func (s *Server) unsubscribeAllSubscriptions(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	targetsByIdentity := map[string]*subscriptionSenderTarget{}
-	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
+	err := s.withNativeMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		for _, raw := range stateMessages(state) {
 			message, _ := raw.(map[string]any)
 			if message == nil || stateString(message, "folder") != "subscriptions" {
@@ -392,7 +392,7 @@ func (s *Server) permanentlyDeleteMessages(ctx context.Context, user userRecord,
 	mutations := []imapAction{}
 	folders := map[string]bool{}
 	removed := 0
-	err = s.withMailMetadataState(ctx, user, func(state map[string]any) error {
+	err = s.withNativeMailMetadataState(ctx, user, func(state map[string]any) error {
 		for _, id := range unique {
 			message := findMessageIn(state, id)
 			if message == nil {

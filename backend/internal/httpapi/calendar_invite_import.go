@@ -21,20 +21,21 @@ func (s *Server) importMessageCalendar(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "DELEGATE_READ_ONLY", "Open the invitation in the mailbox owner's calendar")
 		return
 	}
-	var subject, fromEmail, folder, name, mime, storedPath string
+	var subject, fromEmail, folder, name, mime, storedPath, accountEmail string
 	var messageIDHeader, threadID string
 	var sentAt time.Time
 	err := s.store.DB.QueryRow(r.Context(), `
 		SELECT m.subject, m.from_email::text, m.folder, m.message_id, m.thread_id, m.sent_at,
-		       a.name, a.mime, a.stored_path
+		       a.name, a.mime, a.stored_path, COALESCE(ma2.email::text, '')
 		FROM mail_messages m
 		JOIN mail_message_attachments ma ON ma.message_id=m.id
 		JOIN attachments a ON a.id=ma.attachment_id AND a.user_id=m.user_id
+		LEFT JOIN mail_accounts ma2 ON ma2.id=m.account_id
 		WHERE m.id=$1 AND m.user_id=$2
 		  AND (lower(a.mime) LIKE 'text/calendar%' OR lower(a.name) LIKE '%.ics')
 		ORDER BY ma.position
 		LIMIT 1
-	`, messageID, sess.User.ID).Scan(&subject, &fromEmail, &folder, &messageIDHeader, &threadID, &sentAt, &name, &mime, &storedPath)
+	`, messageID, sess.User.ID).Scan(&subject, &fromEmail, &folder, &messageIDHeader, &threadID, &sentAt, &name, &mime, &storedPath, &accountEmail)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "CALENDAR_INVITE", "This message does not contain a calendar invitation")
 		return
@@ -73,7 +74,7 @@ func (s *Server) importMessageCalendar(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "CALENDAR_INVITE", "The invitation is missing a meeting time")
 		return
 	}
-	if strings.EqualFold(event.Organizer, sess.User.Email) {
+	if s.localMailIdentity(r.Context(), sess.User, event.Organizer) {
 		writeError(w, http.StatusConflict, "CALENDAR_INVITE", "You organized this meeting; open it from your calendar")
 		return
 	}
@@ -118,7 +119,7 @@ func (s *Server) importMessageCalendar(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "CALENDAR", "Could not save the invitation")
 		return
 	}
-	if err := s.insertImportedCalendarAttendees(r.Context(), tx, eventID, sess.User, event); err != nil {
+	if err := s.insertImportedCalendarAttendees(r.Context(), tx, eventID, sess.User, firstNonEmpty(accountEmail, sess.User.Email), event); err != nil {
 		writeError(w, http.StatusInternalServerError, "CALENDAR", "Could not save the invitation guests")
 		return
 	}
@@ -143,8 +144,9 @@ func (s *Server) importMessageCalendar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "event": payload})
 }
 
-func (s *Server) insertImportedCalendarAttendees(ctx context.Context, tx pgx.Tx, eventID string, user userRecord, event parsedCalendarEvent) error {
+func (s *Server) insertImportedCalendarAttendees(ctx context.Context, tx pgx.Tx, eventID string, user userRecord, localEmail string, event parsedCalendarEvent) error {
 	seen := map[string]bool{}
+	localEmail = strings.ToLower(strings.TrimSpace(firstNonEmpty(localEmail, user.Email)))
 	organizerEmail := strings.ToLower(strings.TrimSpace(event.Organizer))
 	insert := func(email, name, status, role string, organizer bool, userID any, respondedAt any) error {
 		_, err := tx.Exec(ctx, `
@@ -187,6 +189,11 @@ func (s *Server) insertImportedCalendarAttendees(ctx context.Context, tx pgx.Tx,
 			if name == "" {
 				name = local.Name
 			}
+		} else if email == localEmail {
+			userID = user.ID
+			if name == "" {
+				name = user.Name
+			}
 		}
 		var respondedAt any
 		if status != "needs-action" {
@@ -196,7 +203,7 @@ func (s *Server) insertImportedCalendarAttendees(ctx context.Context, tx pgx.Tx,
 			return err
 		}
 	}
-	email := strings.ToLower(strings.TrimSpace(user.Email))
+	email := localEmail
 	if email != "" && !seen[email] {
 		if err := insert(email, user.Name, "needs-action", "REQ-PARTICIPANT", false, user.ID, nil); err != nil {
 			return err

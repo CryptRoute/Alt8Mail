@@ -655,6 +655,15 @@ without them, authentication and admin routes fail closed. Migrations are
 idempotent (`IF NOT EXISTS` / `ON CONFLICT DO NOTHING`). See [ADMIN.md](ADMIN.md)
 for the admin console, permissions and subdomain deployment.
 
+The multi-account migrations `0057_mail_accounts` and `0058_mail_phase2` have
+matching rollback scripts under `backend/migrations/rollback/`. Run the 0058
+script first. The 0057 rollback is destructive: it removes connected-account
+metadata and the account id columns, restores the old per-user IMAP UID index,
+and requires a backup.
+
+Connected-account create/test/update/delete/sync and OAuth starts are limited to
+30 actions per user per ten minutes. The limit is in memory per webmail process.
+
 Environment is `/opt/a8m/secrets/app.env`, loaded by systemd as user
 `a8m`. The unit uses `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`,
 `ProtectSystem=strict`, `ProtectHome`, an empty capability set and only
@@ -710,6 +719,13 @@ ALT8MAIL_DROPBOX_CLIENT_ID=
 ALT8MAIL_DROPBOX_CLIENT_SECRET=
 ALT8MAIL_MICROSOFT_CLIENT_ID=
 ALT8MAIL_MICROSOFT_CLIENT_SECRET=
+# Connected mail OAuth (fall back to the storage IDs above when empty)
+ALT8MAIL_GOOGLE_MAIL_CLIENT_ID=
+ALT8MAIL_GOOGLE_MAIL_CLIENT_SECRET=
+ALT8MAIL_MICROSOFT_MAIL_CLIENT_ID=
+ALT8MAIL_MICROSOFT_MAIL_CLIENT_SECRET=
+# Microsoft Entra tenant: common (default), organizations, consumers or a tenant id
+ALT8MAIL_MICROSOFT_MAIL_TENANT=common
 ```
 
 `ALT8MAIL_WEBAUTHN_RPID` is a bare hostname (no scheme/port) and
@@ -1173,11 +1189,30 @@ Set `ALT8MAIL_GOOGLE_CLIENT_ID`, `ALT8MAIL_GOOGLE_CLIENT_SECRET`,
 `ALT8MAIL_DROPBOX_CLIENT_ID`, `ALT8MAIL_DROPBOX_CLIENT_SECRET`,
 `ALT8MAIL_MICROSOFT_CLIENT_ID` and `ALT8MAIL_MICROSOFT_CLIENT_SECRET`. Providers
 are shown as unconfigured until both ID and secret are present. Refresh/access
-tokens are AES-GCM sealed with a key derived from `ALT8MAIL_SESSION_SECRET`;
-rotating that secret requires users to reconnect. OAuth cannot be live-tested
-without real provider apps; the authorization, callback, refresh, upload,
-download and sync paths are implemented and unit/API boundaries are documented
-in `backend/README.md`.
+tokens are AES-GCM sealed with a key derived from `ALT8MAIL_SESSION_SECRET`.
+To rotate that secret without an immediate reconnect, set
+`ALT8MAIL_SESSION_SECRET_PREVIOUS` to the old value while changing
+`ALT8MAIL_SESSION_SECRET`; new reads fall back to the previous key and new writes
+use the new key. Re-save or reconnect storage, AI, add-on and connected-account
+credentials to re-seal them, then remove the previous value. OAuth cannot be
+live-tested without real provider apps; the authorization, callback, refresh,
+upload, download and sync paths are implemented and unit/API boundaries are
+documented in `backend/README.md`.
+
+Connected mail accounts use the same sealing key. For Gmail OAuth register
+`https://mail.example.com/api/mail/oauth/gmail/callback` with the
+`https://mail.google.com/` scope. For Microsoft 365 register
+`https://mail.example.com/api/mail/oauth/microsoft/callback` with delegated
+`IMAP.AccessAsUser.All`, `SMTP.Send`, `openid`, `email`, `profile` and
+`offline_access`. Set `ALT8MAIL_GOOGLE_MAIL_CLIENT_ID` /
+`ALT8MAIL_GOOGLE_MAIL_CLIENT_SECRET` and
+`ALT8MAIL_MICROSOFT_MAIL_CLIENT_ID` / `ALT8MAIL_MICROSOFT_MAIL_CLIENT_SECRET`;
+when those are empty the storage connector IDs above are reused, provided the
+mail callbacks are registered on the same apps. Google treats
+`https://mail.google.com/` as a restricted scope, so a public app must complete
+Google verification. Microsoft tenants that disable SMTP AUTH can still read
+mail, but sending through that account will report an SMTP authentication
+error until the tenant enables it.
 
 ### 5.14 Large-mailbox sync, workspace data and scale
 

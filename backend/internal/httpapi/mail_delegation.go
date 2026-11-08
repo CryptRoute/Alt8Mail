@@ -87,16 +87,20 @@ func (s *Server) applyDelegatedMailboxes(ctx context.Context, user userRecord, f
 		if !ok {
 			continue
 		}
+		ownerAccount, accountErr := s.nativeMailAccountForUser(ctx, delegation.OwnerID)
+		if accountErr != nil {
+			continue
+		}
 		folderID := "delegate_" + delegation.OwnerID
 		shown, _, err := s.loadMailMessagesQuery(ctx, delegation.OwnerID,
 			`SELECT `+mailMessageColumns+` FROM mail_messages
-			 WHERE user_id=$1 AND folder='inbox' AND NOT ignored
+			 WHERE user_id=$1 AND account_id=$3 AND folder='inbox' AND NOT ignored
 			   AND (snoozed_until IS NULL OR snoozed_until <= now())
-			 ORDER BY sent_at DESC LIMIT $2`, delegation.OwnerID, delegatedMessageLimit)
+			 ORDER BY sent_at DESC LIMIT $2`, delegation.OwnerID, delegatedMessageLimit, ownerAccount.ID)
 		if err != nil {
 			continue
 		}
-		counts, unreadByFolder, _ := s.loadMailFolderCounts(ctx, delegation.OwnerID)
+		counts, unreadByFolder, _ := s.loadMailFolderCounts(ctx, delegation.OwnerID, ownerAccount.ID)
 		unread := unreadByFolder["inbox"]
 		total := counts["inbox"]
 		for _, message := range shown {

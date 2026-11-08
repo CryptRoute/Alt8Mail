@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"fmt"
 	"net/textproto"
 	"time"
 
@@ -16,6 +15,7 @@ var appToIMAPFolder = map[string]string{
 }
 
 type imapAction struct {
+	AccountID        string
 	MessageID        string
 	SourceUID        int64
 	SourceFolder     string
@@ -36,38 +36,110 @@ func imapFolderFor(appFolder string) string {
 }
 
 func (s *Server) applyIMAPActions(user userRecord, actions []imapAction) error {
-	if !s.mailAccountConfigured(user.Email) || len(actions) == 0 {
+	if len(actions) == 0 {
 		return nil
 	}
-	if !s.tenantPolicyFor(context.Background(), user.TenantID).Mail.IMAPAccess {
+	ctx := context.Background()
+	if !s.tenantPolicyFor(ctx, user.TenantID).Mail.IMAPAccess {
 		return nil
 	}
-	loginUser, loginPassword, err := s.mailLoginForUser(user.Email)
-	if err != nil {
-		return err
+	// Older call sites only know the message id. Resolve its account in one
+	// query so native and connected messages can travel through the same
+	// mutation path without exposing account ids to every caller.
+	messageIDs := []string{}
+	for _, action := range actions {
+		if action.AccountID == "" && action.MessageID != "" {
+			messageIDs = append(messageIDs, action.MessageID)
+		}
 	}
-	tlsConfig, err := s.mailTLSConfig(s.cfg.IMAPTLSName)
-	if err != nil {
-		return err
+	if len(messageIDs) > 0 {
+		rows, err := s.store.DB.Query(ctx, `
+			SELECT id, account_id FROM public.mail_messages
+			WHERE user_id=$1 AND id = ANY($2)
+		`, user.ID, messageIDs)
+		if err == nil {
+			accountsByMessage := map[string]string{}
+			for rows.Next() {
+				var messageID, accountID string
+				if rows.Scan(&messageID, &accountID) == nil {
+					accountsByMessage[messageID] = accountID
+				}
+			}
+			rows.Close()
+			for index := range actions {
+				if actions[index].AccountID == "" {
+					actions[index].AccountID = accountsByMessage[actions[index].MessageID]
+				}
+			}
+		}
 	}
-	conn, err := imapclient.DialTLS(s.cfg.IMAPAddr, tlsConfig)
-	if err != nil {
-		return fmt.Errorf("connect to IMAP: %w", err)
+	native, nativeErr := s.nativeMailAccountForUser(ctx, user.ID)
+	groups := map[string][]imapAction{}
+	for _, action := range actions {
+		if action.AccountID == "" && nativeErr == nil {
+			action.AccountID = native.ID
+		}
+		if action.AccountID == "" {
+			continue
+		}
+		groups[action.AccountID] = append(groups[action.AccountID], action)
 	}
-	defer conn.Logout()
-	conn.Timeout = 30 * time.Second
-	if err := conn.Login(loginUser, loginPassword); err != nil {
-		return fmt.Errorf("IMAP login: %w", err)
+	for accountID, group := range groups {
+		account, err := s.resolveMailAccount(ctx, user.ID, accountID)
+		if err != nil {
+			s.logger.Warn("IMAP action account missing", "account", accountID, "err", err)
+			continue
+		}
+		if account.Kind == mailAccountKindExternal && !s.externalMailAccountsAllowed(ctx, user) {
+			continue
+		}
+		if account.Kind == mailAccountKindNative {
+			if !s.mailAccountConfigured(user.Email) {
+				continue
+			}
+			loginUser, loginPassword, loginErr := s.mailLoginForUser(user.Email)
+			if loginErr != nil {
+				s.logger.Warn("IMAP action credentials", "err", loginErr)
+				continue
+			}
+			tlsConfig, tlsErr := s.mailTLSConfig(s.cfg.IMAPTLSName)
+			if tlsErr != nil {
+				continue
+			}
+			conn, connectErr := imapclient.DialTLS(s.cfg.IMAPAddr, tlsConfig)
+			if connectErr != nil {
+				s.logger.Warn("IMAP action connect", "err", connectErr)
+				continue
+			}
+			conn.Timeout = 30 * time.Second
+			if loginErr := conn.Login(loginUser, loginPassword); loginErr != nil {
+				_ = conn.Logout()
+				s.logger.Warn("IMAP action login", "err", loginErr)
+				continue
+			}
+			ensureIMAPFolders(conn)
+			state, _ := s.loadState(ctx, user.ID)
+			s.applyIMAPActionsForAccount(ctx, conn, user, account, state, group)
+			_ = conn.Logout()
+			continue
+		}
+		conn, connectErr := s.openExternalIMAP(ctx, account)
+		if connectErr != nil {
+			s.recordExternalSyncFailure(ctx, account, connectErr)
+			s.logger.Warn("connected IMAP action login", "account", account.Email, "err", connectErr)
+			continue
+		}
+		s.applyIMAPActionsForAccount(ctx, conn, user, account, nil, group)
+		_ = conn.Logout()
 	}
-	ensureIMAPFolders(conn)
-	state, _ := s.loadState(context.Background(), user.ID)
+	return nil
+}
+
+func (s *Server) applyIMAPActionsForAccount(ctx context.Context, conn *imapclient.Client, user userRecord, account mailAccountRecord, state map[string]any, actions []imapAction) {
 	for _, action := range actions {
 		source := action.SourceIMAPFolder
 		if source == "" {
-			source = imapFolderFor(action.SourceFolder)
-			if source == "" && state != nil {
-				source = folderIMAPName(state, action.SourceFolder)
-			}
+			source = s.actionIMAPFolder(ctx, account, state, action.SourceFolder)
 		}
 		if source == "" || (action.MessageID == "" && action.SourceUID == 0) {
 			continue
@@ -80,7 +152,7 @@ func (s *Server) applyIMAPActions(user userRecord, actions []imapAction) error {
 			}
 		}
 		if err != nil || uid == 0 {
-			s.logger.Warn("IMAP action could not find message", "folder", source, "message", action.MessageID, "err", err)
+			s.logger.Warn("IMAP action could not find message", "account", account.Email, "folder", source, "message", action.MessageID, "err", err)
 			continue
 		}
 		currentFolder := source
@@ -92,20 +164,15 @@ func (s *Server) applyIMAPActions(user userRecord, actions []imapAction) error {
 		if action.TargetFolder != "" && action.TargetFolder != action.SourceFolder {
 			target := action.TargetIMAPFolder
 			if target == "" {
-				target = imapFolderFor(action.TargetFolder)
-				if target == "" && state != nil {
-					target = folderIMAPName(state, action.TargetFolder)
-				}
+				target = s.actionIMAPFolder(ctx, account, state, action.TargetFolder)
 			}
 			if target == "" {
 				continue
 			}
 			if err := moveIMAPMessage(conn, source, uid, target); err != nil {
 				s.logger.Warn("IMAP move failed", "message", action.MessageID, "from", source, "to", target, "err", err)
-				// Fall through so flag changes still apply in the source folder.
 			} else {
 				currentFolder = target
-				// The UID changed in the destination mailbox.
 				uid, err = findIMAPUID(conn, target, action.MessageID)
 				if err != nil || uid == 0 {
 					continue
@@ -136,8 +203,39 @@ func (s *Server) applyIMAPActions(user userRecord, actions []imapAction) error {
 				s.logger.Warn("IMAP flag update failed", "message", action.MessageID, "err", err)
 			}
 		}
+		if action.MarkDeleted && account.Kind == mailAccountKindExternal {
+			set := new(imap.SeqSet)
+			set.AddNum(uid)
+			if err := uidExpunge(conn, set); err != nil {
+				_ = conn.Expunge(nil)
+			}
+		}
 	}
-	return nil
+}
+
+func (s *Server) actionIMAPFolder(ctx context.Context, account mailAccountRecord, state map[string]any, appFolder string) string {
+	if account.Kind == mailAccountKindNative {
+		if folder := imapFolderFor(appFolder); folder != "" {
+			return folder
+		}
+		if state != nil {
+			return folderIMAPName(state, appFolder)
+		}
+		return ""
+	}
+	role := appFolder
+	if appFolder == "spam" {
+		role = "junk"
+	}
+	var remote string
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT remote_name FROM public.mail_folders
+		WHERE account_id=$1 AND (id=$2 OR role=$3 OR remote_name=$2)
+		ORDER BY CASE WHEN id=$2 THEN 0 WHEN remote_name=$2 THEN 1 ELSE 2 END,
+		         sync_enabled DESC, remote_name
+		LIMIT 1
+	`, account.ID, appFolder, role).Scan(&remote)
+	return remote
 }
 
 func findIMAPUID(conn *imapclient.Client, mailbox, messageID string) (uint32, error) {

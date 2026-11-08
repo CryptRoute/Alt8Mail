@@ -175,7 +175,9 @@ func (s *Server) refreshInboxFlagsForUser(ctx context.Context, user userRecord) 
 			starred := hasIMAPFlag(update.Flags, `\Flagged`)
 			batch.Queue(`
 				UPDATE mail_messages SET unread=$4, starred=$5, flagged=$5, updated_at=now()
-				WHERE user_id=$1 AND imap_folder='inbox' AND uid_validity=$2 AND uid=$3
+				WHERE user_id=$1 AND account_id=(
+					SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+				) AND imap_folder='inbox' AND uid_validity=$2 AND uid=$3
 			`, user.ID, int64(status.UidValidity), int64(update.UID), unread, starred)
 		}
 		results := tx.SendBatch(ctx, batch)
@@ -191,12 +193,16 @@ func (s *Server) refreshInboxFlagsForUser(ctx context.Context, user userRecord) 
 	}
 	if len(live) == 0 {
 		_, err = tx.Exec(ctx, `
-			DELETE FROM mail_messages WHERE user_id=$1 AND imap_folder='inbox' AND uid > 0
+			DELETE FROM mail_messages WHERE user_id=$1 AND account_id=(
+				SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+			) AND imap_folder='inbox' AND uid > 0
 		`, user.ID)
 	} else {
 		_, err = tx.Exec(ctx, `
 			DELETE FROM mail_messages
-			WHERE user_id=$1 AND imap_folder='inbox' AND uid > 0
+			WHERE user_id=$1 AND account_id=(
+				SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+			) AND imap_folder='inbox' AND uid > 0
 			  AND (uid_validity <> $2 OR NOT (uid = ANY($3)))
 		`, user.ID, int64(status.UidValidity), live)
 	}

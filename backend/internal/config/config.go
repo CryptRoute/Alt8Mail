@@ -11,30 +11,31 @@ import (
 )
 
 type Config struct {
-	Env               string
-	Listen            string
-	PublicURL         string
-	MailDomain        string
-	MailHostname      string
-	MaildirBase       string
-	DKIMDir           string
-	DKIMSelectorMap   string
-	LocalDomainsMap   string
-	PublicDir         string
-	UploadDir         string
-	DatabaseURL       string
-	DBMaxConns        int32
-	MemoryLimitMB     int
-	RedisAddr         string
-	RedisPassword     string
-	RedisDB           int
-	SessionSecret     string
-	CSRFSecret        string
-	CookieSecure      bool
-	SessionTTL        time.Duration
-	RememberTTL       time.Duration
-	StaticCacheBust   string
-	ReadHeaderTimeout time.Duration
+	Env                   string
+	Listen                string
+	PublicURL             string
+	MailDomain            string
+	MailHostname          string
+	MaildirBase           string
+	DKIMDir               string
+	DKIMSelectorMap       string
+	LocalDomainsMap       string
+	PublicDir             string
+	UploadDir             string
+	DatabaseURL           string
+	DBMaxConns            int32
+	MemoryLimitMB         int
+	RedisAddr             string
+	RedisPassword         string
+	RedisDB               int
+	SessionSecret         string
+	SessionSecretPrevious string
+	CSRFSecret            string
+	CookieSecure          bool
+	SessionTTL            time.Duration
+	RememberTTL           time.Duration
+	StaticCacheBust       string
+	ReadHeaderTimeout     time.Duration
 
 	IMAPAddr              string
 	IMAPUser              string
@@ -66,19 +67,24 @@ type Config struct {
 	WebAuthnOrigins  []string
 	PushVAPIDKeyFile string
 
-	S3Endpoint            string
-	S3Region              string
-	S3Bucket              string
-	S3AccessKey           string
-	S3SecretKey           string
-	S3UseSSL              bool
-	S3PathStyle           bool
-	GoogleClientID        string
-	GoogleClientSecret    string
-	DropboxClientID       string
-	DropboxClientSecret   string
-	MicrosoftClientID     string
-	MicrosoftClientSecret string
+	S3Endpoint                string
+	S3Region                  string
+	S3Bucket                  string
+	S3AccessKey               string
+	S3SecretKey               string
+	S3UseSSL                  bool
+	S3PathStyle               bool
+	GoogleClientID            string
+	GoogleClientSecret        string
+	GoogleMailClientID        string
+	GoogleMailClientSecret    string
+	DropboxClientID           string
+	DropboxClientSecret       string
+	MicrosoftClientID         string
+	MicrosoftClientSecret     string
+	MicrosoftMailClientID     string
+	MicrosoftMailClientSecret string
+	MicrosoftMailTenant       string
 
 	AddonRelayURL       string
 	AddonRelaySecret    string
@@ -96,71 +102,77 @@ type Config struct {
 func Load() (Config, error) {
 	dkimDir := env("ALT8MAIL_DKIM_DIR", "/var/lib/rspamd/dkim")
 	cfg := Config{
-		Env:                   env("ALT8MAIL_ENV", "development"),
-		Listen:                env("ALT8MAIL_LISTEN", "127.0.0.1:8080"),
-		PublicURL:             env("ALT8MAIL_PUBLIC_URL", "http://localhost:8001"),
-		MailDomain:            env("ALT8MAIL_MAIL_DOMAIN", "a8m.test"),
-		MailHostname:          strings.TrimSuffix(strings.ToLower(env("ALT8MAIL_MAIL_HOSTNAME", "mail.a8m.test")), "."),
-		MaildirBase:           env("ALT8MAIL_MAILDIR_BASE", "/var/vmail"),
-		DKIMDir:               dkimDir,
-		DKIMSelectorMap:       env("ALT8MAIL_DKIM_SELECTOR_MAP", filepath.Join(dkimDir, "selectors.map")),
-		LocalDomainsMap:       env("ALT8MAIL_LOCAL_DOMAINS_MAP", "/var/lib/rspamd/local_domains.map"),
-		PublicDir:             env("ALT8MAIL_PUBLIC_DIR", "./public"),
-		UploadDir:             env("ALT8MAIL_UPLOAD_DIR", "./data/uploads"),
-		RedisAddr:             env("ALT8MAIL_REDIS_ADDR", "127.0.0.1:6379"),
-		RedisPassword:         os.Getenv("ALT8MAIL_REDIS_PASSWORD"),
-		SessionSecret:         os.Getenv("ALT8MAIL_SESSION_SECRET"),
-		CSRFSecret:            os.Getenv("ALT8MAIL_CSRF_SECRET"),
-		CookieSecure:          envBool("ALT8MAIL_COOKIE_SECURE", false),
-		StaticCacheBust:       os.Getenv("ALT8MAIL_BUILD_ID"),
-		ReadHeaderTimeout:     10 * time.Second,
-		PushVAPIDKeyFile:      env("ALT8MAIL_PUSH_VAPID_KEY_FILE", "/etc/a8m/web_push_vapid.key"),
-		SessionTTL:            12 * time.Hour,
-		RememberTTL:           30 * 24 * time.Hour,
-		IMAPAddr:              env("ALT8MAIL_IMAP_ADDR", "127.0.0.1:993"),
-		IMAPUser:              os.Getenv("ALT8MAIL_IMAP_USER"),
-		IMAPMasterUser:        os.Getenv("ALT8MAIL_IMAP_MASTER_USER"),
-		IMAPTLSName:           env("ALT8MAIL_IMAP_TLS_NAME", "mail.a8m.test"),
-		SMTPAddr:              env("ALT8MAIL_SMTP_ADDR", "127.0.0.1:587"),
-		SMTPTLSName:           env("ALT8MAIL_SMTP_TLS_NAME", "mail.a8m.test"),
-		ManageSieveAddr:       env("ALT8MAIL_MANAGESIEVE_ADDR", "127.0.0.1:4190"),
-		MailCAFile:            os.Getenv("ALT8MAIL_MAIL_CA_FILE"),
-		DemoMode:              envBool("ALT8MAIL_DEMO_MODE", false),
-		DemoEmail:             strings.ToLower(env("ALT8MAIL_DEMO_EMAIL", "")),
-		DemoPassword:          os.Getenv("ALT8MAIL_DEMO_PASSWORD"),
-		DemoUserEmail:         strings.ToLower(env("ALT8MAIL_DEMO_USER_EMAIL", "")),
-		IMAPSyncInterval:      5 * time.Minute,
-		IMAPPollInterval:      15 * time.Second,
-		IMAPIdle:              envBool("ALT8MAIL_IMAP_IDLE", true),
-		MailWorkerConcurrency: 8,
-		OrphanSweepInterval:   time.Hour,
-		OrphanGracePeriod:     5 * time.Minute,
-		ImportScan:            envBool("ALT8MAIL_IMPORT_SCAN", true),
-		ImportScanMaxMB:       24,
-		ClamAVAddr:            os.Getenv("ALT8MAIL_CLAMAV_ADDR"),
-		S3Endpoint:            env("ALT8MAIL_S3_ENDPOINT", ""),
-		S3Region:              env("ALT8MAIL_S3_REGION", "us-east-1"),
-		S3Bucket:              env("ALT8MAIL_S3_BUCKET", ""),
-		S3AccessKey:           os.Getenv("ALT8MAIL_S3_ACCESS_KEY"),
-		S3SecretKey:           os.Getenv("ALT8MAIL_S3_SECRET_KEY"),
-		S3UseSSL:              envBool("ALT8MAIL_S3_USE_SSL", true),
-		S3PathStyle:           envBool("ALT8MAIL_S3_PATH_STYLE", true),
-		GoogleClientID:        os.Getenv("ALT8MAIL_GOOGLE_CLIENT_ID"),
-		GoogleClientSecret:    os.Getenv("ALT8MAIL_GOOGLE_CLIENT_SECRET"),
-		DropboxClientID:       os.Getenv("ALT8MAIL_DROPBOX_CLIENT_ID"),
-		DropboxClientSecret:   os.Getenv("ALT8MAIL_DROPBOX_CLIENT_SECRET"),
-		MicrosoftClientID:     os.Getenv("ALT8MAIL_MICROSOFT_CLIENT_ID"),
-		MicrosoftClientSecret: os.Getenv("ALT8MAIL_MICROSOFT_CLIENT_SECRET"),
-		AddonRelayURL:         strings.TrimRight(env("ALT8MAIL_ADDON_RELAY_URL", ""), "/"),
-		AddonRelaySecret:      os.Getenv("ALT8MAIL_ADDON_RELAY_SECRET"),
-		AddonGatewayURL:       strings.TrimRight(env("ALT8MAIL_ADDON_GATEWAY_URL", ""), "/"),
-		OfficeJWTSecretFile:   env("ALT8MAIL_OFFICE_JWT_SECRET_FILE", "/etc/a8m/office-jwt-secret"),
-		AdminListen:           env("ALT8MAIL_ADMIN_LISTEN", "127.0.0.1:8081"),
-		AdminDir:              env("ALT8MAIL_ADMIN_DIR", "./admin"),
-		AdminPublicURL:        strings.TrimRight(env("ALT8MAIL_ADMIN_URL", ""), "/"),
-		AdminSessionTTL:       8 * time.Hour,
-		AdminRateLimitMax:     10,
-		AdminRateWindow:       10 * time.Minute,
+		Env:                       env("ALT8MAIL_ENV", "development"),
+		Listen:                    env("ALT8MAIL_LISTEN", "127.0.0.1:8080"),
+		PublicURL:                 env("ALT8MAIL_PUBLIC_URL", "http://localhost:8001"),
+		MailDomain:                env("ALT8MAIL_MAIL_DOMAIN", "a8m.test"),
+		MailHostname:              strings.TrimSuffix(strings.ToLower(env("ALT8MAIL_MAIL_HOSTNAME", "mail.a8m.test")), "."),
+		MaildirBase:               env("ALT8MAIL_MAILDIR_BASE", "/var/vmail"),
+		DKIMDir:                   dkimDir,
+		DKIMSelectorMap:           env("ALT8MAIL_DKIM_SELECTOR_MAP", filepath.Join(dkimDir, "selectors.map")),
+		LocalDomainsMap:           env("ALT8MAIL_LOCAL_DOMAINS_MAP", "/var/lib/rspamd/local_domains.map"),
+		PublicDir:                 env("ALT8MAIL_PUBLIC_DIR", "./public"),
+		UploadDir:                 env("ALT8MAIL_UPLOAD_DIR", "./data/uploads"),
+		RedisAddr:                 env("ALT8MAIL_REDIS_ADDR", "127.0.0.1:6379"),
+		RedisPassword:             os.Getenv("ALT8MAIL_REDIS_PASSWORD"),
+		SessionSecret:             os.Getenv("ALT8MAIL_SESSION_SECRET"),
+		SessionSecretPrevious:     os.Getenv("ALT8MAIL_SESSION_SECRET_PREVIOUS"),
+		CSRFSecret:                os.Getenv("ALT8MAIL_CSRF_SECRET"),
+		CookieSecure:              envBool("ALT8MAIL_COOKIE_SECURE", false),
+		StaticCacheBust:           os.Getenv("ALT8MAIL_BUILD_ID"),
+		ReadHeaderTimeout:         10 * time.Second,
+		PushVAPIDKeyFile:          env("ALT8MAIL_PUSH_VAPID_KEY_FILE", "/etc/a8m/web_push_vapid.key"),
+		SessionTTL:                12 * time.Hour,
+		RememberTTL:               30 * 24 * time.Hour,
+		IMAPAddr:                  env("ALT8MAIL_IMAP_ADDR", "127.0.0.1:993"),
+		IMAPUser:                  os.Getenv("ALT8MAIL_IMAP_USER"),
+		IMAPMasterUser:            os.Getenv("ALT8MAIL_IMAP_MASTER_USER"),
+		IMAPTLSName:               env("ALT8MAIL_IMAP_TLS_NAME", "mail.a8m.test"),
+		SMTPAddr:                  env("ALT8MAIL_SMTP_ADDR", "127.0.0.1:587"),
+		SMTPTLSName:               env("ALT8MAIL_SMTP_TLS_NAME", "mail.a8m.test"),
+		ManageSieveAddr:           env("ALT8MAIL_MANAGESIEVE_ADDR", "127.0.0.1:4190"),
+		MailCAFile:                os.Getenv("ALT8MAIL_MAIL_CA_FILE"),
+		DemoMode:                  envBool("ALT8MAIL_DEMO_MODE", false),
+		DemoEmail:                 strings.ToLower(env("ALT8MAIL_DEMO_EMAIL", "")),
+		DemoPassword:              os.Getenv("ALT8MAIL_DEMO_PASSWORD"),
+		DemoUserEmail:             strings.ToLower(env("ALT8MAIL_DEMO_USER_EMAIL", "")),
+		IMAPSyncInterval:          5 * time.Minute,
+		IMAPPollInterval:          15 * time.Second,
+		IMAPIdle:                  envBool("ALT8MAIL_IMAP_IDLE", true),
+		MailWorkerConcurrency:     8,
+		OrphanSweepInterval:       time.Hour,
+		OrphanGracePeriod:         5 * time.Minute,
+		ImportScan:                envBool("ALT8MAIL_IMPORT_SCAN", true),
+		ImportScanMaxMB:           24,
+		ClamAVAddr:                os.Getenv("ALT8MAIL_CLAMAV_ADDR"),
+		S3Endpoint:                env("ALT8MAIL_S3_ENDPOINT", ""),
+		S3Region:                  env("ALT8MAIL_S3_REGION", "us-east-1"),
+		S3Bucket:                  env("ALT8MAIL_S3_BUCKET", ""),
+		S3AccessKey:               os.Getenv("ALT8MAIL_S3_ACCESS_KEY"),
+		S3SecretKey:               os.Getenv("ALT8MAIL_S3_SECRET_KEY"),
+		S3UseSSL:                  envBool("ALT8MAIL_S3_USE_SSL", true),
+		S3PathStyle:               envBool("ALT8MAIL_S3_PATH_STYLE", true),
+		GoogleClientID:            os.Getenv("ALT8MAIL_GOOGLE_CLIENT_ID"),
+		GoogleClientSecret:        os.Getenv("ALT8MAIL_GOOGLE_CLIENT_SECRET"),
+		GoogleMailClientID:        os.Getenv("ALT8MAIL_GOOGLE_MAIL_CLIENT_ID"),
+		GoogleMailClientSecret:    os.Getenv("ALT8MAIL_GOOGLE_MAIL_CLIENT_SECRET"),
+		DropboxClientID:           os.Getenv("ALT8MAIL_DROPBOX_CLIENT_ID"),
+		DropboxClientSecret:       os.Getenv("ALT8MAIL_DROPBOX_CLIENT_SECRET"),
+		MicrosoftClientID:         os.Getenv("ALT8MAIL_MICROSOFT_CLIENT_ID"),
+		MicrosoftClientSecret:     os.Getenv("ALT8MAIL_MICROSOFT_CLIENT_SECRET"),
+		MicrosoftMailClientID:     os.Getenv("ALT8MAIL_MICROSOFT_MAIL_CLIENT_ID"),
+		MicrosoftMailClientSecret: os.Getenv("ALT8MAIL_MICROSOFT_MAIL_CLIENT_SECRET"),
+		MicrosoftMailTenant:       env("ALT8MAIL_MICROSOFT_MAIL_TENANT", "common"),
+		AddonRelayURL:             strings.TrimRight(env("ALT8MAIL_ADDON_RELAY_URL", ""), "/"),
+		AddonRelaySecret:          os.Getenv("ALT8MAIL_ADDON_RELAY_SECRET"),
+		AddonGatewayURL:           strings.TrimRight(env("ALT8MAIL_ADDON_GATEWAY_URL", ""), "/"),
+		OfficeJWTSecretFile:       env("ALT8MAIL_OFFICE_JWT_SECRET_FILE", "/etc/a8m/office-jwt-secret"),
+		AdminListen:               env("ALT8MAIL_ADMIN_LISTEN", "127.0.0.1:8081"),
+		AdminDir:                  env("ALT8MAIL_ADMIN_DIR", "./admin"),
+		AdminPublicURL:            strings.TrimRight(env("ALT8MAIL_ADMIN_URL", ""), "/"),
+		AdminSessionTTL:           8 * time.Hour,
+		AdminRateLimitMax:         10,
+		AdminRateWindow:           10 * time.Minute,
 	}
 	if hours, err := strconv.Atoi(env("ALT8MAIL_ADMIN_SESSION_HOURS", "8")); err == nil && hours >= 1 && hours <= 72 {
 		cfg.AdminSessionTTL = time.Duration(hours) * time.Hour

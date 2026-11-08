@@ -297,8 +297,23 @@ func (s *Server) expungeIMAPFolder(user userRecord, name string) error {
 
 func folderAuditTarget(label string) string { return truncate(strings.TrimSpace(label), 120) }
 
+func (s *Server) requireNativeFolderAccount(w http.ResponseWriter, r *http.Request, sess *sessionRecord) bool {
+	account, err := s.resolveMailAccount(r.Context(), sess.User.ID, requestedMailAccountID(r))
+	if err != nil {
+		return true
+	}
+	if account.Kind == mailAccountKindExternal {
+		writeError(w, http.StatusForbidden, "FOLDER_CONNECTED", "Folder management is not available for connected accounts")
+		return false
+	}
+	return true
+}
+
 func (s *Server) createFolder(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.requireNativeFolderAccount(w, r, sess) {
+		return
+	}
 	var body struct {
 		Label    string `json:"label"`
 		ParentID string `json:"parentId"`
@@ -385,6 +400,9 @@ func stateRemoveFolder(folders []map[string]any, id string) []any {
 
 func (s *Server) updateFolder(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.requireNativeFolderAccount(w, r, sess) {
+		return
+	}
 	id := r.PathValue("id")
 	var body struct {
 		Label     *string `json:"label"`
@@ -499,7 +517,7 @@ func (s *Server) updateFolder(w http.ResponseWriter, r *http.Request) {
 		// disclosure arrow or drag a subfolder.
 		err = s.withState(sess.User.ID, sess.User.TenantID, applyUpdate)
 	} else {
-		err = s.withMailMetadataState(r.Context(), sess.User, applyUpdate)
+		err = s.withNativeMailMetadataState(r.Context(), sess.User, applyUpdate)
 	}
 	if err != nil {
 		writeFromError(w, err)
@@ -529,6 +547,9 @@ func (s *Server) updateFolder(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) reorderFolders(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.requireNativeFolderAccount(w, r, sess) {
+		return
+	}
 	var body struct {
 		IDs []string `json:"ids"`
 	}
@@ -578,10 +599,13 @@ func toAnyFolders(folders []map[string]any) []any {
 
 func (s *Server) markFolderRead(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.requireNativeFolderAccount(w, r, sess) {
+		return
+	}
 	id := r.PathValue("id")
 	mutations := []imapAction{}
 	affected := 0
-	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
+	err := s.withNativeMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
 		label := stateString(folder, "label")
 		if id == "subscriptions" {
@@ -626,6 +650,9 @@ func (s *Server) markFolderRead(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) emptyFolder(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.requireNativeFolderAccount(w, r, sess) {
+		return
+	}
 	id := r.PathValue("id")
 	if primaryFolderIDs[id] && id != "spam" && id != "trash" {
 		writeError(w, http.StatusBadRequest, "FOLDER_SYSTEM", "Inbox, Sent, Drafts and Archive cannot be emptied")
@@ -645,7 +672,7 @@ func (s *Server) emptyFolder(w http.ResponseWriter, r *http.Request) {
 	imapName := ""
 	labels := ""
 	expungeNames := map[string]bool{}
-	err = s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
+	err = s.withNativeMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
 		if id == "subscriptions" {
 			labels = "Subscriptions"
@@ -703,6 +730,9 @@ func (s *Server) emptyFolder(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if !s.requireNativeFolderAccount(w, r, sess) {
+		return
+	}
 	id := r.PathValue("id")
 	if primaryFolderIDs[id] {
 		writeError(w, http.StatusBadRequest, "FOLDER_SYSTEM", "Primary folders cannot be deleted")
@@ -712,7 +742,7 @@ func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request) {
 	imapName := ""
 	scriptToPush := ""
 	label := ""
-	err := s.withMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
+	err := s.withNativeMailMetadataState(r.Context(), sess.User, func(state map[string]any) error {
 		folder := findStateFolder(state, id)
 		if folder == nil {
 			return fail(http.StatusNotFound, "FOLDER_NOT_FOUND", "Folder not found")

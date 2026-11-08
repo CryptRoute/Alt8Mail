@@ -55,5 +55,18 @@
   "common.close": "Sluiten",
   "common.done": "Gereed",
   "common.saved": "Voorkeuren opgeslagen",
-  "notify.newMail": "Nieuwe Alt8Mail"
+  "notify.newMail": "Nieuwe Alt8Mail",
+  "accounts.all": "Alle accounts",
+  "accounts.connected": "Verbonden accounts",
+  "accounts.add": "E-mailaccount toevoegen",
+  "accounts.sync": "Synchroniseren",
+  "accounts.servers": "Servers",
+  "accounts.reconnect": "Opnieuw verbinden",
+  "accounts.password": "Wachtwoord",
+  "accounts.remove": "Verwijderen",
+  "accounts.connectedHint": "Lees je andere mailboxen en verstuur via hun eigen IMAP- en SMTP-servers.",
+  "accounts.provider": "Provider",
+  "accounts.gmailOAuth": "Gmail — inloggen met Google",
+  "accounts.microsoftOAuth": "Microsoft 365 / Outlook — inloggen",
+  "accounts.gmailAppPassword": "Gmail — app-wachtwoord"
 }

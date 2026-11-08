@@ -975,6 +975,10 @@ const state = {
   delegatedSwitchOpen: false,
   delegatedSwitchQuery: "",
   delegatedHeartbeat: null,
+  accounts: [],
+  activeAccount: null,
+  activeAccountId: "",
+  accountRestoreAttempted: false,
   aliases: [],
   identities: [],
   signatures: [],
@@ -1617,6 +1621,7 @@ async function api(path, options = {}) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(options.body);
   }
+  if (!state.delegatedMode && state.activeAccountId) headers["X-A8M-Account"] = state.activeAccountId;
   const delegatedSession = state.delegatedSession;
   if (delegatedSession?.token) headers[DELEGATED_SESSION_HEADER] = delegatedSession.token;
   const csrf = delegatedSession?.csrf || state.csrf;
@@ -5161,7 +5166,29 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   }
   state.mailboxMode = data.mailboxMode || "demo";
   state.mailSyncError = String((data.mailSync && data.mailSync.lastError) || "").trim();
-  state.aliases = data.aliases || [];
+  state.accounts = Array.isArray(data.accounts) ? data.accounts : [];
+  state.activeAccount = data.activeAccount || state.accounts.find((account) => account.id === data.activeAccountId) || null;
+  state.activeAccountId = data.activeAccountId || state.activeAccount?.id || "";
+  const nativeAliases = data.aliases || [];
+  const connectedAliases = [];
+  const aliasEmails = new Set(nativeAliases.map((alias) => normalizeEmail(alias.email)));
+  for (const account of state.accounts) {
+    if (account.isNative || account.status === "disabled") continue;
+    const email = normalizeEmail(account.email);
+    if (!email || aliasEmails.has(email)) continue;
+    aliasEmails.add(email);
+    connectedAliases.push({
+      id: `account:${account.id}`,
+      email: account.email,
+      label: account.displayName || account.email,
+      kind: "connected",
+      canSend: account.status === "active",
+      status: "verified",
+      source: "account",
+      accountId: account.id
+    });
+  }
+  state.aliases = [...nativeAliases, ...connectedAliases];
   state.identities = data.identities || state.identities || [];
   state.signatures = data.signatures || state.signatures || [];
   state.labels = data.labels || state.labels || [];
@@ -5226,6 +5253,14 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.storageProviders = data.storageProviders || [];
   state.defaultStorage = data.defaultStorage || state.defaultStorage || "a8m";
   state.tenantPolicy = data.tenantPolicy || null;
+  if (state.activeAccountId === "all" && !unifiedAccountsAvailable()) {
+    const native = nativeMailAccount();
+    if (native) {
+      state.activeAccountId = native.id;
+      state.activeAccount = native;
+      try { localStorage.setItem(activeAccountStorageKey(), native.id); } catch {}
+    }
+  }
   ensureStickySettingsUi();
   const stickyNewMenu = document.querySelector('[data-new="sticky"]');
   if (stickyNewMenu) stickyNewMenu.hidden = !tenantFeatureEnabled("stickyNotes");
@@ -5240,6 +5275,36 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   applyPreferenceChrome();
   rebuildIndex();
   renderAccountChrome();
+  renderAccountSwitcher();
+  renderConnectedAccounts();
+  applyConnectedAccountSettingsScope();
+  if (firstUserLoad && !state.accountRestoreAttempted && !state.delegatedMode) {
+    state.accountRestoreAttempted = true;
+    let stored = "";
+    let requestedAccount = "";
+    try {
+      const params = new URLSearchParams(location.search);
+      requestedAccount = String(params.get("account") || "").trim();
+      if (requestedAccount) {
+        params.delete("account");
+        const query = params.toString();
+        history.replaceState({}, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash || ""}`);
+      }
+      stored = localStorage.getItem(activeAccountStorageKey()) || "";
+    } catch {}
+    if (requestedAccount) stored = requestedAccount;
+    const validAccount = (id) => id === "all"
+      ? unifiedAccountsAvailable()
+      : state.accounts.some((account) => account.id === id && (account.isNative || externalAccountsEnabled()));
+    if (stored && stored !== state.activeAccountId && validAccount(stored)) {
+      state.activeAccountId = stored;
+      state.activeAccount = stored === "all"
+        ? unifiedAccountView()
+        : (state.accounts.find((account) => account.id === stored) || state.activeAccount);
+      try { localStorage.setItem(activeAccountStorageKey(), stored); } catch {}
+      setTimeout(() => loadBootstrap({ quiet: true }).catch(() => {}), 0);
+    }
+  }
   ensureDelegatedMailboxUi();
   renderDelegatedWindowChrome();
   startDelegatedHeartbeat();
@@ -5887,6 +5952,7 @@ function folderDef(folderId) {
 
 function ensureSubscriptionsFolder() {
   if (!Array.isArray(state.folders)) state.folders = [];
+  if (state.activeAccount && state.activeAccount.kind === "external") return;
   if (state.folders.some((folder) => folder.id === "subscriptions")) return;
   state.folders.push({
     id: "subscriptions", label: "Subscriptions", icon: "i-mail", section: "favorites",
@@ -6762,12 +6828,16 @@ function renderAccountChrome() {
   }
   const accountLine = $(".account-line");
   if (accountLine) {
+  const active = state.activeAccount;
+  const displayName = active?.isUnified ? "All accounts" : active && !active.isNative ? (active.displayName || active.email) : user.name;
+  const displayEmail = active?.isUnified ? `${active.accountCount || state.accounts.length} mailboxes · unified inbox` : active && !active.isNative ? active.email : user.email;
+  const displayColor = active ? (active.color || "#3f5d7a") : (user.color || "#3f5d7a");
     const av = $(".avatar", accountLine);
-    if (av) { av.textContent = user.initials || initialsFrom(user.name); av.style.setProperty("--av", user.color || "#3f5d7a"); }
+    if (av) { av.textContent = initialsFrom(displayName); av.style.setProperty("--av", displayColor); }
     const name = $(".account-id strong", accountLine);
     const email = $(".account-id span", accountLine);
-    if (name) name.textContent = user.name;
-    if (email) email.textContent = user.email;
+    if (name) name.textContent = displayName;
+    if (email) email.textContent = displayEmail;
   }
   const accountEmail = document.getElementById("accountEmail");
   if (accountEmail) accountEmail.textContent = user.email;
@@ -6781,6 +6851,454 @@ function renderAccountChrome() {
     const p = $(".account-profile-copy p", profile);
     if (h3) h3.textContent = user.name;
     if (p) p.textContent = `${user.role || "Team member"} · ${user.company || "Alt8Mail"}`;
+  }
+}
+
+function externalAccountsEnabled() {
+  const policy = state.tenantPolicy || {};
+  return Boolean(policy.mail && policy.mail.externalAccounts === true);
+}
+
+function activeAccountStorageKey() {
+  return `a8m.activeAccount.${normalizeEmail(state.user?.email || "anonymous")}`;
+}
+
+function unifiedAccountsAvailable() {
+  return externalAccountsEnabled() && (state.accounts || []).some((account) => !account.isNative);
+}
+
+function unifiedAccountView() {
+  return {
+    id: "all",
+    kind: "unified",
+    email: "",
+    displayName: "All accounts",
+    color: "#34557a",
+    status: "active",
+    isNative: false,
+    isUnified: true,
+    accountCount: (state.accounts || []).length
+  };
+}
+
+function nativeMailAccount() {
+  return (state.accounts || []).find((account) => account.isNative) || null;
+}
+
+function defaultComposeAccountId() {
+  return state.activeAccountId === "all" ? (nativeMailAccount()?.id || "") : state.activeAccountId;
+}
+
+function connectedAccountInitials(account) {
+  return initialsFrom(account?.displayName || account?.email || "");
+}
+
+function renderAccountSwitcher() {
+  const row = document.getElementById("accountSwitcherRow");
+  const select = document.getElementById("accountSwitcher");
+  const add = document.getElementById("accountAddBtn");
+  if (!row || !select) return;
+  const accounts = (state.accounts || []).filter((account) => account.isNative || externalAccountsEnabled());
+  const hasExternal = accounts.some((account) => !account.isNative);
+  const visible = !state.delegatedMode && (hasExternal || externalAccountsEnabled());
+  row.hidden = !visible;
+  if (!visible) return;
+  const unified = unifiedAccountsAvailable()
+    ? `<option value="all"${state.activeAccountId === "all" ? " selected" : ""}>${esc(t("accounts.all"))} · ${accounts.length}</option>`
+    : "";
+  select.innerHTML = unified + accounts.map((account) => {
+    const label = account.isNative
+      ? `Alt8Mail · ${account.email}`
+      : `${account.displayName || account.email} · ${account.email}`;
+    return `<option value="${esc(account.id)}"${account.id === state.activeAccountId ? " selected" : ""}>${esc(label)}</option>`;
+  }).join("");
+  if (add) add.hidden = state.delegatedMode || !externalAccountsEnabled();
+}
+
+function connectedAccountStatus(account) {
+  switch (account.status) {
+    case "reauth": return { label: "Reconnect required", className: "is-reauth" };
+    case "error": return { label: "Sync error", className: "is-error" };
+    case "disabled": return { label: "Disabled", className: "" };
+    default: return { label: "Connected", className: "" };
+  }
+}
+
+function renderConnectedAccounts() {
+  const holder = document.getElementById("connectedAccountsList");
+  if (!holder) return;
+  const add = document.getElementById("connectedAccountAdd");
+  if (add) add.hidden = !externalAccountsEnabled() || state.delegatedMode;
+  const connected = (state.accounts || []).filter((account) => !account.isNative);
+  if (!connected.length) {
+    holder.innerHTML = `<div class="connected-account-empty">${externalAccountsEnabled() ? "No connected accounts yet." : "Connected accounts are disabled by your organization."}</div>`;
+    return;
+  }
+  holder.innerHTML = connected.map((account) => {
+    const status = connectedAccountStatus(account);
+    return `<div class="connected-account-row" data-connected-account="${esc(account.id)}">
+      <span class="avatar avatar-sm" style="--av:${esc(account.color || "#34557a")}" aria-hidden="true">${esc(connectedAccountInitials(account))}</span>
+      <div class="connected-account-copy">
+        <strong>${esc(account.displayName || account.email)}</strong>
+        <span>${esc(account.email)} · <span class="connected-account-status ${status.className}">${esc(status.label)}</span></span>
+        ${account.lastError ? `<span title="${esc(account.lastError)}">${esc(account.lastError)}</span>` : ""}
+      </div>
+      <div class="connected-account-actions">
+        <button class="btn-secondary" type="button" data-account-sync="${esc(account.id)}">${esc(t("accounts.sync"))}</button>
+        <button class="btn-secondary" type="button" data-account-servers="${esc(account.id)}">${esc(t("accounts.servers"))}</button>
+        <button class="btn-secondary" type="button" data-account-reconnect="${esc(account.id)}">${esc(account.oauth ? t("accounts.reconnect") : account.status === "reauth" ? t("accounts.reconnect") : t("accounts.password"))}</button>
+        <button class="btn-secondary" type="button" data-account-remove="${esc(account.id)}">${esc(t("accounts.remove"))}</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function applyConnectedAccountSettingsScope() {
+  const connected = Boolean(state.activeAccount && state.activeAccount.kind === "external");
+  document.querySelectorAll('[data-settings-tab="rules"], [data-settings-tab="autoreply"]').forEach((tab) => {
+    tab.hidden = connected;
+  });
+  if (connected && ["rules", "autoreply"].includes(state.settingsTab)) {
+    state.settingsTab = "account";
+  }
+}
+
+function switchMailAccount(accountId, { reload = true } = {}) {
+  const account = accountId === "all"
+    ? (unifiedAccountsAvailable() ? unifiedAccountView() : null)
+    : (state.accounts || []).find((item) => item.id === accountId);
+  if (!account || accountId === state.activeAccountId) return;
+  state.activeAccountId = accountId;
+  state.activeAccount = account;
+  try { localStorage.setItem(activeAccountStorageKey(), accountId); } catch {}
+  state.folder = "inbox";
+  state.filter = "all";
+  state.query = "";
+  state.selectedThreadId = null;
+  state.selectedMessageId = null;
+  state.messages = [];
+  state.mailPages = {};
+  state.knownInboxIds = null;
+  state.knownSnoozeDueIds = new Set();
+  state.homeTab = "home";
+  state.pulseData = null;
+  state.pulseYear = null;
+  renderAccountSwitcher();
+  renderAccountChrome();
+  if (reload) {
+    loadBootstrap({ quiet: true }).catch((error) => showToast(error.message || "Could not switch mail account"));
+  }
+}
+
+function startMailOAuth(provider, accountId = "") {
+  return new Promise((resolve, reject) => {
+    const query = accountId ? `?account=${encodeURIComponent(accountId)}` : "";
+    const popup = window.open(
+      `/api/mail/oauth/${encodeURIComponent(provider)}/start${query}`,
+      "a8m-mail-oauth",
+      "width=520,height=720,menubar=no,toolbar=no"
+    );
+    if (!popup) {
+      reject(new Error("Allow pop-ups for Alt8Mail to finish the sign-in."));
+      return;
+    }
+    let settled = false;
+    let poll = null;
+    let timeout = null;
+    const cleanup = () => {
+      window.removeEventListener("message", onMessage);
+      if (poll) clearInterval(poll);
+      if (timeout) clearTimeout(timeout);
+    };
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(value);
+    };
+    const onMessage = (event) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data || {};
+      if (data.type !== "a8m-mail-oauth") return;
+      if (data.status === "connected") finish(resolve, data.accountId || "");
+      else finish(reject, new Error(data.message || "The mail account was not connected."));
+    };
+    window.addEventListener("message", onMessage);
+    poll = setInterval(() => {
+      if (popup.closed) finish(reject, new Error("Sign-in was cancelled."));
+    }, 800);
+    timeout = setTimeout(() => finish(reject, new Error("Sign-in timed out. Try again.")), 5 * 60 * 1000);
+  });
+}
+
+async function connectMailAccountWithOAuth(provider, accountId = "") {
+  const accountID = await startMailOAuth(provider, accountId);
+  showToast(accountId ? "Mail account reconnected" : "Mail account connected");
+  await loadBootstrap({ quiet: true });
+  if (!accountId && accountID) {
+    const connected = state.accounts.find((account) => account.id === accountID);
+    if (connected) switchMailAccount(connected.id, { reload: false });
+    await loadBootstrap({ quiet: true });
+    setTimeout(() => loadBootstrap({ quiet: true }).catch(() => {}), 4000);
+  }
+}
+
+function openAddMailAccountDialog(account = null) {
+  if (state.delegatedMode) return;
+  if (!account && !externalAccountsEnabled()) {
+    showToast("Connected mail accounts are disabled for this organization");
+    return;
+  }
+  document.getElementById("accountDialogOverlay")?.remove();
+  const reauth = Boolean(account);
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.id = "accountDialogOverlay";
+  overlay.innerHTML = `<div class="dialog account-dialog" role="dialog" aria-modal="true" aria-labelledby="accountDialogTitle">
+    <div class="dialog-head"><div><h2 id="accountDialogTitle">${reauth ? "Reconnect mail account" : "Add mail account"}</h2><p>${reauth ? (account.oauth ? "Sign in again to refresh this account's authorization." : "Enter the current password or app password for this account.") : "Alt8Mail connects directly to the mail server over TLS."}</p></div><button class="icon-btn" type="button" data-account-dialog-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <form id="accountDialogForm" class="form-grid">
+      ${reauth ? `<div class="span-2"><strong>${esc(account.displayName || account.email)}</strong><p class="form-note">${esc(account.email)}</p></div>` : `
+      <label class="form-field"><span>${esc(t("accounts.provider"))}</span><select id="accountProvider">
+        <option value="imap">Other IMAP / SMTP</option>
+        <option value="gmail-oauth">${esc(t("accounts.gmailOAuth"))}</option>
+        <option value="microsoft">${esc(t("accounts.microsoftOAuth"))}</option>
+        <option value="gmail">${esc(t("accounts.gmailAppPassword"))}</option>
+      </select></label>
+      <label class="form-field"><span>Email address</span><input id="accountEmailInput" type="email" autocomplete="email" required placeholder="you@example.com"></label>
+      <label class="form-field"><span>Display name</span><input id="accountDisplayName" type="text" maxlength="120" placeholder="Optional"></label>
+      <label class="form-field"><span>Username</span><input id="accountUsername" type="text" autocomplete="username" placeholder="Defaults to the email address"></label>
+      <label class="form-field"><span>Password or app password</span><input id="accountPassword" type="password" autocomplete="new-password" required></label>
+      <div class="account-server-fields">
+        <label class="form-field"><span>IMAP host</span><input id="accountImapHost" type="text" required placeholder="imap.example.com"></label>
+        <label class="form-field"><span>IMAP port</span><input id="accountImapPort" type="number" min="1" max="65535" value="993" required></label>
+        <label class="form-field"><span>IMAP security</span><select id="accountImapTls"><option value="tls">TLS</option><option value="starttls">STARTTLS</option></select></label>
+        <label class="form-field"><span>SMTP host</span><input id="accountSmtpHost" type="text" required placeholder="smtp.example.com"></label>
+        <label class="form-field"><span>SMTP port</span><input id="accountSmtpPort" type="number" min="1" max="65535" value="587" required></label>
+        <label class="form-field"><span>SMTP security</span><select id="accountSmtpTls"><option value="starttls">STARTTLS</option><option value="tls">TLS</option></select></label>
+      </div>`}
+      ${reauth ? `<label class="form-field span-2"${account.oauth ? " hidden" : ""}><span>New password or app password</span><input id="accountPassword" type="password" autocomplete="new-password"${account.oauth ? "" : " required"}></label>${account.oauth ? `<p class="form-note span-2">Alt8Mail will open ${account.provider === "microsoft" ? "Microsoft" : "Google"} so you can authorize this account again. The new tokens replace the expired ones.</p>` : ""}` : ""}
+      <p class="account-dialog-status span-2" id="accountDialogStatus" role="status" aria-live="polite"></p>
+      <div class="dialog-actions span-2">
+        <button class="btn-secondary" type="button" data-account-dialog-close>Cancel</button>
+        ${reauth ? "" : '<button class="btn-secondary" type="button" id="accountTestBtn">Test connection</button>'}
+        <button class="btn-primary" type="submit" id="accountSubmitBtn">${reauth ? "Reconnect" : "Connect account"}</button>
+      </div>
+    </form>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelectorAll("[data-account-dialog-close]").forEach((button) => button.addEventListener("click", close));
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+  const provider = overlay.querySelector("#accountProvider");
+  const oauthProviderFor = (value) => value === "gmail-oauth" ? "gmail" : value === "microsoft" ? "microsoft" : "";
+  const fillProvider = () => {
+    if (!provider) return;
+    const oauth = oauthProviderFor(provider.value);
+    const gmail = provider.value === "gmail";
+    for (const selector of [
+      "#accountEmailInput", "#accountDisplayName", "#accountUsername", "#accountPassword",
+      "#accountImapHost", "#accountImapPort", "#accountImapTls",
+      "#accountSmtpHost", "#accountSmtpPort", "#accountSmtpTls"
+    ]) {
+      const input = overlay.querySelector(selector);
+      if (!input) continue;
+      input.closest("label")?.toggleAttribute("hidden", Boolean(oauth));
+      input.required = !oauth;
+    }
+    overlay.querySelector(".account-server-fields")?.toggleAttribute("hidden", Boolean(oauth));
+    overlay.querySelector("#accountTestBtn")?.toggleAttribute("hidden", Boolean(oauth));
+    const submit = overlay.querySelector("#accountSubmitBtn");
+    if (submit && !reauth) {
+      submit.textContent = oauth === "gmail" ? "Sign in with Google"
+        : oauth === "microsoft" ? "Sign in with Microsoft"
+        : "Connect account";
+    }
+    if (oauth) return;
+    overlay.querySelector("#accountImapHost").value = gmail ? "imap.gmail.com" : "";
+    overlay.querySelector("#accountImapPort").value = "993";
+    overlay.querySelector("#accountImapTls").value = "tls";
+    overlay.querySelector("#accountSmtpHost").value = gmail ? "smtp.gmail.com" : "";
+    overlay.querySelector("#accountSmtpPort").value = "587";
+    overlay.querySelector("#accountSmtpTls").value = "starttls";
+  };
+  provider?.addEventListener("change", fillProvider);
+  fillProvider();
+  const status = (message, isError = false) => {
+    const node = overlay.querySelector("#accountDialogStatus");
+    if (!node) return;
+    node.textContent = message || "";
+    node.classList.toggle("is-error", Boolean(isError));
+  };
+  const readBody = () => ({
+    provider: provider ? provider.value : account?.provider || "imap",
+    email: reauth ? account.email : overlay.querySelector("#accountEmailInput")?.value.trim() || "",
+    displayName: reauth ? account.displayName : overlay.querySelector("#accountDisplayName")?.value.trim() || "",
+    username: reauth ? undefined : overlay.querySelector("#accountUsername")?.value.trim() || "",
+    password: overlay.querySelector("#accountPassword")?.value || "",
+    imapHost: reauth ? undefined : overlay.querySelector("#accountImapHost")?.value.trim() || "",
+    imapPort: reauth ? undefined : Number(overlay.querySelector("#accountImapPort")?.value || 0),
+    imapTls: reauth ? undefined : overlay.querySelector("#accountImapTls")?.value || "",
+    smtpHost: reauth ? undefined : overlay.querySelector("#accountSmtpHost")?.value.trim() || "",
+    smtpPort: reauth ? undefined : Number(overlay.querySelector("#accountSmtpPort")?.value || 0),
+    smtpTls: reauth ? undefined : overlay.querySelector("#accountSmtpTls")?.value || ""
+  });
+  overlay.querySelector("#accountTestBtn")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    status("Checking the IMAP and SMTP servers…");
+    try {
+      await api("/api/accounts/test", { method: "POST", body: readBody() });
+      status("Connection successful.");
+    } catch (error) {
+      status(error.message || "Could not connect to the mail server.", true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  overlay.querySelector("#accountDialogForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = overlay.querySelector("#accountSubmitBtn");
+    submit.disabled = true;
+    if (reauth && account.oauth) {
+      status(`Waiting for ${account.provider === "microsoft" ? "Microsoft" : "Google"} sign-in…`);
+      try {
+        await connectMailAccountWithOAuth(account.provider, account.id);
+        close();
+      } catch (error) {
+        status(error.message || "Could not reconnect the mail account.", true);
+        submit.disabled = false;
+      }
+      return;
+    }
+    const oauth = !reauth ? oauthProviderFor(provider?.value) : "";
+    if (oauth) {
+      status(`Opening ${oauth === "microsoft" ? "Microsoft" : "Google"} sign-in…`);
+      try {
+        await connectMailAccountWithOAuth(oauth);
+        close();
+      } catch (error) {
+        status(error.message || "Could not connect the mail account.", true);
+        submit.disabled = false;
+      }
+      return;
+    }
+    status(reauth ? "Reconnecting…" : "Connecting…");
+    try {
+      if (reauth) {
+        await api(`/api/accounts/${encodeURIComponent(account.id)}`, { method: "PATCH", body: { password: readBody().password } });
+        close();
+        showToast("Mail account reconnected");
+        await loadBootstrap({ quiet: true });
+      } else {
+        const result = await api("/api/accounts", { method: "POST", body: readBody() });
+        const created = result?.account;
+        close();
+        showToast("Mail account connected");
+        if (created?.id) {
+          state.accounts = [...state.accounts.filter((item) => item.id !== created.id), created];
+          state.activeAccount = created;
+          state.activeAccountId = created.id;
+          try { localStorage.setItem(activeAccountStorageKey(), created.id); } catch {}
+        }
+        await loadBootstrap({ quiet: true });
+        setTimeout(() => loadBootstrap({ quiet: true }).catch(() => {}), 4000);
+      }
+    } catch (error) {
+      status(error.message || "Could not save the mail account.", true);
+      submit.disabled = false;
+    }
+  });
+  const initialFocus = overlay.querySelector("#accountEmailInput");
+  if (initialFocus && !initialFocus.closest("label")?.hidden) initialFocus.focus();
+}
+
+function openMailAccountServersDialog(account) {
+  document.getElementById("accountServersOverlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.id = "accountServersOverlay";
+  overlay.innerHTML = `<div class="dialog account-dialog" role="dialog" aria-modal="true" aria-labelledby="accountServersTitle">
+    <div class="dialog-head"><div><h2 id="accountServersTitle">Mail server settings</h2><p>${esc(account.displayName || account.email)} · ${esc(account.email)}</p></div><button class="icon-btn" type="button" data-account-servers-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <form id="accountServersForm" class="form-grid">
+      <label class="form-field span-2"><span>Username</span><input id="accountServersUsername" type="text" autocomplete="username" value="${esc(account.email)}"></label>
+      <label class="form-field"><span>IMAP host</span><input id="accountServersImapHost" type="text" value="${esc(account.imapHost || "")}" required></label>
+      <label class="form-field"><span>IMAP port</span><input id="accountServersImapPort" type="number" min="1" max="65535" value="${esc(account.imapPort || 993)}" required></label>
+      <label class="form-field"><span>IMAP security</span><select id="accountServersImapTls"><option value="tls"${account.imapTls !== "starttls" ? " selected" : ""}>TLS</option><option value="starttls"${account.imapTls === "starttls" ? " selected" : ""}>STARTTLS</option></select></label>
+      <label class="form-field"><span>SMTP host</span><input id="accountServersSmtpHost" type="text" value="${esc(account.smtpHost || "")}" required></label>
+      <label class="form-field"><span>SMTP port</span><input id="accountServersSmtpPort" type="number" min="1" max="65535" value="${esc(account.smtpPort || 587)}" required></label>
+      <label class="form-field"><span>SMTP security</span><select id="accountServersSmtpTls"><option value="starttls"${account.smtpTls !== "tls" ? " selected" : ""}>STARTTLS</option><option value="tls"${account.smtpTls === "tls" ? " selected" : ""}>TLS</option></select></label>
+      <p class="account-dialog-status span-2" id="accountServersStatus" role="status" aria-live="polite"></p>
+      <div class="dialog-actions span-2">
+        <button class="btn-secondary" type="button" data-account-servers-close>Cancel</button>
+        <button class="btn-primary" type="submit" id="accountServersSubmit">Save servers</button>
+      </div>
+    </form>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelectorAll("[data-account-servers-close]").forEach((button) => button.addEventListener("click", close));
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+  const status = (message, isError = false) => {
+    const node = overlay.querySelector("#accountServersStatus");
+    if (!node) return;
+    node.textContent = message || "";
+    node.classList.toggle("is-error", Boolean(isError));
+  };
+  overlay.querySelector("#accountServersForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = overlay.querySelector("#accountServersSubmit");
+    submit.disabled = true;
+    status("Testing the new servers…");
+    try {
+      await api(`/api/accounts/${encodeURIComponent(account.id)}`, {
+        method: "PATCH",
+        body: {
+          username: overlay.querySelector("#accountServersUsername")?.value.trim() || "",
+          imapHost: overlay.querySelector("#accountServersImapHost")?.value.trim() || "",
+          imapPort: Number(overlay.querySelector("#accountServersImapPort")?.value || 0),
+          imapTls: overlay.querySelector("#accountServersImapTls")?.value || "",
+          smtpHost: overlay.querySelector("#accountServersSmtpHost")?.value.trim() || "",
+          smtpPort: Number(overlay.querySelector("#accountServersSmtpPort")?.value || 0),
+          smtpTls: overlay.querySelector("#accountServersSmtpTls")?.value || ""
+        }
+      });
+      close();
+      showToast("Mail server settings saved");
+      await loadBootstrap({ quiet: true });
+    } catch (error) {
+      status(error.message || "Could not update the mail servers.", true);
+      submit.disabled = false;
+    }
+  });
+  overlay.querySelector("#accountServersUsername")?.focus();
+}
+
+async function removeConnectedAccount(account) {
+  const confirmed = await appConfirm({
+    title: "Remove connected account?",
+    message: `Cached messages and folders for ${account.email} will be removed from Alt8Mail. The account itself is not changed.`,
+    confirmLabel: "Remove account",
+    tone: "danger",
+    icon: "i-trash"
+  });
+  if (!confirmed) return;
+  try {
+    await api(`/api/accounts/${encodeURIComponent(account.id)}`, { method: "DELETE" });
+    state.accounts = state.accounts.filter((item) => item.id !== account.id);
+    const remainingExternal = state.accounts.some((item) => !item.isNative);
+    if (state.activeAccountId === account.id || (state.activeAccountId === "all" && !remainingExternal)) {
+      const native = state.accounts.find((item) => item.isNative);
+      state.activeAccountId = native?.id || "";
+      state.activeAccount = native || null;
+      state.folder = "inbox";
+      state.messages = [];
+    }
+    renderAccountSwitcher();
+    renderConnectedAccounts();
+    showToast("Connected account removed");
+    await loadBootstrap({ quiet: true });
+  } catch (error) {
+    showToast(error.message || "Could not remove the connected account");
   }
 }
 
@@ -6973,8 +7491,8 @@ function folderRowMarkup(folder, depth, folders, visited) {
   const active = state.task === "mail" && state.folder === folder.id && !state.query;
   const badge = folderBadge(folder);
   const color = folder.color ? ` style="color:${esc(folder.color)}"` : "";
-  const canDrag = folderIsCustom(folder);
-  const canDrop = folderCanAcceptChildren(folder);
+  const canDrag = folderIsCustom(folder) && !folder.connected;
+  const canDrop = folderCanAcceptChildren(folder) && !folder.connected;
   const toggle = hasChildren
     ? `<button class="folder-toggle${collapsed ? " is-collapsed" : ""}" data-folder-toggle="${esc(folder.id)}" type="button" aria-expanded="${collapsed ? "false" : "true"}" aria-label="${collapsed ? "Expand" : "Collapse"} ${esc(folder.label)} subfolders" title="${collapsed ? "Expand" : "Collapse"} subfolders"><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>`
     : `<span class="folder-toggle-spacer" aria-hidden="true"></span>`;
@@ -6985,13 +7503,16 @@ function folderRowMarkup(folder, depth, folders, visited) {
       <span class="folder-name">${esc(folder.label)}</span>
       ${badge ? `<span class="folder-badge${badge.neutral ? " neutral" : ""}" data-folder-badge="${esc(folder.id)}">${badge.count > 999 ? "999+" : badge.count}</span>` : ""}
     </button>
-    <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"${folder.delegated ? " hidden" : ""}><span aria-hidden="true">⋯</span></button>
+    <button class="folder-more" data-folder-menu="${esc(folder.id)}" type="button" aria-label="Folder actions for ${esc(folder.label)}" title="Folder actions"${folder.delegated || folder.connected ? " hidden" : ""}><span aria-hidden="true">⋯</span></button>
   </div>`;
   if (!hasChildren || collapsed) return row;
   return row + children.map((child) => folderRowMarkup(child, depth + 1, folders, visited)).join("");
 }
 
 function renderFolders() {
+  const connected = Boolean(state.activeAccount && !state.activeAccount.isNative);
+  const addButton = document.getElementById("folderAddBtn");
+  if (addButton) addButton.closest(".folder-add-row")?.toggleAttribute("hidden", connected);
   const folders = (state.folders || []).slice().sort((a, b) => folderSortValue(a) - folderSortValue(b));
   const sections = [
     { key: "favorites", label: "Favorites" },
@@ -7776,6 +8297,15 @@ function threadCollabChips(thread) {
   return chips.length ? `<span class="msg-collab-chips">${chips.join("")}</span>` : "";
 }
 
+function threadAccountTag(message) {
+  if (state.activeAccountId !== "all" || !message?.accountId) return "";
+  const account = (state.accounts || []).find((item) => item.id === message.accountId);
+  if (!account) return "";
+  const label = account.isNative ? "Alt8Mail" : (account.displayName || account.email);
+  const title = account.isNative ? `Alt8Mail · ${account.email}` : account.email;
+  return `<span class="msg-account-tag" title="${esc(title)}"><span class="msg-account-dot" style="--acct:${esc(account.color || "#34557a")}" aria-hidden="true"></span>${esc(label)}</span>`;
+}
+
 function threadRowMarkup(thread) {
   const { rep, person, label } = threadRowDisplay(thread);
   const selected = thread.id === state.selectedThreadId;
@@ -7794,6 +8324,7 @@ function threadRowMarkup(thread) {
         <div class="msg-main">
           <div class="msg-top">
             <span class="msg-from">${esc(label)}</span>
+            ${threadAccountTag(rep)}
             ${threadCount}
             ${hasCalendar ? `<span class="msg-tag msg-calendar-tag" title="Calendar invitation or update" aria-label="Calendar invitation or update"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span>` : ""}
             ${hasFiles ? `<span class="msg-tag" title="Has attachments"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></span>` : ""}
@@ -10447,7 +10978,7 @@ function commitmentKindLabel(kind) {
               <span class="ai-commitment-kind is-${esc(item.kind || "promise")}">${esc(commitmentKindLabel(item.kind))}</span>
               <strong>${esc(item.text || "")}</strong>
               <span class="ai-commitment-quote">“${esc(item.quote || "")}”</span>
-              <small>${esc(item.messageSubject || "Message")}${item.messageDate ? ` · ${esc(formatListWhen(item.messageDate))}` : ""}${item.due ? ` · due ${esc(item.due)}` : ""}</small>
+              <small>${esc(item.messageSubject || "Message")}${item.messageDate ? ` · ${esc(formatListWhen(item.messageDate))}` : ""}${item.due ? ` · due ${esc(item.due)}` : ""}${state.activeAccountId === "all" && item.accountEmail ? ` · ${esc(item.accountEmail)}` : ""}</small>
             </button>`).join("")}</div>`
           : `<p class="ai-commitment-empty">No clear commitments were found in this conversation.</p>`;
     return `<div class="ai-summary-card ai-commitments-card" id="readerAiCard">
@@ -13398,7 +13929,8 @@ function scheduleToneSuggestion(session) {
           recipient,
           subject: session.subject || "",
           draft: session.body || stripHtml(session.bodyHtml || ""),
-          language: state.preferences.language || "en-US"
+          language: state.preferences.language || "en-US",
+          accountId: session.accountId || defaultComposeAccountId()
         }
       });
       if (!composeSessions.includes(session)) return;
@@ -13914,12 +14446,22 @@ function openCompose(prefill = {}, options = {}) {
   }
   const id = options.id || `c${++composeCounter}_${uid("draft")}`;
   const draftId = options.draftId || uid("draft");
-  const primary = state.aliases.find((alias) => alias.id === "primary" && alias.canSend) || aliasesForSelect()[0] || { email: state.user?.email || "" };
+  const activeAccountAlias = state.activeAccount && state.activeAccount.kind === "external"
+    ? aliasForEmail(state.activeAccount.email)
+    : null;
+  const primary = activeAccountAlias && activeAccountAlias.canSend
+    ? activeAccountAlias
+    : (state.aliases.find((alias) => alias.id === "primary" && alias.canSend) || aliasesForSelect()[0] || { email: state.user?.email || "" });
   const isNewMessage = !options.restoring && !data.inReplyTo && !data.kind;
-  const defaultAlias = aliasForEmail(state.preferences.defaultFrom) || primary;
+  const defaultAlias = activeAccountAlias && activeAccountAlias.canSend
+    ? activeAccountAlias
+    : (aliasForEmail(state.preferences.defaultFrom) || primary);
   const requestedFrom = data.fromEmail || (isNewMessage ? defaultAlias.email : primary.email);
   const requestedAlias = aliasForEmail(requestedFrom);
-  const fromEmail = requestedAlias && requestedAlias.canSend ? requestedFrom : defaultAlias.email;
+  const fromEmail = activeAccountAlias && activeAccountAlias.canSend
+    ? (requestedAlias && requestedAlias.accountId === activeAccountAlias.accountId ? requestedFrom : activeAccountAlias.email)
+    : (requestedAlias && requestedAlias.canSend ? requestedFrom : defaultAlias.email);
+  const composeAccountId = aliasForEmail(fromEmail)?.accountId || defaultComposeAccountId();
   const htmlMode = data.htmlMode != null ? !!data.htmlMode : state.preferences.composeMode !== "plain";
   const context = (data.kind === "reply" || data.kind === "replyAll") ? "reply" : data.kind === "forward" ? "forward" : "new";
   const signatureItem = options.restoring ? null : defaultSignatureForCompose(context, fromEmail);
@@ -13958,6 +14500,7 @@ function openCompose(prefill = {}, options = {}) {
     hasQuote,
     quoteCollapsed: false,
     fromEmail,
+    accountId: composeAccountId,
     autoSignature: signatureItem ? { id: signatureItem.id, text: signatureText, html: signatureHTML } : null,
     signatureContext: context,
     priority: data.priority || state.defaultPriority,
@@ -14954,6 +15497,7 @@ function composePayload(session) {
     bodyText: session.body,
     bodyHtml: session.htmlMode ? restoreEditorImageSources(session.bodyHtml) : "",
     fromEmail: session.fromEmail,
+    accountId: session.accountId || defaultComposeAccountId(),
     attachments: session.files,
     mentions: activeComposeMentions(session),
     threadId: session.threadId,
@@ -15458,6 +16002,7 @@ function composeSendPayload(session, extra = {}) {
   return {
     draftId: session.draftId,
     fromEmail: session.fromEmail,
+    accountId: session.accountId || defaultComposeAccountId(),
     to: session.to,
     cc: session.cc,
     bcc: session.bcc,
@@ -15815,7 +16360,10 @@ function updateComposeField(session, target) {
   }
   const value = target.type === "checkbox" ? target.checked : target.value;
   session[field] = value;
-  if (field === "fromEmail") swapComposeIdentitySignature(session, value);
+  if (field === "fromEmail") {
+    session.accountId = aliasForEmail(value)?.accountId || defaultComposeAccountId();
+    swapComposeIdentitySignature(session, value);
+  }
   session.dirty = true;
   session.error = null;
   if (field === "to") {
@@ -17598,7 +18146,26 @@ function setExternalWarningsUi(value) {
 }
 
 async function resyncMailbox() {
-  if (!(await appConfirm({ title: "Refresh mailbox?", message: "Alt8Mail will ask Dovecot for new messages. Open compose windows are kept.", confirmLabel: "Refresh" }))) return;
+  if (state.activeAccount?.isUnified) {
+    if (!(await appConfirm({ title: "Refresh all mailboxes?", message: "Alt8Mail will ask every connected account for new messages. Open compose windows are kept.", confirmLabel: "Refresh" }))) return;
+    try {
+      const accounts = (state.accounts || []).filter((account) => !account.isNative && account.status !== "disabled");
+      await Promise.all(accounts.map((account) => api(`/api/accounts/${encodeURIComponent(account.id)}/sync`, { method: "POST", body: {} })));
+      showToast("Connected account sync started");
+      setTimeout(() => loadBootstrap({ quiet: true }).catch(() => {}), 2500);
+    } catch (error) { showError(error); }
+    return;
+  }
+  const connected = state.activeAccount && !state.activeAccount.isNative;
+  if (!(await appConfirm({ title: "Refresh mailbox?", message: connected ? `Alt8Mail will ask ${state.activeAccount.email} for new messages. Open compose windows are kept.` : "Alt8Mail will ask Dovecot for new messages. Open compose windows are kept.", confirmLabel: "Refresh" }))) return;
+  if (connected) {
+    try {
+      await api(`/api/accounts/${encodeURIComponent(state.activeAccount.id)}/sync`, { method: "POST", body: {} });
+      showToast("Connected account sync started");
+      setTimeout(() => loadBootstrap({ quiet: true }).catch(() => {}), 2500);
+    } catch (error) { showError(error); }
+    return;
+  }
   try {
     const result = await api("/api/mail/sync", { method: "POST", body: {} });
     await refreshMailbox({ quiet: true });
@@ -17786,7 +18353,7 @@ function renderTaskDetail() {
       <div><span>Completed</span><strong>${task.completedAt ? esc(formatDateOnly(task.completedAt)) : "—"}</strong></div>
     </div>
     <div class="task-notes"><h3>Notes</h3><p>${esc(task.notes || "No notes yet.").replace(/\n/g, "<br>")}</p></div>
-    ${task.linkedThreadId ? `<button class="task-linked-card" data-task-open-thread="${esc(task.linkedThreadId)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><div><strong>Linked email</strong><span>${esc(task.linkedSubject || "Open conversation")}</span></div><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>` : ""}
+    ${task.linkedThreadId ? `<button class="task-linked-card" data-task-open-thread="${esc(task.linkedThreadId)}" data-task-open-account="${esc(task.linkedAccountId || "")}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><div><strong>Linked email</strong><span>${esc(task.linkedSubject || "Open conversation")}</span></div><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>` : ""}
     <div class="task-detail-actions">
       <button class="btn-primary" data-task-toggle="${esc(task.id)}" type="button"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>${task.status === "done" ? "Reopen task" : "Mark complete"}</button>
       <button class="btn-secondary" data-task-edit="${esc(task.id)}" type="button">Edit</button>
@@ -17869,7 +18436,14 @@ async function refreshTasks() {
   }
 }
 
-function openTaskFromEmail(threadId) {
+function openTaskFromEmail(threadId, accountId = "") {
+  if (accountId && accountId !== state.activeAccountId && state.accounts.some((account) => account.id === accountId)) {
+    switchMailAccount(accountId, { reload: false });
+    loadBootstrap({ quiet: true })
+      .then(() => openTaskFromEmail(threadId))
+      .catch((error) => showToast(error.message || "Could not open the linked conversation"));
+    return;
+  }
   const thread = threadById(threadId);
   if (!thread) { showToast("The linked conversation is no longer available"); return; }
   const message = thread.messages.find((item) => item.folder !== "sent" && item.folder !== "drafts") || thread.latest;
@@ -24723,7 +25297,7 @@ function handleFeatureClick(event) {
   const taskDelete = target.closest("[data-task-delete]");
   if (taskDelete) { event.preventDefault(); deleteTask(taskDelete.getAttribute("data-task-delete")); return true; }
   const taskThread = target.closest("[data-task-open-thread]");
-  if (taskThread) { event.preventDefault(); openTaskFromEmail(taskThread.getAttribute("data-task-open-thread")); return true; }
+  if (taskThread) { event.preventDefault(); openTaskFromEmail(taskThread.getAttribute("data-task-open-thread"), taskThread.getAttribute("data-task-open-account") || ""); return true; }
   if (target.closest("[data-task-editor-close]")) {
     event.preventDefault();
     state.editingTaskId = null;
@@ -25733,6 +26307,44 @@ function bindEvents() {
   document.getElementById("helpClose").addEventListener("click", closeHelp);
   document.getElementById("settingsBtn").addEventListener("click", () => openSettings());
   document.getElementById("accountBtn").addEventListener("click", () => openSettings("account"));
+  document.getElementById("accountSwitcher")?.addEventListener("change", (event) => switchMailAccount(event.target.value));
+  document.getElementById("accountAddBtn")?.addEventListener("click", () => openAddMailAccountDialog());
+  document.getElementById("connectedAccountAdd")?.addEventListener("click", () => openAddMailAccountDialog());
+  document.getElementById("connectedAccountsList")?.addEventListener("click", async (event) => {
+    const syncButton = event.target.closest("[data-account-sync]");
+    if (syncButton) {
+      const account = state.accounts.find((item) => item.id === syncButton.getAttribute("data-account-sync"));
+      if (!account) return;
+      syncButton.disabled = true;
+      try {
+        await api(`/api/accounts/${encodeURIComponent(account.id)}/sync`, { method: "POST", body: {} });
+        showToast("Syncing " + account.email);
+        setTimeout(() => loadBootstrap({ quiet: true }).catch(() => {}), 2500);
+      } catch (error) {
+        showToast(error.message || "Could not sync the connected account");
+      } finally {
+        syncButton.disabled = false;
+      }
+      return;
+    }
+    const serversButton = event.target.closest("[data-account-servers]");
+    if (serversButton) {
+      const account = state.accounts.find((item) => item.id === serversButton.getAttribute("data-account-servers"));
+      if (account) openMailAccountServersDialog(account);
+      return;
+    }
+    const reconnectButton = event.target.closest("[data-account-reconnect]");
+    if (reconnectButton) {
+      const account = state.accounts.find((item) => item.id === reconnectButton.getAttribute("data-account-reconnect"));
+      if (account) openAddMailAccountDialog(account);
+      return;
+    }
+    const removeButton = event.target.closest("[data-account-remove]");
+    if (removeButton) {
+      const account = state.accounts.find((item) => item.id === removeButton.getAttribute("data-account-remove"));
+      if (account) removeConnectedAccount(account);
+    }
+  });
   document.getElementById("settingsDone").addEventListener("click", () => setTask("mail"));
   document.getElementById("railLogout").addEventListener("click", logout);
   document.getElementById("signOutOtherSessions")?.addEventListener("click", revokeOtherSessions);

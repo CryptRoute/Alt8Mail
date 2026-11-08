@@ -15,6 +15,25 @@ import (
 // when an attendee proposes another time. A proposal is only accepted when the
 // sender is an attendee on the event, the UID belongs to an event organized by
 // the local user and the proposed time differs from the current one.
+func (s *Server) localMailIdentity(ctx context.Context, user userRecord, email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return false
+	}
+	if strings.EqualFold(email, user.Email) {
+		return true
+	}
+	var exists bool
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM public.mail_accounts
+			WHERE user_id=$1 AND kind='external' AND status <> 'disabled'
+			  AND lower(email::text)=lower($2)
+		)
+	`, user.ID, email).Scan(&exists)
+	return exists
+}
+
 func (s *Server) processInboundCalendarReplies(ctx context.Context, user userRecord, fetched []fetchedMail) int {
 	applied := 0
 	for _, message := range fetched {
@@ -59,7 +78,7 @@ func (s *Server) applyCalendarReply(ctx context.Context, organizer userRecord, s
 		return false
 	}
 	if organizerEmail := strings.ToLower(strings.TrimSpace(reply.Organizer)); organizerEmail != "" &&
-		!strings.EqualFold(organizerEmail, organizer.Email) {
+		!s.localMailIdentity(ctx, organizer, organizerEmail) {
 		return false
 	}
 	var attendee parsedCalendarAttendee
@@ -91,7 +110,7 @@ func (s *Server) applyCalendarReply(ctx context.Context, organizer userRecord, s
 	if err != nil {
 		return false
 	}
-	if !strings.EqualFold(eventOrganizer, organizer.Email) {
+	if !s.localMailIdentity(ctx, organizer, eventOrganizer) {
 		return false
 	}
 	// A reply must answer the invitation currently on record. Google and some
@@ -167,7 +186,7 @@ func (s *Server) applyCalendarCounter(ctx context.Context, organizer userRecord,
 		return false
 	}
 	if organizerEmail := strings.ToLower(strings.TrimSpace(counter.Organizer)); organizerEmail != "" &&
-		!strings.EqualFold(organizerEmail, organizer.Email) {
+		!s.localMailIdentity(ctx, organizer, organizerEmail) {
 		return false
 	}
 	var eventID, eventOrganizer, eventTimezone, title, tenantID string
@@ -181,7 +200,7 @@ func (s *Server) applyCalendarCounter(ctx context.Context, organizer userRecord,
 		WHERE lower(e.uid)=lower($1) AND lower(a.email)=lower($2) AND e.tenant_id=$3
 		LIMIT 1
 	`, uid, sender, organizer.TenantID).Scan(&eventID, &eventSequence, &eventOrganizer, &eventTimezone, &title, &tenantID, &eventStartsAt, &eventEndsAt)
-	if err != nil || !strings.EqualFold(eventOrganizer, organizer.Email) {
+	if err != nil || !s.localMailIdentity(ctx, organizer, eventOrganizer) {
 		return false
 	}
 	// The organizer's own address can also appear as an attendee. An update

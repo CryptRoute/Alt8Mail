@@ -78,6 +78,20 @@ func (s *Server) messageSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fetchRawMessage(ctx context.Context, user userRecord, state map[string]any, message map[string]any) ([]byte, string, bool) {
+	accountID := stateString(message, "accountId")
+	if accountID == "" {
+		_ = s.store.DB.QueryRow(ctx, `
+			SELECT account_id FROM public.mail_messages WHERE id=$1 AND user_id=$2
+		`, stateString(message, "id"), user.ID).Scan(&accountID)
+	}
+	if accountID != "" {
+		if account, err := s.resolveMailAccount(ctx, user.ID, accountID); err == nil && account.Kind == mailAccountKindExternal {
+			if !s.externalMailAccountsAllowed(ctx, user) {
+				return synthesizedMessageSource(message), "Connected mail accounts are disabled by organization policy; headers were reconstructed from the synced message index.", false
+			}
+			return s.fetchRawExternalMessage(ctx, account, message)
+		}
+	}
 	if !s.mailAccountConfigured(user.Email) {
 		return synthesizedMessageSource(message), "Live IMAP is not configured for this mailbox; headers were reconstructed from the synced message index.", false
 	}
@@ -111,6 +125,24 @@ func (s *Server) fetchRawMessage(ctx context.Context, user userRecord, state map
 		s.logger.Warn("message source IMAP login failed", "err", err)
 		return synthesizedMessageSource(message), "The mail server rejected the mailbox session; headers were reconstructed from the synced message index.", false
 	}
+	return s.fetchRawFromIMAPConn(conn, folder, uid, message)
+}
+
+func (s *Server) fetchRawExternalMessage(ctx context.Context, account mailAccountRecord, message map[string]any) ([]byte, string, bool) {
+	folder := stateString(message, "imapFolder")
+	uid := stateInt(message, "imapUid")
+	if folder == "" {
+		return synthesizedMessageSource(message), "The source mailbox folder is unknown; headers were reconstructed from the synced message index.", false
+	}
+	conn, err := s.openExternalIMAP(ctx, account)
+	if err != nil {
+		return synthesizedMessageSource(message), "The connected mail server could not be reached; headers were reconstructed from the synced message index.", false
+	}
+	defer conn.Logout()
+	return s.fetchRawFromIMAPConn(conn, folder, uid, message)
+}
+
+func (s *Server) fetchRawFromIMAPConn(conn *imapclient.Client, folder string, uid int64, message map[string]any) ([]byte, string, bool) {
 	if _, err := conn.Select(folder, true); err != nil {
 		return synthesizedMessageSource(message), "The source folder is no longer available; headers were reconstructed from the synced message index.", false
 	}

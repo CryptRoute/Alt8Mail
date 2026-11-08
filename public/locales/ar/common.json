@@ -55,5 +55,18 @@
   "common.close": "إغلاق",
   "common.done": "تم",
   "common.saved": "تم حفظ التفضيلات",
-  "notify.newMail": "بريد Alt8Mail جديد"
+  "notify.newMail": "بريد Alt8Mail جديد",
+  "accounts.all": "كل الحسابات",
+  "accounts.connected": "الحسابات المتصلة",
+  "accounts.add": "إضافة حساب بريد",
+  "accounts.sync": "مزامنة",
+  "accounts.servers": "الخوادم",
+  "accounts.reconnect": "إعادة الاتصال",
+  "accounts.password": "كلمة المرور",
+  "accounts.remove": "إزالة",
+  "accounts.connectedHint": "اقرأ علب البريد الأخرى وأرسل عبر خوادم IMAP وSMTP الخاصة بها.",
+  "accounts.provider": "المزود",
+  "accounts.gmailOAuth": "Gmail — تسجيل الدخول باستخدام Google",
+  "accounts.microsoftOAuth": "Microsoft 365 / Outlook — تسجيل الدخول",
+  "accounts.gmailAppPassword": "Gmail — كلمة مرور التطبيق"
 }

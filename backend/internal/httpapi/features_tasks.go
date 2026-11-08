@@ -32,6 +32,7 @@ type taskRecord struct {
 	ID, Title, Notes, Status, Priority, Due, DueTime, Source     string
 	AssigneeEmail, AssigneeName, AssigneeInitials, AssigneeColor string
 	LinkedThreadID, LinkedSubject                                *string
+	LinkedAccountID                                              string
 	Tags                                                         []string
 	CompletedAt, CreatedAt, UpdatedAt                            *time.Time
 }
@@ -43,7 +44,12 @@ func (s *Server) loadTasks(ctx context.Context, userID string) ([]map[string]any
 		       COALESCE(to_char(t.due_time, 'HH24:MI'), ''),
 		       COALESCE(a.email::text, ''), COALESCE(a.name, ''), COALESCE(a.initials, ''), COALESCE(a.color, ''),
 		       t.linked_thread_id, t.linked_subject, t.source, t.tags,
-		       t.completed_at, t.created_at, t.updated_at
+		       t.completed_at, t.created_at, t.updated_at,
+		       COALESCE((
+		         SELECT m.account_id FROM public.mail_messages m
+		         WHERE m.user_id=t.user_id AND m.thread_id=t.linked_thread_id
+		         ORDER BY m.account_id LIMIT 1
+		       ), '')
 		FROM tasks t
 		LEFT JOIN users a ON a.id = t.assignee_user_id
 		WHERE t.user_id = $1 OR t.assignee_user_id = $1
@@ -59,7 +65,7 @@ func (s *Server) loadTasks(ctx context.Context, userID string) ([]map[string]any
 		if err := rows.Scan(&task.ID, &task.Title, &task.Notes, &task.Status, &task.Priority,
 			&task.Due, &task.DueTime, &task.AssigneeEmail, &task.AssigneeName, &task.AssigneeInitials,
 			&task.AssigneeColor, &task.LinkedThreadID, &task.LinkedSubject, &task.Source, &task.Tags,
-			&task.CompletedAt, &task.CreatedAt, &task.UpdatedAt); err != nil {
+			&task.CompletedAt, &task.CreatedAt, &task.UpdatedAt, &task.LinkedAccountID); err != nil {
 			continue
 		}
 		tasks = append(tasks, publicTask(task))
@@ -88,7 +94,8 @@ func publicTask(task taskRecord) map[string]any {
 		"priority": task.Priority, "due": task.Due, "dueTime": task.DueTime,
 		"assignee": assignee, "tags": tags, "source": task.Source,
 		"linkedThreadId": task.LinkedThreadID, "linkedSubject": task.LinkedSubject,
-		"completedAt": completedAt, "createdAt": task.CreatedAt.UTC().Format(time.RFC3339),
+		"linkedAccountId": task.LinkedAccountID,
+		"completedAt":     completedAt, "createdAt": task.CreatedAt.UTC().Format(time.RFC3339),
 		"updatedAt": task.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
@@ -213,7 +220,12 @@ func (s *Server) loadTask(ctx context.Context, userID, id string) (map[string]an
 		       COALESCE(to_char(t.due_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(t.due_time, 'HH24:MI'), ''),
 		       COALESCE(a.email::text, ''), COALESCE(a.name, ''), COALESCE(a.initials, ''), COALESCE(a.color, ''),
 		       t.linked_thread_id, t.linked_subject, t.source, t.tags, t.completed_at, t.created_at, t.updated_at,
-		       t.user_id::text
+		       t.user_id::text,
+		       COALESCE((
+		         SELECT m.account_id FROM public.mail_messages m
+		         WHERE m.user_id=t.user_id AND m.thread_id=t.linked_thread_id
+		         ORDER BY m.account_id LIMIT 1
+		       ), '')
 		FROM tasks t LEFT JOIN users a ON a.id = t.assignee_user_id
 		WHERE t.id = $1 AND (t.user_id = $2 OR t.assignee_user_id = $2)
 	`, id, userID)
@@ -229,7 +241,7 @@ func (s *Server) loadTask(ctx context.Context, userID, id string) (map[string]an
 	if err := rows.Scan(&task.ID, &task.Title, &task.Notes, &task.Status, &task.Priority, &task.Due, &task.DueTime,
 		&task.AssigneeEmail, &task.AssigneeName, &task.AssigneeInitials, &task.AssigneeColor,
 		&task.LinkedThreadID, &task.LinkedSubject, &task.Source, &task.Tags, &task.CompletedAt,
-		&task.CreatedAt, &task.UpdatedAt, &ownerID); err != nil {
+		&task.CreatedAt, &task.UpdatedAt, &ownerID, &task.LinkedAccountID); err != nil {
 		return nil, err
 	}
 	result := publicTask(task)

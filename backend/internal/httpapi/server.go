@@ -41,6 +41,7 @@ type Server struct {
 	limit           *loginLimiter
 	davLimit        *loginLimiter
 	adminLimit      *loginLimiter
+	accountLimit    *loginLimiter
 	stateLocksMu    sync.Mutex
 	stateLocks      map[string]*sync.Mutex
 	mailUserMu      sync.Mutex
@@ -80,6 +81,7 @@ func New(opts Options) *Server {
 		sieveSyncAgain:  map[string]bool{},
 		activeImports:   map[string]bool{},
 		adminLimit:      newLoginLimiter(opts.Config.AdminRateLimitMax, opts.Config.AdminRateWindow),
+		accountLimit:    newLoginLimiter(30, 10*time.Minute),
 		realtime:        newRealtimeHub(),
 		avatarCache:     map[string]senderAvatarCacheEntry{},
 	}
@@ -159,6 +161,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/folders/{id}/empty", s.requireUser(s.emptyFolder))
 	mux.HandleFunc("POST /api/folders/{id}/mark-read", s.requireUser(s.markFolderRead))
 	mux.HandleFunc("GET /api/aliases", s.requireUser(s.getAliases))
+	mux.HandleFunc("GET /api/accounts", s.requireUser(s.getMailAccounts))
+	mux.HandleFunc("POST /api/accounts", s.requireUser(s.createMailAccount))
+	mux.HandleFunc("POST /api/accounts/test", s.requireUser(s.testMailAccount))
+	mux.HandleFunc("PATCH /api/accounts/{id}", s.requireUser(s.updateMailAccount))
+	mux.HandleFunc("DELETE /api/accounts/{id}", s.requireUser(s.deleteMailAccount))
+	mux.HandleFunc("POST /api/accounts/{id}/sync", s.requireUser(s.syncMailAccount))
+	mux.HandleFunc("GET /api/mail/oauth/{provider}/start", s.requireUser(s.startMailOAuth))
+	mux.HandleFunc("GET /api/mail/oauth/{provider}/callback", s.mailOAuthCallback)
 	mux.HandleFunc("POST /api/password/change", s.requireUser(s.changePassword))
 	mux.HandleFunc("GET /api/preferences", s.requireUser(s.getPreferences))
 	mux.HandleFunc("PATCH /api/preferences", s.requireUser(s.patchPreferencesState))
@@ -672,6 +682,24 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		identities = []map[string]any{}
 	}
 	aliases := identityAliases(identities)
+	accounts := []map[string]any{}
+	if records, accountErr := s.mailAccountsForSession(ctx, sess); accountErr == nil {
+		for _, account := range records {
+			accounts = append(accounts, mailAccountView(account))
+		}
+	} else {
+		s.logger.Warn("mail account load failed", "user", sess.User.ID, "err", accountErr)
+	}
+	policy := s.tenantPolicyFor(ctx, sess.User.TenantID)
+	readScope, scopeErr := s.resolveMailReadScope(ctx, sess, requestedMailAccountID(r))
+	if scopeErr != nil {
+		writeError(w, http.StatusInternalServerError, "MAIL_ACCOUNT", "Could not resolve the mailbox account")
+		return
+	}
+	activeAccountView := unifiedMailAccountView(accounts)
+	if !readScope.Unified {
+		activeAccountView = mailAccountView(readScope.Account)
+	}
 	signatures, err := s.listSignatures(ctx, sess.User)
 	if err != nil {
 		s.logger.Warn("signature load failed", "user", sess.User.ID, "err", err)
@@ -703,7 +731,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	if value, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && value > 0 {
 		offset = value
 	}
-	page, err := s.loadMailThreadPage(ctx, sess.User.ID, folder, filter, limit, offset)
+	page, err := s.loadMailThreadPage(ctx, sess.User.ID, readScope.AccountID, folder, filter, limit, offset)
 	if err != nil {
 		s.logger.Warn("bootstrap message load failed", "user", sess.User.ID, "err", err)
 		page = mailThreadPage{Offset: offset, Limit: limit}
@@ -723,19 +751,26 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	appendStored(page.Messages)
 	// Drafts are a small, special folder: keep every open/draft message in the
 	// initial bootstrap so compose restoration still works after a reload.
-	if drafts, _, draftErr := s.loadMailMessagesByFolder(ctx, sess.User.ID, "drafts", ""); draftErr == nil {
+	if drafts, _, draftErr := s.loadMailMessagesByFolder(ctx, sess.User.ID, readScope.AccountID, "drafts", ""); draftErr == nil {
 		appendStored(drafts)
 	}
 	messages := make([]any, 0, len(storedMessages))
 	for _, message := range storedMessages {
 		messages = append(messages, publicStateMessage(state, message))
 	}
-	folderCounts, folderUnread, countErr := s.loadMailFolderCounts(ctx, sess.User.ID)
+	folderCounts, folderUnread, countErr := s.loadMailFolderCounts(ctx, sess.User.ID, readScope.AccountID)
 	if countErr != nil {
 		s.logger.Warn("bootstrap folder counts failed", "user", sess.User.ID, "err", countErr)
 	}
 	folders := stateSlice(state, "folders")
-	if len(folders) == 0 {
+	if !readScope.Unified && readScope.Account.Kind == mailAccountKindExternal {
+		folders = []any{}
+		if externalFolders, folderErr := s.externalFolderViews(ctx, readScope.Account); folderErr == nil {
+			for _, folder := range externalFolders {
+				folders = append(folders, folder)
+			}
+		}
+	} else if len(folders) == 0 {
 		foldersAny := []any{}
 		for _, folder := range defaultFolders() {
 			foldersAny = append(foldersAny, folder)
@@ -744,9 +779,9 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	delegatedMailboxes := []map[string]any{}
 	sieve := publicSieve(state, sess.User.Email)
-	// A delegated window already is the owner's mailbox. Do not surface a
-	// second layer of mailboxes that the owner may have delegated to them.
-	if !sess.IsDelegated {
+	// A delegated window already is the owner's mailbox. Connected accounts
+	// also do not surface the owner's delegated Alt8Mail mailboxes.
+	if !sess.IsDelegated && !readScope.Unified && readScope.Account.Kind == mailAccountKindNative {
 		folders, messages = s.applyDelegatedMailboxes(ctx, sess.User, folders, messages)
 		delegatedMailboxes = s.delegatedMailboxViews(ctx, sess.User.TenantID, sess.User.ID)
 	}
@@ -781,7 +816,6 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	providers, _ := s.publicStorageProviders(ctx, sess.User)
 	storageQuota := storageQuotaPayload(s.storageUsageFor(ctx, sess.User))
 	people, _ := s.directoryPeople(ctx, sess, false)
-	policy := s.tenantPolicyFor(ctx, sess.User.TenantID)
 	recentAudit := stateSlice(state, "audit")
 	if len(recentAudit) > 12 {
 		recentAudit = recentAudit[:12]
@@ -789,10 +823,21 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	threadMeta := s.collaborationThreadMeta(ctx, sess.User)
 	serverNotifications := s.loadMailNotifications(ctx, sess.User.ID, 50)
 	unsubscribeActions := s.loadUnsubscribeActions(ctx, sess.User.ID)
+	mailSync := map[string]any{
+		"lastError":  nullableString(stateString(stateMap(state, "mailSync"), "lastError")),
+		"lastSyncAt": nullableString(stateString(stateMap(state, "mailSync"), "lastSyncAt")),
+	}
+	if !readScope.Unified && readScope.Account.Kind == mailAccountKindExternal {
+		mailSync["lastError"] = nullableString(readScope.Account.LastError)
+		mailSync["lastSyncAt"] = nullableTime(readScope.Account.LastSyncAt)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":             user,
 		"organizationName": organizationName,
 		"aliases":          aliases,
+		"accounts":         accounts,
+		"activeAccount":    activeAccountView,
+		"activeAccountId":  readScope.AccountID,
 		"identities":       identities,
 		"signatures":       signatures,
 		"labels":           labels,
@@ -817,8 +862,9 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"defaultStorage":        s.defaultStorageProvider(ctx, sess.User.ID),
 		"tenantPolicy": map[string]any{
 			"mail": map[string]any{
-				"externalTag": policy.Mail.ExternalTag,
-				"quarantine":  policy.Mail.Quarantine,
+				"externalTag":      policy.Mail.ExternalTag,
+				"quarantine":       policy.Mail.Quarantine,
+				"externalAccounts": policy.Mail.ExternalAccounts,
 			},
 			"directory": map[string]any{
 				"contactSharing":    policy.Directory.ContactSharing || webmailAdminRole(sess.User.Role),
@@ -866,20 +912,17 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"push":                s.pushPublicConfig(ctx, sess.User.ID),
 		"capabilities":        capabilities(),
 		"mailboxMode":         stateString(state, "mailMode"),
-		"mailSync": map[string]any{
-			"lastError":  nullableString(stateString(stateMap(state, "mailSync"), "lastError")),
-			"lastSyncAt": nullableString(stateString(stateMap(state, "mailSync"), "lastSyncAt")),
-		},
-		"attachmentMaxBytes": 8 * 1024 * 1024,
-		"csrf":               sess.CSRF,
-		"sessionKind":        sessionKind(sess),
-		"delegated":          sess.IsDelegated,
-		"delegatedCanSend":   sess.DelegatedCanSend,
-		"delegatedMailboxes": delegatedMailboxes,
-		"mailClient":         s.mailClientSettings(r, sess.User.Email),
-		"demo":               map[string]any{"email": sess.User.Email, "holdSeconds": 8},
-		"serverTime":         time.Now().UTC().Format(time.RFC3339),
-		"preferences":        preferences,
+		"mailSync":            mailSync,
+		"attachmentMaxBytes":  8 * 1024 * 1024,
+		"csrf":                sess.CSRF,
+		"sessionKind":         sessionKind(sess),
+		"delegated":           sess.IsDelegated,
+		"delegatedCanSend":    sess.DelegatedCanSend,
+		"delegatedMailboxes":  delegatedMailboxes,
+		"mailClient":          s.mailClientSettings(r, sess.User.Email),
+		"demo":                map[string]any{"email": sess.User.Email, "holdSeconds": 8},
+		"serverTime":          time.Now().UTC().Format(time.RFC3339),
+		"preferences":         preferences,
 	})
 }
 

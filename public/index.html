@@ -10,14 +10,14 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.28.0">
-<link rel="stylesheet" href="/features.css?v=0.28.0">
-<link rel="stylesheet" href="/workspace.css?v=0.28.0">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.28.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.28.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.28.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.28.0">
-<link rel="stylesheet" href="/selects.css?v=0.28.0">
+<link rel="stylesheet" href="/styles.css?v=0.31.0">
+<link rel="stylesheet" href="/features.css?v=0.31.0">
+<link rel="stylesheet" href="/workspace.css?v=0.31.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.31.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.31.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.31.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.31.0">
+<link rel="stylesheet" href="/selects.css?v=0.31.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -488,6 +488,12 @@
                 <strong>Avery Chen</strong>
                 <span>avery.chen@a8m.example</span>
               </div>
+            </div>
+            <div class="account-switcher-row" id="accountSwitcherRow" hidden>
+              <select id="accountSwitcher" aria-label="Mail account"></select>
+              <button class="icon-btn account-add-btn" id="accountAddBtn" type="button" aria-label="Add connected mail account" title="Add connected mail account" data-i18n-aria-label="accounts.add" data-i18n-title="accounts.add" hidden>
+                <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+              </button>
             </div>
           </div>
           <div class="folder-scroll" id="folderList"></div>
@@ -1757,6 +1763,17 @@
                         <div class="pref-copy"><strong>Retention policy</strong><span>Seven years for all workspace mail.</span></div>
                         <span class="policy-chip">7 years</span>
                       </div>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3 data-i18n="accounts.connected">Connected accounts</h3>
+                      <p data-i18n="accounts.connectedHint">Read your other mailboxes and send through their own IMAP and SMTP servers.</p>
+                    </div>
+                    <div class="connected-account-list" id="connectedAccountsList"></div>
+                    <div class="settings-actions">
+                      <button class="btn-secondary" id="connectedAccountAdd" type="button" data-i18n="accounts.add">Add mail account</button>
                     </div>
                   </div>
 
@@ -3202,6 +3219,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.28.0"></script>
+<script type="module" src="/app.js?v=0.31.0"></script>
 </body>
 </html>

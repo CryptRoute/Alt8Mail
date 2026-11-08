@@ -19,7 +19,8 @@ const mailMessageColumns = `id, folder, imap_folder, uid, uid_validity,
 	size_bytes, unread, starred, flagged, pinned, draft, external, classification, categories,
 	auth, spam_report, event, priority, receipt, delivery, save_copy, via_api, window_mode,
 	replied_at, forwarded_at, reply_count, forward_count, snoozed_until, ignored, ignored_at,
-	compose_kind, source_message_id, unsubscribe, sender_utc_offset_minutes`
+	compose_kind, source_message_id, unsubscribe, sender_utc_offset_minutes,
+	COALESCE(account_id, '')`
 
 type mailRow struct {
 	ID                     string
@@ -76,6 +77,7 @@ type mailRow struct {
 	SourceMessageID        string
 	UnsubscribeJSON        []byte
 	SenderUTCOffsetMinutes *int
+	AccountID              string
 }
 
 type rowScanner interface {
@@ -94,7 +96,8 @@ func scanMailRow(scanner rowScanner) (mailRow, error) {
 		&row.EventJSON, &row.Priority, &row.Receipt, &row.Delivery, &row.SaveCopy,
 		&row.ViaAPI, &row.WindowMode, &row.RepliedAt, &row.ForwardedAt, &row.ReplyCount,
 		&row.ForwardCount, &row.SnoozedUntil, &row.Ignored, &row.IgnoredAt,
-		&row.ComposeKind, &row.SourceMessageID, &row.UnsubscribeJSON, &row.SenderUTCOffsetMinutes)
+		&row.ComposeKind, &row.SourceMessageID, &row.UnsubscribeJSON, &row.SenderUTCOffsetMinutes,
+		&row.AccountID)
 	return row, err
 }
 
@@ -186,6 +189,7 @@ func (row mailRow) stateMap(state map[string]any, attachments []map[string]any) 
 		"composeKind": row.ComposeKind, "sourceMessageId": row.SourceMessageID,
 		"createdAt": row.CreatedAt.UTC().Format(time.RFC3339),
 		"updatedAt": row.UpdatedAt.UTC().Format(time.RFC3339),
+		"accountId": row.AccountID,
 	}
 	if row.RepliedAt != nil {
 		out["repliedAt"] = row.RepliedAt.UTC().Format(time.RFC3339)
@@ -359,14 +363,23 @@ func (s *Server) loadMailMessagesQueryMode(ctx context.Context, userID, query st
 	return messages, attachmentRecords, nil
 }
 
-func (s *Server) loadAllMailMessages(ctx context.Context, userID string) ([]map[string]any, map[string]any, error) {
+func (s *Server) loadAllMailMessages(ctx context.Context, userID, accountScope string) ([]map[string]any, map[string]any, error) {
 	return s.loadMailMessagesQuery(ctx, userID,
-		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE user_id=$1 ORDER BY sent_at ASC`, userID)
+		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE `+mailAccountScopeCondition(accountScope)+` ORDER BY sent_at ASC`, userID)
 }
 
-func (s *Server) loadAllMailMetadata(ctx context.Context, userID string) ([]map[string]any, map[string]any, error) {
+func (s *Server) loadAllMailMetadata(ctx context.Context, userID, accountScope string) ([]map[string]any, map[string]any, error) {
 	return s.loadMailMessagesMetadata(ctx, userID,
-		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE user_id=$1 ORDER BY sent_at ASC`, userID)
+		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE `+mailAccountScopeCondition(accountScope)+` ORDER BY sent_at ASC`, userID)
+}
+
+func mailAccountScopeCondition(accountScope string) string {
+	if accountScope == mailAccountKindNative {
+		return `user_id=$1 AND account_id=(
+			SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+		)`
+	}
+	return "user_id=$1"
 }
 
 func (s *Server) loadMailMessagesByIDs(ctx context.Context, userID string, ids []string) ([]map[string]any, map[string]any, error) {
@@ -378,8 +391,16 @@ func (s *Server) loadMailMessagesByIDs(ctx context.Context, userID string, ids [
 }
 
 func mailFolderCondition(userID, folder, filter string) (string, []any) {
+	return mailFolderConditionForAccount(userID, "", folder, filter)
+}
+
+func mailFolderConditionForAccount(userID, accountID, folder, filter string) (string, []any) {
 	conditions := []string{"user_id=$1", "NOT ignored"}
 	args := []any{userID}
+	if trimmed := strings.TrimSpace(accountID); trimmed != "" && trimmed != mailAccountScopeAll {
+		args = append(args, accountID)
+		conditions = append(conditions, fmt.Sprintf(`account_id=$%d`, len(args)))
+	}
 	switch folder {
 	case "starred":
 		conditions = append(conditions, `(starred OR flagged) AND folder NOT IN ('spam', 'trash')`, `(snoozed_until IS NULL OR snoozed_until <= now())`)
@@ -418,8 +439,8 @@ func mailFolderCondition(userID, folder, filter string) (string, []any) {
 	return strings.Join(conditions, " AND "), args
 }
 
-func (s *Server) loadMailMessagesByFolder(ctx context.Context, userID, folder, filter string) ([]map[string]any, map[string]any, error) {
-	where, args := mailFolderCondition(userID, folder, filter)
+func (s *Server) loadMailMessagesByFolder(ctx context.Context, userID, accountID, folder, filter string) ([]map[string]any, map[string]any, error) {
+	where, args := mailFolderConditionForAccount(userID, accountID, folder, filter)
 	return s.loadMailMessagesQuery(ctx, userID,
 		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE `+where+` ORDER BY sent_at DESC`, args...)
 }
@@ -436,7 +457,7 @@ type mailThreadPage struct {
 	HasMore       bool
 }
 
-func (s *Server) loadMailThreadPage(ctx context.Context, userID, folder, filter string, limit, offset int) (mailThreadPage, error) {
+func (s *Server) loadMailThreadPage(ctx context.Context, userID, accountID, folder, filter string, limit, offset int) (mailThreadPage, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -446,7 +467,7 @@ func (s *Server) loadMailThreadPage(ctx context.Context, userID, folder, filter 
 	if offset < 0 {
 		offset = 0
 	}
-	where, args := mailFolderCondition(userID, folder, filter)
+	where, args := mailFolderConditionForAccount(userID, accountID, folder, filter)
 	var total, totalMessages int
 	if err := s.store.DB.QueryRow(ctx, `SELECT count(DISTINCT thread_id), count(*) FROM mail_messages WHERE `+where, args...).Scan(&total, &totalMessages); err != nil {
 		return mailThreadPage{}, err
@@ -480,7 +501,7 @@ func (s *Server) loadMailThreadPage(ctx context.Context, userID, folder, filter 
 	rows.Close()
 	messages := []map[string]any{}
 	if len(threadIDs) > 0 {
-		messages, _, err = s.loadMailMessagesByThreads(ctx, userID, threadIDs)
+		messages, _, err = s.loadMailMessagesByThreadsPreferred(ctx, userID, threadIDs, folder)
 		if err != nil {
 			return mailThreadPage{}, err
 		}
@@ -491,21 +512,27 @@ func (s *Server) loadMailThreadPage(ctx context.Context, userID, folder, filter 
 	}, nil
 }
 
-func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[string]int, map[string]int, error) {
+func (s *Server) loadMailFolderCounts(ctx context.Context, userID, accountID string) (map[string]int, map[string]int, error) {
 	counts := map[string]int{}
 	unread := map[string]int{}
+	accountFilter := ""
+	countArgs := []any{userID}
+	if strings.TrimSpace(accountID) != "" && strings.TrimSpace(accountID) != mailAccountScopeAll {
+		accountFilter = " AND account_id=$2"
+		countArgs = append(countArgs, accountID)
+	}
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT folder,
 		       count(*) FILTER (WHERE NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())),
 		       count(*) FILTER (WHERE unread AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now()))
 		FROM mail_messages
-		WHERE user_id=$1 AND NOT EXISTS (
+		WHERE user_id=$1`+accountFilter+` AND NOT EXISTS (
 			SELECT 1 FROM public.mail_thread_meta mt
 			WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id
 			  AND mt.closed_at IS NOT NULL
 		)
 		GROUP BY folder
-	`, userID)
+	`, countArgs...)
 	if err != nil {
 		return counts, unread, err
 	}
@@ -525,54 +552,93 @@ func (s *Server) loadMailFolderCounts(ctx context.Context, userID string) (map[s
 	_ = s.store.DB.QueryRow(ctx, `
 		SELECT count(*), count(*) FILTER (WHERE unread)
 		FROM mail_messages
-		WHERE user_id=$1 AND NOT ignored AND snoozed_until > now()
+		WHERE user_id=$1`+accountFilter+` AND NOT ignored AND snoozed_until > now()
 		  AND NOT EXISTS (
 			SELECT 1 FROM public.mail_thread_meta mt
 			WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id
 			  AND mt.closed_at IS NOT NULL
 		  )
-	`, userID).Scan(&snoozed, &snoozedUnread)
+	`, countArgs...).Scan(&snoozed, &snoozedUnread)
 	counts["snoozed"] = snoozed
 	unread["snoozed"] = snoozedUnread
 	var starred, starredUnread int
 	_ = s.store.DB.QueryRow(ctx, `
 		SELECT count(*), count(*) FILTER (WHERE unread)
 		FROM mail_messages
-		WHERE user_id=$1 AND (starred OR flagged) AND folder NOT IN ('spam', 'trash')
+		WHERE user_id=$1`+accountFilter+` AND (starred OR flagged) AND folder NOT IN ('spam', 'trash')
 		  AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())
 		  AND NOT EXISTS (
 			SELECT 1 FROM public.mail_thread_meta mt
 			WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id
 			  AND mt.closed_at IS NOT NULL
 		  )
-	`, userID).Scan(&starred, &starredUnread)
+	`, countArgs...).Scan(&starred, &starredUnread)
 	counts["starred"] = starred
 	unread["starred"] = starredUnread
 	var subscriptions, subscriptionsUnread int
 	_ = s.store.DB.QueryRow(ctx, `
 		SELECT count(*), count(*) FILTER (WHERE unread)
 		FROM mail_messages
-		WHERE user_id=$1 AND folder='subscriptions' AND NOT ignored
+		WHERE user_id=$1`+accountFilter+` AND folder='subscriptions' AND NOT ignored
 		  AND (snoozed_until IS NULL OR snoozed_until <= now())
-	`, userID).Scan(&subscriptions, &subscriptionsUnread)
+	`, countArgs...).Scan(&subscriptions, &subscriptionsUnread)
 	counts["subscriptions"] = subscriptions
 	unread["subscriptions"] = subscriptionsUnread
 	return counts, unread, nil
 }
 
 func (s *Server) loadMailMessagesByThreads(ctx context.Context, userID string, threadIDs []string) ([]map[string]any, map[string]any, error) {
+	return s.loadMailMessagesByThreadsPreferred(ctx, userID, threadIDs, "")
+}
+
+// loadMailMessagesByThreadsPreferred keeps one copy of a message that exists
+// in several mirror folders (a Gmail message with labels, or a Sent copy) while
+// preferring the copy in the folder currently being read.
+func (s *Server) loadMailMessagesByThreadsPreferred(ctx context.Context, userID string, threadIDs []string, preferredFolder string) ([]map[string]any, map[string]any, error) {
 	if len(threadIDs) == 0 {
 		return []map[string]any{}, map[string]any{}, nil
 	}
-	return s.loadMailMessagesQuery(ctx, userID,
+	messages, attachments, err := s.loadMailMessagesQuery(ctx, userID,
 		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE user_id=$1 AND thread_id = ANY($2) ORDER BY sent_at ASC`, userID, threadIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return dedupeThreadMessages(messages, preferredFolder), attachments, nil
+}
+
+func dedupeThreadMessages(messages []map[string]any, preferredFolder string) []map[string]any {
+	chosen := map[string]map[string]any{}
+	order := []string{}
+	for _, message := range messages {
+		key := stateString(message, "accountId") + "\x00" + stateString(message, "messageId")
+		if stateString(message, "messageId") == "" {
+			key = "\x00id\x00" + stateString(message, "id")
+		}
+		existing, seen := chosen[key]
+		if !seen {
+			order = append(order, key)
+			chosen[key] = message
+			continue
+		}
+		if preferredFolder != "" && stateString(message, "folder") == preferredFolder &&
+			stateString(existing, "folder") != preferredFolder {
+			chosen[key] = message
+		}
+	}
+	out := make([]map[string]any, 0, len(order))
+	for _, key := range order {
+		out = append(out, chosen[key])
+	}
+	return out
 }
 
 func (s *Server) loadFolderUIDs(ctx context.Context, userID, folder string, uidValidity int64) map[uint32]bool {
 	known := map[uint32]bool{}
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT uid FROM mail_messages
-		WHERE user_id=$1 AND imap_folder=$2 AND uid_validity=$3 AND uid > 0 AND uid <= 4294967295
+		WHERE user_id=$1 AND account_id=(
+			SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+		) AND imap_folder=$2 AND uid_validity=$3 AND uid > 0 AND uid <= 4294967295
 	`, userID, folder, uidValidity)
 	if err != nil {
 		return known
@@ -591,7 +657,9 @@ func (s *Server) countMailMessages(ctx context.Context, userID, folder string, u
 	var count int
 	_ = s.store.DB.QueryRow(ctx, `
 		SELECT count(*) FROM mail_messages
-		WHERE user_id=$1 AND imap_folder=$2 AND uid_validity=$3 AND uid > 0
+		WHERE user_id=$1 AND account_id=(
+			SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+		) AND imap_folder=$2 AND uid_validity=$3 AND uid > 0
 	`, userID, folder, uidValidity).Scan(&count)
 	return count
 }
@@ -656,7 +724,7 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 		       thread_id, COALESCE(in_reply_to,''), priority, receipt, delivery, save_copy, scheduled,
 		       send_at, queued_at, hold_ms, status, delivery_state, delivery_claimed_at, retry_at,
 		       attempts, last_error, mime_message_id, draft_snapshot, ip, user_agent,
-		       compose_kind, source_message_id, classification, dlp_warnings
+		       compose_kind, source_message_id, classification, dlp_warnings, COALESCE(account_id,'')
 		FROM outbox WHERE user_id=$1 ORDER BY send_at ASC
 	`, userID)
 	if err != nil {
@@ -665,7 +733,7 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, draftID, threadID, inReplyTo, priority, status, deliveryState, lastError, mimeMessageID, ip, userAgent, composeKind, sourceMessageID, classification string
+		var id, draftID, threadID, inReplyTo, priority, status, deliveryState, lastError, mimeMessageID, ip, userAgent, composeKind, sourceMessageID, classification, accountID string
 		var subject, bodyText, bodyHTML string
 		var fromJSON, toJSON, ccJSON, bccJSON, attachmentsJSON, draftSnapshotJSON, dlpWarningsJSON []byte
 		var receipt, delivery, saveCopy, scheduled bool
@@ -676,7 +744,7 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 			&attachmentsJSON, &threadID, &inReplyTo, &priority, &receipt, &delivery, &saveCopy,
 			&scheduled, &sendAt, &queuedAt, &holdMs, &status, &deliveryState, &claimedAt, &retryAt,
 			&attempts, &lastError, &mimeMessageID, &draftSnapshotJSON, &ip, &userAgent,
-			&composeKind, &sourceMessageID, &classification, &dlpWarningsJSON); err != nil {
+			&composeKind, &sourceMessageID, &classification, &dlpWarningsJSON, &accountID); err != nil {
 			continue
 		}
 		item := map[string]any{
@@ -693,6 +761,7 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 			"composeKind": composeKind, "sourceMessageId": sourceMessageID,
 			"classification": firstNonEmpty(classification, "Internal"),
 			"dlpWarnings":    decodeJSONAny(dlpWarningsJSON, []any{}),
+			"accountId":      accountID,
 		}
 		if inReplyTo != "" {
 			item["inReplyTo"] = inReplyTo
@@ -760,7 +829,7 @@ func copyAttachmentMap(state map[string]any) map[string]map[string]any {
 }
 
 func (s *Server) withMailState(ctx context.Context, user userRecord, ids []string, loadAll bool, fn func(map[string]any) error) error {
-	return s.withMailStateMode(ctx, user, ids, loadAll, false, fn)
+	return s.withMailStateMode(ctx, user, ids, loadAll, false, "", fn)
 }
 
 // withMailMetadataState is for mailbox-wide operations that only need message
@@ -768,10 +837,17 @@ func (s *Server) withMailState(ctx context.Context, user userRecord, ids []strin
 // undo. It never transfers the stored HTML or plain-text bodies, avoiding
 // several copies of the entire mailbox on each pass.
 func (s *Server) withMailMetadataState(ctx context.Context, user userRecord, fn func(map[string]any) error) error {
-	return s.withMailStateMode(ctx, user, nil, true, true, fn)
+	return s.withMailStateMode(ctx, user, nil, true, true, "", fn)
 }
 
-func (s *Server) withMailStateMode(ctx context.Context, user userRecord, ids []string, loadAll, metadataOnly bool, fn func(map[string]any) error) error {
+// The native IMAP engine must never see connected-account rows in its
+// mailbox-wide state. Native folder actions, subscriptions and reconciliation
+// use this scope so two providers with the same IMAP folder/UID cannot collide.
+func (s *Server) withNativeMailMetadataState(ctx context.Context, user userRecord, fn func(map[string]any) error) error {
+	return s.withMailStateMode(ctx, user, nil, true, true, mailAccountKindNative, fn)
+}
+
+func (s *Server) withMailStateMode(ctx context.Context, user userRecord, ids []string, loadAll, metadataOnly bool, accountScope string, fn func(map[string]any) error) error {
 	return s.withStateTimeout(user.ID, user.TenantID, 120*time.Second, func(state map[string]any) error {
 		ensureStateCollections(state)
 		if err := s.syncStateAliases(ctx, user, state); err != nil {
@@ -782,9 +858,9 @@ func (s *Server) withMailStateMode(ctx context.Context, user userRecord, ids []s
 		var err error
 		if loadAll {
 			if metadataOnly {
-				messages, attachmentRecords, err = s.loadAllMailMetadata(ctx, user.ID)
+				messages, attachmentRecords, err = s.loadAllMailMetadata(ctx, user.ID, accountScope)
 			} else {
-				messages, attachmentRecords, err = s.loadAllMailMessages(ctx, user.ID)
+				messages, attachmentRecords, err = s.loadAllMailMessages(ctx, user.ID, accountScope)
 			}
 		} else {
 			messages, attachmentRecords, err = s.loadMailMessagesByIDs(ctx, user.ID, ids)
@@ -986,16 +1062,17 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 		classification = "Internal"
 	}
 	dlpWarningsJSON, _ := json.Marshal(stateSlice(item, "dlpWarnings"))
+	accountID := sanitizeMailText(stateString(item, "accountId"))
 	_, err = tx.Exec(ctx, `
 		INSERT INTO outbox (
 			id, tenant_id, user_id, draft_id, from_json, to_json, cc_json, bcc_json, subject,
 			body_text, body_html, attachments, thread_id, in_reply_to, priority, receipt, delivery,
 			save_copy, scheduled, send_at, queued_at, hold_ms, status, delivery_state, delivery_claimed_at,
 			retry_at, attempts, last_error, mime_message_id, draft_snapshot, ip, user_agent,
-			compose_kind, source_message_id, classification, dlp_warnings, created_at, updated_at
+			compose_kind, source_message_id, classification, dlp_warnings, created_at, updated_at, account_id
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),$15,$16,$17,$18,$19,$20,
-			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,now()
+			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,now(),NULLIF($38,'')
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			draft_id=EXCLUDED.draft_id, from_json=EXCLUDED.from_json, to_json=EXCLUDED.to_json,
@@ -1012,7 +1089,7 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 			ip=EXCLUDED.ip, user_agent=EXCLUDED.user_agent,
 			compose_kind=EXCLUDED.compose_kind, source_message_id=EXCLUDED.source_message_id,
 			classification=EXCLUDED.classification, dlp_warnings=EXCLUDED.dlp_warnings,
-			updated_at=now()
+			account_id=EXCLUDED.account_id, updated_at=now()
 	`, id, user.TenantID, user.ID, sanitizeMailText(stateString(item, "draftId")), fromJSON, toJSON, ccJSON, bccJSON,
 		truncate(sanitizeMailText(stateString(item, "subject")), 500), sanitizeMailText(stateString(item, "bodyText")),
 		sanitizeMailText(stateString(item, "bodyHtml")), attachmentsJSON,
@@ -1027,7 +1104,7 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 		truncate(sanitizeMailText(stateString(item, "userAgent")), 300),
 		truncate(sanitizeMailText(stateString(item, "composeKind")), 24),
 		truncate(sanitizeMailText(stateString(item, "sourceMessageId")), 120),
-		classification, dlpWarningsJSON, queuedAt)
+		classification, dlpWarningsJSON, queuedAt, accountID)
 	return err
 }
 
@@ -1176,6 +1253,7 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 	classification := firstNonEmpty(sanitizeMailText(stateString(message, "classification")), "Internal")
 	folder := firstNonEmpty(sanitizeMailText(stateString(message, "folder")), "inbox")
 	imapFolder := firstNonEmpty(sanitizeMailText(stateString(message, "imapFolder")), folder)
+	accountID := sanitizeMailText(stateString(message, "accountId"))
 	messageID := sanitizeMailText(stateString(message, "messageId"))
 	inReplyTo := sanitizeMailText(stateString(message, "inReplyTo"))
 	subject := truncate(sanitizeMailText(stateString(message, "subject")), 1000)
@@ -1203,12 +1281,14 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 			pinned, draft, external, classification, categories, auth, spam_report, event, priority,
 			receipt, delivery, save_copy, via_api, window_mode, replied_at, forwarded_at,
 			reply_count, forward_count, snoozed_until, ignored, ignored_at, compose_kind,
-			source_message_id, unsubscribe, sender_utc_offset_minutes
+			source_message_id, unsubscribe, sender_utc_offset_minutes, account_id
 		) VALUES (
-			$1,$2,$3,(SELECT id FROM mailboxes WHERE user_id=$3 LIMIT 1),$4,$5,$6,$7,
+			$1,$2,$3,CASE WHEN $56 = '' OR EXISTS (
+				SELECT 1 FROM public.mail_accounts WHERE id=$56 AND kind='native'
+			) THEN (SELECT id FROM mailboxes WHERE user_id=$3 LIMIT 1) ELSE NULL END,$4,$5,$6,$7,
 			$8,$9,NULLIF($10,''),$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
 			$24,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
-			$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55
+			$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,NULLIF($56,'')
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			folder=EXCLUDED.folder, imap_folder=EXCLUDED.imap_folder, uid=EXCLUDED.uid,
@@ -1251,7 +1331,7 @@ func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userR
 		snoozedUntil, stateBool(message, "ignored"), ignoredAt,
 		truncate(sanitizeMailText(stateString(message, "composeKind")), 24),
 		truncate(sanitizeMailText(stateString(message, "sourceMessageId")), 120),
-		unsubscribeJSON, senderOffset)
+		unsubscribeJSON, senderOffset, accountID)
 	if err != nil {
 		return err
 	}
@@ -1385,10 +1465,14 @@ func likePattern(value string) string {
 	return "%" + value + "%"
 }
 
-func (s *Server) searchMailMessages(ctx context.Context, userID, raw string) ([]map[string]any, mailSearchQuery, error) {
+func (s *Server) searchMailMessages(ctx context.Context, userID, accountID, raw string) ([]map[string]any, mailSearchQuery, error) {
 	parsed := parseMailSearch(raw)
 	conditions := []string{"user_id=$1"}
 	args := []any{userID}
+	if strings.TrimSpace(accountID) != "" && strings.TrimSpace(accountID) != mailAccountScopeAll {
+		args = append(args, accountID)
+		conditions = append(conditions, fmt.Sprintf("account_id=$%d", len(args)))
+	}
 	appendClause := func(format string, value any) {
 		args = append(args, value)
 		conditions = append(conditions, fmt.Sprintf(format, len(args)))

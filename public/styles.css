@@ -1399,6 +1399,30 @@ svg.icon {
   text-overflow: ellipsis;
 }
 .msg.is-unread .msg-from { font-weight: 700; }
+.msg-account-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 132px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.msg-account-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--acct, #34557a);
+}
 .msg-time {
   flex: none;
   font-size: 0.6875rem;

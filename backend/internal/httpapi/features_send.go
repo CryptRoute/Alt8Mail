@@ -11,6 +11,7 @@ import (
 
 type sendBody struct {
 	DraftID         string   `json:"draftId"`
+	AccountID       string   `json:"accountId"`
 	FromEmail       string   `json:"fromEmail"`
 	To              any      `json:"to"`
 	CC              any      `json:"cc"`
@@ -57,6 +58,26 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeBody(w, r, &body, 12*1024*1024) {
 		return
 	}
+	accountScope := body.AccountID
+	if normalizeMailAccountScope(accountScope) == mailAccountScopeAll {
+		accountScope = ""
+	}
+	account, accountErr := s.resolveMailAccount(r.Context(), sess.User.ID, accountScope)
+	if accountErr != nil {
+		writeError(w, http.StatusNotFound, "ACCOUNT_NOT_FOUND", "Mail account not found")
+		return
+	}
+	if account.Kind == mailAccountKindExternal {
+		policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
+		if !policy.Mail.ExternalAccounts || !policy.Mail.IMAPAccess {
+			writeError(w, http.StatusForbidden, "ACCOUNT_POLICY", "Connected mail accounts are disabled for this organization")
+			return
+		}
+		if account.Status != "active" {
+			writeError(w, http.StatusConflict, "ACCOUNT_REAUTH", "Reconnect this mail account before sending")
+			return
+		}
+	}
 	var response map[string]any
 	draftMessageID := ""
 	draftIDs := []string{}
@@ -67,14 +88,31 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
 		fromEmail := body.FromEmail
 		if fromEmail == "" {
-			fromEmail = stateString(stateMap(state, "user"), "email")
+			if account.Kind == mailAccountKindExternal {
+				fromEmail = account.Email
+			} else {
+				fromEmail = stateString(stateMap(state, "user"), "email")
+			}
 		}
-		alias := aliasFor(state, fromEmail)
-		if alias == nil || alias["canSend"] == false {
-			return fail(http.StatusForbidden, "BAD_FROM", "That From identity is not available for sending")
-		}
-		if err := s.enforceSenderDomainDNS(r.Context(), sess.User.TenantID, stateString(alias, "email")); err != nil {
-			return err
+		var fromPerson map[string]any
+		if account.Kind == mailAccountKindExternal {
+			if !strings.EqualFold(strings.TrimSpace(fromEmail), account.Email) {
+				return fail(http.StatusForbidden, "BAD_FROM", "Choose the connected account address as the From identity")
+			}
+			fromPerson = map[string]any{
+				"name": account.DisplayName, "email": account.Email,
+				"initials": initialsFor(account.DisplayName, account.Email),
+				"color":    account.Color, "kind": "connected",
+			}
+		} else {
+			alias := aliasFor(state, fromEmail)
+			if alias == nil || alias["canSend"] == false {
+				return fail(http.StatusForbidden, "BAD_FROM", "That From identity is not available for sending")
+			}
+			if err := s.enforceSenderDomainDNS(r.Context(), sess.User.TenantID, stateString(alias, "email")); err != nil {
+				return err
+			}
+			fromPerson = aliasPerson(alias)
 		}
 		to, invalid := parseRecipients(body.To, state)
 		if len(invalid) > 0 {
@@ -224,7 +262,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			sourceMessageID = stateString(draft, "sourceMessageId")
 		}
 		item := map[string]any{
-			"id": newID("send"), "draftId": body.DraftID, "from": aliasPerson(alias),
+			"id": newID("send"), "draftId": body.DraftID, "accountId": account.ID, "from": fromPerson,
 			"to": to, "cc": cc, "bcc": bcc, "subject": subject,
 			"bodyText": bodyText, "bodyHtml": bodyHTML,
 			"attachments": attachments, "mentions": sanitizeMentionInput(body.Mentions),
@@ -247,11 +285,11 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			removeMessage(state, body.DraftID)
 		}
 		state["outbox"] = append(stateSlice(state, "outbox"), item)
-		auditDetail := fmt.Sprintf("Queued for %ds undo window · %d recipient · from %s · %s classification", holdMs/1000, len(to), stateString(alias, "email"), classification)
+		auditDetail := fmt.Sprintf("Queued for %ds undo window · %d recipient · from %s · %s classification", holdMs/1000, len(to), fromEmail, classification)
 		auditAction := "send.queued"
 		if !scheduledAt.IsZero() {
 			auditAction = "send.scheduled"
-			auditDetail = fmt.Sprintf("Scheduled for %s · %d recipient · from %s", sendAt.Format(time.RFC3339), len(to), stateString(alias, "email"))
+			auditDetail = fmt.Sprintf("Scheduled for %s · %d recipient · from %s", sendAt.Format(time.RFC3339), len(to), fromEmail)
 		}
 		appendStateAudit(state, auditAction, firstNonEmpty(subject, "(no subject)"), stateString(stateMap(state, "user"), "name"),
 			auditDetail, clientIP(r), sanitizeUserAgent(r.UserAgent()))
@@ -275,7 +313,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		writeFromError(w, err)
 		return
 	}
-	if draftMessageID != "" {
+	if draftMessageID != "" && account.Kind == mailAccountKindNative {
 		s.deleteIMAPDraft(sess.User, draftMessageID)
 	}
 	if response != nil {
@@ -339,7 +377,10 @@ func (s *Server) cancelSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if restoredDraft != nil {
-		s.persistDraftToIMAP(sess.User, restoredDraft, attachmentRecords)
+		account, accountErr := s.resolveMailAccount(r.Context(), sess.User.ID, stateString(restoredDraft, "accountId"))
+		if accountErr == nil && account.Kind == mailAccountKindNative {
+			s.persistDraftToIMAP(sess.User, restoredDraft, attachmentRecords)
+		}
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -369,11 +410,26 @@ func (s *Server) patchOutbox(w http.ResponseWriter, r *http.Request) {
 		policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
 		changed := []string{}
 		if body.FromEmail != "" {
-			alias := aliasFor(state, body.FromEmail)
-			if alias == nil || alias["canSend"] == false {
-				return fail(http.StatusForbidden, "BAD_ALIAS", "Choose one of your sendable identities")
+			itemAccount, accountErr := s.resolveMailAccount(r.Context(), sess.User.ID, stateString(item, "accountId"))
+			if accountErr != nil {
+				itemAccount, _ = s.resolveMailAccount(r.Context(), sess.User.ID, "")
 			}
-			item["from"] = aliasPerson(alias)
+			if itemAccount.Kind == mailAccountKindExternal {
+				if !strings.EqualFold(strings.TrimSpace(body.FromEmail), itemAccount.Email) {
+					return fail(http.StatusForbidden, "BAD_ALIAS", "Use the connected account address for this message")
+				}
+				item["from"] = map[string]any{
+					"name": itemAccount.DisplayName, "email": itemAccount.Email,
+					"initials": initialsFor(itemAccount.DisplayName, itemAccount.Email), "color": itemAccount.Color,
+					"kind": "connected",
+				}
+			} else {
+				alias := aliasFor(state, body.FromEmail)
+				if alias == nil || alias["canSend"] == false {
+					return fail(http.StatusForbidden, "BAD_ALIAS", "Choose one of your sendable identities")
+				}
+				item["from"] = aliasPerson(alias)
+			}
 			changed = append(changed, "from")
 		}
 		if body.To != nil {
@@ -572,7 +628,8 @@ func restoreDraft(state map[string]any, item map[string]any) map[string]any {
 	bcc := stateSlice(item, "bcc")
 	draft := map[string]any{
 		"id": draftID, "folder": "drafts", "draft": true,
-		"from": from, "fromEmail": stateString(from, "email"),
+		"accountId": stateString(item, "accountId"),
+		"from":      from, "fromEmail": stateString(from, "email"),
 		"to": to, "toText": firstNonEmpty(stateString(snapshot, "toText"), recipientText(to)),
 		"cc": cc, "ccText": firstNonEmpty(stateString(snapshot, "ccText"), recipientText(cc)),
 		"bcc": bcc, "bccText": firstNonEmpty(stateString(snapshot, "bccText"), recipientText(bcc)),
@@ -655,6 +712,9 @@ func commitQueued(state map[string]any, item map[string]any) string {
 			"inReplyTo": item["inReplyTo"], "priority": firstNonEmpty(stateString(item, "priority"), "normal"),
 			"receipt": stateBool(item, "receipt"), "delivery": stateBool(item, "delivery"),
 			"saveCopy": true, "viaApi": true, "windowMode": "floating",
+		}
+		if accountID := stateString(item, "accountId"); accountID != "" {
+			sent["accountId"] = accountID
 		}
 		state["messages"] = append(stateMessages(state), sent)
 		sentMessageID = stateString(sent, "id")

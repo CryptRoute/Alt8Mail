@@ -85,8 +85,20 @@ func (s *Server) processOutboxItem(ctx context.Context, userID, tenantID, itemID
 	if err != nil {
 		return nil, err
 	}
-
-	if !s.mailDeliveryConfigured() {
+	account, accountErr := s.resolveMailAccount(ctx, userID, stateString(itemCopy, "accountId"))
+	if accountErr != nil {
+		account, accountErr = s.resolveMailAccount(ctx, userID, "")
+	}
+	if accountErr != nil {
+		s.markDeliveryRetry(userID, tenantID, itemID, accountErr)
+		return nil, accountErr
+	}
+	if account.Kind == mailAccountKindExternal && account.Status != "active" {
+		err := fmt.Errorf("reconnect the connected mail account before sending")
+		s.markDeliveryRetry(userID, tenantID, itemID, err)
+		return nil, err
+	}
+	if account.Kind == mailAccountKindNative && !s.mailDeliveryConfigured() {
 		sentID, err := s.finalizeOutboxItem(userID, tenantID, itemID, "", nil)
 		if err != nil {
 			return nil, err
@@ -102,7 +114,12 @@ func (s *Server) processOutboxItem(ctx context.Context, userID, tenantID, itemID
 		s.markDeliveryRetry(userID, tenantID, itemID, err)
 		return nil, err
 	}
-	delivered, err := s.deliverSMTP(itemCopy, attachments)
+	var delivered *deliveredMail
+	if account.Kind == mailAccountKindExternal {
+		delivered, err = s.deliverExternalSMTP(ctx, account, itemCopy, attachments)
+	} else {
+		delivered, err = s.deliverSMTP(itemCopy, attachments)
+	}
 	if err != nil {
 		s.markDeliveryRetry(userID, tenantID, itemID, err)
 		s.logger.Warn("outbound delivery failed", "item", itemID, "err", err)
@@ -116,7 +133,11 @@ func (s *Server) processOutboxItem(ctx context.Context, userID, tenantID, itemID
 		s.createMentionNotifications(ctx, sender, itemCopy, sentID)
 	}
 	fromIdentity, _ := itemCopy["from"].(map[string]any)
-	s.appendToSent(delivered.Raw, stateString(fromIdentity, "email"))
+	if account.Kind == mailAccountKindNative {
+		s.appendToSent(delivered.Raw, stateString(fromIdentity, "email"))
+	} else {
+		s.appendExternalSent(ctx, account, delivered.Raw)
+	}
 	return map[string]any{
 		"sentMessageId": sentID, "subject": firstNonEmpty(stateString(itemCopy, "subject"), "(no subject)"),
 		"messageId": delivered.MessageID,
@@ -427,6 +448,88 @@ func formatPeopleHeader(people []any) string {
 		parts = append(parts, formatMailbox(stateString(person, "name"), stateString(person, "email")))
 	}
 	return strings.Join(parts, ", ")
+}
+
+func (s *Server) deliverExternalSMTP(ctx context.Context, account mailAccountRecord, item map[string]any, attachments []outboundAttachment) (*deliveredMail, error) {
+	from, _ := item["from"].(map[string]any)
+	fromEmail := strings.TrimSpace(stateString(from, "email"))
+	if fromEmail == "" {
+		return nil, fmt.Errorf("message has no From identity")
+	}
+	if !strings.EqualFold(fromEmail, account.Email) {
+		return nil, fmt.Errorf("connected account messages must be sent from %s", account.Email)
+	}
+	recipients := []string{}
+	for _, key := range []string{"to", "cc", "bcc"} {
+		for _, raw := range stateSlice(item, key) {
+			person, _ := raw.(map[string]any)
+			if email := strings.TrimSpace(stateString(person, "email")); email != "" {
+				recipients = append(recipients, email)
+			}
+		}
+	}
+	if len(recipients) == 0 {
+		return nil, fmt.Errorf("message has no recipients")
+	}
+	messageDomain := domainOf(account.Email)
+	if messageDomain == "" {
+		messageDomain = "localhost"
+	}
+	messageID := fmt.Sprintf("<%s@%s>", newID("mail"), messageDomain)
+	raw, err := buildMIMEMessage(item, messageID, attachments)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.openExternalSMTP(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+	if err := client.Mail(fromEmail); err != nil {
+		return nil, fmt.Errorf("SMTP MAIL FROM: %w", err)
+	}
+	for _, recipient := range recipients {
+		if err := client.Rcpt(recipient); err != nil {
+			return nil, fmt.Errorf("SMTP RCPT TO %s: %w", recipient, err)
+		}
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return nil, fmt.Errorf("SMTP DATA: %w", err)
+	}
+	if _, err := writer.Write(raw); err != nil {
+		_ = writer.Close()
+		return nil, fmt.Errorf("write message: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("finish message: %w", err)
+	}
+	if err := client.Quit(); err != nil {
+		return nil, fmt.Errorf("SMTP quit: %w", err)
+	}
+	return &deliveredMail{MessageID: messageID, Raw: raw}, nil
+}
+
+func (s *Server) appendExternalSent(ctx context.Context, account mailAccountRecord, raw []byte) {
+	if len(raw) == 0 || strings.EqualFold(account.Provider, "gmail") {
+		return
+	}
+	var remoteName string
+	if err := s.store.DB.QueryRow(ctx, `
+		SELECT remote_name FROM public.mail_folders
+		WHERE account_id=$1 AND role='sent' LIMIT 1
+	`, account.ID).Scan(&remoteName); err != nil || strings.TrimSpace(remoteName) == "" {
+		return
+	}
+	conn, err := s.openExternalIMAP(ctx, account)
+	if err != nil {
+		s.logger.Warn("append external sent: connect", "account", account.Email, "err", err)
+		return
+	}
+	defer conn.Logout()
+	if err := conn.Append(remoteName, []string{`\Seen`}, time.Now(), &imapLiteral{data: raw}); err != nil {
+		s.logger.Warn("append external sent: append", "account", account.Email, "folder", remoteName, "err", err)
+	}
 }
 
 func (s *Server) appendToSent(raw []byte, fromEmail string) {

@@ -161,6 +161,7 @@ type oauthToken struct {
 	ExpiresIn    int64  `json:"expires_in"`
 	Scope        string `json:"scope"`
 	TokenType    string `json:"token_type"`
+	IDToken      string `json:"id_token"`
 }
 
 func (s *Server) exchangeOAuthCode(ctx context.Context, config oauthProviderConfig, clientID, clientSecret, providerID, code string) (oauthToken, error) {

@@ -29,6 +29,8 @@ func delegatedSessionAllowed(method, path string) bool {
 		return false
 	case strings.HasPrefix(path, "/api/storage/credentials"), strings.HasPrefix(path, "/api/storage/oauth"):
 		return false
+	case strings.HasPrefix(path, "/api/accounts"), strings.HasPrefix(path, "/api/mail/oauth"):
+		return false
 	case strings.HasPrefix(path, "/api/storage"):
 		return method == http.MethodGet || method == http.MethodHead
 	case strings.HasPrefix(path, "/api/file-shares"):

@@ -12,6 +12,19 @@ func (s *Server) registerYearReviewRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/yearly-review", s.requireUser(s.yearlyReview))
 }
 
+// Gmail labels and Sent copies can create more than one local row for the same
+// message. Pulse counts each message once, preferring the standard-folder copy.
+const yearReviewMessages = `(
+	SELECT DISTINCT ON (account_id, COALESCE(NULLIF(message_id, ''), id)) *
+	FROM public.mail_messages
+	WHERE user_id=$1
+	ORDER BY account_id, COALESCE(NULLIF(message_id, ''), id),
+	         CASE folder WHEN 'inbox' THEN 0 WHEN 'sent' THEN 1 WHEN 'archive' THEN 2
+	                     WHEN 'drafts' THEN 3 WHEN 'junk' THEN 4 WHEN 'spam' THEN 5
+	                     WHEN 'trash' THEN 6 ELSE 7 END,
+	         sent_at DESC
+) mail_messages`
+
 func userTimeLocation(user userRecord) *time.Location {
 	prefs := preferencesFor(user)
 	zone := strings.TrimSpace(fmt.Sprint(prefs["timeZone"]))
@@ -37,13 +50,30 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 	end := start.AddDate(1, 0, 0)
 	ctx := r.Context()
 	zoneName := location.String()
+	scope, scopeErr := s.resolveMailReadScope(ctx, sess, requestedMailAccountID(r))
+	if scopeErr != nil {
+		writeError(w, http.StatusInternalServerError, "MAIL_ACCOUNT", "Could not resolve the mailbox account")
+		return
+	}
+	withAccount := func(where string, args []any) (string, []any) {
+		if scope.Unified {
+			return where, args
+		}
+		args = append(args, scope.AccountID)
+		return fmt.Sprintf("%s AND account_id=$%d", where, len(args)), args
+	}
 
 	years := []int{}
-	if rows, err := s.store.DB.Query(ctx, `
+	yearQuery := `
 		SELECT DISTINCT extract(year from sent_at AT TIME ZONE $2)::int
-		FROM public.mail_messages WHERE user_id=$1
-		ORDER BY 1 DESC
-	`, sess.User.ID, zoneName); err == nil {
+		FROM ` + yearReviewMessages + ` WHERE user_id=$1`
+	yearArgs := []any{sess.User.ID, zoneName}
+	if !scope.Unified {
+		yearQuery += ` AND account_id=$3`
+		yearArgs = append(yearArgs, scope.AccountID)
+	}
+	yearQuery += ` ORDER BY 1 DESC`
+	if rows, err := s.store.DB.Query(ctx, yearQuery, yearArgs...); err == nil {
 		for rows.Next() {
 			var value int
 			if rows.Scan(&value) == nil && value >= 2000 {
@@ -61,6 +91,8 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 
 	var total, sent, received, threads, unread, newsletters int
 	var chars int64
+	totalWhere, totalArgs := withAccount("user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft",
+		[]any{sess.User.ID, start.UTC(), end.UTC()})
 	_ = s.store.DB.QueryRow(ctx, `
 		SELECT count(*),
 		       count(*) FILTER (WHERE folder='sent'),
@@ -69,9 +101,9 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 		       count(*) FILTER (WHERE unread),
 		       count(*) FILTER (WHERE unsubscribe IS NOT NULL AND unsubscribe <> '{}'::jsonb),
 		       COALESCE(sum(length(body_text)), 0)
-		FROM public.mail_messages
-		WHERE user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft
-	`, sess.User.ID, start.UTC(), end.UTC()).Scan(&total, &sent, &received, &threads, &unread, &newsletters, &chars)
+		FROM `+yearReviewMessages+`
+		WHERE `+totalWhere+`
+	`, totalArgs...).Scan(&total, &sent, &received, &threads, &unread, &newsletters, &chars)
 	readingMinutes := int(chars / 6 / 220)
 	if chars > 0 && readingMinutes < 1 {
 		readingMinutes = 1
@@ -83,13 +115,15 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 		Count int    `json:"count"`
 	}
 	topSenders := []contactCount{}
+	senderWhere, senderArgs := withAccount(
+		"user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND folder<>'sent' AND NOT draft AND lower(from_email::text) <> lower($4)",
+		[]any{sess.User.ID, start.UTC(), end.UTC(), sess.User.Email})
 	if rows, err := s.store.DB.Query(ctx, `
 		SELECT COALESCE(NULLIF(from_name,''), from_email::text), lower(from_email::text), count(*)
-		FROM public.mail_messages
-		WHERE user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND folder<>'sent' AND NOT draft
-		  AND lower(from_email::text) <> lower($4)
+		FROM `+yearReviewMessages+`
+		WHERE `+senderWhere+`
 		GROUP BY 1,2 ORDER BY count(*) DESC, 1 ASC LIMIT 5
-	`, sess.User.ID, start.UTC(), end.UTC(), sess.User.Email); err == nil {
+	`, senderArgs...); err == nil {
 		for rows.Next() {
 			var item contactCount
 			if rows.Scan(&item.Name, &item.Email, &item.Count) == nil {
@@ -99,14 +133,17 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 		rows.Close()
 	}
 	topRecipients := []contactCount{}
+	recipientWhere, recipientArgs := withAccount(
+		"m.user_id=$1 AND m.sent_at >= $2 AND m.sent_at < $3 AND m.folder='sent' AND NOT m.draft AND lower(p->>'email') <> lower($4)",
+		[]any{sess.User.ID, start.UTC(), end.UTC(), sess.User.Email})
+	recipientWhere = strings.ReplaceAll(recipientWhere, "account_id=", "m.account_id=")
 	if rows, err := s.store.DB.Query(ctx, `
 		SELECT COALESCE(NULLIF(p->>'name',''), p->>'email'), lower(p->>'email'), count(*)
-		FROM public.mail_messages m,
+		FROM `+yearReviewMessages+` m,
 		     jsonb_array_elements(CASE WHEN jsonb_typeof(m.to_json)='array' THEN m.to_json ELSE '[]'::jsonb END) p
-		WHERE m.user_id=$1 AND m.sent_at >= $2 AND m.sent_at < $3 AND m.folder='sent' AND NOT m.draft
-		  AND lower(p->>'email') <> lower($4)
+		WHERE `+recipientWhere+`
 		GROUP BY 1,2 ORDER BY count(*) DESC, 1 ASC LIMIT 5
-	`, sess.User.ID, start.UTC(), end.UTC(), sess.User.Email); err == nil {
+	`, recipientArgs...); err == nil {
 		for rows.Next() {
 			var item contactCount
 			if rows.Scan(&item.Name, &item.Email, &item.Count) == nil {
@@ -119,14 +156,17 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 	monthly := make([]int, 12)
 	monthlySent := make([]int, 12)
 	monthlyReceived := make([]int, 12)
+	monthWhere, monthArgs := withAccount("user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft",
+		[]any{sess.User.ID, start.UTC(), end.UTC()})
+	monthArgs = append(monthArgs, zoneName)
 	if rows, err := s.store.DB.Query(ctx, `
-		SELECT extract(month from sent_at AT TIME ZONE $4)::int,
+		SELECT extract(month from sent_at AT TIME ZONE $5)::int,
 		       count(*) FILTER (WHERE folder='sent'),
 		       count(*) FILTER (WHERE folder<>'sent')
-		FROM public.mail_messages
-		WHERE user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft
+		FROM `+yearReviewMessages+`
+		WHERE `+monthWhere+`
 		GROUP BY 1
-	`, sess.User.ID, start.UTC(), end.UTC(), zoneName); err == nil {
+	`, monthArgs...); err == nil {
 		for rows.Next() {
 			var month, sent, received int
 			if rows.Scan(&month, &sent, &received) == nil && month >= 1 && month <= 12 {
@@ -152,14 +192,17 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	weeklyItems := []map[string]any{}
+	weekWhere, weekArgs := withAccount("user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft",
+		[]any{sess.User.ID, start.UTC(), end.UTC()})
+	weekArgs = append(weekArgs, zoneName)
 	if rows, err := s.store.DB.Query(ctx, `
-		SELECT date_trunc('week', sent_at AT TIME ZONE $4)::date AS week_start,
+		SELECT date_trunc('week', sent_at AT TIME ZONE $5)::date AS week_start,
 		       count(*) FILTER (WHERE folder='sent'),
 		       count(*) FILTER (WHERE folder<>'sent')
-		FROM public.mail_messages
-		WHERE user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft
+		FROM `+yearReviewMessages+`
+		WHERE `+weekWhere+`
 		GROUP BY 1 ORDER BY 1
-	`, sess.User.ID, start.UTC(), end.UTC(), zoneName); err == nil {
+	`, weekArgs...); err == nil {
 		for rows.Next() {
 			var weekStart time.Time
 			var sent, received int
@@ -178,19 +221,22 @@ func (s *Server) yearlyReview(w http.ResponseWriter, r *http.Request) {
 	}
 	var busiestDay string
 	var busiestDayCount int
+	busyWhere, busyArgs := withAccount("user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft",
+		[]any{sess.User.ID, start.UTC(), end.UTC()})
+	busyArgs = append(busyArgs, zoneName)
 	_ = s.store.DB.QueryRow(ctx, `
-		SELECT to_char(sent_at AT TIME ZONE $4, 'YYYY-MM-DD'), count(*)
-		FROM public.mail_messages
-		WHERE user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft
+		SELECT to_char(sent_at AT TIME ZONE $5, 'YYYY-MM-DD'), count(*)
+		FROM `+yearReviewMessages+`
+		WHERE `+busyWhere+`
 		GROUP BY 1 ORDER BY count(*) DESC, 1 ASC LIMIT 1
-	`, sess.User.ID, start.UTC(), end.UTC(), zoneName).Scan(&busiestDay, &busiestDayCount)
+	`, busyArgs...).Scan(&busiestDay, &busiestDayCount)
 	var busiestHour, busiestHourCount int
 	_ = s.store.DB.QueryRow(ctx, `
-		SELECT extract(hour from sent_at AT TIME ZONE $4)::int, count(*)
-		FROM public.mail_messages
-		WHERE user_id=$1 AND sent_at >= $2 AND sent_at < $3 AND NOT draft
+		SELECT extract(hour from sent_at AT TIME ZONE $5)::int, count(*)
+		FROM `+yearReviewMessages+`
+		WHERE `+busyWhere+`
 		GROUP BY 1 ORDER BY count(*) DESC, 1 ASC LIMIT 1
-	`, sess.User.ID, start.UTC(), end.UTC(), zoneName).Scan(&busiestHour, &busiestHourCount)
+	`, busyArgs...).Scan(&busiestHour, &busiestHourCount)
 	var reactionsGiven, reactionsReceived int
 	_ = s.store.DB.QueryRow(ctx, `
 		SELECT count(*) FROM public.mail_reactions

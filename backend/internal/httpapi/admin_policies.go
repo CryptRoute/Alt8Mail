@@ -143,6 +143,7 @@ type adminMailPolicy struct {
 	IMAPAccess                bool     `json:"imapAccess"`
 	POPAccess                 bool     `json:"popAccess"`
 	SMTPAccess                bool     `json:"smtpAccess"`
+	ExternalAccounts          bool     `json:"externalAccounts"`
 	MaxAttachmentMB           int      `json:"maxAttachmentMB"`
 	BlockedExtensions         []string `json:"blockedExtensions"`
 	AllowedExternalRecipients []string `json:"allowedExternalRecipients"`
@@ -229,7 +230,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 		},
 		Mail: adminMailPolicy{
 			ExternalForwarding: false, AutoForwarding: true, IMAPAccess: true, POPAccess: false,
-			SMTPAccess: true, MaxAttachmentMB: 25,
+			SMTPAccess: true, ExternalAccounts: false, MaxAttachmentMB: 25,
 			BlockedExtensions:         []string{"exe", "js", "vbs", "bat", "cmd", "scr", "ps1", "jar", "msi"},
 			AllowedExternalRecipients: []string{}, SpamSensitivity: "medium",
 			// Users release their own Junk by default. Organizations that need

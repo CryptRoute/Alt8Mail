@@ -375,12 +375,15 @@ func (s *Server) testWebPush(w http.ResponseWriter, r *http.Request) {
 }
 
 type webPushMessage struct {
-	ID        string
-	UserID    string
-	Subject   string
-	FromName  string
-	FromEmail string
-	Received  time.Time
+	ID           string
+	UserID       string
+	Subject      string
+	FromName     string
+	FromEmail    string
+	Received     time.Time
+	AccountID    string
+	AccountEmail string
+	AccountLabel string
 }
 
 func (s *Server) webPushWorker(ctx context.Context) {
@@ -409,6 +412,42 @@ func quietHourNow(settings webPushSettings, now time.Time) bool {
 	return hour >= settings.QuietStart || hour < settings.QuietEnd
 }
 
+func webPushNotificationURL(publicURL, accountID string) string {
+	base := strings.TrimRight(publicURL, "/")
+	if accountID != "" {
+		return base + "/?account=" + url.QueryEscape(accountID) + "#/Inbox"
+	}
+	return base + "/#/Inbox"
+}
+
+func (s *Server) webPushMessagesSince(ctx context.Context, since time.Time, sinceID string) ([]webPushMessage, error) {
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT m.id, m.user_id::text, COALESCE(m.subject,''), COALESCE(m.from_name,''),
+		       m.from_email::text, m.received_at, COALESCE(m.account_id,''),
+		       COALESCE(a.email::text,''),
+		       CASE WHEN a.kind='external' THEN COALESCE(NULLIF(a.display_name,''), a.email::text, '') ELSE '' END
+		FROM mail_messages m
+		LEFT JOIN mail_accounts a ON a.id=m.account_id
+		WHERE m.folder='inbox' AND NOT m.draft AND NOT m.ignored AND m.unread
+		  AND (m.snoozed_until IS NULL OR m.snoozed_until <= now())
+		  AND (m.received_at > $1 OR (m.received_at = $1 AND m.id > $2))
+		ORDER BY m.received_at, m.id LIMIT 200
+	`, since, sinceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	messages := []webPushMessage{}
+	for rows.Next() {
+		var message webPushMessage
+		if rows.Scan(&message.ID, &message.UserID, &message.Subject, &message.FromName, &message.FromEmail,
+			&message.Received, &message.AccountID, &message.AccountEmail, &message.AccountLabel) == nil {
+			messages = append(messages, message)
+		}
+	}
+	return messages, rows.Err()
+}
+
 func (s *Server) deliverWebPush(ctx context.Context) error {
 	settings, err := s.loadWebPushSettings(ctx)
 	if err != nil || !settings.Enabled || settings.PublicKey == "" {
@@ -421,33 +460,17 @@ func (s *Server) deliverWebPush(ctx context.Context) error {
 		_, _ = s.store.DB.Exec(ctx, `UPDATE public.web_push_settings SET cursor_at=now(), cursor_id='' WHERE id=true`)
 		return nil
 	}
-	rows, err := s.store.DB.Query(ctx, `
-		SELECT m.id, m.user_id::text, COALESCE(m.subject,''), COALESCE(m.from_name,''),
-		       m.from_email::text, m.received_at
-		FROM mail_messages m
-		WHERE m.folder='inbox' AND NOT m.draft AND NOT m.ignored AND m.unread
-		  AND (m.snoozed_until IS NULL OR m.snoozed_until <= now())
-		  AND (m.received_at > $1 OR (m.received_at = $1 AND m.id > $2))
-		ORDER BY m.received_at, m.id LIMIT 200
-	`, *settings.CursorAt, settings.CursorID)
+	messages, err := s.webPushMessagesSince(ctx, *settings.CursorAt, settings.CursorID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	byUser := map[string][]webPushMessage{}
 	lastAt := *settings.CursorAt
 	lastID := settings.CursorID
-	for rows.Next() {
-		var message webPushMessage
-		if rows.Scan(&message.ID, &message.UserID, &message.Subject, &message.FromName, &message.FromEmail, &message.Received) != nil {
-			continue
-		}
+	for _, message := range messages {
 		byUser[message.UserID] = append(byUser[message.UserID], message)
 		lastAt = message.Received
 		lastID = message.ID
-	}
-	if err := rows.Err(); err != nil {
-		return err
 	}
 	if len(byUser) == 0 {
 		return nil
@@ -499,14 +522,18 @@ func (s *Server) deliverWebPush(ctx context.Context) error {
 			if settings.IncludeSubject && strings.TrimSpace(latest.Subject) != "" {
 				bodyParts = append(bodyParts, latest.Subject)
 			}
+			if strings.TrimSpace(latest.AccountLabel) != "" {
+				bodyParts = append(bodyParts, "via "+latest.AccountLabel)
+			}
 			if len(bodyParts) == 0 {
 				bodyParts = append(bodyParts, "New message")
 			}
 			title = truncate(strings.Join(strings.Fields(title), " "), 120)
 			body := strings.Join(strings.Fields(strings.Join(bodyParts, " · ")), " ")
+			notificationURL := webPushNotificationURL(s.cfg.PublicURL, latest.AccountID)
 			payload := map[string]any{
 				"title": title, "body": truncate(body, 400), "tag": "a8m-mail-" + userID,
-				"url":  strings.TrimRight(s.cfg.PublicURL, "/") + "/#/Inbox",
+				"url": notificationURL, "accountId": latest.AccountID, "accountEmail": latest.AccountEmail,
 				"icon": "/icons/icon-192.png", "badge": "/icons/icon-192.png",
 				"timestamp": latest.Received.UTC().UnixMilli(),
 			}

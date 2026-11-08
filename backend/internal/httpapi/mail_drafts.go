@@ -1,9 +1,9 @@
 package httpapi
 
 import (
-	"time"
-
 	"context"
+	"strings"
+	"time"
 
 	"github.com/emersion/go-imap"
 	imapclient "github.com/emersion/go-imap/client"
@@ -85,6 +85,81 @@ func (s *Server) deleteIMAPDraft(user userRecord, messageID string) {
 		return
 	}
 	uid, err := findIMAPUID(conn, "Drafts", messageID)
+	if err != nil || uid == 0 {
+		return
+	}
+	set := new(imap.SeqSet)
+	set.AddNum(uid)
+	_ = conn.UidStore(set, imap.FormatFlagsOp(imap.AddFlags, true), []interface{}{imap.DeletedFlag}, nil)
+	_ = conn.Expunge(nil)
+}
+
+func (s *Server) externalRoleFolder(ctx context.Context, accountID, role string) string {
+	var remote string
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT remote_name FROM public.mail_folders
+		WHERE account_id=$1 AND role=$2
+		ORDER BY sync_enabled DESC LIMIT 1
+	`, accountID, role).Scan(&remote)
+	return strings.TrimSpace(remote)
+}
+
+// persistExternalDraft mirrors a compose draft into the connected provider's
+// Drafts folder. Autosave reuses the stable Message-ID: the previous remote
+// copy is expunged before the new one is appended.
+func (s *Server) persistExternalDraft(ctx context.Context, account mailAccountRecord, draft map[string]any, attachmentRecords map[string]any) {
+	messageID := stateString(draft, "messageId")
+	if messageID == "" {
+		return
+	}
+	remoteDrafts := s.externalRoleFolder(ctx, account.ID, "drafts")
+	if remoteDrafts == "" {
+		return
+	}
+	attachments, err := s.outboundAttachments(attachmentRecords, draft)
+	if err != nil {
+		s.logger.Warn("external draft attachment read failed", "account", account.Email, "err", err)
+		return
+	}
+	raw, err := buildMIMEMessage(draft, messageID, attachments)
+	if err != nil {
+		s.logger.Warn("external draft MIME build failed", "account", account.Email, "err", err)
+		return
+	}
+	conn, err := s.openExternalIMAP(ctx, account)
+	if err != nil {
+		s.recordExternalSyncFailure(ctx, account, err)
+		s.logger.Warn("external draft connect failed", "account", account.Email, "err", err)
+		return
+	}
+	defer conn.Logout()
+	if uid, findErr := findIMAPUID(conn, remoteDrafts, messageID); findErr == nil && uid > 0 {
+		set := new(imap.SeqSet)
+		set.AddNum(uid)
+		_ = conn.UidStore(set, imap.FormatFlagsOp(imap.AddFlags, true), []interface{}{imap.DeletedFlag}, nil)
+		_ = conn.Expunge(nil)
+	}
+	if err := conn.Append(remoteDrafts, []string{imap.DraftFlag, imap.SeenFlag}, time.Now(), &imapLiteral{data: raw}); err != nil {
+		s.logger.Warn("external draft append failed", "account", account.Email, "folder", remoteDrafts, "err", err)
+	}
+}
+
+func (s *Server) deleteExternalDraft(ctx context.Context, account mailAccountRecord, messageID string) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return
+	}
+	remoteDrafts := s.externalRoleFolder(ctx, account.ID, "drafts")
+	if remoteDrafts == "" {
+		return
+	}
+	conn, err := s.openExternalIMAP(ctx, account)
+	if err != nil {
+		s.logger.Warn("external draft delete connect failed", "account", account.Email, "err", err)
+		return
+	}
+	defer conn.Logout()
+	uid, err := findIMAPUID(conn, remoteDrafts, messageID)
 	if err != nil || uid == 0 {
 		return
 	}

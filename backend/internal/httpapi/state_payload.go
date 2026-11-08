@@ -305,7 +305,7 @@ func publicOutboxItem(item map[string]any) map[string]any {
 		"kind":           map[bool]string{true: "scheduled", false: "undo"}[stateBool(item, "scheduled")],
 		"classification": firstNonEmpty(stateString(item, "classification"), "Internal"),
 		"deliveryState":  stateString(item, "deliveryState"), "lastError": stateString(item, "lastError"),
-		"dlpWarnings": stateSlice(item, "dlpWarnings"),
+		"dlpWarnings": stateSlice(item, "dlpWarnings"), "accountId": stateString(item, "accountId"),
 	}
 }
 

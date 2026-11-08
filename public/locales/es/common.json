@@ -55,5 +55,18 @@
   "common.close": "Cerrar",
   "common.done": "Hecho",
   "common.saved": "Preferencias guardadas",
-  "notify.newMail": "Nuevo correo de Alt8Mail"
+  "notify.newMail": "Nuevo correo de Alt8Mail",
+  "accounts.all": "Todas las cuentas",
+  "accounts.connected": "Cuentas conectadas",
+  "accounts.add": "Añadir cuenta de correo",
+  "accounts.sync": "Sincronizar",
+  "accounts.servers": "Servidores",
+  "accounts.reconnect": "Reconectar",
+  "accounts.password": "Contraseña",
+  "accounts.remove": "Eliminar",
+  "accounts.connectedHint": "Lee tus otros buzones y envía mediante sus propios servidores IMAP y SMTP.",
+  "accounts.provider": "Proveedor",
+  "accounts.gmailOAuth": "Gmail — iniciar sesión con Google",
+  "accounts.microsoftOAuth": "Microsoft 365 / Outlook — iniciar sesión",
+  "accounts.gmailAppPassword": "Gmail — contraseña de aplicación"
 }
