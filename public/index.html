@@ -10,14 +10,14 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.32.0">
-<link rel="stylesheet" href="/features.css?v=0.32.0">
-<link rel="stylesheet" href="/workspace.css?v=0.32.0">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.32.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.32.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.32.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.32.0">
-<link rel="stylesheet" href="/selects.css?v=0.32.0">
+<link rel="stylesheet" href="/styles.css?v=0.33.0">
+<link rel="stylesheet" href="/features.css?v=0.33.0">
+<link rel="stylesheet" href="/workspace.css?v=0.33.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.33.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.33.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.33.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.33.0">
+<link rel="stylesheet" href="/selects.css?v=0.33.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -485,24 +485,58 @@
                 <span><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Enterprise workspace</span>
               </div>
             </div>
-            <div class="account-line">
-              <span class="avatar avatar-sm" style="--av:#3f5d7a">AC</span>
-              <div class="account-id">
-                <strong>Avery Chen</strong>
-                <span>avery.chen@a8m.example</span>
+            <div class="account-menu" id="accountMenu">
+              <button class="account-trigger" id="accountMenuBtn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="accountPopover" aria-label="Switch mailbox">
+                <span class="account-trigger-logo" id="accountTriggerLogo" aria-hidden="true">
+                  <span class="avatar avatar-md account-avatar" style="--av:#3f5d7a"><span class="avatar-initials">AC</span></span>
+                </span>
+                <span class="account-trigger-copy">
+                  <span class="account-trigger-name" id="accountTriggerName">Alt8Mail</span>
+                  <span class="account-trigger-email" id="accountTriggerEmail">avery.chen@a8m.example</span>
+                </span>
+                <span class="account-trigger-status" id="accountTriggerStatus" aria-hidden="true" hidden></span>
+                <span class="account-trigger-unread" id="accountTriggerUnread" title="Unread messages" hidden>
+                  <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span id="accountTriggerUnreadCount">0</span>
+                </span>
+                <svg class="icon account-trigger-chevron" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+              </button>
+              <div class="account-pop" id="accountPopover" role="dialog" aria-label="Switch mailbox" hidden>
+                <div class="account-pop-head">
+                  <div><strong>Switch mailbox</strong><span>Choose the account shown in this window</span></div>
+                  <span class="account-pop-count" id="accountMenuCount">1</span>
+                </div>
+                <label class="account-pop-search" id="accountSearchWrap" hidden>
+                  <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+                  <input id="accountSearch" type="search" placeholder="Search mailboxes" autocomplete="off" spellcheck="false" aria-label="Search mailboxes">
+                </label>
+                <div class="account-pop-list" id="accountMenuList" role="listbox" aria-label="Mail accounts"></div>
+                <div class="account-pop-note" id="accountMenuNote" hidden>
+                  <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>
+                  <span>Connected accounts are disabled by your organization.</span>
+                </div>
+                <div class="account-pop-foot">
+                  <button class="account-pop-manage" id="accountManageBtn" type="button">
+                    <svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg><span>Manage</span>
+                  </button>
+                  <button class="account-pop-add" id="accountPopAddBtn" type="button">
+                    <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span data-i18n="accounts.add">Add mail account</span>
+                  </button>
+                </div>
               </div>
-            </div>
-            <div class="account-switcher-row" id="accountSwitcherRow" hidden>
-              <select id="accountSwitcher" aria-label="Mail account"></select>
-              <button class="icon-btn account-add-btn" id="accountAddBtn" type="button" aria-label="Add connected mail account" title="Add connected mail account" data-i18n-aria-label="accounts.add" data-i18n-title="accounts.add" hidden>
-                <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
-              </button>
-            </div>
-            <div class="account-connect-row" id="accountConnectRow" hidden>
-              <button class="account-connect-btn" id="accountConnectBtn" type="button">
-                <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
-                <span data-i18n="accounts.add">Add mail account</span>
-              </button>
+              <div class="account-ping" id="accountPing" aria-live="polite" hidden>
+                <button class="account-ping-main" id="accountPingOpen" type="button">
+                  <span class="account-ping-logo" id="accountPingLogo" aria-hidden="true"></span>
+                  <span class="account-ping-copy">
+                    <span class="account-ping-kicker"><span class="account-ping-dot" aria-hidden="true"></span>New mail · <span id="accountPingAccount"></span></span>
+                    <strong id="accountPingSubject"></strong>
+                    <span class="account-ping-meta" id="accountPingMeta"></span>
+                  </span>
+                  <span class="account-ping-count" id="accountPingCount"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span>0</span></span>
+                </button>
+                <button class="account-ping-close" id="accountPingClose" type="button" aria-label="Dismiss new mail alert">
+                  <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+                </button>
+              </div>
             </div>
           </div>
           <div class="folder-scroll" id="folderList"></div>
@@ -3245,6 +3279,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.32.0"></script>
+<script type="module" src="/app.js?v=0.33.0"></script>
 </body>
 </html>

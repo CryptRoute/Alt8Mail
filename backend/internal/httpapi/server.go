@@ -162,6 +162,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/folders/{id}/mark-read", s.requireUser(s.markFolderRead))
 	mux.HandleFunc("GET /api/aliases", s.requireUser(s.getAliases))
 	mux.HandleFunc("GET /api/accounts", s.requireUser(s.getMailAccounts))
+	mux.HandleFunc("GET /api/accounts/summary", s.requireUser(s.getMailAccountSummaries))
 	mux.HandleFunc("POST /api/accounts", s.requireUser(s.createMailAccount))
 	mux.HandleFunc("POST /api/accounts/test", s.requireUser(s.testMailAccount))
 	mux.HandleFunc("PATCH /api/accounts/{id}", s.requireUser(s.updateMailAccount))
@@ -682,9 +683,15 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		identities = []map[string]any{}
 	}
 	aliases := identityAliases(identities)
+	unreadSummaries, summaryErr := s.mailAccountUnreadSummaries(ctx, sess.User.ID)
+	if summaryErr != nil {
+		s.logger.Warn("mail unread summary failed", "user", sess.User.ID, "err", summaryErr)
+		unreadSummaries = map[string]mailAccountUnreadSummary{}
+	}
 	accounts := []map[string]any{}
 	if records, accountErr := s.mailAccountsForSession(ctx, sess); accountErr == nil {
 		for _, account := range records {
+			account.UnreadCount = unreadSummaries[account.ID].UnreadCount
 			accounts = append(accounts, mailAccountView(account))
 		}
 	} else {
@@ -698,6 +705,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	activeAccountView := unifiedMailAccountView(accounts)
 	if !readScope.Unified {
+		readScope.Account.UnreadCount = unreadSummaries[readScope.Account.ID].UnreadCount
 		activeAccountView = mailAccountView(readScope.Account)
 	}
 	signatures, err := s.listSignatures(ctx, sess.User)

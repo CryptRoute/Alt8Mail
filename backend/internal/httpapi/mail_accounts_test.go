@@ -59,6 +59,7 @@ func TestMailAccountViewOmitsCredentials(t *testing.T) {
 	view := mailAccountView(mailAccountRecord{
 		ID: "macct_test", Kind: mailAccountKindNative, Provider: mailAccountProviderAlt8Mail,
 		Email: "owner@example.test", DisplayName: "Owner", Color: "#34557a", Status: "active",
+		UnreadCount: 4,
 	})
 	for _, forbidden := range []string{
 		"secret", "secretSealed", "secret_sealed", "oauthRefresh", "oauthAccess",
@@ -70,6 +71,16 @@ func TestMailAccountViewOmitsCredentials(t *testing.T) {
 	}
 	if view["isNative"] != true || view["email"] != "owner@example.test" {
 		t.Fatalf("unexpected account view: %#v", view)
+	}
+	if view["unreadCount"] != 4 {
+		t.Fatalf("unreadCount = %#v, want 4", view["unreadCount"])
+	}
+	unified := unifiedMailAccountView([]map[string]any{
+		view,
+		mailAccountView(mailAccountRecord{ID: "macct_second", Kind: mailAccountKindExternal, UnreadCount: 3}),
+	})
+	if unified["unreadCount"] != 7 {
+		t.Fatalf("unified unreadCount = %#v, want 7", unified["unreadCount"])
 	}
 }
 

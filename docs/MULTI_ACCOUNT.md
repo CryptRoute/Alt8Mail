@@ -92,11 +92,14 @@ Alt8Mail mailbox:
 4. Run **Test connection**, then choose **Connect account**. The account appears
    in the account switcher above the folder list.
 
-The folder pane also shows **Add mail account** when no connected account
-exists, and the account switcher keeps a compact add button after the first
-account is connected. An administrator can turn the feature off under
-**Mail access → Connected accounts**; the Settings tab then explains that the
-organization disabled it.
+The folder pane shows a mailbox card with the active account's avatar or
+provider logo, name and address. Opening it lists the primary Alt8Mail mailbox,
+every connected mailbox and the unified inbox when more than one mailbox
+exists, with a Manage action and **Add mail account** in the menu. A compact
+plus button stays next to the card for quick account setup. Delegated windows
+show the delegated identity as a read-only card and cannot switch mailboxes.
+An administrator can turn the feature off under **Mail access → Connected
+accounts**; the Settings tab then explains that the organization disabled it.
 
 - **Add account** from the folder-pane account switcher, or from Settings →
   Connected accounts. The three-step wizard presents provider logo tiles for
@@ -115,6 +118,14 @@ organization disabled it.
 - **Account switching** reloads the mailbox with an `X-A8M-Account` scope.
   Messages, folder counts, search and Pulse use the active account. Delegated
   Alt8Mail windows never see connected personal accounts.
+- **Unread at a glance** every account row shows an inbox envelope counter and
+  the selector shows the total unread across all mailboxes. `GET
+  /api/accounts/summary` returns per-account counts and the newest unread
+  message; the realtime `mail` event and the 15-second monitor refresh it. When
+  unread mail arrives in an account that is not active, the selector raises an
+  in-place alert with the provider logo, sender, subject and unread total,
+  pulses the account card, and switches to that mailbox when opened. Unified
+  view suppresses these alerts because every mailbox is already visible.
 - **Sending** uses the account's own SMTP server and From address. Gmail does
   not need a Sent copy because SMTP saves it; other providers receive an IMAP
   append to their Sent folder. Scheduled send, undo send, drafts and the outbox

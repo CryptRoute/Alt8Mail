@@ -1872,18 +1872,68 @@ export async function createApp(options = {}) {
     return { allowed: !blocked, blocked, classification, defaultClassification: MOCK_DLP.defaultClassification, labels: MOCK_DLP.labels, enabled: MOCK_DLP.enabled, warnings, matches };
   }
 
+  function mockInboxUnread() {
+    return db.messages
+      .filter((message) => message.folder === "inbox" && message.unread && !message.draft && !message.ignored)
+      .sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0));
+  }
+
+  function mockLatestUnread(message) {
+    if (!message) return null;
+    return {
+      id: message.id || "",
+      fromName: message.from?.name || message.fromName || "",
+      fromEmail: message.from?.email || message.fromEmail || "",
+      subject: message.subject || "",
+      date: message.date || new Date().toISOString()
+    };
+  }
+
+  function mockAccountSummaries() {
+    const unread = mockInboxUnread();
+    const accounts = [{
+      id: "acct_native",
+      unreadCount: unread.length,
+      latestUnread: mockLatestUnread(unread[0])
+    }];
+    for (const account of db.externalMailAccounts || []) {
+      accounts.push({
+        id: account.id,
+        unreadCount: Math.max(0, Number(account.unreadCount) || 0),
+        latestUnread: account.latestUnread || null
+      });
+    }
+    return accounts;
+  }
+
   function bootstrapPayload(session) {
     const mailbox = delegatedMailboxFor(session);
+    const nativeUnread = mockInboxUnread();
     const nativeAccount = {
       id: "acct_native", kind: "native", provider: "alt8mail",
       email: db.user.email, displayName: db.user.name, color: db.user.color,
-      status: "active", isNative: true, isUnified: false
+      status: "active", isNative: true, isUnified: false,
+      unreadCount: nativeUnread.length
     };
+    const accounts = [nativeAccount, ...(db.externalMailAccounts || []).map((account) => ({
+      id: account.id,
+      kind: "external",
+      provider: account.provider || "gmail",
+      email: account.email,
+      displayName: account.displayName || account.email,
+      color: account.color || "#34557a",
+      oauth: account.oauth !== false,
+      status: account.status || "active",
+      isNative: false,
+      isUnified: false,
+      unreadCount: Math.max(0, Number(account.unreadCount) || 0),
+      lastError: account.lastError || null
+    }))];
     const payload = {
       user: mailbox ? delegatedPublicUser(mailbox) : publicUser(db.user),
       organizationName: "Alt8Mail",
       aliases: db.user.aliases,
-      accounts: [nativeAccount],
+      accounts,
       activeAccount: nativeAccount,
       activeAccountId: nativeAccount.id,
       folders: db.folders,
@@ -2629,6 +2679,15 @@ export async function createApp(options = {}) {
       }
       if (pathname === "/api/bootstrap" && req.method === "GET") {
         sendJson(res, 200, bootstrapPayload(session));
+        return;
+      }
+      if (pathname === "/api/accounts/summary" && req.method === "GET") {
+        const accounts = mockAccountSummaries();
+        sendJson(res, 200, {
+          accounts,
+          totalUnread: accounts.reduce((sum, account) => sum + account.unreadCount, 0),
+          updatedAt: new Date().toISOString()
+        });
         return;
       }
       if (pathname === "/api/accounts/test" && req.method === "POST") {

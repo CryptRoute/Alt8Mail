@@ -146,10 +146,35 @@ try {
   await page.screenshot(path.join(artifacts, "01-inbox.png"));
 
   console.log("\n[1b] Connected account entry points");
-  check(await page.eval("!document.getElementById('accountConnectRow').hidden"), "folder pane offers Add mail account");
-  await page.click("#accountConnectBtn");
+  check(await page.eval("!document.getElementById('accountMenu').hidden"), "folder pane shows the mailbox switcher");
+  check(await page.eval("document.getElementById('accountTriggerName')?.textContent === 'Avery Chen' && document.getElementById('accountTriggerEmail')?.textContent.includes('avery.chen@a8m.example')"), "mailbox switcher shows the active account name and address");
+  check(await page.eval("!document.getElementById('accountTriggerUnread').hidden && Number(document.getElementById('accountTriggerUnreadCount').textContent) > 0"), "mailbox switcher shows an unread envelope counter");
+  await page.click("#accountMenuBtn");
+  await page.waitFor(() => !document.getElementById("accountPopover").hidden, 5000);
+  check(await page.eval("document.getElementById('accountMenuBtn').getAttribute('aria-expanded') === 'true'"), "mailbox menu opens from the account card");
+  equal(await page.eval("document.querySelectorAll('#accountMenuList [data-account-menu-id]').length"), 1, "mailbox menu lists the native mailbox");
+  check(await page.eval("document.querySelector('#accountMenuList .account-row.is-selected .account-row-badge')?.textContent === 'Primary'"), "the active mailbox is marked as primary");
+  check(await page.eval("document.querySelector('#accountMenuList .account-row-unread')?.textContent.trim() === document.getElementById('accountTriggerUnreadCount').textContent.trim()"), "mailbox rows show each account's unread envelope count");
+  check(await page.eval("!document.getElementById('accountPopAddBtn').hidden"), "mailbox menu offers Add mail account");
+  await page.screenshot(path.join(artifacts, "01b-mailbox-switcher.png"));
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
+  await page.click("#folderToggle");
+  await page.waitFor(() => document.body.classList.contains("drawer-open"), 5000);
+  if (await page.eval("document.getElementById('accountPopover').hidden")) {
+    await page.click("#accountMenuBtn");
+    await page.waitFor(() => !document.getElementById("accountPopover").hidden, 5000);
+  }
+  await page.screenshot(path.join(artifacts, "01b-mailbox-switcher-mobile.png"));
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await sleep(250);
+  if (await page.eval("document.getElementById('accountPopover').hidden")) {
+    await page.click("#accountMenuBtn");
+    await page.waitFor(() => !document.getElementById("accountPopover").hidden, 5000);
+  }
+  await page.click("#accountPopAddBtn");
   await page.waitFor(() => Boolean(document.getElementById("accountDialogOverlay")), 5000);
-  check(await page.eval("document.querySelector('#accountDialogTitle')?.textContent === 'Add mail account'"), "folder-pane action opens the add-account wizard");
+  check(await page.eval("document.querySelector('#accountDialogTitle')?.textContent === 'Add mail account'"), "mailbox menu opens the add-account wizard");
   equal(await page.eval("document.querySelectorAll('[data-provider-tile]').length"), 12, "add-account wizard offers eleven branded providers plus other IMAP");
   equal(await page.eval("document.querySelectorAll('.mail-provider-tile img[src^=\"/icons/providers/\"]').length"), 12, "every provider tile renders its own logo");
   check(await page.eval("['Gmail','Outlook','Hotmail','Yahoo Mail','iCloud Mail','Other IMAP / SMTP'].every(name => [...document.querySelectorAll('.mail-provider-copy strong')].some(node => node.textContent === name))"), "provider gallery names Gmail, Outlook, Hotmail, Yahoo, iCloud and other IMAP");
@@ -787,11 +812,11 @@ try {
   try {
     await delegatedPage.waitFor(() => document.readyState === "complete", 12000);
     await delegatedPage.waitFor(() => !document.getElementById("app").hidden && document.querySelectorAll(".msg").length > 0, 15000);
-    equal(await delegatedPage.eval("document.querySelector('.account-id span')?.textContent"), "marcus.webb@a8m.example", "delegated window opens the owner mailbox");
+    equal(await delegatedPage.eval("document.getElementById('accountTriggerEmail')?.textContent"), "marcus.webb@a8m.example", "delegated window opens the owner mailbox");
     check(await delegatedPage.eval("document.body.innerText.includes('Delegated inbox: quarterly forecast sign-off')"), "delegated inbox loads its own conversations");
     check(await delegatedPage.eval("Boolean(document.getElementById('delegatedWindowChip'))"), "delegated window names its mailbox");
     check(await delegatedPage.eval("document.getElementById('delegatedSwitcher')?.hidden !== false"), "delegated window does not offer a second delegation switcher");
-    equal(await page.eval("document.querySelector('.account-id span')?.textContent"), DEMO_EMAIL, "primary window keeps the original mailbox session");
+    equal(await page.eval("document.getElementById('accountTriggerEmail')?.textContent"), DEMO_EMAIL, "primary window keeps the original mailbox session");
     await delegatedPage.screenshot(path.join(artifacts, "16b-delegated-window.png"));
     await delegatedPage.click("#delegatedWindowExit");
     await sleep(700);
@@ -2182,6 +2207,45 @@ try {
   await sleep(200);
   await page.click("#settingsDone");
   await sleep(300);
+
+  console.log("\n[11a] Unread mailbox notifications");
+  app.db.externalMailAccounts = [{
+    id: "acct_gmail_demo", provider: "gmail", email: "team@gmail.example",
+    displayName: "Team Gmail", color: "#c5221f", oauth: true, status: "active",
+    unreadCount: 2,
+    latestUnread: {
+      id: "gmail_demo_1", fromName: "Jordan Blake", fromEmail: "jordan@example.com",
+      subject: "Q4 supplier update", date: new Date().toISOString()
+    }
+  }];
+  await page.eval("location.reload()");
+  await waitForApp();
+  check(await page.eval("!document.getElementById('accountMenu').hidden"), "account switcher loads with connected mailboxes");
+  equal(await page.eval("document.getElementById('accountMenuCount').textContent"), "2", "mailbox count includes the connected Gmail account");
+  check(await page.eval("!document.getElementById('accountTriggerUnread').hidden && Number(document.getElementById('accountTriggerUnreadCount').textContent) > 0"), "folder switcher counts unread mail across mailboxes");
+  await page.click("#accountMenuBtn");
+  await page.waitFor(() => !document.getElementById("accountPopover").hidden, 5000);
+  check(await page.eval("document.querySelector('#accountMenuList [data-account-menu-id=\"all\"] .account-row-unread')?.textContent.trim() === document.getElementById('accountTriggerUnreadCount').textContent.trim()"), "unified mailbox row mirrors the total unread envelope count");
+  check(await page.eval("[...document.querySelectorAll('#accountMenuList .account-row-copy strong')].some(node => node.textContent === 'Team Gmail')"), "account menu lists the connected Gmail mailbox");
+  check(await page.eval("document.querySelector('#accountMenuList [data-account-menu-id=\"acct_gmail_demo\"] .account-row-unread')?.textContent.trim() === '2'"), "connected mailbox shows its unread envelope count");
+  await page.click("#accountMenuBtn");
+  app.db.externalMailAccounts[0].unreadCount = 5;
+  app.db.externalMailAccounts[0].latestUnread = {
+    id: "gmail_demo_2", fromName: "Jordan Blake", fromEmail: "jordan@example.com",
+    subject: "New supplier contract", date: new Date().toISOString()
+  };
+  await page.eval("document.dispatchEvent(new Event('visibilitychange'))");
+  await page.waitFor(() => {
+    const ping = document.getElementById("accountPing");
+    return Boolean(ping && !ping.hidden);
+  }, 5000);
+  check(await page.eval("document.getElementById('accountPing')?.textContent.includes('Team Gmail') && document.getElementById('accountPing')?.textContent.includes('New supplier contract')"), "new mail in another mailbox pops a notification from the account selector");
+  check(await page.eval("Number(document.getElementById('accountPingCount').textContent.trim()) === 5"), "notification shows the connected mailbox's unread total");
+  check(await page.eval("document.getElementById('accountMenu').classList.contains('has-news')"), "account selector pulses while the new-mail alert is visible");
+  await page.screenshot(path.join(artifacts, "01c-account-new-mail-ping.png"));
+  await page.click("#accountPingClose");
+  check(await page.eval("document.getElementById('accountPing').hidden"), "new-mail alert can be dismissed");
+  app.db.externalMailAccounts = [];
 
   console.log("\n[11b] Passkey sign-in");
   await page.eval("localStorage.setItem('a8m.accent', 'rose'); document.documentElement.style.setProperty('--accent', '#b8336a')");

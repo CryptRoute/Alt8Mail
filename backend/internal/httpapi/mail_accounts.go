@@ -44,6 +44,7 @@ type mailAccountRecord struct {
 	Settings    json.RawMessage
 	LastSyncAt  *time.Time
 	LastError   string
+	UnreadCount int
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -231,6 +232,7 @@ func mailAccountView(account mailAccountRecord) map[string]any {
 		"username":    account.Username,
 		"lastSyncAt":  nullableTime(account.LastSyncAt),
 		"lastError":   nullableString(account.LastError),
+		"unreadCount": account.UnreadCount,
 	}
 }
 
@@ -245,11 +247,17 @@ func (s *Server) mailIdentityForMessage(ctx context.Context, user userRecord, me
 }
 
 func unifiedMailAccountView(accounts []map[string]any) map[string]any {
+	unread := 0
+	for _, account := range accounts {
+		if count, ok := account["unreadCount"].(int); ok {
+			unread += count
+		}
+	}
 	return map[string]any{
 		"id": "all", "kind": "unified", "provider": "alt8mail", "email": "",
 		"displayName": "All accounts", "color": "#34557a", "oauth": false,
 		"status": "active", "isNative": false, "isUnified": true,
-		"accountCount": len(accounts),
+		"accountCount": len(accounts), "unreadCount": unread,
 	}
 }
 
@@ -319,8 +327,14 @@ func (s *Server) getMailAccounts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "MAIL_ACCOUNTS", "Could not load mail accounts")
 		return
 	}
+	summaries, summaryErr := s.mailAccountUnreadSummaries(r.Context(), sess.User.ID)
+	if summaryErr != nil {
+		s.logger.Warn("mail unread summary failed", "user", sess.User.ID, "err", summaryErr)
+		summaries = map[string]mailAccountUnreadSummary{}
+	}
 	views := make([]map[string]any, 0, len(accounts))
 	for _, account := range accounts {
+		account.UnreadCount = summaries[account.ID].UnreadCount
 		views = append(views, mailAccountView(account))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": views})

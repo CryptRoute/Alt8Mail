@@ -975,6 +975,13 @@ const state = {
   delegatedSwitchOpen: false,
   delegatedSwitchQuery: "",
   delegatedHeartbeat: null,
+  accountMenuOpen: false,
+  accountMenuQuery: "",
+  knownAccountUnread: new Map(),
+  knownAccountLatest: new Map(),
+  accountPingQueue: [],
+  accountPingCurrent: null,
+  accountPingTimer: null,
   accounts: [],
   activeAccount: null,
   activeAccountId: "",
@@ -5051,6 +5058,12 @@ async function logout() {
     state.folderUnread = {};
     state.knownInboxIds = null;
     state.knownSnoozeDueIds = new Set();
+    state.knownAccountUnread = new Map();
+    state.knownAccountLatest = new Map();
+    state.accountPingQueue = [];
+    state.accountPingCurrent = null;
+    clearTimeout(state.accountPingTimer);
+    state.accountPingTimer = null;
     state.push = { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true };
     state.pushLocal = false;
     state.pushBusy = false;
@@ -5169,6 +5182,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.accounts = Array.isArray(data.accounts) ? data.accounts : [];
   state.activeAccount = data.activeAccount || state.accounts.find((account) => account.id === data.activeAccountId) || null;
   state.activeAccountId = data.activeAccountId || state.activeAccount?.id || "";
+  hydrateAccountUnreadCounts();
   const nativeAliases = data.aliases || [];
   const connectedAliases = [];
   const aliasEmails = new Set(nativeAliases.map((alias) => normalizeEmail(alias.email)));
@@ -5372,13 +5386,18 @@ function startMailMonitor() {
   if (state.mailMonitorTimer) return;
   state.mailMonitorTimer = setInterval(() => {
     pollNewMail().catch(() => {});
+    pollAccountSummaries().catch(() => {});
     checkCalendarReminders().catch(() => {});
   }, 15000);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") pollNewMail().catch(() => {});
+    if (document.visibilityState === "visible") {
+      pollNewMail().catch(() => {});
+      pollAccountSummaries().catch(() => {});
+    }
   });
   startMailRealtime();
   pollNewMail().catch(() => {});
+  pollAccountSummaries().catch(() => {});
 }
 
 function startMailRealtime() {
@@ -5392,6 +5411,7 @@ function startMailRealtime() {
       state.mailRealtimeTimer = setTimeout(() => {
         state.mailRealtimeTimer = null;
         pollNewMail().catch(() => {});
+        pollAccountSummaries().catch(() => {});
       }, 250);
     });
   } catch {}
@@ -5426,6 +5446,39 @@ async function pollNewMail() {
   showNewMailNotification(fresh[0], fresh.length);
   await refreshMailbox({ quiet: true });
   renderNotifications();
+}
+
+async function pollAccountSummaries() {
+  if (!state.user || state.delegatedMode || !externalAccountsEnabled()) return;
+  if (!(state.accounts || []).some((account) => !account.isNative)) return;
+  const data = await api("/api/accounts/summary");
+  for (const summary of data.accounts || []) {
+    const account = (state.accounts || []).find((item) => item.id === summary.id);
+    if (!account) continue;
+    const next = Math.max(0, Number(summary.unreadCount) || 0);
+    const previous = state.knownAccountUnread.get(account.id);
+    const latestId = summary.latestUnread?.id || "";
+    const knownLatest = state.knownAccountLatest.get(account.id) || "";
+    const grew = previous !== undefined && next > previous;
+    const changedLatest = next > 0 && Boolean(knownLatest) && Boolean(latestId) &&
+      latestId !== knownLatest && next >= (previous ?? 0);
+    account.unreadCount = next;
+    if (summary.latestUnread) account.latestUnread = summary.latestUnread;
+    if (grew || changedLatest) {
+      maybeQueueAccountPing(account, Math.max(1, next - (previous ?? 0)), summary.latestUnread);
+    }
+    state.knownAccountUnread.set(account.id, next);
+    state.knownAccountLatest.set(account.id, latestId);
+  }
+  if (state.activeAccount) {
+    if (state.activeAccount.isUnified) {
+      state.activeAccount.unreadCount = accountUnreadTotal();
+    } else {
+      const live = (state.accounts || []).find((item) => item.id === state.activeAccount.id);
+      if (live) state.activeAccount.unreadCount = live.unreadCount;
+    }
+  }
+  renderAccountSwitcher();
 }
 
 function showBrowserNotification(title, body, tag = "a8m-new-mail") {
@@ -6826,19 +6879,6 @@ function renderAccountChrome() {
     topAvatar.textContent = user.initials || initialsFrom(user.name);
     topAvatar.title = `${user.name} — account settings`;
   }
-  const accountLine = $(".account-line");
-  if (accountLine) {
-  const active = state.activeAccount;
-  const displayName = active?.isUnified ? "All accounts" : active && !active.isNative ? (active.displayName || active.email) : user.name;
-  const displayEmail = active?.isUnified ? `${active.accountCount || state.accounts.length} mailboxes · unified inbox` : active && !active.isNative ? active.email : user.email;
-  const displayColor = active ? (active.color || "#3f5d7a") : (user.color || "#3f5d7a");
-    const av = $(".avatar", accountLine);
-    if (av) { av.textContent = initialsFrom(displayName); av.style.setProperty("--av", displayColor); }
-    const name = $(".account-id strong", accountLine);
-    const email = $(".account-id span", accountLine);
-    if (name) name.textContent = displayName;
-    if (email) email.textContent = displayEmail;
-  }
   const accountEmail = document.getElementById("accountEmail");
   if (accountEmail) accountEmail.textContent = user.email;
   const copyAccount = document.querySelector("[data-copy-email]");
@@ -6889,28 +6929,376 @@ function defaultComposeAccountId() {
   return state.activeAccountId === "all" ? (nativeMailAccount()?.id || "") : state.activeAccountId;
 }
 
-function renderAccountSwitcher() {
-  const row = document.getElementById("accountSwitcherRow");
-  const select = document.getElementById("accountSwitcher");
-  const add = document.getElementById("accountAddBtn");
-  if (!row || !select) return;
-  const accounts = (state.accounts || []).filter((account) => account.isNative || externalAccountsEnabled());
-  const hasExternal = accounts.some((account) => !account.isNative);
-  const visible = !state.delegatedMode && (hasExternal || externalAccountsEnabled());
-  row.hidden = !visible;
-  const connectRow = document.getElementById("accountConnectRow");
-  if (connectRow) connectRow.hidden = state.delegatedMode || !externalAccountsEnabled() || hasExternal;
-  if (!visible) return;
-  const unified = unifiedAccountsAvailable()
-    ? `<option value="all"${state.activeAccountId === "all" ? " selected" : ""}>${esc(t("accounts.all"))} · ${accounts.length}</option>`
-    : "";
-  select.innerHTML = unified + accounts.map((account) => {
-    const label = account.isNative
-      ? `Alt8Mail · ${account.email}`
-      : `${account.displayName || account.email} · ${account.email}`;
-    return `<option value="${esc(account.id)}"${account.id === state.activeAccountId ? " selected" : ""}>${esc(label)}</option>`;
+function accountMenuAccounts() {
+  return (state.accounts || []).filter((account) => account.isNative || externalAccountsEnabled());
+}
+
+function accountMenuEntries() {
+  const entries = [];
+  if (unifiedAccountsAvailable()) entries.push(unifiedAccountView());
+  entries.push(...accountMenuAccounts());
+  return entries;
+}
+
+function accountMenuTitle(account) {
+  if (!account) return "Alt8Mail";
+  if (account.isUnified) return "All accounts";
+  if (account.isNative) return account.displayName || state.user?.name || "Alt8Mail";
+  return account.displayName || mailProviderMeta(account.provider).name || account.email || "Mail account";
+}
+
+function accountMenuSubtitle(account) {
+  if (!account) return state.user?.email || "";
+  if (account.isUnified) {
+    const count = account.accountCount || accountMenuAccounts().length;
+    return `${count} ${count === 1 ? "mailbox" : "mailboxes"} · unified inbox`;
+  }
+  return account.email || "";
+}
+
+function accountUnreadCount(account) {
+  if (!account) return 0;
+  if (account.isUnified) {
+    return accountMenuAccounts().reduce((total, item) => total + Math.max(0, Number(item.unreadCount) || 0), 0);
+  }
+  if (account.kind === "delegated") {
+    const native = (state.accounts || []).find((item) => item.isNative);
+    return Math.max(0, Number(native?.unreadCount) || 0);
+  }
+  const live = (state.accounts || []).find((item) => item.id === account.id);
+  return Math.max(0, Number((live || account).unreadCount) || 0);
+}
+
+function accountUnreadTotal() {
+  return accountMenuAccounts().reduce((total, account) => total + Math.max(0, Number(account.unreadCount) || 0), 0);
+}
+
+function hydrateAccountUnreadCounts() {
+  const known = state.knownAccountUnread instanceof Map ? state.knownAccountUnread : new Map();
+  for (const account of state.accounts || []) {
+    account.unreadCount = Math.max(0, Number(account.unreadCount) || 0);
+    if (!known.has(account.id) || state.activeAccountId === "all" || state.activeAccountId === account.id) {
+      known.set(account.id, account.unreadCount);
+    }
+  }
+  state.knownAccountUnread = known;
+  if (state.activeAccount) {
+    if (state.activeAccount.isUnified) {
+      state.activeAccount.unreadCount = accountUnreadTotal();
+    } else {
+      const live = (state.accounts || []).find((item) => item.id === state.activeAccount.id);
+      if (live) state.activeAccount.unreadCount = live.unreadCount;
+    }
+  }
+}
+
+function accountMenuProviderLabel(account) {
+  if (!account || account.isNative) return "Alt8Mail";
+  if (account.isUnified) return "Unified";
+  const meta = mailProviderMeta(account.provider);
+  return meta.id === "imap" ? "IMAP" : meta.name.replace(/\s+Mail$/, "");
+}
+
+function accountMenuBadge(account) {
+  if (account?.isUnified) return { label: "Combined", className: "is-unified" };
+  if (account?.isNative) return { label: "Primary", className: "is-primary" };
+  if (account?.status === "reauth") return { label: "Reconnect", className: "is-warning" };
+  if (account?.status === "error") return { label: "Sync error", className: "is-error" };
+  return { label: accountMenuProviderLabel(account), className: "" };
+}
+
+function accountMenuLogo(account, extraClass = "") {
+  const extra = extraClass ? ` ${extraClass}` : "";
+  if (account?.isUnified) {
+    return `<span class="account-logo-unified${extra}"><svg class="icon" aria-hidden="true"><use href="#i-inbox"/></svg></span>`;
+  }
+  if (!account || account.isNative || !account.provider || account.provider === "alt8mail") {
+    const name = account?.displayName || state.user?.name || "Alt8Mail";
+    const color = account?.color || state.user?.color || "#34557a";
+    const initials = initialsFrom(name || account?.email || "A8") || "A8";
+    return `<span class="avatar avatar-md account-avatar${extra}" style="--av:${esc(color)}" aria-hidden="true"><span class="avatar-initials">${esc(initials)}</span></span>`;
+  }
+  return `<img class="account-provider-img${extra}" src="${mailProviderLogo(account.provider)}" alt="" loading="lazy">`;
+}
+
+function renderAccountMenuList() {
+  const list = document.getElementById("accountMenuList");
+  if (!list) return;
+  const query = state.accountMenuQuery.trim().toLowerCase();
+  const matches = accountMenuEntries().filter((account) => {
+    if (!query) return true;
+    return `${accountMenuTitle(account)} ${accountMenuSubtitle(account)} ${accountMenuProviderLabel(account)}`
+      .toLowerCase().includes(query);
+  });
+  if (!matches.length) {
+    list.innerHTML = `<div class="account-pop-empty"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><strong>No mailbox found</strong><span>Try a name or email address.</span></div>`;
+    return;
+  }
+  list.innerHTML = matches.map((account) => {
+    const selected = account.id === state.activeAccountId;
+    const badge = accountMenuBadge(account);
+    const unread = accountUnreadCount(account);
+    const unreadLabel = unread > 99 ? "99+" : String(unread);
+    return `<button class="account-row${selected ? " is-selected" : ""}" type="button" role="option" aria-selected="${selected}" data-account-menu-id="${esc(account.id)}">
+      <span class="account-row-logo">${accountMenuLogo(account)}</span>
+      <span class="account-row-copy"><strong>${esc(accountMenuTitle(account))}</strong><span>${esc(accountMenuSubtitle(account))}</span></span>
+      <span class="account-row-badge ${badge.className}">${esc(badge.label)}</span>
+      <span class="account-row-unread${unread > 0 ? " has-unread" : ""}" title="${unread} unread message${unread === 1 ? "" : "s"}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span>${unreadLabel}</span></span>
+      <span class="account-row-check" aria-hidden="true"><svg class="icon"><use href="#i-check"/></svg></span>
+    </button>`;
   }).join("");
-  if (add) add.hidden = state.delegatedMode || !externalAccountsEnabled();
+}
+
+function renderAccountSwitcher() {
+  const menu = document.getElementById("accountMenu");
+  const trigger = document.getElementById("accountMenuBtn");
+  const triggerLogo = document.getElementById("accountTriggerLogo");
+  const triggerName = document.getElementById("accountTriggerName");
+  const triggerEmail = document.getElementById("accountTriggerEmail");
+  const triggerStatus = document.getElementById("accountTriggerStatus");
+  const triggerUnread = document.getElementById("accountTriggerUnread");
+  const triggerUnreadCount = document.getElementById("accountTriggerUnreadCount");
+  const count = document.getElementById("accountMenuCount");
+  const searchWrap = document.getElementById("accountSearchWrap");
+  const addPop = document.getElementById("accountPopAddBtn");
+  const note = document.getElementById("accountMenuNote");
+  if (!menu || !trigger) return;
+  const accounts = accountMenuAccounts();
+  const active = state.delegatedMode
+    ? {
+      id: "delegated",
+      kind: "delegated",
+      provider: "alt8mail",
+      email: state.user?.email || state.delegatedSession?.mailbox?.email || "",
+      displayName: state.user?.name || "Delegated mailbox",
+      color: state.user?.color,
+      status: "active",
+      isNative: true,
+      isUnified: false
+    }
+    : state.activeAccount
+      || (state.activeAccountId === "all" && unifiedAccountsAvailable() ? unifiedAccountView() : null)
+      || accounts.find((account) => account.id === state.activeAccountId)
+      || accounts[0]
+      || (state.user ? {
+        id: "",
+        kind: "native",
+        provider: "alt8mail",
+        email: state.user.email,
+        displayName: state.user.name || "Alt8Mail",
+        color: state.user.color,
+        status: "active",
+        isNative: true,
+        isUnified: false
+      } : null);
+  const visible = Boolean(active) || accounts.length > 0;
+  menu.hidden = !visible;
+  if (state.delegatedMode) closeAccountMenu(false);
+  const canAdd = !state.delegatedMode && externalAccountsEnabled();
+  if (addPop) addPop.hidden = !canAdd;
+  if (note) note.hidden = externalAccountsEnabled();
+  if (count) count.textContent = String(accounts.length);
+  if (searchWrap) searchWrap.hidden = accountMenuEntries().length < 5;
+  if (!visible || !active) return;
+  triggerLogo.innerHTML = accountMenuLogo(active);
+  triggerName.textContent = accountMenuTitle(active);
+  triggerEmail.textContent = accountMenuSubtitle(active);
+  const title = state.delegatedMode ? active.displayName : accountMenuTitle(active);
+  const subtitle = accountMenuSubtitle(active);
+  const unreadTotal = accountUnreadTotal();
+  const unreadText = unreadTotal > 99 ? "99+" : String(unreadTotal);
+  if (triggerUnread) {
+    triggerUnread.hidden = unreadTotal <= 0;
+    triggerUnread.title = `${unreadTotal} unread message${unreadTotal === 1 ? "" : "s"} across your mailboxes`;
+    if (triggerUnreadCount) triggerUnreadCount.textContent = unreadText;
+  }
+  trigger.setAttribute("aria-label", state.delegatedMode
+    ? `Delegated mailbox: ${title}${subtitle ? `, ${subtitle}` : ""}${unreadTotal ? `, ${unreadTotal} unread` : ""}`
+    : `Mailbox: ${title}${subtitle ? `, ${subtitle}` : ""}${unreadTotal ? `, ${unreadTotal} unread across mailboxes` : ""}. Switch mailbox`);
+  trigger.title = `${title}${subtitle ? ` · ${subtitle}` : ""}${unreadTotal ? ` · ${unreadTotal} unread` : ""}`;
+  trigger.classList.toggle("is-unified", Boolean(active.isUnified));
+  trigger.classList.toggle("is-static", state.delegatedMode);
+  if (state.delegatedMode) {
+    trigger.setAttribute("aria-disabled", "true");
+    trigger.setAttribute("tabindex", "-1");
+    trigger.removeAttribute("aria-haspopup");
+    trigger.setAttribute("aria-expanded", "false");
+  } else {
+    trigger.removeAttribute("aria-disabled");
+    trigger.removeAttribute("tabindex");
+    trigger.setAttribute("aria-haspopup", "dialog");
+  }
+  const warning = active.status === "reauth" || active.status === "error";
+  if (triggerStatus) {
+    triggerStatus.hidden = !warning;
+    triggerStatus.title = warning ? (active.lastError || connectedAccountStatus(active).label) : "";
+    triggerStatus.innerHTML = warning ? `<svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>` : "";
+  }
+  renderAccountMenuList();
+}
+
+function toggleAccountMenu(force) {
+  const menu = document.getElementById("accountMenu");
+  const pop = document.getElementById("accountPopover");
+  const trigger = document.getElementById("accountMenuBtn");
+  if (!menu || !pop || menu.hidden || state.delegatedMode) return;
+  const open = typeof force === "boolean" ? force : pop.hidden;
+  if (open) {
+    clearAccountPings();
+    state.accountMenuQuery = "";
+    const search = document.getElementById("accountSearch");
+    if (search) search.value = "";
+    renderAccountSwitcher();
+  }
+  state.accountMenuOpen = open;
+  pop.hidden = !open;
+  menu.classList.toggle("is-open", open);
+  trigger?.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    setTimeout(() => {
+      const searchWrap = document.getElementById("accountSearchWrap");
+      const search = document.getElementById("accountSearch");
+      if (searchWrap && !searchWrap.hidden && search) {
+        search.focus();
+        return;
+      }
+      const row = pop.querySelector(".account-row.is-selected") || pop.querySelector(".account-row");
+      row?.focus();
+    }, 30);
+  }
+}
+
+function closeAccountMenu(restoreFocus = false) {
+  const menu = document.getElementById("accountMenu");
+  const pop = document.getElementById("accountPopover");
+  const trigger = document.getElementById("accountMenuBtn");
+  if (!menu || !pop) return;
+  const wasOpen = !pop.hidden || state.accountMenuOpen;
+  state.accountMenuOpen = false;
+  state.accountMenuQuery = "";
+  pop.hidden = true;
+  menu.classList.remove("is-open");
+  trigger?.setAttribute("aria-expanded", "false");
+  if (restoreFocus && wasOpen) trigger?.focus();
+}
+
+function accountMenuVisible() {
+  const menu = document.getElementById("accountMenu");
+  if (!menu || menu.hidden) return false;
+  const rect = menu.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.left < window.innerWidth;
+}
+
+function resetAccountPingTimer() {
+  clearTimeout(state.accountPingTimer);
+  state.accountPingTimer = setTimeout(() => dismissAccountPing(), 12000);
+}
+
+function renderAccountPing() {
+  const node = document.getElementById("accountPing");
+  const menu = document.getElementById("accountMenu");
+  if (!node) return;
+  const ping = state.accountPingCurrent;
+  if (!ping) {
+    node.hidden = true;
+    menu?.classList.remove("has-news");
+    return;
+  }
+  const account = (state.accounts || []).find((item) => item.id === ping.accountId) || ping.account;
+  const latest = ping.latest || account?.latestUnread || {};
+  const unread = accountUnreadCount(account);
+  const unreadText = unread > 99 ? "99+" : String(unread);
+  const sender = latest.fromName || latest.fromEmail || "New sender";
+  const senderLine = latest.fromEmail && latest.fromEmail !== sender ? `${sender} · ${latest.fromEmail}` : sender;
+  const logo = document.getElementById("accountPingLogo");
+  const accountLabel = document.getElementById("accountPingAccount");
+  const subject = document.getElementById("accountPingSubject");
+  const meta = document.getElementById("accountPingMeta");
+  const count = document.getElementById("accountPingCount");
+  const open = document.getElementById("accountPingOpen");
+  if (logo) logo.innerHTML = accountMenuLogo(account);
+  if (accountLabel) accountLabel.textContent = account?.isNative ? "Alt8Mail" : accountMenuTitle(account);
+  if (subject) subject.textContent = latest.subject || "New message";
+  if (meta) meta.textContent = senderLine;
+  if (count) count.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span>${unreadText}</span>`;
+  if (open) {
+    open.setAttribute("data-account-ping-id", ping.accountId);
+    open.setAttribute("aria-label", `Open ${accountMenuTitle(account)} with new mail from ${sender}`);
+  }
+  node.hidden = false;
+  menu?.classList.add("has-news");
+}
+
+function showNextAccountPing() {
+  if (state.accountPingCurrent) return;
+  const next = state.accountPingQueue.shift();
+  if (!next) return;
+  state.accountPingCurrent = next;
+  renderAccountPing();
+  resetAccountPingTimer();
+}
+
+function maybeQueueAccountPing(account, increase, latest) {
+  if (!account || state.delegatedMode) return;
+  if (state.activeAccountId === "all" || state.activeAccountId === account.id) return;
+  const payload = {
+    accountId: account.id,
+    account: { ...account },
+    increase,
+    latest: latest || account.latestUnread || null
+  };
+  const detail = payload.latest || {};
+  const sender = detail.fromName || detail.fromEmail || "a new sender";
+  const subject = detail.subject || "New message";
+  if (document.visibilityState !== "visible") {
+    showBrowserNotification(`New mail in ${accountMenuTitle(account)}`, `${sender}: ${subject}`, `a8m-account-${account.id}`);
+    return;
+  }
+  if (state.task !== "mail" || !accountMenuVisible()) {
+    showToast(`New mail in ${accountMenuTitle(account)}: ${subject}`, "Open", () => {
+      setTask("mail");
+      switchMailAccount(account.id);
+    });
+    return;
+  }
+  const existing = state.accountPingCurrent?.accountId === account.id
+    ? state.accountPingCurrent
+    : state.accountPingQueue.find((item) => item.accountId === account.id);
+  if (existing) {
+    Object.assign(existing, payload);
+    if (existing === state.accountPingCurrent) {
+      renderAccountPing();
+      resetAccountPingTimer();
+    }
+    return;
+  }
+  state.accountPingQueue.push(payload);
+  showNextAccountPing();
+}
+
+function dismissAccountPing(showNext = true) {
+  clearTimeout(state.accountPingTimer);
+  state.accountPingTimer = null;
+  state.accountPingCurrent = null;
+  renderAccountPing();
+  if (showNext) {
+    setTimeout(() => {
+      if (!state.accountPingCurrent) showNextAccountPing();
+    }, 300);
+  }
+}
+
+function clearAccountPings() {
+  clearTimeout(state.accountPingTimer);
+  state.accountPingTimer = null;
+  state.accountPingCurrent = null;
+  state.accountPingQueue = [];
+  renderAccountPing();
+}
+
+function removeAccountPings(accountId) {
+  state.accountPingQueue = state.accountPingQueue.filter((item) => item.accountId !== accountId);
+  if (state.accountPingCurrent?.accountId === accountId) dismissAccountPing();
 }
 
 function connectedAccountStatus(account) {
@@ -7114,7 +7502,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "0.32.0";
+const MAIL_PROVIDER_ASSET_VERSION = "0.33.0";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -7470,7 +7858,10 @@ function openAddMailAccountDialog(account = null) {
           overlay.remove();
           showToast("Mail account connected");
           if (created?.id) {
+            created.unreadCount = Math.max(0, Number(created.unreadCount) || 0);
             state.accounts = [...state.accounts.filter((item) => item.id !== created.id), created];
+            state.knownAccountUnread.set(created.id, created.unreadCount);
+            state.knownAccountLatest.set(created.id, "");
             state.activeAccount = created;
             state.activeAccountId = created.id;
             try { localStorage.setItem(activeAccountStorageKey(), created.id); } catch {}
@@ -7601,6 +7992,9 @@ async function removeConnectedAccount(account) {
   try {
     await api(`/api/accounts/${encodeURIComponent(account.id)}`, { method: "DELETE" });
     state.accounts = state.accounts.filter((item) => item.id !== account.id);
+    state.knownAccountUnread.delete(account.id);
+    state.knownAccountLatest.delete(account.id);
+    removeAccountPings(account.id);
     const remainingExternal = state.accounts.some((item) => !item.isNative);
     if (state.activeAccountId === account.id || (state.activeAccountId === "all" && !remainingExternal)) {
       const native = state.accounts.find((item) => item.isNative);
@@ -24747,6 +25141,7 @@ function setTask(task) {
   if (!["mail", "calendar", "people", "tasks", "files", "scheduled", "settings"].includes(task)) return;
   state.task = task;
   app.setAttribute("data-task", task);
+  if (task !== "mail") clearAccountPings();
   if (task !== "mail") {
     const inlineDraft = composeSessions.find((session) => session.mode === "inline");
     if (inlineDraft) minimizeComposeSession(inlineDraft.id);
@@ -24904,6 +25299,7 @@ function openDrawer() {
 }
 
 function closeDrawer() {
+  closeAccountMenu();
   document.body.classList.remove("drawer-open");
   scrim.classList.remove("is-open");
   scrim.setAttribute("aria-hidden", "true");
@@ -25015,6 +25411,7 @@ function closeMenus() {
   moveMenu.hidden = true;
   if (folderMenu) folderMenu.hidden = true;
   if (messageMenu) messageMenu.hidden = true;
+  closeAccountMenu();
   toggleListFilterMenu(false);
   state.folderMenuTarget = "";
   state.messageMenuThreadId = "";
@@ -26625,9 +27022,68 @@ function bindEvents() {
   document.getElementById("helpClose").addEventListener("click", closeHelp);
   document.getElementById("settingsBtn").addEventListener("click", () => openSettings());
   document.getElementById("accountBtn").addEventListener("click", () => openSettings("account"));
-  document.getElementById("accountSwitcher")?.addEventListener("change", (event) => switchMailAccount(event.target.value));
-  document.getElementById("accountAddBtn")?.addEventListener("click", () => openAddMailAccountDialog());
-  document.getElementById("accountConnectBtn")?.addEventListener("click", () => openAddMailAccountDialog());
+  const accountMenuBtn = document.getElementById("accountMenuBtn");
+  accountMenuBtn?.addEventListener("click", () => {
+    toggleAccountMenu();
+  });
+  accountMenuBtn?.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown") return;
+    event.preventDefault();
+    toggleAccountMenu(true);
+  });
+  document.getElementById("accountPopAddBtn")?.addEventListener("click", () => {
+    closeAccountMenu();
+    openAddMailAccountDialog();
+  });
+  document.getElementById("accountManageBtn")?.addEventListener("click", () => {
+    closeAccountMenu();
+    openSettings("accounts");
+  });
+  document.getElementById("accountMenuList")?.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-account-menu-id]");
+    if (!row) return;
+    const accountId = row.getAttribute("data-account-menu-id");
+    closeAccountMenu(true);
+    if (accountId && accountId !== state.activeAccountId) switchMailAccount(accountId);
+  });
+  document.getElementById("accountPingOpen")?.addEventListener("click", () => {
+    const accountId = state.accountPingCurrent?.accountId;
+    if (!accountId) return;
+    state.accountPingQueue = state.accountPingQueue.filter((item) => item.accountId !== accountId);
+    dismissAccountPing(false);
+    switchMailAccount(accountId);
+  });
+  document.getElementById("accountPingClose")?.addEventListener("click", () => dismissAccountPing());
+  document.getElementById("accountSearch")?.addEventListener("input", (event) => {
+    state.accountMenuQuery = event.target.value || "";
+    renderAccountMenuList();
+  });
+  document.getElementById("accountSearch")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    document.querySelector("#accountMenuList [data-account-menu-id]")?.click();
+  });
+  const accountPopover = document.getElementById("accountPopover");
+  accountPopover?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeAccountMenu(true);
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const rows = [...accountPopover.querySelectorAll("[data-account-menu-id]")];
+    if (!rows.length) return;
+    event.preventDefault();
+    const current = rows.indexOf(document.activeElement);
+    const next = current < 0
+      ? (event.key === "ArrowDown" ? 0 : rows.length - 1)
+      : (current + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+    rows[next].focus();
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#accountMenu")) closeAccountMenu();
+  });
   document.getElementById("connectedAccountAdd")?.addEventListener("click", () => openAddMailAccountDialog());
   document.getElementById("connectedAccountsList")?.addEventListener("click", async (event) => {
     const syncButton = event.target.closest("[data-account-sync]");
@@ -27777,6 +28233,7 @@ function bindEvents() {
     }
     if (event.key === "Escape") {
       if (!confirmOverlay.hidden) { settleConfirm(false); return; }
+      if (state.accountMenuOpen) { closeAccountMenu(true); return; }
       if (document.getElementById("addonSetupOverlay") && !document.getElementById("addonSetupOverlay").hidden) { closeAddonSetup(); return; }
       if (document.getElementById("addonResultOverlay") && !document.getElementById("addonResultOverlay").hidden) { closeAddonResult(); return; }
       if (state.addonReaderMenuOpen) { closeReaderAddonMenu(); return; }
