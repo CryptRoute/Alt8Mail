@@ -178,11 +178,31 @@ func (s *Server) checkDomainCaps(ctx context.Context, domain, queueID, recipient
 		  AND (($2 <> '' AND lower(sasl_user)=lower($2)) OR ($2 = '' AND lower(sender::text)=lower($3)))
 		  AND ($4 = '' OR queue_id <> $4)
 	`, domain, saslUser, sender, queueID).Scan(&userMessageCount)
-	if userDailyCap > 0 && userMessageCount+1 > int64(userDailyCap) {
-		reason := fmt.Sprintf("Outgoing daily cap reached for this mailbox (%d/day)", userDailyCap)
+	reason, allowed := outboundCapDecision(capsEnabled, capHour, capDay, capMonth, burst, userDailyCap,
+		hourCount, dayCount, monthCount, userMessageCount, domain)
+	if !allowed {
 		_, _ = tx.Exec(ctx, attemptInsertSQL(), queueID, sender, domain, recipient, size, saslUser, client, "defer", reason)
 		_ = tx.Commit(ctx)
 		return reason, false
+	}
+	_, err = tx.Exec(ctx, attemptInsertSQL(), queueID, sender, domain, recipient, size, saslUser, client, "permit", "")
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+		return "Outbound policy is temporarily unavailable", false
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "Outbound policy is temporarily unavailable", false
+	}
+	return "", true
+}
+
+// outboundCapDecision is the pure cap policy used by the Postfix daemon. The
+// per-mailbox cap is checked first and independently of capsEnabled, so a
+// domain can leave rolling caps off and still stop a single mailbox from
+// turning into an abuse source. A zero per-mailbox cap disables that check.
+func outboundCapDecision(capsEnabled bool, capHour, capDay, capMonth, burst, userDailyCap int,
+	hourCount, dayCount, monthCount, userMessageCount int64, domain string) (string, bool) {
+	if userDailyCap > 0 && userMessageCount+1 > int64(userDailyCap) {
+		return fmt.Sprintf("Outgoing daily cap reached for this mailbox (%d/day)", userDailyCap), false
 	}
 	if capsEnabled {
 		effectiveHour := capHour
@@ -191,28 +211,12 @@ func (s *Server) checkDomainCaps(ctx context.Context, domain, queueID, recipient
 		}
 		switch {
 		case effectiveHour > 0 && hourCount+1 > int64(effectiveHour):
-			reason := fmt.Sprintf("Outgoing hourly cap reached for %s (%d/hour%s)", domain, capHour, burstText(burst))
-			_, _ = tx.Exec(ctx, attemptInsertSQL(), queueID, sender, domain, recipient, size, saslUser, client, "defer", reason)
-			_ = tx.Commit(ctx)
-			return reason, false
+			return fmt.Sprintf("Outgoing hourly cap reached for %s (%d/hour%s)", domain, capHour, burstText(burst)), false
 		case capDay > 0 && dayCount+1 > int64(capDay):
-			reason := fmt.Sprintf("Outgoing daily cap reached for %s (%d/day)", domain, capDay)
-			_, _ = tx.Exec(ctx, attemptInsertSQL(), queueID, sender, domain, recipient, size, saslUser, client, "defer", reason)
-			_ = tx.Commit(ctx)
-			return reason, false
+			return fmt.Sprintf("Outgoing daily cap reached for %s (%d/day)", domain, capDay), false
 		case capMonth > 0 && monthCount+1 > int64(capMonth):
-			reason := fmt.Sprintf("Outgoing monthly cap reached for %s (%d/30 days)", domain, capMonth)
-			_, _ = tx.Exec(ctx, attemptInsertSQL(), queueID, sender, domain, recipient, size, saslUser, client, "defer", reason)
-			_ = tx.Commit(ctx)
-			return reason, false
+			return fmt.Sprintf("Outgoing monthly cap reached for %s (%d/30 days)", domain, capMonth), false
 		}
-	}
-	_, err = tx.Exec(ctx, attemptInsertSQL(), queueID, sender, domain, recipient, size, saslUser, client, "permit", "")
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
-		return "Outbound policy is temporarily unavailable", false
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return "Outbound policy is temporarily unavailable", false
 	}
 	return "", true
 }

@@ -2,12 +2,15 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const undoWindow = 30 * time.Second
@@ -297,19 +300,43 @@ func (s *Server) outboundPayload(ctx context.Context, user userRecord, state map
 		LEFT JOIN control.domain_settings cs ON cs.domain_id=d.id
 		WHERE d.domain=$1
 	`, domain).Scan(&controlCap); err != nil {
+		// A missing grant or table must not silently masquerade as the default
+		// 200-message cap; leave the fallback meter in place and make the
+		// configuration failure visible in the server log.
+		if s.logger != nil && !errors.Is(err, pgx.ErrNoRows) {
+			s.logger.Warn("control outbound cap lookup failed", "user", user.ID, "domain", domain, "err", err)
+		}
 		return outbound
 	}
-	outbound["controlUserDailyCap"] = controlCap
 	outbound["controlDomain"] = domain
+	return applyControlOutboundCap(outbound, controlCap)
+}
+
+// applyControlOutboundCap makes the Control Plane per-mailbox daily cap the
+// authoritative webmail meter. A cap of zero means no per-mailbox limit, which
+// must also stop the webmail pre-send check from blocking at the old default.
+func applyControlOutboundCap(outbound map[string]any, controlCap int) map[string]any {
+	outbound["controlUserDailyCap"] = controlCap
+	used := stateInt(outbound, "usedWithQueued")
 	if controlCap <= 0 {
+		outbound["unlimited"] = true
+		outbound["limit"] = 0
+		outbound["remaining"] = nil
+		outbound["percent"] = 0.0
+		outbound["source"] = "control-plane"
 		return outbound
 	}
-	used := int64(stateInt(outbound, "usedWithQueued"))
+	outbound["unlimited"] = false
 	outbound["limit"] = controlCap
 	outbound["remaining"] = max(int64(0), int64(controlCap)-used)
 	outbound["percent"] = math.Round(float64(used)/float64(controlCap)*1000) / 10
 	outbound["source"] = "control-plane"
 	return outbound
+}
+
+func outboundCapReached(outbound map[string]any) bool {
+	limit := stateInt(outbound, "limit")
+	return limit > 0 && stateInt(outbound, "usedWithQueued") >= limit
 }
 
 func publicOutboxItem(item map[string]any) map[string]any {

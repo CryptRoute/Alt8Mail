@@ -394,6 +394,38 @@ func TestStateQuotaAndOutbound(t *testing.T) {
 	}
 }
 
+func TestControlOutboundCapOverridesDefault(t *testing.T) {
+	outbound := map[string]any{
+		"limit": int64(200), "usedWithQueued": int64(42),
+		"remaining": int64(158), "percent": 21.0, "source": "alt8mail+control-plane",
+	}
+	capped := applyControlOutboundCap(outbound, 150)
+	if stateInt(capped, "limit") != 150 || stateInt(capped, "remaining") != 108 {
+		t.Fatalf("cap was not applied: %#v", capped)
+	}
+	if stateBool(capped, "unlimited") || stateString(capped, "source") != "control-plane" {
+		t.Fatalf("cap metadata incorrect: %#v", capped)
+	}
+	if outboundCapReached(capped) {
+		t.Fatal("42 of 150 must not be treated as reached")
+	}
+	capped["usedWithQueued"] = int64(150)
+	if !outboundCapReached(capped) {
+		t.Fatal("150 of 150 must be treated as reached")
+	}
+
+	unlimited := applyControlOutboundCap(map[string]any{
+		"limit": int64(200), "usedWithQueued": int64(10000),
+		"remaining": int64(0), "percent": 5000.0,
+	}, 0)
+	if !stateBool(unlimited, "unlimited") || stateInt(unlimited, "limit") != 0 {
+		t.Fatalf("zero cap must mean unlimited: %#v", unlimited)
+	}
+	if outboundCapReached(unlimited) {
+		t.Fatal("an unlimited outbound policy must never block a send")
+	}
+}
+
 func TestPublicOutboxItemHidesUndoBody(t *testing.T) {
 	state := map[string]any{"outbox": []any{
 		map[string]any{"id": "u1", "subject": "Hold", "bodyText": "secret", "sendAt": time.Now().Add(time.Second).Format(time.RFC3339), "scheduled": false},

@@ -770,7 +770,8 @@ export async function createApp(options = {}) {
       usedWithQueued: used + queued,
       remaining: Math.max(0, outbound.limit - used - queued),
       percent: outbound.limit ? Math.round(((used + queued) / outbound.limit) * 1000) / 10 : 0,
-      source: "postfwd",
+      unlimited: !(Number(outbound.limit) > 0),
+      source: "alt8mail+control-plane",
       refreshedAt: nowIso()
     };
   }

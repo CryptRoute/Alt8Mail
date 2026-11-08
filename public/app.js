@@ -7504,7 +7504,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "0.34.0";
+const MAIL_PROVIDER_ASSET_VERSION = "0.35.0";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -17385,14 +17385,23 @@ function updateQuotaUi(quota = null) {
   if (state.statusPop === "quota") renderStatusPop();
 }
 
+function outboundIsUnlimited(data) {
+  return Boolean(data?.unlimited) || !(Number(data?.limit) > 0);
+}
+
 function updateOutboundUi() {
   const data = state.outbound;
   const outboundChip = document.getElementById("outboundChip");
   const outboundText = document.getElementById("outboundText");
   if (data) {
     const value = data.usedWithQueued != null ? data.usedWithQueued : data.used;
-    if (outboundText) outboundText.textContent = `${value} / ${data.limit} sent${data.queued ? ` · ${data.queued} queued` : ""}`;
-    if (outboundChip) outboundChip.title = `Outbound caps enforced by Alt8Mail and the Control Plane · ${data.used} sent in the last ${data.windowHours}h${data.queued ? `, ${data.queued} queued` : ""}`;
+    const unlimited = outboundIsUnlimited(data);
+    if (outboundText) outboundText.textContent = unlimited
+      ? `${value} sent${data.queued ? ` · ${data.queued} queued` : ""} · no cap`
+      : `${value} / ${data.limit} sent${data.queued ? ` · ${data.queued} queued` : ""}`;
+    if (outboundChip) outboundChip.title = unlimited
+      ? `No per-mailbox daily cap · ${data.used} sent in the last ${data.windowHours}h${data.queued ? `, ${data.queued} queued` : ""}`
+      : `Outbound caps enforced by Alt8Mail and the Control Plane · ${data.used} sent in the last ${data.windowHours}h${data.queued ? `, ${data.queued} queued` : ""}`;
     const usedValue = document.getElementById("outboundUsedValue");
     const limitChip = document.getElementById("outboundLimitChip");
     const fill = document.getElementById("outboundBarFill");
@@ -17400,10 +17409,10 @@ function updateOutboundUi() {
     const pct = document.getElementById("outboundPercentText");
     const percent = Math.min(100, Math.max(0, Number(data.percent) || 0));
     if (usedValue) usedValue.textContent = String(value);
-    if (limitChip) limitChip.textContent = `of ${data.limit} per ${data.windowHours}h`;
+    if (limitChip) limitChip.textContent = unlimited ? "No daily cap" : `of ${data.limit} per ${data.windowHours}h`;
     if (fill) fill.style.width = `${percent}%`;
     if (reset) reset.textContent = data.queued ? `${data.queued} queued in the undo window` : `Rolling ${data.windowHours}-hour window`;
-    if (pct) pct.textContent = `${percent.toFixed(percent % 1 ? 1 : 0)}% used`;
+    if (pct) pct.textContent = unlimited ? "No cap" : `${percent.toFixed(percent % 1 ? 1 : 0)}% used`;
   }
   if (state.statusPop === "outbound") renderStatusPop();
 }
@@ -17507,11 +17516,12 @@ function statusPopMarkup(kind) {
     const data = state.outbound;
     if (!data) return "<p>Usage unavailable.</p>";
     const value = data.usedWithQueued != null ? data.usedWithQueued : data.used;
-    return `<div class="status-pop-metric"><strong>${value}</strong><span>of ${data.limit} messages</span></div>
-      <div class="usage-bar"><span style="width:${Math.min(100, data.percent)}%"></span></div>
+    const unlimited = outboundIsUnlimited(data);
+    return `<div class="status-pop-metric"><strong>${value}</strong><span>${unlimited ? "messages · no daily cap" : `of ${data.limit} messages`}</span></div>
+      <div class="usage-bar"><span style="width:${unlimited ? 0 : Math.min(100, data.percent)}%"></span></div>
       <div class="status-pop-meta"><span>Rolling ${data.windowHours}-hour window</span><span>${data.queued} queued</span></div>
-      <div class="status-breakdown"><div><span>Sent</span><span>${data.used}</span></div><div><span>Waiting in undo queue</span><span>${data.queued}</span></div><div><span>Remaining</span><span>${data.remaining}</span></div></div>
-      <p class="status-pop-note">Enforced per user by Alt8Mail, with a per-mailbox daily safety cap enforced by the Control Plane's Postfix policy service. The cap includes messages still in the undo-send queue.</p>
+      <div class="status-breakdown"><div><span>Sent</span><span>${data.used}</span></div><div><span>Waiting in undo queue</span><span>${data.queued}</span></div><div><span>Remaining</span><span>${unlimited ? "Unlimited" : data.remaining}</span></div></div>
+      <p class="status-pop-note">Enforced per user by Alt8Mail, with a per-mailbox daily safety cap enforced by the Control Plane's Postfix policy service. The cap includes messages still in the undo-send queue. Set the cap to 0 for unlimited sending.</p>
       <button class="btn-secondary status-refresh" data-status-refresh="outbound" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh usage</button>`;
   }
   if (kind === "pending") {
@@ -25681,12 +25691,12 @@ function buildNotifications() {
     });
   }
   const outboundPercent = Number(state.outbound?.percent || 0);
-  if (outboundPercent >= 80) {
+  if (!outboundIsUnlimited(state.outbound) && outboundPercent >= 80) {
     add({
       id: "outbound:warning",
       kind: "quota",
       title: "Outbound sending limit is almost reached",
-      body: `${state.outbound.usedWithQueued || 0} of ${state.outbound.limit || 200} messages used`,
+      body: `${state.outbound.usedWithQueued || 0} of ${state.outbound.limit} messages used`,
       detail: "The rolling 24-hour window resets automatically.",
       time: new Date().toISOString(),
       unread: true,

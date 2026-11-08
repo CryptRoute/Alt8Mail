@@ -1230,26 +1230,6 @@ func (s *Server) aliases(ctx context.Context, userID string) ([]map[string]any, 
 	return result, rows.Err()
 }
 
-func (s *Server) outboundInfo(ctx context.Context, userID, tenantID string) (map[string]any, error) {
-	var committed, queued, scheduled int
-	_ = s.store.DB.QueryRow(ctx, `SELECT count(*) FROM outbound_events WHERE user_id = $1 AND sent_at > now() - interval '24 hours'`, userID).Scan(&committed)
-	_ = s.store.DB.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE user_id = $1 AND status = 'queued'`, userID).Scan(&queued)
-	_ = s.store.DB.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE user_id = $1 AND status = 'queued' AND scheduled = true`, userID).Scan(&scheduled)
-	limit := 200
-	used := committed
-	usedWithQueued := used + queued
-	return map[string]any{
-		"limit": limit, "windowHours": 24, "baseline": 0,
-		"committed": committed, "used": used, "queued": queued,
-		"undoQueued": queued - scheduled, "scheduled": scheduled,
-		"usedWithQueued": usedWithQueued,
-		"remaining":      max(0, limit-usedWithQueued),
-		"percent":        float64(usedWithQueued) / float64(limit) * 100,
-		"source":         "postfix/a8m-outbox",
-		"refreshedAt":    time.Now().UTC().Format(time.RFC3339),
-	}, nil
-}
-
 func (s *Server) pendingSends(ctx context.Context, userID string) ([]map[string]any, error) {
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT id, COALESCE(subject, ''), from_email::text, from_name, to_json, cc_json, bcc_json,

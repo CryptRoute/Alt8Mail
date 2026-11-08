@@ -59,4 +59,9 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO alt8mail_control;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO a8m_app;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO a8m_app;
 
+-- The webmail reads the Control Plane's per-mailbox daily cap so its outbound
+-- meter and pre-send check match the Postfix policy daemon.
+GRANT USAGE ON SCHEMA control TO a8m_app;
+GRANT SELECT ON control.domain_settings TO a8m_app;
+
 COMMIT;

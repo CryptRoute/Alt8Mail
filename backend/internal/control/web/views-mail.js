@@ -182,6 +182,16 @@ export async function renderDomainDetail(ctx) {
   const aliasCounts = detail.aliasCounts || {};
   const mailboxes = Array.isArray(detail.mailboxes) ? detail.mailboxes : [];
   const capPercent = (used, limit) => (Number(limit) > 0 ? Math.min(100, (Number(used) / Number(limit)) * 100) : 0);
+  const capMeter = (label, used, cap) => ui.meter({
+    label,
+    value: capPercent(used, cap),
+    detail: cap > 0 ? `${ui.num(used)} accepted · cap ${ui.num(cap)}` : `${ui.num(used)} accepted · no cap`
+  });
+  const hourUsageCap = caps.enabled && Number(caps.hour) > 0 ? Number(caps.hour) + Number(caps.burst || 0) : 0;
+  const dayUsageCap = caps.enabled ? Number(caps.day) || 0 : 0;
+  const monthUsageCap = caps.enabled ? Number(caps.month) || 0 : 0;
+  const userCap = Number(caps.userDailyCap ?? 200);
+  const userCapLabel = userCap > 0 ? `${ui.num(userCap)}/day` : 'unlimited';
   const statusTone = (status) => status === 'pass' ? 'good' : status === 'warn' ? 'warning' : status === 'provider' ? 'info' : 'critical';
 
   const dnsMarkup = () => {
@@ -247,7 +257,7 @@ export async function renderDomainDetail(ctx) {
                   <div>${ui.meter({ label: 'This hour', value: capPercent(usage.hour, caps.hour + caps.burst), detail: `${ui.num(usage.hour)} used · cap ${ui.num(caps.hour + caps.burst)}` })}</div>
                   <div>${ui.meter({ label: 'Today', value: capPercent(usage.day, caps.day), detail: `${ui.num(usage.day)} used · cap ${ui.num(caps.day)}` })}</div>
                   <div>${ui.meter({ label: 'This month', value: capPercent(usage.month, caps.month), detail: `${ui.num(usage.month)} used · cap ${ui.num(caps.month)}` })}</div>
-                </div>` : `<div class="notice tone-warning">${ui.icon('alert', 16)}<div><strong>Rolling caps are not enabled</strong><p>Mail from this domain is limited only by Postfix rate limits. Enable caps for burst protection.</p></div></div>`}
+                </div>` : `<div class="notice tone-warning">${ui.icon('alert', 16)}<div><strong>Rolling caps are not enabled</strong><p>Domain rolling caps are off, but the per-mailbox daily safety cap still applies. Enable rolling caps for burst protection.</p></div></div>`}
               </div>
             </section>
             <section class="card">
@@ -269,7 +279,7 @@ export async function renderDomainDetail(ctx) {
       <section data-domain-panel="sending" hidden>
         <div class="grid grid-main">
           <section class="card">
-            <header class="card-head"><div><h3>Rolling outgoing caps</h3><p>Enforced by the Postfix policy daemon inside PostgreSQL · per-mailbox safety cap ${ui.num(caps.userDailyCap ?? 200)}/day</p></div>${caps.enabled ? ui.badge('Enabled', 'good', 'shield-check') : ui.badge('Safety cap only', 'neutral')}</header>
+            <header class="card-head"><div><h3>Rolling outgoing caps</h3><p>Enforced by the Postfix policy daemon inside PostgreSQL · per-mailbox safety cap ${userCapLabel}</p></div>${caps.enabled ? ui.badge('Enabled', 'good', 'shield-check') : ui.badge('Safety cap only', 'neutral')}</header>
             <div class="card-body">
               <form id="caps-form" class="form-grid">
                 ${ui.switchField({ label: 'Enforce rolling caps', name: 'capsEnabled', checked: !!caps.enabled, help: 'Caps apply to authenticated and locally submitted mail from this domain, never to inbound external mail.' })}
@@ -278,7 +288,7 @@ export async function renderDomainDetail(ctx) {
                 ${ui.field({ label: 'Burst allowance', name: 'burst', type: 'number', value: caps.burst || 0, min: 0, help: 'Extra recipients added to the hourly cap for short spikes.' })}
                 ${ui.field({ label: 'Daily cap', name: 'capDay', type: 'number', value: caps.day || 0, min: 0, help: 'Maximum accepted recipients in 24 rolling hours. 0 disables the domain cap.' })}
                 ${ui.field({ label: 'Monthly cap', name: 'capMonth', type: 'number', value: caps.month || 0, min: 0, help: 'Maximum accepted recipients in 30 rolling days. 0 disables.' })}
-                ${ui.field({ label: 'Per-mailbox daily cap', name: 'userDailyCap', type: 'number', value: caps.userDailyCap ?? 200, min: 0, help: 'Maximum accepted messages per authenticated mailbox in 24 hours. This safety cap applies even when the domain rolling caps are off. Default 200; 0 disables it.' })}
+                ${ui.field({ label: 'Per-mailbox daily cap', name: 'userDailyCap', type: 'number', value: caps.userDailyCap ?? 200, min: 0, help: 'Maximum accepted messages per authenticated mailbox in 24 hours. This safety cap applies even when the domain rolling caps are off. 0 means unlimited; the default is 200.' })}
                 <div class="span-2">${ui.field({ label: 'DMARC policy', name: 'dmarcPolicy', type: 'select', value: detail.dmarcPolicy || 'none', options: [
                   { value: 'none', label: 'none — monitor only' },
                   { value: 'quarantine', label: 'quarantine — send suspicious mail to spam' },
@@ -293,9 +303,9 @@ export async function renderDomainDetail(ctx) {
             <header class="card-head"><div><h3>Current usage</h3><p>Rolling windows, accepted mail</p></div></header>
             <div class="card-body">
               <div class="meter-stack">
-                <div>${ui.meter({ label: 'Hour', value: capPercent(usage.hour, caps.enabled ? Math.max(1, caps.hour + caps.burst) : 100), detail: `${ui.num(usage.hour)} accepted recipients` })}</div>
-                <div>${ui.meter({ label: 'Day', value: capPercent(usage.day, caps.enabled ? Math.max(1, caps.day) : 100), detail: `${ui.num(usage.day)} accepted recipients` })}</div>
-                <div>${ui.meter({ label: 'Month', value: capPercent(usage.month, caps.enabled ? Math.max(1, caps.month) : 100), detail: `${ui.num(usage.month)} accepted recipients` })}</div>
+                <div>${capMeter('Hour', usage.hour, hourUsageCap)}</div>
+                <div>${capMeter('Day', usage.day, dayUsageCap)}</div>
+                <div>${capMeter('Month', usage.month, monthUsageCap)}</div>
               </div>
               <div class="note-strip" style="margin-top:14px">${ui.icon('info', 13)} <span>When a cap is reached, Postfix replies with a temporary 4.7.1 deferral. The message remains queued at the sender and can retry later.</span></div>
             </div>

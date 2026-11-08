@@ -292,8 +292,10 @@ writes audit events. `cancel` restores a draft from the queue snapshot.
 5. **Alias envelope:** use the selected alias as envelope/From and enforce
    permission server-side. Spoofing a From must not be possible with a custom
    request.
-6. **Outbound caps:** check the same counter the Postfix policy daemon enforces, before enqueue.
-   Count queued messages too, as the demo does. Expose usage through
+6. **Outbound caps:** check the same counter the Postfix policy daemon enforces,
+   before enqueue. The Control Plane's per-mailbox daily cap is authoritative;
+   the webmail reads it from `control.domain_settings` and treats `0` as
+   unlimited. Count queued messages too, as the demo does. Expose usage through
    `/api/outbound` and let the status bar/security card poll it. Decide on the
    reset semantics (rolling vs calendar) and make the UI text match.
 7. **Failure handling:** if delivery bounces or the MTA rejects, surface a

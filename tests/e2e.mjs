@@ -527,6 +527,11 @@ try {
   await page.click("#outboundChip");
   await sleep(250);
   check(await page.eval("document.getElementById('statusPopBody').textContent.includes('Control Plane')"), "outbound popover names the Control Plane enforcement");
+  app.db.user.outbound.limit = 0;
+  await page.click("[data-status-refresh='outbound']");
+  await sleep(500);
+  check(await page.eval("document.getElementById('statusPopBody').textContent.includes('no daily cap') && document.getElementById('statusPopBody').textContent.includes('Unlimited')"), "zero outbound cap renders as unlimited");
+  app.db.user.outbound.limit = 200;
   await page.click("#statusPopClose");
   await page.click("[data-folder='sent']");
   await sleep(600);

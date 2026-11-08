@@ -153,7 +153,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		outbound := s.outboundPayload(r.Context(), sess.User, state)
-		if stateInt(outbound, "usedWithQueued") >= stateInt(outbound, "limit") {
+		if outboundCapReached(outbound) {
 			return failDetails(http.StatusTooManyRequests, "OUTBOUND_CAP",
 				fmt.Sprintf("Daily outbound cap reached (%d/%d). Try again after the window resets.",
 					stateInt(outbound, "usedWithQueued"), stateInt(outbound, "limit")),
