@@ -1232,7 +1232,9 @@ const state = {
   messageMenuMessageId: "",
   messageMenuView: "",
   messageMenuPoint: null,
-  messageMenuSelectionText: ""
+  messageMenuSelectionText: "",
+  messageMenuSelectionRect: null,
+  selectionTranslation: null
 };
 
 state.calendarSelected = `${state.calendarYear}-${String(state.calendarMonth + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`;
@@ -7502,7 +7504,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "0.33.0";
+const MAIL_PROVIDER_ASSET_VERSION = "0.34.0";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -9277,6 +9279,21 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
   syncSearchContext();
   if (preserveScroll) messageList.scrollTop = previousScroll;
   updateDocumentTitle();
+  ensureMailListFilled(threads);
+}
+
+function ensureMailListFilled(threads = null) {
+  if (state.query) return;
+  const page = currentMailPage();
+  if (!page || !page.hasMore || page.loading) return;
+  const visible = threads || computeView();
+  if (visible.length > 2) return;
+  setTimeout(() => {
+    const current = currentMailPage();
+    if (!current || !current.hasMore || current.loading) return;
+    if (computeView().length > 2) return;
+    loadMoreMailPage();
+  }, 40);
 }
 
 function renderSearchScope(threads) {
@@ -13235,7 +13252,13 @@ async function performBulkAction(action, folderValue, options = {}) {
   if (page) {
     let removedThreads = 0;
     for (const id of beforeThreadIds) if (!afterThreadIds.has(id)) removedThreads += 1;
-    if (removedThreads) page.total = Math.max(0, Number(page.total || 0) - removedThreads);
+    if (removedThreads) {
+      page.total = Math.max(0, Number(page.total || 0) - removedThreads);
+      // OFFSET is measured in threads. Removing threads from the loaded page
+      // shifts the server-side window, so adjust the next offset exactly by
+      // the number that disappeared instead of skipping the remaining mail.
+      page.nextOffset = Math.max(0, Number(page.nextOffset || 0) - removedThreads);
+    }
   }
   focusThreadAfterMailAction(nextId);
   renderList({ preserveScroll: true });
@@ -13396,7 +13419,7 @@ function messageMenuAdvancedList() {
     ${menuButton("ignore", "i-lock", "Ignore conversation")}`;
 }
 
-function openMessageSelectionMenu(threadId, messageId, text, point) {
+function openMessageSelectionMenu(threadId, messageId, text, point, selectionRect = null) {
   const thread = threadById(threadId);
   if (!thread) return;
   closeMenus();
@@ -13405,14 +13428,110 @@ function openMessageSelectionMenu(threadId, messageId, text, point) {
   state.messageMenuView = "selection";
   state.messageMenuSelectionText = String(text || "").trim();
   state.messageMenuPoint = point || { clientX: 120, clientY: 120 };
+  state.messageMenuSelectionRect = selectionRect || null;
   messageMenu.innerHTML = messageMenuMarkup();
   positionMessageMenu(state.messageMenuPoint);
   messageMenu.querySelector("button")?.focus();
 }
 
+const NON_LATIN_SCRIPT = /[Ѐ-ӿ֐-׿؀-ۿݐ-ݿऀ-ॿ฀-๿Ⴀ-ჿᄀ-ᇿ⺀-鿿가-힯]/u;
+const ENGLISH_COMMON_WORDS = new Set([
+  "the", "and", "to", "of", "in", "for", "is", "on", "that", "with", "as", "was", "at", "by",
+  "be", "this", "from", "or", "an", "are", "it", "not", "you", "we", "your", "have", "has",
+  "will", "can", "all", "but", "our", "if", "they", "their", "there", "been", "more", "when",
+  "who", "which", "would", "should", "could", "about", "after", "before", "please", "thank",
+  "thanks", "hi", "hello", "dear", "regards", "message", "email", "mail"
+]);
+
+function selectionLooksNonEnglish(text) {
+  const value = String(text || "").trim();
+  if (value.length < 2) return false;
+  if (NON_LATIN_SCRIPT.test(value)) return true;
+  const words = value.toLowerCase().match(/[a-zà-öø-ÿ'’-]+/g) || [];
+  if (words.length < 2) return false;
+  const englishHits = words.filter((word) => ENGLISH_COMMON_WORDS.has(word)).length;
+  const ratio = englishHits / words.length;
+  const accented = /[à-öø-ÿ]/i.test(value);
+  return ratio < 0.12 || (accented && ratio < 0.3);
+}
+
+function selectionTargetLanguage() {
+  return (state.preferences && state.preferences.language) || "en-US";
+}
+
+function selectionTargetLanguageLabel(language = selectionTargetLanguage()) {
+  try {
+    return new Intl.DisplayNames([language], { type: "language" }).of(String(language).split("-")[0]) || language;
+  } catch {
+    return language;
+  }
+}
+
+function positionSelectionTranslation(anchor) {
+  const card = document.getElementById("selectionTranslation");
+  if (!card || card.hidden || !anchor) return;
+  const width = card.offsetWidth || 360;
+  const height = card.offsetHeight || 140;
+  const left = Math.min(Math.max(12, anchor.left || 12), Math.max(12, window.innerWidth - width - 12));
+  let top = (anchor.bottom || 120) + 10;
+  if (top + height > window.innerHeight - 12) {
+    top = Math.max(12, (anchor.top || 120) - height - 10);
+  }
+  card.style.left = `${left}px`;
+  card.style.top = `${top}px`;
+}
+
+function closeSelectionTranslation() {
+  const card = document.getElementById("selectionTranslation");
+  if (card) card.hidden = true;
+  const body = document.getElementById("selectionTranslationBody");
+  if (body) body.innerHTML = "";
+  state.selectionTranslation = null;
+}
+
+async function openSelectionTranslation(text, anchor = null) {
+  const value = String(text || "").trim();
+  if (!value) return;
+  const card = document.getElementById("selectionTranslation");
+  const body = document.getElementById("selectionTranslationBody");
+  const languageLabel = document.getElementById("selectionTranslationLanguage");
+  const title = document.getElementById("selectionTranslationTitle");
+  if (!card || !body) return;
+  closeSelectionTranslation();
+  state.selectionTranslation = { text: value, anchor: anchor || null };
+  if (languageLabel) languageLabel.textContent = `Translating to ${selectionTargetLanguageLabel()}`;
+  if (title) title.textContent = value.length > 120 ? `${value.slice(0, 117)}…` : value;
+  body.innerHTML = `<div class="selection-translation-loading"><span class="passkey-spinner" aria-hidden="true"></span><span>Translating this selection…</span></div>`;
+  card.hidden = false;
+  card.style.visibility = "hidden";
+  card.style.left = "12px";
+  card.style.top = "12px";
+  requestAnimationFrame(() => {
+    positionSelectionTranslation(anchor);
+    card.style.visibility = "visible";
+  });
+  try {
+    const data = await api("/api/ai/translate", {
+      method: "POST",
+      body: { text: value, language: selectionTargetLanguage() }
+    });
+    if (!state.selectionTranslation || state.selectionTranslation.text !== value) return;
+    const translation = String(data.translation || "").trim();
+    if (languageLabel) languageLabel.textContent = `Translated to ${selectionTargetLanguageLabel(data.language || selectionTargetLanguage())}`;
+    body.innerHTML = `<p class="selection-translation-text">${esc(translation || "No translation was returned.")}</p>`;
+    requestAnimationFrame(() => positionSelectionTranslation(anchor));
+  } catch (error) {
+    if (!state.selectionTranslation || state.selectionTranslation.text !== value) return;
+    body.innerHTML = `<p class="selection-translation-error">${esc(error.message || "Could not translate this selection.")}</p>`;
+    requestAnimationFrame(() => positionSelectionTranslation(anchor));
+  }
+}
+
 function messageMenuSelectionMarkup(thread) {
   const preview = state.messageMenuSelectionText.replace(/\s+/g, " ").trim();
+  const canTranslate = Boolean(state.ai?.enabled) && selectionLooksNonEnglish(preview);
   return `<div class="message-menu-head"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><div><strong>Selected text</strong><span>${esc(preview.slice(0, 110))}${preview.length > 110 ? "…" : ""}</span></div></div>
+    ${canTranslate ? `<button type="button" data-message-command="translateSelection" class="message-translate-text"><svg class="icon" aria-hidden="true"><use href="#i-translate"/></svg><span>Translate</span><kbd>${esc(selectionTargetLanguageLabel())}</kbd></button>${messageMenuDivider()}` : ""}
     <button type="button" data-message-command="copyText" class="message-copy-text"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy Text</span><kbd>Ctrl C</kbd></button>
     ${messageMenuDivider()}
     ${menuButton("reply", "i-reply", "Reply")}
@@ -13796,10 +13915,15 @@ async function messageMenuCommand(command, button) {
   const threads = messageMenuActionThreads(thread);
   const target = messageMenuTargetMessage(thread);
   const selectionText = state.messageMenuSelectionText;
+  const selectionRect = state.messageMenuSelectionRect;
   closeMessageMenu();
   if (command === "copyText") {
     const copied = await copyTextToClipboard(selectionText);
     showToast(copied ? "Selected text copied" : "Could not copy the selected text");
+    return;
+  }
+  if (command === "translateSelection") {
+    await openSelectionTranslation(selectionText, selectionRect);
     return;
   }
   if (command === "reply") { replyToMessage(target || replyTarget(thread)); return; }
@@ -15277,6 +15401,22 @@ function openCompose(prefill = {}, options = {}) {
     scheduleComposeSave(session, 500);
   }
   return session;
+}
+
+function openMailtoCompose(href) {
+  let url;
+  try { url = new URL(href, window.location.href); } catch { return; }
+  if (url.protocol.toLowerCase() !== "mailto:") return;
+  let to = "";
+  try { to = decodeURIComponent(url.pathname || "").replace(/^\/+/, "").trim(); } catch { to = String(url.pathname || "").trim(); }
+  const subject = url.searchParams.get("subject") || "";
+  const body = url.searchParams.get("body") || "";
+  openCompose({
+    to,
+    toText: to,
+    subject,
+    bodyText: body
+  });
 }
 
 function openComposeFromDraft(draft, options = {}) {
@@ -17252,7 +17392,7 @@ function updateOutboundUi() {
   if (data) {
     const value = data.usedWithQueued != null ? data.usedWithQueued : data.used;
     if (outboundText) outboundText.textContent = `${value} / ${data.limit} sent${data.queued ? ` · ${data.queued} queued` : ""}`;
-    if (outboundChip) outboundChip.title = `Outbound caps enforced by postfwd · ${data.used} sent in the last ${data.windowHours}h${data.queued ? `, ${data.queued} queued` : ""}`;
+    if (outboundChip) outboundChip.title = `Outbound caps enforced by Alt8Mail and the Control Plane · ${data.used} sent in the last ${data.windowHours}h${data.queued ? `, ${data.queued} queued` : ""}`;
     const usedValue = document.getElementById("outboundUsedValue");
     const limitChip = document.getElementById("outboundLimitChip");
     const fill = document.getElementById("outboundBarFill");
@@ -17371,7 +17511,7 @@ function statusPopMarkup(kind) {
       <div class="usage-bar"><span style="width:${Math.min(100, data.percent)}%"></span></div>
       <div class="status-pop-meta"><span>Rolling ${data.windowHours}-hour window</span><span>${data.queued} queued</span></div>
       <div class="status-breakdown"><div><span>Sent</span><span>${data.used}</span></div><div><span>Waiting in undo queue</span><span>${data.queued}</span></div><div><span>Remaining</span><span>${data.remaining}</span></div></div>
-      <p class="status-pop-note">Enforced per user by postfwd. The cap includes messages still in the undo-send queue.</p>
+      <p class="status-pop-note">Enforced per user by Alt8Mail, with a per-mailbox daily safety cap enforced by the Control Plane's Postfix policy service. The cap includes messages still in the undo-send queue.</p>
       <button class="btn-secondary status-refresh" data-status-refresh="outbound" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh usage</button>`;
   }
   if (kind === "pending") {
@@ -22373,7 +22513,7 @@ function openScheduledEdit(id) {
   scheduledEditTo.value = (item.to || []).map((person) => person.email).join(", ");
   scheduledEditCc.value = (item.cc || []).map((person) => person.email).join(", ");
   scheduledEditSubject.value = item.subject || "";
-  scheduledEditBody.value = item.bodyText || "";
+  scheduledEditBody.innerHTML = item.bodyHtml || textToEditorHTML(item.bodyText || "");
   scheduledEditDate.min = dateKeyInZone(new Date());
   scheduledEditDate.value = dateKeyInZone(stamp);
   scheduledEditTime.value = `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
@@ -22392,10 +22532,26 @@ function openScheduledEdit(id) {
 
 function closeScheduledEdit() {
   scheduledEditOverlay.hidden = true;
+  scheduledEditBody.innerHTML = "";
   state.scheduledEditId = null;
   scheduledEditError.hidden = true;
   scheduledEditSave.disabled = false;
   scheduledEditSave.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save changes';
+}
+
+function applyScheduledEditCommand(command, value = null) {
+  const editor = scheduledEditBody;
+  if (!editor) return;
+  editor.focus();
+  if (command === "createLink") {
+    const href = window.prompt("Link URL", "https://");
+    if (!href || !/^(https?:\/\/|mailto:)/i.test(href.trim())) return;
+    try { document.execCommand("styleWithCSS", false, true); } catch {}
+    document.execCommand("createLink", false, href.trim());
+    return;
+  }
+  try { document.execCommand("styleWithCSS", false, true); } catch {}
+  document.execCommand(command, false, value);
 }
 
 function updateScheduledEditInsight() {
@@ -22433,7 +22589,8 @@ async function saveScheduledEdit() {
         to: scheduledEditTo.value,
         cc: scheduledEditCc.value,
         subject: scheduledEditSubject.value,
-        bodyText: scheduledEditBody.value,
+        bodyHtml: scheduledEditBody.innerHTML,
+        bodyText: scheduledEditBody.innerText,
         sendAt: stamp.toISOString()
       }
     });
@@ -25412,6 +25569,7 @@ function closeMenus() {
   if (folderMenu) folderMenu.hidden = true;
   if (messageMenu) messageMenu.hidden = true;
   closeAccountMenu();
+  closeSelectionTranslation();
   toggleListFilterMenu(false);
   state.folderMenuTarget = "";
   state.messageMenuThreadId = "";
@@ -26259,6 +26417,23 @@ function handleFeatureClick(event) {
     }
     return true;
   }
+  const scheduledEditorCommand = target.closest("[data-scheduled-editor-cmd]");
+  if (scheduledEditorCommand) {
+    event.preventDefault();
+    applyScheduledEditCommand(scheduledEditorCommand.getAttribute("data-scheduled-editor-cmd"));
+    return true;
+  }
+  const scheduledEditorBlock = target.closest("[data-scheduled-editor-block]");
+  if (scheduledEditorBlock) {
+    event.preventDefault();
+    applyScheduledEditCommand("formatBlock", scheduledEditorBlock.getAttribute("data-scheduled-editor-block"));
+    return true;
+  }
+  if (target.closest("[data-scheduled-editor-link]")) {
+    event.preventDefault();
+    applyScheduledEditCommand("createLink");
+    return true;
+  }
   if (target.closest("#scheduledEditSave")) { event.preventDefault(); saveScheduledEdit(); return true; }
   if (target.closest("#sendNowClose") || target.closest("#sendNowCancel") || target === sendNowOverlay) {
     event.preventDefault();
@@ -26818,6 +26993,13 @@ function bindEvents() {
   }, { passive: true });
 
   if (selectAll) selectAll.addEventListener("change", () => selectAllVisible(selectAll.checked));
+  document.getElementById("selectionTranslationClose")?.addEventListener("click", closeSelectionTranslation);
+  window.addEventListener("resize", () => {
+    if (state.selectionTranslation) closeSelectionTranslation();
+  });
+  scheduledEditOverlay?.addEventListener("mousedown", (event) => {
+    if (event.target.closest(".scheduled-edit-toolbar button")) event.preventDefault();
+  });
 
   searchInput.addEventListener("input", () => {
     state.query = searchInput.value.trim();
@@ -26958,7 +27140,8 @@ function bindEvents() {
         const element = selection.anchorNode.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection.anchorNode.parentElement;
         const article = element?.closest?.(".thread-msg[data-message-id]");
         event.preventDefault();
-        openMessageSelectionMenu(thread.id, article?.getAttribute("data-message-id") || thread.latest?.id || "", selectedText, { clientX: event.clientX, clientY: event.clientY });
+        const range = selection.getRangeAt(0).cloneRange();
+        openMessageSelectionMenu(thread.id, article?.getAttribute("data-message-id") || thread.latest?.id || "", selectedText, { clientX: event.clientX, clientY: event.clientY }, range.getBoundingClientRect());
         return;
       }
     }
@@ -27124,6 +27307,14 @@ function bindEvents() {
   document.getElementById("railLogout").addEventListener("click", logout);
   document.getElementById("signOutOtherSessions")?.addEventListener("click", revokeOtherSessions);
   document.getElementById("signOutSettings")?.addEventListener("click", signOutCurrent);
+  readerContent.addEventListener("click", (event) => {
+    const anchor = event.target.closest("a[href]");
+    if (!anchor || !readerContent.contains(anchor)) return;
+    const href = anchor.getAttribute("href") || "";
+    if (!/^mailto:/i.test(href.trim())) return;
+    event.preventDefault();
+    openMailtoCompose(href);
+  });
   document.getElementById("readerBack").addEventListener("click", () => {
     if (document.body.classList.contains("popout")) { window.close(); return; }
     document.body.classList.remove("reader-open");
@@ -28233,6 +28424,7 @@ function bindEvents() {
     }
     if (event.key === "Escape") {
       if (!confirmOverlay.hidden) { settleConfirm(false); return; }
+      if (state.selectionTranslation) { closeSelectionTranslation(); return; }
       if (state.accountMenuOpen) { closeAccountMenu(true); return; }
       if (document.getElementById("addonSetupOverlay") && !document.getElementById("addonSetupOverlay").hidden) { closeAddonSetup(); return; }
       if (document.getElementById("addonResultOverlay") && !document.getElementById("addonResultOverlay").hidden) { closeAddonResult(); return; }

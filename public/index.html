@@ -10,14 +10,14 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.33.0">
-<link rel="stylesheet" href="/features.css?v=0.33.0">
-<link rel="stylesheet" href="/workspace.css?v=0.33.0">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.33.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.33.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.33.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.33.0">
-<link rel="stylesheet" href="/selects.css?v=0.33.0">
+<link rel="stylesheet" href="/styles.css?v=0.34.0">
+<link rel="stylesheet" href="/features.css?v=0.34.0">
+<link rel="stylesheet" href="/workspace.css?v=0.34.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.34.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.34.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.34.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.34.0">
+<link rel="stylesheet" href="/selects.css?v=0.34.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -1752,7 +1752,7 @@
                   <div class="settings-block">
                     <div class="settings-block-head">
                       <h3>Outbound sending</h3>
-                      <p>Enforced per user by postfwd. Usage is live for the current rolling window.</p>
+                      <p>Enforced per user by Alt8Mail, with a per-mailbox daily safety cap in the Control Plane's Postfix policy. Usage is live for the current rolling window.</p>
                     </div>
                     <div class="usage-card" id="outboundUsageCard">
                       <div class="usage-card-top">
@@ -2042,6 +2042,14 @@
 <div class="cmd-newmenu" id="moveMenu" hidden></div>
 <div class="folder-context-menu" id="folderMenu" hidden></div>
 <div class="folder-context-menu message-context-menu" id="messageMenu" hidden></div>
+<div class="selection-translation" id="selectionTranslation" role="dialog" aria-label="Selection translation" hidden>
+  <div class="selection-translation-head">
+    <span class="selection-translation-mark" aria-hidden="true"><svg class="icon"><use href="#i-translate"/></svg></span>
+    <div class="selection-translation-title"><span class="eyebrow" id="selectionTranslationLanguage">Translated</span><strong id="selectionTranslationTitle">Selected text</strong></div>
+    <button class="icon-btn" id="selectionTranslationClose" type="button" aria-label="Close translation"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+  </div>
+  <div class="selection-translation-body" id="selectionTranslationBody" aria-live="polite"></div>
+</div>
 
 <div class="overlay" id="detailsOverlay" hidden>
   <div class="dialog details-dialog" role="dialog" aria-modal="true" aria-labelledby="detailsTitle">
@@ -2251,7 +2259,24 @@
         <label class="form-field"><span>Cc <em>optional</em></span><input id="scheduledEditCc" type="text" autocomplete="off" spellcheck="false" placeholder="Copy recipients"></label>
       </div>
       <label class="form-field"><span>Subject</span><input id="scheduledEditSubject" type="text" maxlength="500" autocomplete="off"></label>
-      <label class="form-field"><span>Message</span><textarea id="scheduledEditBody" rows="5"></textarea></label>
+      <div class="form-field scheduled-edit-body-field"><span>Message</span>
+        <div class="scheduled-edit-editor-wrap">
+          <div class="compose-editor-toolbar scheduled-edit-toolbar" role="toolbar" aria-label="Message formatting">
+            <button type="button" data-scheduled-editor-cmd="undo" title="Undo">↶</button>
+            <button type="button" data-scheduled-editor-cmd="redo" title="Redo">↷</button>
+            <span class="editor-sep"></span>
+            <button type="button" data-scheduled-editor-cmd="bold" title="Bold"><strong>B</strong></button>
+            <button type="button" data-scheduled-editor-cmd="italic" title="Italic"><em>I</em></button>
+            <button type="button" data-scheduled-editor-cmd="underline" title="Underline"><u>U</u></button>
+            <button type="button" data-scheduled-editor-cmd="insertUnorderedList" title="Bulleted list">•</button>
+            <button type="button" data-scheduled-editor-cmd="insertOrderedList" title="Numbered list">1.</button>
+            <button type="button" data-scheduled-editor-block="blockquote" title="Quote">❝</button>
+            <button type="button" data-scheduled-editor-link title="Insert link">🔗</button>
+            <button type="button" data-scheduled-editor-cmd="removeFormat" title="Clear formatting">Tx</button>
+          </div>
+          <div class="compose-editor scheduled-edit-editor" id="scheduledEditBody" contenteditable="true" role="textbox" aria-label="Message" aria-multiline="true" data-placeholder="Message"></div>
+        </div>
+      </div>
       <div class="scheduled-edit-presets" id="scheduledEditPresets" aria-label="Quick reschedule options"></div>
       <div class="scheduled-fields">
         <label class="form-field"><span>Send date</span><input id="scheduledEditDate" type="date"></label>
@@ -3279,6 +3304,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.33.0"></script>
+<script type="module" src="/app.js?v=0.34.0"></script>
 </body>
 </html>

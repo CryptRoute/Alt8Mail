@@ -55,7 +55,8 @@ func (s *Server) handleDomains(w http.ResponseWriter, r *http.Request, sess *ses
 		       (SELECT count(*) FROM public.user_aliases a WHERE a.email LIKE '%@'||d.domain::text),
 		       (SELECT count(*) FROM control.mail_aliases ca WHERE ca.domain=d.domain AND ca.active),
 		       COALESCE(cs.caps_enabled,false), COALESCE(cs.cap_hour,0), COALESCE(cs.cap_day,0),
-		       COALESCE(cs.cap_month,0), COALESCE(cs.burst,0), COALESCE(d.dmarc_policy,'none')
+		       COALESCE(cs.cap_month,0), COALESCE(cs.burst,0), COALESCE(cs.user_daily_cap,200),
+		       COALESCE(d.dmarc_policy,'none')
 		FROM public.mail_domains d
 		JOIN public.tenants t ON t.id=d.tenant_id
 		LEFT JOIN control.domain_settings cs ON cs.domain_id=d.id
@@ -73,17 +74,18 @@ func (s *Server) handleDomains(w http.ResponseWriter, r *http.Request, sess *ses
 		var primary, capsEnabled bool
 		var createdAt time.Time
 		var mailboxCount, userCount, aliasCount, controlAliases int
-		var capHour, capDay, capMonth, burst int
+		var capHour, capDay, capMonth, burst, userDailyCap int
 		if rows.Scan(&id, &domain, &primary, &status, &selector, &record, &createdAt, &tenantName,
 			&mailboxCount, &userCount, &aliasCount, &controlAliases,
-			&capsEnabled, &capHour, &capDay, &capMonth, &burst, &dmarcPolicy) == nil {
+			&capsEnabled, &capHour, &capDay, &capMonth, &burst, &userDailyCap, &dmarcPolicy) == nil {
 			items = append(items, map[string]any{
 				"id": id, "domain": domain, "primary": primary, "status": status,
 				"dkimSelector": selector, "dkimReady": record != "", "createdAt": createdAt.UTC().Format(time.RFC3339),
 				"tenant": tenantName, "mailboxes": mailboxCount, "users": userCount,
 				"aliases": aliasCount + controlAliases, "capsEnabled": capsEnabled,
 				"capHour": capHour, "capDay": capDay, "capMonth": capMonth, "burst": burst,
-				"dmarcPolicy": dmarcPolicy,
+				"userDailyCap": userDailyCap,
+				"dmarcPolicy":  dmarcPolicy,
 			})
 		}
 	}
@@ -181,18 +183,18 @@ func (s *Server) handleDomainDetail(w http.ResponseWriter, r *http.Request, sess
 	var primary bool
 	var createdAt time.Time
 	var capEnabled bool
-	var capHour, capDay, capMonth, burst int
+	var capHour, capDay, capMonth, burst, userDailyCap int
 	err := s.db.QueryRow(r.Context(), `
 		SELECT d.id::text, d.domain::text, d.tenant_id::text, d.is_primary, d.status,
 		       COALESCE(d.dkim_selector,''), COALESCE(d.dkim_record,''), COALESCE(d.dkim_key_error,''),
 		       COALESCE(d.dmarc_policy,'none'), d.created_at,
 		       COALESCE(cs.caps_enabled,false), COALESCE(cs.cap_hour,0), COALESCE(cs.cap_day,0),
-		       COALESCE(cs.cap_month,0), COALESCE(cs.burst,0), COALESCE(cs.notes,'')
+		       COALESCE(cs.cap_month,0), COALESCE(cs.burst,0), COALESCE(cs.user_daily_cap,200), COALESCE(cs.notes,'')
 		FROM public.mail_domains d
 		LEFT JOIN control.domain_settings cs ON cs.domain_id=d.id
 		WHERE d.id=$1
 	`, id).Scan(&id, &domain, &tenantID, &primary, &status, &selector, &record, &dkimError,
-		&dmarcPolicy, &createdAt, &capEnabled, &capHour, &capDay, &capMonth, &burst, &notes)
+		&dmarcPolicy, &createdAt, &capEnabled, &capHour, &capDay, &capMonth, &burst, &userDailyCap, &notes)
 	if err != nil {
 		writeFromError(w, err)
 		return
@@ -223,7 +225,7 @@ func (s *Server) handleDomainDetail(w http.ResponseWriter, r *http.Request, sess
 		"id": id, "domain": domain, "tenantId": tenantID, "primary": primary, "status": status,
 		"dkimSelector": selector, "dkimRecord": record, "dkimError": dkimError,
 		"dmarcPolicy": dmarcPolicy, "createdAt": createdAt.UTC().Format(time.RFC3339),
-		"caps":  map[string]any{"enabled": capEnabled, "hour": capHour, "day": capDay, "month": capMonth, "burst": burst},
+		"caps":  map[string]any{"enabled": capEnabled, "hour": capHour, "day": capDay, "month": capMonth, "burst": burst, "userDailyCap": userDailyCap},
 		"usage": usage, "notes": notes, "mailboxes": mailboxes,
 		"aliasCounts": map[string]any{"identities": userAliases, "forwarders": controlAliases, "groups": groups},
 	})
@@ -244,15 +246,16 @@ func (s *Server) domainUsage(ctx context.Context, domain string) map[string]any 
 func (s *Server) handleDomainUpdate(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	id := pathID(r)
 	var body struct {
-		Domain      *string `json:"domain"`
-		IsPrimary   *bool   `json:"isPrimary"`
-		DMARCPolicy *string `json:"dmarcPolicy"`
-		CapsEnabled *bool   `json:"capsEnabled"`
-		CapHour     *int    `json:"capHour"`
-		CapDay      *int    `json:"capDay"`
-		CapMonth    *int    `json:"capMonth"`
-		Burst       *int    `json:"burst"`
-		Notes       *string `json:"notes"`
+		Domain       *string `json:"domain"`
+		IsPrimary    *bool   `json:"isPrimary"`
+		DMARCPolicy  *string `json:"dmarcPolicy"`
+		CapsEnabled  *bool   `json:"capsEnabled"`
+		CapHour      *int    `json:"capHour"`
+		CapDay       *int    `json:"capDay"`
+		CapMonth     *int    `json:"capMonth"`
+		Burst        *int    `json:"burst"`
+		UserDailyCap *int    `json:"userDailyCap"`
+		Notes        *string `json:"notes"`
 	}
 	if err := decodeJSON(w, r, &body, 64<<10); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
@@ -291,12 +294,12 @@ func (s *Server) handleDomainUpdate(w http.ResponseWriter, r *http.Request, sess
 		_, _ = s.db.Exec(r.Context(), `UPDATE public.mail_domains SET is_primary=false WHERE is_primary`)
 		_, _ = s.db.Exec(r.Context(), `UPDATE public.mail_domains SET is_primary=true WHERE id=$1`, id)
 	}
-	if body.CapsEnabled != nil || body.CapHour != nil || body.CapDay != nil || body.CapMonth != nil || body.Burst != nil || body.Notes != nil {
-		capHour, capDay, capMonth, burst := 0, 0, 0, 0
+	if body.CapsEnabled != nil || body.CapHour != nil || body.CapDay != nil || body.CapMonth != nil || body.Burst != nil || body.UserDailyCap != nil || body.Notes != nil {
+		capHour, capDay, capMonth, burst, userDailyCap := 0, 0, 0, 0, 200
 		var capsEnabled bool
 		var notes string
-		_ = s.db.QueryRow(r.Context(), `SELECT caps_enabled, cap_hour, cap_day, cap_month, burst, notes FROM control.domain_settings WHERE domain_id=$1`, id).
-			Scan(&capsEnabled, &capHour, &capDay, &capMonth, &burst, &notes)
+		_ = s.db.QueryRow(r.Context(), `SELECT caps_enabled, cap_hour, cap_day, cap_month, burst, COALESCE(user_daily_cap,200), notes FROM control.domain_settings WHERE domain_id=$1`, id).
+			Scan(&capsEnabled, &capHour, &capDay, &capMonth, &burst, &userDailyCap, &notes)
 		if body.CapsEnabled != nil {
 			capsEnabled = *body.CapsEnabled
 		}
@@ -312,20 +315,23 @@ func (s *Server) handleDomainUpdate(w http.ResponseWriter, r *http.Request, sess
 		if body.Burst != nil {
 			burst = *body.Burst
 		}
+		if body.UserDailyCap != nil {
+			userDailyCap = *body.UserDailyCap
+		}
 		if body.Notes != nil {
 			notes = truncateText(strings.TrimSpace(*body.Notes), 2000)
 		}
-		if capHour < 0 || capDay < 0 || capMonth < 0 || burst < 0 {
+		if capHour < 0 || capDay < 0 || capMonth < 0 || burst < 0 || userDailyCap < 0 {
 			writeError(w, http.StatusBadRequest, "CAPS", "Outgoing caps cannot be negative")
 			return
 		}
 		_, err := s.db.Exec(r.Context(), `
-			INSERT INTO control.domain_settings (domain_id, caps_enabled, cap_hour, cap_day, cap_month, burst, notes, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+			INSERT INTO control.domain_settings (domain_id, caps_enabled, cap_hour, cap_day, cap_month, burst, user_daily_cap, notes, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
 			ON CONFLICT (domain_id) DO UPDATE SET caps_enabled=EXCLUDED.caps_enabled, cap_hour=EXCLUDED.cap_hour,
 			  cap_day=EXCLUDED.cap_day, cap_month=EXCLUDED.cap_month, burst=EXCLUDED.burst,
-			  notes=EXCLUDED.notes, updated_at=now()
-		`, id, capsEnabled, capHour, capDay, capMonth, burst, notes)
+			  user_daily_cap=EXCLUDED.user_daily_cap, notes=EXCLUDED.notes, updated_at=now()
+		`, id, capsEnabled, capHour, capDay, capMonth, burst, userDailyCap, notes)
 		if err != nil {
 			writeFromError(w, err)
 			return

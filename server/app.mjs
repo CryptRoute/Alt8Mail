@@ -784,6 +784,7 @@ export async function createApp(options = {}) {
       cc: item.cc || [],
       bcc: item.bcc || [],
       bodyText: item.scheduled ? item.bodyText || "" : "",
+      bodyHtml: item.scheduled ? item.bodyHtml || "" : "",
       attachments: item.attachments || [],
       queuedAt: item.queuedAt,
       sendAt: item.sendAt,
@@ -1906,8 +1907,38 @@ export async function createApp(options = {}) {
     return accounts;
   }
 
-  function bootstrapPayload(session) {
+  function bootstrapPayload(session, params = new URLSearchParams()) {
     const mailbox = delegatedMailboxFor(session);
+    const folder = String(params.get("folder") || "inbox");
+    const filter = String(params.get("filter") || "all");
+    const pagedRequest = params.has("limit");
+    const limit = Math.min(200, Math.max(1, Number(params.get("limit")) || 50));
+    const offset = Math.max(0, Number(params.get("offset")) || 0);
+    const closedThreads = new Set((db.threadMeta || []).filter((item) => item.ownerId === db.user?.id && item.closed).map((item) => item.threadId));
+    let scopedMessages;
+    if (folder === "starred") scopedMessages = db.messages.filter((message) => message.starred);
+    else if (folder === "subscriptions") scopedMessages = db.messages.filter((message) => message.folder === "subscriptions");
+    else scopedMessages = db.messages.filter((message) => message.folder === folder);
+    scopedMessages = filter === "closed"
+      ? scopedMessages.filter((message) => closedThreads.has(message.threadId))
+      : scopedMessages.filter((message) => !closedThreads.has(message.threadId));
+    if (filter === "unread") scopedMessages = scopedMessages.filter((message) => message.unread);
+    if (filter === "starred") scopedMessages = scopedMessages.filter((message) => message.starred);
+    if (filter === "attachments") scopedMessages = scopedMessages.filter((message) => (message.attachments || []).length);
+    const scopedThreads = buildThreads(scopedMessages, db.messages);
+    const pageThreads = scopedThreads.slice(offset, offset + limit);
+    const pageThreadIds = new Set(pageThreads.map((thread) => thread.id));
+    // Drafts are always included so open compose sessions survive a reload,
+    // matching the production bootstrap behaviour.
+    const pageMessages = pagedRequest
+      ? db.messages.filter((message) => pageThreadIds.has(message.threadId || message.id) || message.folder === "drafts")
+      : db.messages;
+    const mailPage = pagedRequest ? {
+      folder, filter, offset, limit,
+      total: scopedThreads.length,
+      totalMessages: scopedMessages.length,
+      hasMore: offset + pageThreads.length < scopedThreads.length
+    } : undefined;
     const nativeUnread = mockInboxUnread();
     const nativeAccount = {
       id: "acct_native", kind: "native", provider: "alt8mail",
@@ -1938,7 +1969,8 @@ export async function createApp(options = {}) {
       activeAccountId: nativeAccount.id,
       folders: db.folders,
       people: db.people.map((person) => ({ ...person, source: person.source || "directory" })),
-      messages: db.messages.map(publicMessage),
+      messages: pageMessages.map(publicMessage),
+      mailPage,
       calendarEvents: db.calendarEvents.map(calendarEventPayload),
       calendars: calendarList(),
       calendarSubscriptions: [],
@@ -1980,6 +2012,14 @@ export async function createApp(options = {}) {
     if (mailbox) {
       payload.folders = delegatedFolders(mailbox);
       payload.messages = (mailbox.messages || []).map(publicMessage);
+      if (pagedRequest) {
+        payload.mailPage = {
+          folder, filter, offset: 0, limit: Math.max(payload.messages.length, 50),
+          total: new Set(payload.messages.map((message) => message.threadId || message.id)).size,
+          totalMessages: payload.messages.length,
+          hasMore: false
+        };
+      }
       payload.calendarEvents = [];
       payload.calendars = [];
       payload.calendarSubscriptions = [];
@@ -2678,7 +2718,7 @@ export async function createApp(options = {}) {
         return;
       }
       if (pathname === "/api/bootstrap" && req.method === "GET") {
-        sendJson(res, 200, bootstrapPayload(session));
+        sendJson(res, 200, bootstrapPayload(session, url.searchParams));
         return;
       }
       if (pathname === "/api/accounts/summary" && req.method === "GET") {
@@ -2967,6 +3007,20 @@ export async function createApp(options = {}) {
           return;
         }
         sendJson(res, 200, { summary: "The conversation confirms the next steps are under review.", language: "en-US", cached: false, provider: "preview", model: "alt8mail-preview" });
+        return;
+      }
+      if (pathname === "/api/ai/translate" && req.method === "POST") {
+        if (!aiEnabled) throw new ApiError(403, "AI_DISABLED", "The AI assistant is disabled for this organization");
+        const body = await readJson(req);
+        const text = String(body.text || "").trim();
+        if (!text) throw new ApiError(400, "AI_TEXT", "Choose some text to translate");
+        if (aiDelayMs) await new Promise((resolve) => setTimeout(resolve, aiDelayMs));
+        sendJson(res, 200, {
+          translation: `Translated selection: ${text}`,
+          language: body.language || "en-US",
+          provider: "mock",
+          model: "mock-translator"
+        });
         return;
       }
       if (pathname === "/api/ai/compose" && req.method === "POST") {
@@ -3817,6 +3871,8 @@ export async function createApp(options = {}) {
         const query = String(url.searchParams.get("q") || "");
         const filter = String(url.searchParams.get("filter") || "all");
         const requestedThread = String(url.searchParams.get("thread") || "").trim();
+        const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+        const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
         let messages;
         if (requestedThread) messages = db.messages.filter((message) => message.threadId === requestedThread || message.id === requestedThread);
         else if (query) messages = getIndex().search(query).messages;
@@ -3832,12 +3888,21 @@ export async function createApp(options = {}) {
         if (filter === "unread") messages = messages.filter((message) => message.unread);
         if (filter === "starred") messages = messages.filter((message) => message.starred);
         if (filter === "attachments") messages = messages.filter((message) => (message.attachments || []).length);
+        const allThreads = buildThreads(messages, db.messages);
+        const pagedThreads = requestedThread ? allThreads : allThreads.slice(offset, offset + limit);
+        const pageThreadIds = new Set(pagedThreads.map((thread) => thread.id));
+        const pageMessages = requestedThread ? messages : messages.filter((message) => pageThreadIds.has(message.threadId || message.id));
         sendJson(res, 200, {
           folder,
           thread: requestedThread || undefined,
-          count: messages.length,
-          messages: messages.map(publicMessage),
-          threads: buildThreads(messages, db.messages).map((thread) => ({
+          count: pageMessages.length,
+          limit,
+          offset,
+          total: allThreads.length,
+          totalMessages: messages.length,
+          hasMore: !requestedThread && offset + pagedThreads.length < allThreads.length,
+          messages: pageMessages.map(publicMessage),
+          threads: pagedThreads.map((thread) => ({
             id: thread.id,
             subject: thread.subject,
             count: thread.count,
@@ -4595,6 +4660,7 @@ export async function createApp(options = {}) {
         }
         const subject = String(body.subject || "").slice(0, 500);
         const bodyText = String(body.bodyText == null ? body.body || "" : body.bodyText).slice(0, 200_000);
+        const bodyHtml = String(body.bodyHtml || "").slice(0, 500_000);
         const attachments = normalizeAttachments(body.attachments || []);
         const draftId = body.draftId ? String(body.draftId) : null;
         let draft = null;
@@ -4637,6 +4703,7 @@ export async function createApp(options = {}) {
           bcc: bcc.people,
           subject,
           bodyText,
+          bodyHtml,
           attachments,
           mentions: normalizeMentions(body.mentions || (draft && draft.mentions) || []),
           classification: dlp.classification,
@@ -4754,8 +4821,11 @@ export async function createApp(options = {}) {
           item.subject = String(body.subject || "").slice(0, 500);
           changed.push("subject");
         }
-        if (body.bodyText !== undefined || body.body !== undefined) {
-          item.bodyText = String(body.bodyText == null ? body.body : body.bodyText).slice(0, 200_000);
+        if (body.bodyText !== undefined || body.bodyHtml !== undefined || body.body !== undefined) {
+          if (body.bodyHtml !== undefined) item.bodyHtml = String(body.bodyHtml || "").slice(0, 500_000);
+          if (body.bodyText !== undefined) item.bodyText = String(body.bodyText || "").slice(0, 200_000);
+          else if (body.body !== undefined) item.bodyText = String(body.body || "").slice(0, 200_000);
+          else if (body.bodyHtml !== undefined && !item.bodyText) item.bodyText = String(body.bodyHtml || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
           changed.push("body");
         }
         if (body.attachments !== undefined) {

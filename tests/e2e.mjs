@@ -251,6 +251,64 @@ try {
   equal(await page.eval("document.querySelectorAll('.thread-msg.is-expanded').length"), 1, "a collapsed message can be expanded in place");
   await page.screenshot(path.join(artifacts, "02-thread.png"));
 
+  console.log("\n[2b] Inline selection translation");
+  await page.eval(`(() => {
+    const host = document.querySelector('.thread-msg .email-body') || document.getElementById('readerContent');
+    const fixture = document.createElement('p');
+    fixture.id = 'translation-fixture';
+    fixture.textContent = 'Hola, gracias por su ayuda con el proyecto.';
+    host.appendChild(fixture);
+    const range = document.createRange();
+    range.selectNodeContents(fixture);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const rect = fixture.getBoundingClientRect();
+    fixture.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left + 12, clientY: rect.top + 8 }));
+  })()`);
+  await page.waitFor(() => Boolean(document.querySelector('[data-message-command="translateSelection"]')), 3000);
+  check(true, "a non-English selection offers Translate in the context menu");
+  await page.click('[data-message-command="translateSelection"]');
+  await page.waitFor(() => {
+    const card = document.getElementById("selectionTranslation");
+    return Boolean(card && !card.hidden && card.textContent.includes("Translated selection"));
+  }, 5000);
+  check(await page.eval("document.getElementById('selectionTranslationLanguage').textContent.includes('English')"), "selection translation is rendered in the user's configured language");
+  await page.screenshot(path.join(artifacts, "02c-selection-translation.png"));
+  await page.click("#selectionTranslationClose");
+  check(await page.eval("document.getElementById('selectionTranslation').hidden"), "selection translation closes from its close control");
+  await page.eval("document.getElementById('translation-fixture')?.remove(); window.getSelection()?.removeAllRanges()");
+
+  console.log("\n[2c] mailto links open compose");
+  await page.eval(`(() => {
+    const host = document.querySelector('.thread-msg .email-body') || document.getElementById('readerContent');
+    const link = document.createElement('a');
+    link.id = 'mailto-fixture';
+    link.href = 'mailto:recipient@example.com?subject=Hello%20from%20mailto&body=Line%20one';
+    link.textContent = 'email us';
+    host.appendChild(link);
+  })()`);
+  await page.click("#mailto-fixture");
+  await page.waitFor(() => [...document.querySelectorAll('.compose')].some((section) => section.textContent.includes('recipient@example.com')), 4000);
+  const mailtoCompose = await page.eval(`(() => {
+    const section = [...document.querySelectorAll('.compose')].find((item) => item.textContent.includes('recipient@example.com'));
+    if (!section) return null;
+    return {
+      id: section.getAttribute('data-compose-id'),
+      to: section.querySelector('[data-recipient-chips="to"]')?.textContent || '',
+      subject: section.querySelector('[data-compose-field="subject"]')?.value || '',
+      body: section.querySelector('[data-compose-editor]')?.innerText || section.querySelector('[data-compose-field="body"]')?.value || ''
+    };
+  })()`);
+  check(mailtoCompose && mailtoCompose.to.includes('recipient@example.com'), "mailto link pre-fills the To field");
+  check(mailtoCompose && mailtoCompose.subject === 'Hello from mailto', "mailto link pre-fills the subject");
+  check(mailtoCompose && mailtoCompose.body.includes('Line one'), "mailto link pre-fills the message body");
+  await page.click(`.compose[data-compose-id="${mailtoCompose.id}"] [data-compose-action="discard"]`);
+  await page.waitFor(() => !document.getElementById("confirmOverlay").hidden, 3000);
+  await page.click("#confirmAccept");
+  await page.waitFor(`!document.querySelector(${JSON.stringify(`.compose[data-compose-id="${mailtoCompose.id}"]`)})`, 4000);
+  await page.eval("document.getElementById('mailto-fixture')?.remove()");
+
   console.log("\n[3] Instant search with operators");
   await page.click("#searchInput");
   await page.setValue("#searchInput", "from:elena has:attachment");
@@ -468,7 +526,7 @@ try {
   await page.click("#statusPopClose");
   await page.click("#outboundChip");
   await sleep(250);
-  check(await page.eval("document.getElementById('statusPopBody').textContent.includes('postfwd')"), "outbound popover names the postfwd enforcement");
+  check(await page.eval("document.getElementById('statusPopBody').textContent.includes('Control Plane')"), "outbound popover names the Control Plane enforcement");
   await page.click("#statusPopClose");
   await page.click("[data-folder='sent']");
   await sleep(600);
@@ -1344,8 +1402,13 @@ try {
   await page.waitFor(() => !document.getElementById("scheduledEditOverlay").hidden, 4000);
   equal(await page.eval("document.getElementById('scheduledEditTo').value"), "elena.vasquez@a8m.example", "edit dialog loads the recipients");
   check(await page.eval("document.getElementById('scheduledEditOriginal').textContent.includes('Currently scheduled')"), "edit dialog shows the original send time");
+  check(await page.eval("document.getElementById('scheduledEditBody').isContentEditable"), "scheduled edit uses a rich message editor");
   await page.setValue("#scheduledEditSubject", "Managed scheduled note — edited");
-  await page.setValue("#scheduledEditBody", "Updated body, ready to send from the schedule center.");
+  await page.eval(`(() => {
+    const el = document.getElementById('scheduledEditBody');
+    el.innerHTML = '<p>Updated body, ready to send from the schedule center.</p>';
+    el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  })()`);
   const adjustedDate = await page.eval("new Date(Date.now() + 4*86400000).toISOString().slice(0,10)");
   await page.setValue("#scheduledEditDate", adjustedDate);
   await page.setValue("#scheduledEditTime", "10:45");
@@ -1357,8 +1420,9 @@ try {
   await sleep(500);
   check(await page.eval("document.getElementById('toast').textContent.includes('Scheduled message updated')"), "edited schedule is saved");
   check(await page.eval("document.getElementById('scheduledList').textContent.includes('Managed scheduled note — edited')"), "scheduled center reflects the edited subject");
-  const edited = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>{const s=d.pendingSends.find(x=>x.subject==='Managed scheduled note — edited'); return s ? {body:s.bodyText, sendAt:s.sendAt} : null;})");
+  const edited = await page.eval("fetch('/api/bootstrap').then(r=>r.json()).then(d=>{const s=d.pendingSends.find(x=>x.subject==='Managed scheduled note — edited'); return s ? {body:s.bodyText, html:s.bodyHtml, sendAt:s.sendAt} : null;})");
   check(edited && edited.body.includes("Updated body"), "edited body is persisted on the server");
+  check(edited && edited.html.includes("<p>Updated body"), "scheduled edit preserves rich HTML on the server");
 
   await page.click(".scheduled-card [data-scheduled-send-now]");
   await page.waitFor(() => !document.getElementById("sendNowOverlay").hidden, 4000);
@@ -2247,7 +2311,34 @@ try {
   check(await page.eval("document.getElementById('accountPing').hidden"), "new-mail alert can be dismissed");
   app.db.externalMailAccounts = [];
 
-  console.log("\n[11b] Passkey sign-in");
+  console.log("\n[11b] Paged delete auto-loads remaining mail");
+  const pageSeed = app.db.messages.find((message) => message.folder === "inbox" && !message.draft);
+  for (let index = 0; index < 70; index += 1) {
+    app.db.messages.push({
+      ...pageSeed,
+      id: `bulk_page_${index}`,
+      threadId: `bulk_thread_${index}`,
+      messageId: `<bulk-page-${index}@example.test>`,
+      subject: `Bulk paging ${index}`,
+      snippet: `Bulk paging ${index}`,
+      date: new Date(Date.now() - index * 60000).toISOString(),
+      unread: false,
+      starred: false,
+      flagged: false,
+      attachments: []
+    });
+  }
+  await page.eval("location.reload()");
+  await waitForApp();
+  check(await page.eval("document.querySelectorAll('.msg').length >= 40"), "large inbox loads its first page");
+  await page.click("#selectAll");
+  await page.waitFor(() => !document.getElementById("bulkBar").hidden, 3000);
+  await page.click("[data-bulk-action='delete']");
+  await page.waitFor(() => document.querySelectorAll(".msg").length > 0, 6000);
+  check(await page.eval("document.querySelectorAll('.msg').length > 0 && !document.querySelector('#messageList .list-empty')"), "deleting every loaded row auto-loads the next page");
+  await page.screenshot(path.join(artifacts, "25b-paged-delete-auto-load.png"));
+
+  console.log("\n[11c] Passkey sign-in");
   await page.eval("localStorage.setItem('a8m.accent', 'rose'); document.documentElement.style.setProperty('--accent', '#b8336a')");
   const logoutStartedAt = Date.now();
   await page.click("#railLogout");

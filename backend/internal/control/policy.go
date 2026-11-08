@@ -150,25 +150,40 @@ func (s *Server) checkDomainCaps(ctx context.Context, domain, queueID, recipient
 		return "Outbound policy is temporarily unavailable", false
 	}
 	var capsEnabled bool
-	var capHour, capDay, capMonth, burst int
+	var capHour, capDay, capMonth, burst, userDailyCap int
 	err = tx.QueryRow(ctx, `
-		SELECT caps_enabled, cap_hour, cap_day, cap_month, burst
-		FROM control.domain_settings cs JOIN public.mail_domains d ON d.id=cs.domain_id
+		SELECT COALESCE(cs.caps_enabled,false), COALESCE(cs.cap_hour,0), COALESCE(cs.cap_day,0),
+		       COALESCE(cs.cap_month,0), COALESCE(cs.burst,0), COALESCE(cs.user_daily_cap,200)
+		FROM public.mail_domains d
+		LEFT JOIN control.domain_settings cs ON cs.domain_id=d.id
 		WHERE d.domain=$1
-	`, domain).Scan(&capsEnabled, &capHour, &capDay, &capMonth, &burst)
+	`, domain).Scan(&capsEnabled, &capHour, &capDay, &capMonth, &burst, &userDailyCap)
 	if err == pgx.ErrNoRows {
 		return "", true
 	}
 	if err != nil {
 		return "Outbound policy is temporarily unavailable", false
 	}
-	var hourCount, dayCount, monthCount int64
+	var hourCount, dayCount, monthCount, userMessageCount int64
 	_ = tx.QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE attempted_at > now()-interval '1 hour'),
 		       count(*) FILTER (WHERE attempted_at > now()-interval '24 hours'),
 		       count(*) FILTER (WHERE attempted_at > now()-interval '30 days')
 		FROM control.outbound_attempts WHERE sender_domain=$1 AND action='permit'
 	`, domain).Scan(&hourCount, &dayCount, &monthCount)
+	_ = tx.QueryRow(ctx, `
+		SELECT count(DISTINCT NULLIF(queue_id,'')) + count(*) FILTER (WHERE queue_id='')
+		FROM control.outbound_attempts
+		WHERE sender_domain=$1 AND action='permit' AND attempted_at > now()-interval '24 hours'
+		  AND (($2 <> '' AND lower(sasl_user)=lower($2)) OR ($2 = '' AND lower(sender::text)=lower($3)))
+		  AND ($4 = '' OR queue_id <> $4)
+	`, domain, saslUser, sender, queueID).Scan(&userMessageCount)
+	if userDailyCap > 0 && userMessageCount+1 > int64(userDailyCap) {
+		reason := fmt.Sprintf("Outgoing daily cap reached for this mailbox (%d/day)", userDailyCap)
+		_, _ = tx.Exec(ctx, attemptInsertSQL(), queueID, sender, domain, recipient, size, saslUser, client, "defer", reason)
+		_ = tx.Commit(ctx)
+		return reason, false
+	}
 	if capsEnabled {
 		effectiveHour := capHour
 		if effectiveHour > 0 && burst > 0 {

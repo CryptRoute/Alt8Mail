@@ -1029,6 +1029,17 @@ body.composing .settings-panel { padding-bottom: 72px; }
   font-size: 0.75rem;
 }
 .scheduled-edit-dialog .form-field textarea { resize: vertical; line-height: 1.5; }
+.scheduled-edit-body-field { margin-bottom: 9px; }
+.scheduled-edit-editor-wrap {
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.scheduled-edit-editor-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus); }
+.scheduled-edit-toolbar { border-bottom: 1px solid var(--border); }
+.scheduled-edit-editor { min-height: 190px; max-height: 42vh; overflow-y: auto; background: var(--surface); }
+.scheduled-edit-editor:empty::before { content: attr(data-placeholder); color: var(--text-3); pointer-events: none; }
 .scheduled-edit-presets { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 10px; }
 .scheduled-preset {
   display: flex;
@@ -2179,6 +2190,55 @@ body.office-editor-open { overflow: hidden; }
   .office-editor-actions .btn-small { padding-left: 8px; padding-right: 8px; }
 }
 
+/* ---------- inline selection translation ---------- */
+.selection-translation {
+  position: fixed;
+  z-index: 140;
+  width: min(390px, calc(100vw - 24px));
+  max-height: min(340px, calc(100vh - 24px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 70px rgba(8, 17, 31, .28), 0 2px 8px rgba(8, 17, 31, .08);
+  overflow: hidden;
+  animation: selection-translation-in .2s ease-out;
+}
+@keyframes selection-translation-in {
+  from { opacity: 0; transform: translateY(-5px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.selection-translation-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 11px 9px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--surface)), var(--surface));
+}
+.selection-translation-mark {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.selection-translation-mark svg { width: 16px; height: 16px; }
+.selection-translation-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.selection-translation-title .eyebrow { margin: 0; font-size: .5625rem; }
+.selection-translation-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; font-weight: 650; }
+.selection-translation-head .icon-btn { width: 26px; height: 26px; flex: none; border-radius: 8px; }
+.selection-translation-head .icon-btn svg { width: 14px; height: 14px; }
+.selection-translation-body { padding: 12px 14px 15px; overflow-y: auto; color: var(--text); font-size: .8125rem; line-height: 1.65; }
+.selection-translation-text { margin: 0; white-space: pre-wrap; }
+.selection-translation-error { margin: 0; color: var(--danger); font-size: .75rem; line-height: 1.55; }
+.selection-translation-loading { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: .75rem; }
+
 /* Connected mail accounts — mailbox switcher */
 .account-menu {
   position: relative;
@@ -2821,6 +2881,7 @@ body.office-editor-open { overflow: hidden; }
   .account-ping,
   .account-menu.has-news .account-trigger,
   .account-menu.has-news .account-trigger-unread,
+  .selection-translation,
   .icon.is-spinning { animation: none; }
   .mail-provider-tile,
   .mail-provider-arrow { transition: none; }

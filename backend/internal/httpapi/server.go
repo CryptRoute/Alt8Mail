@@ -343,6 +343,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ai/messages/{id}/summary", s.requireUser(s.aiMessageSummary))
 	mux.HandleFunc("POST /api/ai/messages/{id}/translate", s.requireUser(s.aiMessageTranslate))
 	mux.HandleFunc("POST /api/ai/messages/{id}/reply", s.requireUser(s.aiMessageReply))
+	mux.HandleFunc("POST /api/ai/translate", s.requireUser(s.aiTranslateSelection))
 	mux.HandleFunc("POST /api/ai/compose", s.requireUser(s.aiCompose))
 	mux.HandleFunc("POST /api/ai/threads/{id}/commitments", s.requireUser(s.aiThreadCommitments))
 	mux.HandleFunc("POST /api/ai/tone", s.requireUser(s.aiToneSuggestion))
@@ -909,7 +910,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		},
 		"sieve":               sieve,
 		"quota":               s.mailQuota(ctx, sess.User.ID, state),
-		"outbound":            stateOutbound(state),
+		"outbound":            s.outboundPayload(ctx, sess.User, state),
 		"pendingSends":        statePendingSends(state),
 		"auditCount":          len(stateSlice(state, "audit")),
 		"recentAudit":         recentAudit,

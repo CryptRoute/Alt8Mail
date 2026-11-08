@@ -338,14 +338,7 @@ func (s *Server) patchMessage(w http.ResponseWriter, r *http.Request) {
 		if message == nil {
 			return fail(http.StatusNotFound, "NOT_FOUND", "Message not found")
 		}
-		mutation = imapAction{
-			MessageID:    stateString(message, "messageId"),
-			SourceUID:    stateInt(message, "imapUid"),
-			SourceFolder: stateString(message, "imapFolder"),
-		}
-		if mutation.SourceFolder == "" {
-			mutation.SourceFolder = stateString(message, "folder")
-		}
+		mutation = imapActionForMessage(message)
 		if body.Unread != nil {
 			message["unread"] = *body.Unread
 			if !*body.Unread {
@@ -430,15 +423,10 @@ func (s *Server) markRead(w http.ResponseWriter, r *http.Request) {
 			if message != nil && stateBool(message, "unread") {
 				message["unread"] = false
 				clearReturnedSnooze(message)
-				folder := stateString(message, "imapFolder")
-				if folder == "" {
-					folder = stateString(message, "folder")
-				}
 				seen := true
-				mutations = append(mutations, imapAction{
-					MessageID: stateString(message, "messageId"), SourceUID: stateInt(message, "imapUid"),
-					SourceFolder: folder, SetSeen: &seen,
-				})
+				mutation := imapActionForMessage(message)
+				mutation.SetSeen = &seen
+				mutations = append(mutations, mutation)
 				changed++
 			}
 		}
@@ -649,10 +637,10 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 				"snoozedUntil": stateString(message, "snoozedUntil"),
 				"ignored":      stateBool(message, "ignored"), "ignoredAt": stateString(message, "ignoredAt"),
 			}
-			mutation := imapAction{
-				MessageID:    stateString(message, "messageId"),
-				SourceUID:    stateInt(message, "imapUid"),
-				SourceFolder: originalIMAPFolder,
+			mutation := imapActionForMessage(message)
+			if originalIMAPFolder != "" {
+				mutation.SourceFolder = originalIMAPFolder
+				mutation.SourceIMAPFolder = originalIMAPFolder
 			}
 			targetFolder := originalFolder
 			permanent := false
@@ -887,7 +875,7 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 		response = map[string]any{
 			"ok": true, "affected": len(targets), "permanentlyDeleted": permanentlyDeleted,
 			"undoToken": token, "undoExpiresAt": expiresAt.UTC().Format(time.RFC3339),
-			"outbound": stateOutbound(state),
+			"outbound": s.outboundPayload(r.Context(), sess.User, state),
 		}
 		return nil
 	})
@@ -974,9 +962,13 @@ func (s *Server) undoAction(w http.ResponseWriter, r *http.Request) {
 			}
 			seen := !stateBool(item, "unread")
 			flagged := stateBool(item, "starred") || stateBool(item, "flagged")
-			mutation := imapAction{
-				MessageID: messageID, SourceUID: stateInt(message, "imapUid"),
-				SourceFolder: currentFolder, SetSeen: &seen, SetFlagged: &flagged,
+			mutation := imapActionForMessage(message)
+			mutation.MessageID = messageID
+			mutation.SetSeen = &seen
+			mutation.SetFlagged = &flagged
+			if currentFolder != "" {
+				mutation.SourceFolder = currentFolder
+				mutation.SourceIMAPFolder = currentFolder
 			}
 			if permanent {
 				mutation.SourceFolder = originalIMAPFolder
@@ -1370,7 +1362,7 @@ func (s *Server) getOutboundInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
-	writeJSON(w, http.StatusOK, stateOutbound(state))
+	writeJSON(w, http.StatusOK, s.outboundPayload(r.Context(), sess.User, state))
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {

@@ -272,9 +272,44 @@ func stateOutbound(state map[string]any) map[string]any {
 		"undoQueued": queued - scheduled, "scheduled": scheduled,
 		"usedWithQueued": usedWithQueued,
 		"remaining":      max(int64(0), limit-usedWithQueued),
-		"percent":        percentage, "source": "postfwd",
+		"percent":        percentage, "source": "alt8mail+control-plane",
 		"refreshedAt": nowISO(),
 	}
+}
+
+// outboundPayload starts from the webmail's rolling counter and, when the
+// domain has a Control Plane per-mailbox cap, makes that cap authoritative.
+// The Postfix policy daemon enforces the same cap for every SMTP client; this
+// keeps the webmail's displayed limit and pre-send check in sync with it.
+func (s *Server) outboundPayload(ctx context.Context, user userRecord, state map[string]any) map[string]any {
+	outbound := stateOutbound(state)
+	if outbound == nil || s.store == nil || s.store.DB == nil {
+		return outbound
+	}
+	domain := domainOf(user.Email)
+	if domain == "" {
+		return outbound
+	}
+	var controlCap int
+	if err := s.store.DB.QueryRow(ctx, `
+		SELECT COALESCE(cs.user_daily_cap, 200)
+		FROM public.mail_domains d
+		LEFT JOIN control.domain_settings cs ON cs.domain_id=d.id
+		WHERE d.domain=$1
+	`, domain).Scan(&controlCap); err != nil {
+		return outbound
+	}
+	outbound["controlUserDailyCap"] = controlCap
+	outbound["controlDomain"] = domain
+	if controlCap <= 0 {
+		return outbound
+	}
+	used := int64(stateInt(outbound, "usedWithQueued"))
+	outbound["limit"] = controlCap
+	outbound["remaining"] = max(int64(0), int64(controlCap)-used)
+	outbound["percent"] = math.Round(float64(used)/float64(controlCap)*1000) / 10
+	outbound["source"] = "control-plane"
+	return outbound
 }
 
 func publicOutboxItem(item map[string]any) map[string]any {

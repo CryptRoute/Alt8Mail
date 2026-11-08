@@ -123,7 +123,10 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
 - DNS plan (MX, SPF, DKIM, DMARC, autodiscover, MTA-STS), live resolver checks,
   copy and zone-file export.
 - PTR/provider action notes when the reverse zone is outside this host.
-- Per-domain rolling outbound caps with current usage from PostgreSQL.
+- Per-domain rolling outbound caps with current usage from PostgreSQL, plus a
+  per-mailbox daily cap (default **200 messages/24h**) enforced by the built-in
+  Postfix policy daemon even when domain caps are disabled. Set the mailbox cap
+  to `0` to disable it for a domain.
 - Domain detail exposes alias, identity and group counts.
 
 ### Mailboxes, users, aliases and Sieve
@@ -183,7 +186,7 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
   pulsing red listed state, and an amber unverified state when a zone declines
   the query. Resolver-policy replies such as Spamhaus `127.255.255.254` are not
   treated as listings.
-- Postfix policy daemon reports the real rolling-cap reason on a `450` deferral.
+- Postfix policy daemon reports the real rolling-cap or per-mailbox daily-cap reason on a `450` deferral.
 - Spamhaus and some other zones reject queries sent through public resolvers.
   Configure `CONTROL_DNS_RESOLVER` to a resolver permitted by the zone operator
   before treating **Unverified** as a clean result.

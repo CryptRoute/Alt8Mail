@@ -377,7 +377,11 @@
 /* ---------- selected-text message menu ---------- */
 .message-context-menu .message-copy-text { background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
 .message-context-menu .message-copy-text:hover { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
-.message-context-menu .message-copy-text kbd { margin-left: auto; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 5px; background: var(--surface); color: var(--text-3); font-family: var(--font-mono); font-size: 9px; }
+.message-context-menu .message-copy-text kbd,
+.message-context-menu .message-translate-text kbd { margin-left: auto; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 5px; background: var(--surface); color: var(--text-3); font-family: var(--font-mono); font-size: 9px; }
+.message-context-menu .message-translate-text { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent-ink); font-weight: 700; }
+.message-context-menu .message-translate-text:hover { background: color-mix(in srgb, var(--accent) 19%, var(--surface)); }
+.message-context-menu .message-translate-text kbd { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); color: var(--accent-ink); }
 
 /* ---------- light reading surface inside the dark theme ---------- */
 .reader-light-toggle svg {

@@ -152,7 +152,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		if err := s.enforceOutboundPolicy(r.Context(), sess.User.TenantID, append(append(append([]any{}, to...), cc...), bcc...), nil, policy); err != nil {
 			return err
 		}
-		outbound := stateOutbound(state)
+		outbound := s.outboundPayload(r.Context(), sess.User, state)
 		if stateInt(outbound, "usedWithQueued") >= stateInt(outbound, "limit") {
 			return failDetails(http.StatusTooManyRequests, "OUTBOUND_CAP",
 				fmt.Sprintf("Daily outbound cap reached (%d/%d). Try again after the window resets.",
@@ -293,7 +293,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		appendStateAudit(state, auditAction, firstNonEmpty(subject, "(no subject)"), stateString(stateMap(state, "user"), "name"),
 			auditDetail, clientIP(r), sanitizeUserAgent(r.UserAgent()))
-		outbound = stateOutbound(state)
+		outbound = s.outboundPayload(r.Context(), sess.User, state)
 		undoUntil := any(nil)
 		if scheduledAt.IsZero() {
 			undoUntil = sendAt.Format(time.RFC3339)
@@ -337,7 +337,7 @@ func (s *Server) getOutbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "STATE_UNAVAILABLE", "This mailbox is not initialized yet")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"pending": statePendingSends(state), "outbound": stateOutbound(state)})
+	writeJSON(w, http.StatusOK, map[string]any{"pending": statePendingSends(state), "outbound": s.outboundPayload(r.Context(), sess.User, state)})
 }
 
 func (s *Server) cancelSend(w http.ResponseWriter, r *http.Request) {
@@ -369,7 +369,7 @@ func (s *Server) cancelSend(w http.ResponseWriter, r *http.Request) {
 		}
 		appendStateAudit(state, "send.cancelled", firstNonEmpty(stateString(item, "subject"), "(no subject)"),
 			stateString(stateMap(state, "user"), "name"), detail, clientIP(r), sanitizeUserAgent(r.UserAgent()))
-		response = map[string]any{"ok": true, "draft": publicStateMessage(state, draft), "outbound": stateOutbound(state)}
+		response = map[string]any{"ok": true, "draft": publicStateMessage(state, draft), "outbound": s.outboundPayload(r.Context(), sess.User, state)}
 		return nil
 	})
 	if err != nil {
@@ -545,7 +545,7 @@ func (s *Server) patchOutbox(w http.ResponseWriter, r *http.Request) {
 			clientIP(r), sanitizeUserAgent(r.UserAgent()))
 		response = map[string]any{
 			"ok": true, "item": publicOutboxItem(item), "changed": changed,
-			"pending": statePendingSends(state), "outbound": stateOutbound(state),
+			"pending": statePendingSends(state), "outbound": s.outboundPayload(r.Context(), sess.User, state),
 		}
 		return nil
 	})
@@ -597,7 +597,7 @@ func (s *Server) sendNow(w http.ResponseWriter, r *http.Request) {
 	current, _ := s.loadStateWithOutbox(r.Context(), sess.User.ID)
 	response := map[string]any{
 		"ok": true, "subject": subject, "sentMessageId": result["sentMessageId"],
-		"pending": statePendingSends(current), "outbound": stateOutbound(current),
+		"pending": statePendingSends(current), "outbound": s.outboundPayload(r.Context(), sess.User, current),
 	}
 	writeJSON(w, http.StatusOK, response)
 }

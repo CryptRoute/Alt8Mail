@@ -118,3 +118,15 @@ func TestExternalAccountRecordValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestIMAPActionCarriesConnectedAccountAndRemoteFolder(t *testing.T) {
+	action := imapActionForMessage(map[string]any{
+		"accountId": "acct-gmail", "messageId": "<m@example.test>", "imapUid": float64(42),
+		"imapFolder": "[Gmail]/All Mail", "folder": "archive",
+	})
+	if action.AccountID != "acct-gmail" || action.MessageID != "<m@example.test>" ||
+		action.SourceUID != 42 || action.SourceFolder != "[Gmail]/All Mail" ||
+		action.SourceIMAPFolder != "[Gmail]/All Mail" {
+		t.Fatalf("unexpected action: %#v", action)
+	}
+}

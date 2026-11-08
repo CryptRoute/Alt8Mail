@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/textproto"
 	"time"
 
@@ -26,6 +27,20 @@ type imapAction struct {
 	SetFlagged       *bool
 	MarkDeleted      bool
 	ClearDeleted     bool
+}
+
+func imapActionForMessage(message map[string]any) imapAction {
+	source := stateString(message, "imapFolder")
+	if source == "" {
+		source = stateString(message, "folder")
+	}
+	return imapAction{
+		AccountID:        stateString(message, "accountId"),
+		MessageID:        stateString(message, "messageId"),
+		SourceUID:        stateInt(message, "imapUid"),
+		SourceFolder:     source,
+		SourceIMAPFolder: stateString(message, "imapFolder"),
+	}
 }
 
 func imapFolderFor(appFolder string) string {
@@ -137,6 +152,9 @@ func (s *Server) applyIMAPActions(user userRecord, actions []imapAction) error {
 
 func (s *Server) applyIMAPActionsForAccount(ctx context.Context, conn *imapclient.Client, user userRecord, account mailAccountRecord, state map[string]any, actions []imapAction) {
 	for _, action := range actions {
+		if account.Kind == mailAccountKindExternal && action.SetSeen != nil {
+			s.propagateExternalSeen(ctx, conn, user, account, action)
+		}
 		source := action.SourceIMAPFolder
 		if source == "" {
 			source = s.actionIMAPFolder(ctx, account, state, action.SourceFolder)
@@ -210,6 +228,78 @@ func (s *Server) applyIMAPActionsForAccount(ctx context.Context, conn *imapclien
 				_ = conn.Expunge(nil)
 			}
 		}
+	}
+}
+
+// propagateExternalSeen applies a read/unread flag to every cached copy of the
+// message for a connected account. Gmail exposes one message through several
+// label folders; setting \Seen on only the copy that happened to be open can
+// leave the provider's Inbox copy unread, and the next flag reconcile then
+// restores the local row to unread.
+func (s *Server) propagateExternalSeen(ctx context.Context, conn *imapclient.Client, user userRecord, account mailAccountRecord, action imapAction) {
+	if action.SetSeen == nil || action.MessageID == "" {
+		return
+	}
+	type copyRef struct {
+		folder string
+		uid    uint32
+	}
+	copies := []copyRef{}
+	if s.store != nil && s.store.DB != nil {
+		rows, err := s.store.DB.Query(ctx, `
+			SELECT imap_folder, uid
+			FROM public.mail_messages
+			WHERE user_id=$1 AND account_id=$2 AND message_id=$3 AND uid > 0
+			  AND folder NOT IN ('sent', 'drafts')
+			ORDER BY imap_folder
+		`, user.ID, account.ID, action.MessageID)
+		if err == nil {
+			for rows.Next() {
+				var folder string
+				var uid int64
+				if rows.Scan(&folder, &uid) == nil && folder != "" && uid > 0 {
+					copies = append(copies, copyRef{folder: folder, uid: uint32(uid)})
+				}
+			}
+			rows.Close()
+		}
+	}
+	if len(copies) == 0 && action.SourceUID > 0 && action.SourceFolder != "" {
+		copies = append(copies, copyRef{folder: action.SourceFolder, uid: uint32(action.SourceUID)})
+	}
+	seen := *action.SetSeen
+	add := []string{}
+	remove := []string{}
+	if seen {
+		add = append(add, imap.SeenFlag)
+	} else {
+		remove = append(remove, imap.SeenFlag)
+	}
+	applied := 0
+	seenFolders := map[string]bool{}
+	for _, copy := range copies {
+		key := fmt.Sprintf("%s\x00%d", copy.folder, copy.uid)
+		if seenFolders[key] {
+			continue
+		}
+		seenFolders[key] = true
+		if err := setIMAPFlags(conn, copy.folder, copy.uid, add, remove); err != nil {
+			s.logger.Warn("connected IMAP copy flag update failed",
+				"account", account.Email, "folder", copy.folder, "uid", copy.uid, "err", err)
+			continue
+		}
+		applied++
+	}
+	if applied == 0 {
+		return
+	}
+	_, err := s.store.DB.Exec(ctx, `
+		UPDATE public.mail_messages SET unread=$4, updated_at=now()
+		WHERE user_id=$1 AND account_id=$2 AND message_id=$3
+		  AND folder NOT IN ('sent', 'drafts')
+	`, user.ID, account.ID, action.MessageID, !seen)
+	if err != nil {
+		s.logger.Warn("connected IMAP local flag update failed", "account", account.Email, "message", action.MessageID, "err", err)
 	}
 }
 

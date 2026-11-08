@@ -606,7 +606,8 @@ func (s *Server) reactionDispatchWorker(ctx context.Context) {
 func (s *Server) dispatchDueReactions(ctx context.Context) {
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT r.id, r.user_id::text, r.owner_user_id::text, r.message_id, r.emoji,
-		       m.from_email::text, m.from_name, m.subject, m.message_id, t.name
+		       m.from_email::text, m.from_name, m.subject, m.message_id,
+		       m.body_text, m.body_html, m.sent_at, t.name
 		FROM public.mail_reactions r
 		JOIN public.mail_messages m ON m.id=r.message_id AND m.user_id=r.owner_user_id
 		JOIN public.tenants t ON t.id=r.tenant_id
@@ -617,13 +618,17 @@ func (s *Server) dispatchDueReactions(ctx context.Context) {
 		return
 	}
 	type dueReaction struct {
-		id, userID, ownerID, messageID, emoji, toEmail, toName, subject, rfcMessageID, tenantName string
+		id, userID, ownerID, messageID, emoji, toEmail, toName, subject, rfcMessageID string
+		bodyText, bodyHTML                                                            string
+		sentAt                                                                        time.Time
+		tenantName                                                                    string
 	}
 	due := []dueReaction{}
 	for rows.Next() {
 		var item dueReaction
 		if rows.Scan(&item.id, &item.userID, &item.ownerID, &item.messageID, &item.emoji,
-			&item.toEmail, &item.toName, &item.subject, &item.rfcMessageID, &item.tenantName) == nil {
+			&item.toEmail, &item.toName, &item.subject, &item.rfcMessageID,
+			&item.bodyText, &item.bodyHTML, &item.sentAt, &item.tenantName) == nil {
 			due = append(due, item)
 		}
 	}
@@ -651,11 +656,34 @@ func (s *Server) dispatchDueReactions(ctx context.Context) {
 			tenantName = "your organization"
 		}
 		attribution := reactorName + " from " + tenantName + " reacted via Alt8Mail"
-		bodyText := item.emoji + "\n\n" + attribution
+		originalSender := firstNonEmpty(strings.TrimSpace(item.toName), item.toEmail)
+		originalWhen := item.sentAt.UTC().Format("Mon, Jan 2, 2006 at 3:04 PM MST")
+		quoteLead := fmt.Sprintf("On %s, %s wrote:", originalWhen, originalSender)
+		originalText := truncate(strings.TrimSpace(item.bodyText), 12000)
+		if originalText == "" {
+			originalText = truncate(htmlToPlainText(item.bodyHTML), 12000)
+		}
+		originalHTML := truncate(strings.TrimSpace(item.bodyHTML), 60000)
+		if originalHTML == "" && originalText != "" {
+			originalHTML = "<p>" + strings.ReplaceAll(html.EscapeString(originalText), "\n", "<br>") + "</p>"
+		}
+		quotedText := originalText
+		if quotedText != "" {
+			lines := strings.Split(quotedText, "\n")
+			for index, line := range lines {
+				lines[index] = "> " + line
+			}
+			quotedText = strings.Join(lines, "\n")
+		}
+		bodyText := item.emoji + "\n\n" + attribution + "\n\n" + quoteLead + "\n" + quotedText
 		bodyHTML := `<div style="font-family:Arial,Helvetica,sans-serif;text-align:center;padding:28px 16px;color:#334155">` +
 			`<div style="font-size:48px;line-height:56px" aria-hidden="true">` + html.EscapeString(item.emoji) + `</div>` +
 			`<p style="margin:14px 0 0;font-size:13px;line-height:20px;color:#64748b">` + html.EscapeString(attribution) + `</p>` +
-			`</div>`
+			`<div class="compose-quote" data-compose-quote="reply" style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;text-align:left">` +
+			`<div class="compose-quote-inner">` +
+			`<p class="compose-quote-lead" style="margin:0 0 10px;font-size:12px;line-height:18px;color:#64748b;font-style:italic">` + html.EscapeString(quoteLead) + `</p>` +
+			`<blockquote class="email-quote" style="margin:0;padding:0 0 0 12px;border-left:3px solid #cbd5e1;color:#475569">` + originalHTML + `</blockquote>` +
+			`</div></div></div>`
 		outbound := map[string]any{
 			"from": map[string]any{"name": reactor.Name, "email": reactor.Email},
 			"to":   []any{map[string]any{"name": item.toName, "email": item.toEmail}},

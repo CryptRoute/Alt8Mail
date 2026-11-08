@@ -17,7 +17,7 @@ This template deliberately keeps every integration point small and named. The
 UI calls the same API whether the data comes from the demo JSON store or from
 your mail stack. This document maps the demo implementation to the real
 components referenced in the feature brief (`internal/store`, `internal/dkim`,
-postfwd, Dovecot, Sieve, auditlog, directory, CalDAV).
+the built-in Postfix policy daemon, Dovecot, Sieve, auditlog, directory, CalDAV).
 
 ```text
 Browser (Aurora UI) ──JSON──> server/app.mjs ──adapters──> workspace infrastructure
@@ -25,7 +25,7 @@ Browser (Aurora UI) ──JSON──> server/app.mjs ──adapters──> works
                                ├── internal/store        identities, aliases, prefs
                                ├── identity provider     WebAuthn / TOTP / recovery
                                ├── Dovecot               mailboxes, quota, drafts
-                               ├── postfwd / MTA         send + scheduled sends + caps
+                               ├── policy daemon / MTA  send + scheduled sends + caps
                                ├── managesieve           rules + vacation
                                ├── internal/dkim + DNS   SPF/DKIM/DMARC trust
                                ├── object storage        attachments + Files shelf
@@ -292,7 +292,7 @@ writes audit events. `cancel` restores a draft from the queue snapshot.
 5. **Alias envelope:** use the selected alias as envelope/From and enforce
    permission server-side. Spoofing a From must not be possible with a custom
    request.
-6. **Outbound caps:** check the same counter postfwd enforces, before enqueue.
+6. **Outbound caps:** check the same counter the Postfix policy daemon enforces, before enqueue.
    Count queued messages too, as the demo does. Expose usage through
    `/api/outbound` and let the status bar/security card poll it. Decide on the
    reset semantics (rolling vs calendar) and make the UI text match.
@@ -629,7 +629,7 @@ same-origin popout route (`?thread=…&popout=1`).
 - Useful deterministic options for local tests: `createApp({ dataFile, holdMs,
   undoTtlMs, outboundLimit, allowReset, demoTwoFactorCode })`.
 - Add tests for your real integration: WebAuthn signature/counter validation,
-  IMAP thread mapping, alias ACLs, Sieve capability negotiation, postfwd counter
+  IMAP thread mapping, alias ACLs, Sieve capability negotiation, policy-daemon counter
   agreement, Dovecot quota units, provider OAuth refresh/revocation, DNS
   timeouts and audit event schema.
 
@@ -641,7 +641,7 @@ same-origin popout route (`?thread=…&popout=1`).
    flag.
 2. Back the mailbox read path with Dovecot/IMAP + thread mapping.
 3. Move search to Bleve/FTS5 and keep the operator parser/index contract.
-4. Wire drafts and send queue to your MTA + Sent append; verify postfwd caps.
+4. Wire drafts and send queue to your MTA + Sent append; verify policy-daemon and per-mailbox caps.
 5. Wire Sieve/managesieve apply + capability checks.
 6. Wire DKIM/DMARC/DNS into the trust panel and route the existing Report
    action into the security case queue.

@@ -82,7 +82,7 @@ export async function renderDomains(ctx) {
           <td class="num">${ui.num(domain.mailboxes)}</td>
           <td class="num">${ui.num(domain.aliases)}</td>
           <td>${domain.dkimReady ? ui.badge('Ready', 'good', 'check-circle') : ui.badge('Missing', 'warning', 'alert')}</td>
-          <td>${domain.capsEnabled ? `<span class="mono">${ui.num(domain.capHour)}h / ${ui.num(domain.capDay)}d / ${ui.num(domain.capMonth)}m</span>` : ui.badge('Not set', 'neutral')}</td>
+          <td>${domain.capsEnabled ? `<span class="mono">${ui.num(domain.capHour)}h / ${ui.num(domain.capDay)}d / ${ui.num(domain.capMonth)}m</span>` : `<span class="mono">Safety ${ui.num(domain.userDailyCap ?? 200)}/day</span>`}</td>
           <td>${ui.badge(String(domain.dmarcPolicy || 'none').toUpperCase(), domain.dmarcPolicy === 'reject' ? 'good' : domain.dmarcPolicy === 'quarantine' ? 'warning' : 'neutral')}</td>
           <td class="actions"><a class="icon-btn" href="#/domains/${esc(domain.id)}" title="Open domain" aria-label="Open ${esc(domain.domain)}">${ui.icon('chevron-right', 16)}</a></td>
         </tr>`).join('')}</tbody></table></div>` : ui.emptyState('No domains yet', 'Add the first mail domain to begin issuing mailboxes and DNS plans.', canManage ? `<button class="btn btn-primary" type="button" id="domain-create-empty">${ui.icon('plus', 14)} Add domain</button>` : '', 'globe');
@@ -269,15 +269,16 @@ export async function renderDomainDetail(ctx) {
       <section data-domain-panel="sending" hidden>
         <div class="grid grid-main">
           <section class="card">
-            <header class="card-head"><div><h3>Rolling outgoing caps</h3><p>Enforced by the Postfix policy daemon inside PostgreSQL</p></div>${caps.enabled ? ui.badge('Enabled', 'good', 'shield-check') : ui.badge('Disabled', 'neutral')}</header>
+            <header class="card-head"><div><h3>Rolling outgoing caps</h3><p>Enforced by the Postfix policy daemon inside PostgreSQL · per-mailbox safety cap ${ui.num(caps.userDailyCap ?? 200)}/day</p></div>${caps.enabled ? ui.badge('Enabled', 'good', 'shield-check') : ui.badge('Safety cap only', 'neutral')}</header>
             <div class="card-body">
               <form id="caps-form" class="form-grid">
                 ${ui.switchField({ label: 'Enforce rolling caps', name: 'capsEnabled', checked: !!caps.enabled, help: 'Caps apply to authenticated and locally submitted mail from this domain, never to inbound external mail.' })}
                 <div></div>
                 ${ui.field({ label: 'Hourly cap', name: 'capHour', type: 'number', value: caps.hour || 0, min: 0, help: 'Maximum accepted recipients per rolling hour. 0 means no hourly limit.' })}
                 ${ui.field({ label: 'Burst allowance', name: 'burst', type: 'number', value: caps.burst || 0, min: 0, help: 'Extra recipients added to the hourly cap for short spikes.' })}
-                ${ui.field({ label: 'Daily cap', name: 'capDay', type: 'number', value: caps.day || 0, min: 0, help: 'Maximum accepted recipients in 24 rolling hours. 0 disables.' })}
+                ${ui.field({ label: 'Daily cap', name: 'capDay', type: 'number', value: caps.day || 0, min: 0, help: 'Maximum accepted recipients in 24 rolling hours. 0 disables the domain cap.' })}
                 ${ui.field({ label: 'Monthly cap', name: 'capMonth', type: 'number', value: caps.month || 0, min: 0, help: 'Maximum accepted recipients in 30 rolling days. 0 disables.' })}
+                ${ui.field({ label: 'Per-mailbox daily cap', name: 'userDailyCap', type: 'number', value: caps.userDailyCap ?? 200, min: 0, help: 'Maximum accepted messages per authenticated mailbox in 24 hours. This safety cap applies even when the domain rolling caps are off. Default 200; 0 disables it.' })}
                 <div class="span-2">${ui.field({ label: 'DMARC policy', name: 'dmarcPolicy', type: 'select', value: detail.dmarcPolicy || 'none', options: [
                   { value: 'none', label: 'none — monitor only' },
                   { value: 'quarantine', label: 'quarantine — send suspicious mail to spam' },
@@ -419,6 +420,7 @@ export async function renderDomainDetail(ctx) {
           capHour: Number(values.capHour || 0),
           capDay: Number(values.capDay || 0),
           capMonth: Number(values.capMonth || 0),
+          userDailyCap: Number(values.userDailyCap ?? 200),
           burst: Number(values.burst || 0),
           dmarcPolicy: values.dmarcPolicy,
           notes: values.notes || '',
