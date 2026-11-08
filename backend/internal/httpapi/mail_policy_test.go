@@ -70,6 +70,19 @@ func TestUsersReleaseQuarantineByDefault(t *testing.T) {
 	}
 }
 
+func TestConnectedAccountsDefaultOn(t *testing.T) {
+	if !defaultTenantPolicy().Mail.ExternalAccounts {
+		t.Fatal("connected accounts should be available by default")
+	}
+	if !tenantPolicyFromSettings(nil).Mail.ExternalAccounts {
+		t.Fatal("a tenant without a stored policy should allow connected accounts")
+	}
+	disabled := tenantPolicyFromSettings(mustJSON(map[string]any{"mail": map[string]any{"externalAccounts": false}}))
+	if disabled.Mail.ExternalAccounts {
+		t.Fatal("a tenant must be able to disable connected accounts")
+	}
+}
+
 func TestPasswordChangeRequiredByExpiryAndFlag(t *testing.T) {
 	future := time.Now().Add(time.Hour)
 	past := time.Now().Add(-time.Hour)

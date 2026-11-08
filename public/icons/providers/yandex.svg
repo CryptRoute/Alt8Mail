@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Yandex Mail">
+  <rect width="48" height="48" rx="12" fill="#fff1f1"/>
+  <circle cx="24" cy="24" r="16" fill="#fc3f1d"/>
+  <path d="M25.6 34h-4V26l-6-12h4.4l4 8.4 4-8.4h4.3l-6.7 12Z" fill="#fff"/>
+</svg>

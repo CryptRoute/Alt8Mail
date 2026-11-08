@@ -10,14 +10,14 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.31.0">
-<link rel="stylesheet" href="/features.css?v=0.31.0">
-<link rel="stylesheet" href="/workspace.css?v=0.31.0">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.31.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.31.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.31.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.31.0">
-<link rel="stylesheet" href="/selects.css?v=0.31.0">
+<link rel="stylesheet" href="/styles.css?v=0.32.0">
+<link rel="stylesheet" href="/features.css?v=0.32.0">
+<link rel="stylesheet" href="/workspace.css?v=0.32.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.32.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.32.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.32.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.32.0">
+<link rel="stylesheet" href="/selects.css?v=0.32.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -105,7 +105,10 @@
 <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></symbol>
 <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
 <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M8.2 14.8A6 6 0 1 1 15.8 14.8c-.8.6-1.3 1.5-1.5 2.2h-4.6c-.2-.7-.7-1.6-1.5-2.2Z"/></symbol>
-    <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m8.2 12.2 2.6 2.6 5.2-5.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+<symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3.1 3.8M6.2 7.1A17 17 0 0 0 2.5 12S6 18.5 12 18.5a9.6 9.6 0 0 0 3.5-.7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+<symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M6 8h12v2a6 6 0 0 1-12 0ZM12 16v5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m8.2 12.2 2.6 2.6 5.2-5.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-curve-down-left" viewBox="0 0 24 24"><path d="M20 5v4.5a6.5 6.5 0 0 1-6.5 6.5H5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="m9 12-4 4 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-warning-triangle" viewBox="0 0 24 24"><path d="M12 3.5 22 21H2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 9v5.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="17.8" r="1" fill="currentColor" stroke="none"/></symbol>
   </defs>
@@ -493,6 +496,12 @@
               <select id="accountSwitcher" aria-label="Mail account"></select>
               <button class="icon-btn account-add-btn" id="accountAddBtn" type="button" aria-label="Add connected mail account" title="Add connected mail account" data-i18n-aria-label="accounts.add" data-i18n-title="accounts.add" hidden>
                 <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+              </button>
+            </div>
+            <div class="account-connect-row" id="accountConnectRow" hidden>
+              <button class="account-connect-btn" id="accountConnectBtn" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+                <span data-i18n="accounts.add">Add mail account</span>
               </button>
             </div>
           </div>
@@ -947,6 +956,10 @@
               </button>
               <button class="settings-nav-item" data-settings-tab="security" type="button">
                 <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span>Security &amp; privacy</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
+              <button class="settings-nav-item" data-settings-tab="accounts" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span data-i18n="accounts.connected">Connected accounts</span>
                 <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
               </button>
               <button class="settings-nav-item" data-settings-tab="account" type="button">
@@ -1768,17 +1781,6 @@
 
                   <div class="settings-block">
                     <div class="settings-block-head">
-                      <h3 data-i18n="accounts.connected">Connected accounts</h3>
-                      <p data-i18n="accounts.connectedHint">Read your other mailboxes and send through their own IMAP and SMTP servers.</p>
-                    </div>
-                    <div class="connected-account-list" id="connectedAccountsList"></div>
-                    <div class="settings-actions">
-                      <button class="btn-secondary" id="connectedAccountAdd" type="button" data-i18n="accounts.add">Add mail account</button>
-                    </div>
-                  </div>
-
-                  <div class="settings-block">
-                    <div class="settings-block-head">
                       <h3>Send-as identities</h3>
                       <p>Aliases you can choose in the From field. Managed in the internal directory store.</p>
                     </div>
@@ -1793,6 +1795,30 @@
                     <div class="settings-actions">
                       <button class="btn-secondary" id="signOutOtherSessions" type="button">Sign out other sessions</button>
                       <button class="btn-secondary" id="signOutSettings" type="button">Sign out of Alt8Mail</button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-panel" data-settings-panel="accounts" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3 data-i18n="accounts.connected">Connected accounts</h3>
+                      <p data-i18n="accounts.connectedHint">Read your other mailboxes and send through their own IMAP and SMTP servers.</p>
+                    </div>
+                    <div class="connected-account-list" id="connectedAccountsList"></div>
+                    <div class="settings-actions">
+                      <button class="btn-primary" id="connectedAccountAdd" type="button" data-i18n="accounts.add">Add mail account</button>
+                    </div>
+                  </div>
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>How connected accounts work</h3>
+                      <p>Connect Gmail, Microsoft 365 or another IMAP mailbox. Mail is read directly from the provider and sent through its SMTP server.</p>
+                    </div>
+                    <div class="pref-list">
+                      <div class="pref-row"><div class="pref-copy"><strong>Gmail</strong><span>Sign in with Google, or use a Google app password.</span></div><span class="policy-chip">OAuth</span></div>
+                      <div class="pref-row"><div class="pref-copy"><strong>Microsoft 365 / Outlook</strong><span>Sign in with Microsoft. The tenant must allow SMTP AUTH for sending.</span></div><span class="policy-chip">OAuth</span></div>
+                      <div class="pref-row"><div class="pref-copy"><strong>Other providers</strong><span>Use the IMAP and SMTP settings supplied by your mail provider.</span></div><span class="policy-chip">IMAP</span></div>
                     </div>
                   </div>
                 </section>
@@ -3219,6 +3245,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.31.0"></script>
+<script type="module" src="/app.js?v=0.32.0"></script>
 </body>
 </html>

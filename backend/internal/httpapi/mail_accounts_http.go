@@ -59,8 +59,24 @@ func normalizeAccountProvider(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "gmail":
 		return "gmail"
-	case "microsoft", "outlook", "microsoft365", "office365":
+	case "microsoft", "outlook", "hotmail", "live", "microsoft365", "office365":
 		return "microsoft"
+	case "yahoo", "yahoomail":
+		return "yahoo"
+	case "icloud", "apple":
+		return "icloud"
+	case "aol":
+		return "aol"
+	case "zoho":
+		return "zoho"
+	case "gmx":
+		return "gmx"
+	case "yandex":
+		return "yandex"
+	case "fastmail":
+		return "fastmail"
+	case "mailcom", "mail.com":
+		return "mailcom"
 	case "imap", "":
 		return "imap"
 	default:
@@ -74,6 +90,22 @@ func providerMailDefaults(provider string) (imapHost string, imapPort int, smtpH
 		return "imap.gmail.com", 993, "smtp.gmail.com", 587
 	case "microsoft":
 		return "outlook.office365.com", 993, "smtp.office365.com", 587
+	case "yahoo":
+		return "imap.mail.yahoo.com", 993, "smtp.mail.yahoo.com", 465
+	case "icloud":
+		return "imap.mail.me.com", 993, "smtp.mail.me.com", 587
+	case "aol":
+		return "imap.aol.com", 993, "smtp.aol.com", 465
+	case "zoho":
+		return "imap.zoho.com", 993, "smtp.zoho.com", 465
+	case "gmx":
+		return "imap.gmx.com", 993, "smtp.gmx.com", 587
+	case "yandex":
+		return "imap.yandex.com", 993, "smtp.yandex.com", 465
+	case "fastmail":
+		return "imap.fastmail.com", 993, "smtp.fastmail.com", 465
+	case "mailcom":
+		return "imap.mail.com", 993, "smtp.mail.com", 465
 	default:
 		return "", 993, "", 587
 	}

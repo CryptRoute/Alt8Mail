@@ -50,6 +50,37 @@ func TestMailConnectionAddressSafety(t *testing.T) {
 	}
 }
 
+func TestProviderMailPresets(t *testing.T) {
+	cases := []struct {
+		input, provider, imapHost, smtpHost string
+		smtpPort                            int
+	}{
+		{"hotmail", "microsoft", "outlook.office365.com", "smtp.office365.com", 587},
+		{"Outlook", "microsoft", "outlook.office365.com", "smtp.office365.com", 587},
+		{"yahoo", "yahoo", "imap.mail.yahoo.com", "smtp.mail.yahoo.com", 465},
+		{"icloud", "icloud", "imap.mail.me.com", "smtp.mail.me.com", 587},
+		{"aol", "aol", "imap.aol.com", "smtp.aol.com", 465},
+		{"zoho", "zoho", "imap.zoho.com", "smtp.zoho.com", 465},
+		{"gmx", "gmx", "imap.gmx.com", "smtp.gmx.com", 587},
+		{"yandex", "yandex", "imap.yandex.com", "smtp.yandex.com", 465},
+		{"fastmail", "fastmail", "imap.fastmail.com", "smtp.fastmail.com", 465},
+		{"mail.com", "mailcom", "imap.mail.com", "smtp.mail.com", 465},
+	}
+	for _, testCase := range cases {
+		provider := normalizeAccountProvider(testCase.input)
+		if provider != testCase.provider {
+			t.Fatalf("normalizeAccountProvider(%q) = %q, want %q", testCase.input, provider, testCase.provider)
+		}
+		imapHost, _, smtpHost, smtpPort := providerMailDefaults(provider)
+		if imapHost != testCase.imapHost || smtpHost != testCase.smtpHost || smtpPort != testCase.smtpPort {
+			t.Fatalf("%s defaults = %q %q %d", provider, imapHost, smtpHost, smtpPort)
+		}
+	}
+	if normalizeAccountProvider("proton") != "" {
+		t.Fatal("unsupported provider must be rejected")
+	}
+}
+
 func TestExternalAccountRecordValidation(t *testing.T) {
 	server := &Server{}
 	user := userRecord{ID: "user-1", TenantID: "tenant-1", Email: "owner@example.test", Name: "Owner"}

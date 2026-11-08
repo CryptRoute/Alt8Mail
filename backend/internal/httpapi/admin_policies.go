@@ -230,7 +230,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 		},
 		Mail: adminMailPolicy{
 			ExternalForwarding: false, AutoForwarding: true, IMAPAccess: true, POPAccess: false,
-			SMTPAccess: true, ExternalAccounts: false, MaxAttachmentMB: 25,
+			SMTPAccess: true, ExternalAccounts: true, MaxAttachmentMB: 25,
 			BlockedExtensions:         []string{"exe", "js", "vbs", "bat", "cmd", "scr", "ps1", "jar", "msi"},
 			AllowedExternalRecipients: []string{}, SpamSensitivity: "medium",
 			// Users release their own Junk by default. Organizations that need

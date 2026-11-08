@@ -6889,10 +6889,6 @@ function defaultComposeAccountId() {
   return state.activeAccountId === "all" ? (nativeMailAccount()?.id || "") : state.activeAccountId;
 }
 
-function connectedAccountInitials(account) {
-  return initialsFrom(account?.displayName || account?.email || "");
-}
-
 function renderAccountSwitcher() {
   const row = document.getElementById("accountSwitcherRow");
   const select = document.getElementById("accountSwitcher");
@@ -6902,6 +6898,8 @@ function renderAccountSwitcher() {
   const hasExternal = accounts.some((account) => !account.isNative);
   const visible = !state.delegatedMode && (hasExternal || externalAccountsEnabled());
   row.hidden = !visible;
+  const connectRow = document.getElementById("accountConnectRow");
+  if (connectRow) connectRow.hidden = state.delegatedMode || !externalAccountsEnabled() || hasExternal;
   if (!visible) return;
   const unified = unifiedAccountsAvailable()
     ? `<option value="all"${state.activeAccountId === "all" ? " selected" : ""}>${esc(t("accounts.all"))} · ${accounts.length}</option>`
@@ -6931,13 +6929,15 @@ function renderConnectedAccounts() {
   if (add) add.hidden = !externalAccountsEnabled() || state.delegatedMode;
   const connected = (state.accounts || []).filter((account) => !account.isNative);
   if (!connected.length) {
-    holder.innerHTML = `<div class="connected-account-empty">${externalAccountsEnabled() ? "No connected accounts yet." : "Connected accounts are disabled by your organization."}</div>`;
+    holder.innerHTML = externalAccountsEnabled()
+      ? `<div class="connected-account-empty"><strong>No connected accounts yet.</strong><span>Add Gmail, Microsoft 365 or another IMAP mailbox to read it here and send from its own address.</span></div>`
+      : `<div class="connected-account-empty"><strong>Connected accounts are disabled by your organization.</strong><span>An administrator can enable them under Mail access → Connected accounts.</span></div>`;
     return;
   }
   holder.innerHTML = connected.map((account) => {
     const status = connectedAccountStatus(account);
     return `<div class="connected-account-row" data-connected-account="${esc(account.id)}">
-      <span class="avatar avatar-sm" style="--av:${esc(account.color || "#34557a")}" aria-hidden="true">${esc(connectedAccountInitials(account))}</span>
+      <span class="connected-account-logo"><img src="${mailProviderLogo(account.provider)}" alt="" loading="lazy"></span>
       <div class="connected-account-copy">
         <strong>${esc(account.displayName || account.email)}</strong>
         <span>${esc(account.email)} · <span class="connected-account-status ${status.className}">${esc(status.label)}</span></span>
@@ -7043,6 +7043,96 @@ async function connectMailAccountWithOAuth(provider, accountId = "") {
   }
 }
 
+const MAIL_ACCOUNT_PROVIDERS = [
+  {
+    id: "gmail", name: "Gmail", hint: "Google Workspace or personal", logo: "gmail", oauth: "gmail",
+    imapHost: "imap.gmail.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.gmail.com", smtpPort: 587, smtpTls: "starttls",
+    helpUrl: "https://support.google.com/accounts/answer/185833", helpLabel: "Create a Google app password"
+  },
+  {
+    id: "microsoft", name: "Outlook", hint: "Microsoft 365, Live or Outlook.com", logo: "outlook", oauth: "microsoft",
+    imapHost: "outlook.office365.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.office365.com", smtpPort: 587, smtpTls: "starttls"
+  },
+  {
+    id: "hotmail", name: "Hotmail", hint: "Hotmail, Live or Outlook.com", logo: "hotmail", oauth: "microsoft",
+    imapHost: "outlook.office365.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.office365.com", smtpPort: 587, smtpTls: "starttls"
+  },
+  {
+    id: "yahoo", name: "Yahoo Mail", hint: "Yahoo Mail or Rocketmail", logo: "yahoo",
+    imapHost: "imap.mail.yahoo.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.mail.yahoo.com", smtpPort: 465, smtpTls: "tls",
+    helpUrl: "https://help.yahoo.com/kb/SLN15241.html", helpLabel: "Create a Yahoo app password"
+  },
+  {
+    id: "icloud", name: "iCloud Mail", hint: "Apple iCloud or Me.com", logo: "icloud",
+    imapHost: "imap.mail.me.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.mail.me.com", smtpPort: 587, smtpTls: "starttls",
+    helpUrl: "https://support.apple.com/102654", helpLabel: "Create an Apple app-specific password"
+  },
+  {
+    id: "aol", name: "AOL Mail", hint: "AOL and AIM addresses", logo: "aol",
+    imapHost: "imap.aol.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.aol.com", smtpPort: 465, smtpTls: "tls",
+    helpUrl: "https://help.aol.com/articles/create-and-manage-app-passwords", helpLabel: "Create an AOL app password"
+  },
+  {
+    id: "zoho", name: "Zoho Mail", hint: "Zoho Mail or Zoho Workplace", logo: "zoho",
+    imapHost: "imap.zoho.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.zoho.com", smtpPort: 465, smtpTls: "tls",
+    helpUrl: "https://www.zoho.com/mail/help/imap-access.html", helpLabel: "Enable Zoho IMAP access"
+  },
+  {
+    id: "gmx", name: "GMX", hint: "GMX Mail and mail.com addresses", logo: "gmx",
+    imapHost: "imap.gmx.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.gmx.com", smtpPort: 587, smtpTls: "starttls",
+    helpUrl: "https://support.gmx.com/pop-imap/imap/index.html", helpLabel: "Enable GMX IMAP"
+  },
+  {
+    id: "yandex", name: "Yandex Mail", hint: "Yandex Mail", logo: "yandex",
+    imapHost: "imap.yandex.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.yandex.com", smtpPort: 465, smtpTls: "tls",
+    helpUrl: "https://yandex.com/support/mail/mail-clients/others.html", helpLabel: "Enable Yandex IMAP"
+  },
+  {
+    id: "fastmail", name: "Fastmail", hint: "Fastmail and family domains", logo: "fastmail",
+    imapHost: "imap.fastmail.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.fastmail.com", smtpPort: 465, smtpTls: "tls",
+    helpUrl: "https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords", helpLabel: "Create a Fastmail app password"
+  },
+  {
+    id: "mailcom", name: "Mail.com", hint: "Mail.com and its domains", logo: "mailcom",
+    imapHost: "imap.mail.com", imapPort: 993, imapTls: "tls",
+    smtpHost: "smtp.mail.com", smtpPort: 465, smtpTls: "tls",
+    helpUrl: "https://support.mail.com/pop-imap/imap/index.html", helpLabel: "Enable Mail.com IMAP"
+  },
+  {
+    id: "imap", name: "Other IMAP / SMTP", hint: "Any standards-based mail server", logo: "other", manual: true,
+    imapHost: "", imapPort: 993, imapTls: "tls", smtpHost: "", smtpPort: 587, smtpTls: "starttls"
+  }
+];
+
+const MAIL_PROVIDER_ASSET_VERSION = "0.32.0";
+
+function normalizeMailProviderId(value) {
+  const provider = String(value || "").toLowerCase().trim();
+  if (["outlook", "live", "microsoft365", "office365"].includes(provider)) return "microsoft";
+  if (provider === "mail.com") return "mailcom";
+  return provider;
+}
+
+function mailProviderMeta(value) {
+  const provider = normalizeMailProviderId(value);
+  return MAIL_ACCOUNT_PROVIDERS.find((item) => item.id === provider)
+    || MAIL_ACCOUNT_PROVIDERS[MAIL_ACCOUNT_PROVIDERS.length - 1];
+}
+
+function mailProviderLogo(value) {
+  return `/icons/providers/${mailProviderMeta(value).logo}.svg?v=${MAIL_PROVIDER_ASSET_VERSION}`;
+}
+
 function openAddMailAccountDialog(account = null) {
   if (state.delegatedMode) return;
   if (!account && !externalAccountsEnabled()) {
@@ -7054,162 +7144,388 @@ function openAddMailAccountDialog(account = null) {
   const overlay = document.createElement("div");
   overlay.className = "overlay";
   overlay.id = "accountDialogOverlay";
-  overlay.innerHTML = `<div class="dialog account-dialog" role="dialog" aria-modal="true" aria-labelledby="accountDialogTitle">
-    <div class="dialog-head"><div><h2 id="accountDialogTitle">${reauth ? "Reconnect mail account" : "Add mail account"}</h2><p>${reauth ? (account.oauth ? "Sign in again to refresh this account's authorization." : "Enter the current password or app password for this account.") : "Alt8Mail connects directly to the mail server over TLS."}</p></div><button class="icon-btn" type="button" data-account-dialog-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
-    <form id="accountDialogForm" class="form-grid">
-      ${reauth ? `<div class="span-2"><strong>${esc(account.displayName || account.email)}</strong><p class="form-note">${esc(account.email)}</p></div>` : `
-      <label class="form-field"><span>${esc(t("accounts.provider"))}</span><select id="accountProvider">
-        <option value="imap">Other IMAP / SMTP</option>
-        <option value="gmail-oauth">${esc(t("accounts.gmailOAuth"))}</option>
-        <option value="microsoft">${esc(t("accounts.microsoftOAuth"))}</option>
-        <option value="gmail">${esc(t("accounts.gmailAppPassword"))}</option>
-      </select></label>
-      <label class="form-field"><span>Email address</span><input id="accountEmailInput" type="email" autocomplete="email" required placeholder="you@example.com"></label>
-      <label class="form-field"><span>Display name</span><input id="accountDisplayName" type="text" maxlength="120" placeholder="Optional"></label>
-      <label class="form-field"><span>Username</span><input id="accountUsername" type="text" autocomplete="username" placeholder="Defaults to the email address"></label>
-      <label class="form-field"><span>Password or app password</span><input id="accountPassword" type="password" autocomplete="new-password" required></label>
-      <div class="account-server-fields">
-        <label class="form-field"><span>IMAP host</span><input id="accountImapHost" type="text" required placeholder="imap.example.com"></label>
-        <label class="form-field"><span>IMAP port</span><input id="accountImapPort" type="number" min="1" max="65535" value="993" required></label>
-        <label class="form-field"><span>IMAP security</span><select id="accountImapTls"><option value="tls">TLS</option><option value="starttls">STARTTLS</option></select></label>
-        <label class="form-field"><span>SMTP host</span><input id="accountSmtpHost" type="text" required placeholder="smtp.example.com"></label>
-        <label class="form-field"><span>SMTP port</span><input id="accountSmtpPort" type="number" min="1" max="65535" value="587" required></label>
-        <label class="form-field"><span>SMTP security</span><select id="accountSmtpTls"><option value="starttls">STARTTLS</option><option value="tls">TLS</option></select></label>
-      </div>`}
-      ${reauth ? `<label class="form-field span-2"${account.oauth ? " hidden" : ""}><span>New password or app password</span><input id="accountPassword" type="password" autocomplete="new-password"${account.oauth ? "" : " required"}></label>${account.oauth ? `<p class="form-note span-2">Alt8Mail will open ${account.provider === "microsoft" ? "Microsoft" : "Google"} so you can authorize this account again. The new tokens replace the expired ones.</p>` : ""}` : ""}
-      <p class="account-dialog-status span-2" id="accountDialogStatus" role="status" aria-live="polite"></p>
-      <div class="dialog-actions span-2">
-        <button class="btn-secondary" type="button" data-account-dialog-close>Cancel</button>
-        ${reauth ? "" : '<button class="btn-secondary" type="button" id="accountTestBtn">Test connection</button>'}
-        <button class="btn-primary" type="submit" id="accountSubmitBtn">${reauth ? "Reconnect" : "Connect account"}</button>
-      </div>
-    </form>
-  </div>`;
   document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.querySelectorAll("[data-account-dialog-close]").forEach((button) => button.addEventListener("click", close));
-  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
-  const provider = overlay.querySelector("#accountProvider");
-  const oauthProviderFor = (value) => value === "gmail-oauth" ? "gmail" : value === "microsoft" ? "microsoft" : "";
-  const fillProvider = () => {
-    if (!provider) return;
-    const oauth = oauthProviderFor(provider.value);
-    const gmail = provider.value === "gmail";
-    for (const selector of [
-      "#accountEmailInput", "#accountDisplayName", "#accountUsername", "#accountPassword",
-      "#accountImapHost", "#accountImapPort", "#accountImapTls",
-      "#accountSmtpHost", "#accountSmtpPort", "#accountSmtpTls"
-    ]) {
-      const input = overlay.querySelector(selector);
-      if (!input) continue;
-      input.closest("label")?.toggleAttribute("hidden", Boolean(oauth));
-      input.required = !oauth;
-    }
-    overlay.querySelector(".account-server-fields")?.toggleAttribute("hidden", Boolean(oauth));
-    overlay.querySelector("#accountTestBtn")?.toggleAttribute("hidden", Boolean(oauth));
-    const submit = overlay.querySelector("#accountSubmitBtn");
-    if (submit && !reauth) {
-      submit.textContent = oauth === "gmail" ? "Sign in with Google"
-        : oauth === "microsoft" ? "Sign in with Microsoft"
-        : "Connect account";
-    }
-    if (oauth) return;
-    overlay.querySelector("#accountImapHost").value = gmail ? "imap.gmail.com" : "";
-    overlay.querySelector("#accountImapPort").value = "993";
-    overlay.querySelector("#accountImapTls").value = "tls";
-    overlay.querySelector("#accountSmtpHost").value = gmail ? "smtp.gmail.com" : "";
-    overlay.querySelector("#accountSmtpPort").value = "587";
-    overlay.querySelector("#accountSmtpTls").value = "starttls";
+
+  let selected = account ? mailProviderMeta(account.provider) : null;
+  let step = reauth ? 2 : 1;
+  let mode = account ? (account.oauth ? "oauth" : "password") : "";
+  let busy = false;
+  let testError = "";
+  let testedSignature = "";
+  let passwordVisible = false;
+  const draft = {
+    email: account?.email || "",
+    displayName: account?.displayName || "",
+    username: account?.username || "",
+    password: "",
+    imapHost: account?.imapHost || "",
+    imapPort: account?.imapPort || 993,
+    imapTls: account?.imapTls || "tls",
+    smtpHost: account?.smtpHost || "",
+    smtpPort: account?.smtpPort || 587,
+    smtpTls: account?.smtpTls || "starttls"
   };
-  provider?.addEventListener("change", fillProvider);
-  fillProvider();
-  const status = (message, isError = false) => {
-    const node = overlay.querySelector("#accountDialogStatus");
-    if (!node) return;
-    node.textContent = message || "";
-    node.classList.toggle("is-error", Boolean(isError));
+
+  const icon = (name, extra = "") => `<svg class="icon${extra ? ` ${extra}` : ""}" aria-hidden="true"><use href="#${name}"/></svg>`;
+  const providerLogo = (provider = selected) => `<img class="mail-provider-img" src="${mailProviderLogo(provider?.id || "imap")}" alt="" loading="lazy">`;
+  const applyProviderDefaults = () => {
+    if (!selected) return;
+    draft.imapHost = selected.imapHost || "";
+    draft.imapPort = selected.imapPort || 993;
+    draft.imapTls = selected.imapTls || "tls";
+    draft.smtpHost = selected.smtpHost || "";
+    draft.smtpPort = selected.smtpPort || 587;
+    draft.smtpTls = selected.smtpTls || "starttls";
+    if (!reauth) draft.username = "";
   };
-  const readBody = () => ({
-    provider: provider ? provider.value : account?.provider || "imap",
-    email: reauth ? account.email : overlay.querySelector("#accountEmailInput")?.value.trim() || "",
-    displayName: reauth ? account.displayName : overlay.querySelector("#accountDisplayName")?.value.trim() || "",
-    username: reauth ? undefined : overlay.querySelector("#accountUsername")?.value.trim() || "",
-    password: overlay.querySelector("#accountPassword")?.value || "",
-    imapHost: reauth ? undefined : overlay.querySelector("#accountImapHost")?.value.trim() || "",
-    imapPort: reauth ? undefined : Number(overlay.querySelector("#accountImapPort")?.value || 0),
-    imapTls: reauth ? undefined : overlay.querySelector("#accountImapTls")?.value || "",
-    smtpHost: reauth ? undefined : overlay.querySelector("#accountSmtpHost")?.value.trim() || "",
-    smtpPort: reauth ? undefined : Number(overlay.querySelector("#accountSmtpPort")?.value || 0),
-    smtpTls: reauth ? undefined : overlay.querySelector("#accountSmtpTls")?.value || ""
-  });
-  overlay.querySelector("#accountTestBtn")?.addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    status("Checking the IMAP and SMTP servers…");
-    try {
-      await api("/api/accounts/test", { method: "POST", body: readBody() });
-      status("Connection successful.");
-    } catch (error) {
-      status(error.message || "Could not connect to the mail server.", true);
-    } finally {
-      button.disabled = false;
+  if (selected && !reauth) applyProviderDefaults();
+
+  const formReady = () => {
+    const email = (reauth ? account.email : draft.email).trim();
+    if (!email || !draft.password) return false;
+    if (!reauth && !selected) return false;
+    if (selected?.manual) {
+      return Boolean(draft.imapHost.trim() && draft.smtpHost.trim());
     }
+    return true;
+  };
+
+  const bodyForRequest = () => ({
+    provider: selected?.id || "imap",
+    email: (reauth ? account.email : draft.email).trim(),
+    displayName: reauth ? account.displayName : draft.displayName.trim(),
+    username: reauth ? undefined : draft.username.trim(),
+    password: draft.password,
+    imapHost: (reauth ? account.imapHost : draft.imapHost).trim(),
+    imapPort: reauth ? account.imapPort : Number(draft.imapPort || 0),
+    imapTls: reauth ? account.imapTls : draft.imapTls,
+    smtpHost: (reauth ? account.smtpHost : draft.smtpHost).trim(),
+    smtpPort: reauth ? account.smtpPort : Number(draft.smtpPort || 0),
+    smtpTls: reauth ? account.smtpTls : draft.smtpTls
   });
-  overlay.querySelector("#accountDialogForm")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const submit = overlay.querySelector("#accountSubmitBtn");
-    submit.disabled = true;
-    if (reauth && account.oauth) {
-      status(`Waiting for ${account.provider === "microsoft" ? "Microsoft" : "Google"} sign-in…`);
-      try {
-        await connectMailAccountWithOAuth(account.provider, account.id);
-        close();
-      } catch (error) {
-        status(error.message || "Could not reconnect the mail account.", true);
-        submit.disabled = false;
+
+  const updateActionState = () => {
+    overlay.querySelectorAll("[data-account-action]").forEach((button) => {
+      const action = button.getAttribute("data-account-action");
+      if (action === "test") button.disabled = busy || !formReady();
+      if (action === "connect") button.disabled = busy || testedSignature !== JSON.stringify(bodyForRequest());
+      if (action === "oauth") button.disabled = busy;
+    });
+  };
+
+  const stepMarkup = () => {
+    const labels = reauth
+      ? [["1", "Account"], ["2", "Credentials"], ["3", "Verify"]]
+      : [["1", "Provider"], ["2", "Credentials"], ["3", "Verify"]];
+    return `<ol class="mailbox-steps" aria-label="Add account progress">${labels.map(([number, label], index) => {
+      const position = index + 1;
+      const className = position < step ? "is-done" : position === step ? "is-active" : "";
+      return `<li class="${className}"><span>${position < step ? icon("i-check") : number}</span><strong>${label}</strong></li>`;
+    }).join("")}</ol>`;
+  };
+
+  const providerGrid = () => `
+    <div class="mailbox-stage mailbox-provider-stage">
+      <div class="mailbox-stage-head"><span class="eyebrow">Step 1 · Choose a provider</span><h3>Where is your mailbox?</h3><p>Pick a provider and we will fill in the server settings for you.</p></div>
+      <div class="mailbox-provider-grid" role="listbox" aria-label="Mail providers">
+        ${MAIL_ACCOUNT_PROVIDERS.map((provider) => `
+          <button class="mail-provider-tile${selected?.id === provider.id ? " is-selected" : ""}" data-provider-tile="${provider.id}" type="button" role="option" aria-selected="${selected?.id === provider.id ? "true" : "false"}">
+            <span class="mail-provider-logo">${providerLogo(provider)}</span>
+            <span class="mail-provider-copy"><strong>${esc(provider.name)}</strong><small>${esc(provider.hint)}</small></span>
+            <span class="mail-provider-arrow">${icon("i-chevron-right")}</span>
+          </button>`).join("")}
+      </div>
+      <p class="mailbox-footnote">${icon("i-lock")} Your password or OAuth token is encrypted and never shown after saving.</p>
+    </div>`;
+
+  const securePoints = `
+    <ul class="mailbox-benefits">
+      <li>${icon("i-shield-check")}<span>Encrypted credentials</span></li>
+      <li>${icon("i-mail")}<span>Mail stays with your provider</span></li>
+      <li>${icon("i-refresh")}<span>Kept in sync automatically</span></li>
+    </ul>`;
+
+  const oauthStage = () => `
+    <div class="mailbox-stage mailbox-oauth-stage">
+      <div class="mailbox-oauth-card">
+        <div class="mailbox-oauth-logo">${providerLogo()}</div>
+        <span class="eyebrow">Step 2 · ${reauth ? "Reconnect" : "Sign in"}</span>
+        <h3>${reauth ? "Reconnect" : "Continue with"} ${esc(selected.name)}</h3>
+        <p>${selected.id === "microsoft"
+          ? "Sign in with Microsoft to connect Outlook, Hotmail, Live or Microsoft 365. Microsoft verifies the mailbox before Alt8Mail saves it."
+          : "Sign in with Google to connect Gmail or Google Workspace. Google verifies the mailbox before Alt8Mail saves it."}</p>
+        ${securePoints}
+        ${selected.id === "gmail" ? `<button class="mailbox-text-btn" type="button" data-gmail-password>${icon("i-key")}Use an app password instead</button>` : ""}
+        <p class="mailbox-form-status${testError ? " is-error" : ""}" role="status" aria-live="polite">${testError ? esc(testError) : ""}</p>
+      </div>
+    </div>`;
+
+  const passwordStage = () => {
+    const provider = selected || mailProviderMeta("imap");
+    return `
+      <div class="mailbox-stage mailbox-credentials-stage">
+        <aside class="mailbox-provider-summary">
+          <div class="mailbox-summary-logo">${providerLogo(provider)}</div>
+          <span class="eyebrow">${reauth ? "Reconnect" : "Selected provider"}</span>
+          <h3>${esc(provider.name)}</h3>
+          <p>${esc(provider.hint)}</p>
+          ${securePoints}
+          ${provider.helpUrl ? `<a class="mailbox-help-link" href="${esc(provider.helpUrl)}" target="_blank" rel="noopener">${esc(provider.helpLabel || "Provider setup guide")}${icon("i-external")}</a>` : ""}
+        </aside>
+        <form class="mailbox-form" id="accountDialogForm" novalidate>
+          <div class="mailbox-stage-head"><span class="eyebrow">Step 2 · Credentials</span><h3>${reauth ? "Enter your new password" : "Connect " + esc(provider.name)}</h3><p>${reauth ? "Use a current app password for this mailbox." : "Use an app password if your provider requires one. We test the servers before saving."}</p></div>
+          ${reauth ? `<div class="mailbox-reauth-account"><span class="mail-provider-logo">${providerLogo(provider)}</span><div><strong>${esc(account.displayName || account.email)}</strong><span>${esc(account.email)}</span></div></div>` : ""}
+          <div class="mailbox-field-grid">
+            ${reauth ? "" : `<label class="form-field span-2"><span>Email address</span><input id="accountEmailInput" data-account-field="email" type="email" autocomplete="email" value="${esc(draft.email)}" placeholder="you@example.com" required></label>`}
+            <label class="form-field span-2"><span>${reauth || provider.id === "imap" ? "Password" : "App password"}</span>
+              <span class="mailbox-password-wrap"><input id="accountPassword" data-account-field="password" type="${passwordVisible ? "text" : "password"}" value="${esc(draft.password)}" autocomplete="new-password" placeholder="${provider.id === "imap" ? "Your mailbox password" : "Paste the app password from your provider"}" required><button class="mailbox-password-toggle" type="button" data-password-toggle aria-label="${passwordVisible ? "Hide password" : "Show password"}">${icon(passwordVisible ? "i-eye-off" : "i-eye")}</button></span>
+            </label>
+            ${reauth ? "" : `<label class="form-field"><span>Display name</span><input data-account-field="displayName" type="text" maxlength="120" value="${esc(draft.displayName)}" placeholder="Optional"></label>
+            <label class="form-field"><span>Username</span><input data-account-field="username" type="text" autocomplete="username" value="${esc(draft.username)}" placeholder="Defaults to the email address"></label>`}
+          </div>
+          <p class="mailbox-form-status${testError ? " is-error" : ""}" id="accountDialogStatus" role="status" aria-live="polite">${testError ? esc(testError) : "Test the connection to unlock Connect account."}</p>
+          ${selected?.id === "gmail" ? `<button class="mailbox-text-btn" type="button" data-gmail-oauth>${icon("i-arrow-left")}Use Google sign-in instead</button>` : ""}
+          ${reauth ? "" : `<details class="mailbox-advanced"${provider.manual ? " open" : ""}>
+            <summary>${icon("i-sliders")}Advanced server settings<span>${provider.manual ? "Required for this provider" : "Prefilled for " + esc(provider.name)}</span></summary>
+            <div class="mailbox-field-grid mailbox-server-grid">
+              <label class="form-field"><span>IMAP host</span><input data-account-field="imapHost" type="text" value="${esc(draft.imapHost)}" placeholder="imap.example.com"${provider.manual ? " required" : ""}></label>
+              <label class="form-field"><span>IMAP port</span><input data-account-field="imapPort" type="number" min="1" max="65535" value="${esc(draft.imapPort)}" required></label>
+              <label class="form-field"><span>IMAP security</span><select data-account-field="imapTls"><option value="tls"${draft.imapTls !== "starttls" ? " selected" : ""}>TLS</option><option value="starttls"${draft.imapTls === "starttls" ? " selected" : ""}>STARTTLS</option></select></label>
+              <label class="form-field"><span>SMTP host</span><input data-account-field="smtpHost" type="text" value="${esc(draft.smtpHost)}" placeholder="smtp.example.com"${provider.manual ? " required" : ""}></label>
+              <label class="form-field"><span>SMTP port</span><input data-account-field="smtpPort" type="number" min="1" max="65535" value="${esc(draft.smtpPort)}" required></label>
+              <label class="form-field"><span>SMTP security</span><select data-account-field="smtpTls"><option value="starttls"${draft.smtpTls !== "tls" ? " selected" : ""}>STARTTLS</option><option value="tls"${draft.smtpTls === "tls" ? " selected" : ""}>TLS</option></select></label>
+            </div>
+          </details>`}
+        </form>
+      </div>`;
+  };
+
+  const successStage = () => `
+    <div class="mailbox-stage mailbox-success-stage">
+      <div class="mailbox-success-ring">${icon("i-check")}</div>
+      <span class="eyebrow">Connection verified</span>
+      <h3>${esc(reauth ? account.email : draft.email.trim())}</h3>
+      <p>${esc(selected?.name || "Your mailbox")} is ready. Alt8Mail will read new mail and send through this account's own server.</p>
+      <div class="mailbox-success-grid">
+        <div><span>IMAP</span><strong>${esc((reauth ? account.imapHost : draft.imapHost) || "provider default")}</strong><small>${icon("i-check-circle")} Verified</small></div>
+        <div><span>SMTP</span><strong>${esc((reauth ? account.smtpHost : draft.smtpHost) || "provider default")}</strong><small>${icon("i-check-circle")} Verified</small></div>
+      </div>
+      <p class="mailbox-footnote">${icon("i-lock")} You can remove this account at any time from Settings → Connected accounts.</p>
+    </div>`;
+
+  const footer = () => {
+    const cancel = `<button class="btn-secondary mailbox-btn" type="button" data-account-dialog-close>${icon("i-close")}Cancel</button>`;
+    const back = step > 1 && !reauth
+      ? `<button class="btn-secondary mailbox-btn" type="button" data-account-back>${icon("i-arrow-left")}Back</button>`
+      : "";
+    if (step === 1) return `<div class="mailbox-actions mailbox-actions-end">${cancel}</div>`;
+    if (step === 2 && selected?.oauth && mode === "oauth") {
+      const oauthLabel = reauth ? "Reconnect with" : "Continue with";
+      return `<div class="mailbox-actions">${back}<span class="mailbox-actions-spacer"></span>${cancel}<button class="btn-primary mailbox-btn mailbox-oauth-btn" type="button" data-account-action="oauth">${providerLogo()}<span>${oauthLabel} ${esc(selected.name)}</span>${icon("i-chevron-right")}</button></div>`;
+    }
+    if (step === 2) {
+      const testIcon = busy ? icon("i-refresh", "is-spinning") : icon("i-plug");
+      return `<div class="mailbox-actions">${back}<span class="mailbox-actions-spacer"></span>${cancel}<button class="btn-secondary mailbox-btn" type="button" data-account-action="test">${testIcon}${busy ? "Testing…" : "Test connection"}</button><button class="btn-primary mailbox-btn" type="button" data-account-action="connect" disabled>${icon("i-check-circle")}Connect account</button></div>`;
+    }
+    const connectIcon = busy ? icon("i-refresh", "is-spinning") : icon("i-check-circle");
+    return `<div class="mailbox-actions"><button class="btn-secondary mailbox-btn" type="button" data-account-back>${icon("i-arrow-left")}Back to edit</button><span class="mailbox-actions-spacer"></span>${cancel}<button class="btn-primary mailbox-btn" type="button" data-account-action="connect">${connectIcon}${busy ? (reauth ? "Reconnecting…" : "Connecting…") : (reauth ? "Reconnect account" : "Connect account")}</button></div>`;
+  };
+
+  let focusKey = "";
+  const render = () => {
+    const title = reauth ? "Reconnect mail account" : "Add mail account";
+    const subtitle = reauth ? "Restore access to this mailbox." : "Bring Gmail, Outlook and other mailboxes into one clean inbox.";
+    overlay.innerHTML = `<div class="dialog mailbox-wizard" role="dialog" aria-modal="true" aria-labelledby="accountDialogTitle">
+      <header class="mailbox-wizard-head">
+        <div class="mailbox-wizard-title"><span class="mailbox-wizard-mark">${icon("i-mail")}</span><div><span class="eyebrow">Multi-mailbox</span><h2 id="accountDialogTitle">${title}</h2><p>${subtitle}</p></div></div>
+        <button class="icon-btn" type="button" data-account-dialog-close aria-label="Close">${icon("i-close")}</button>
+      </header>
+      ${stepMarkup()}
+      <div class="mailbox-wizard-body">${step === 1 ? providerGrid() : step === 2 ? (mode === "oauth" ? oauthStage() : passwordStage()) : successStage()}</div>
+      <footer class="mailbox-wizard-foot">${footer()}</footer>
+    </div>`;
+    updateActionState();
+    const nextFocusKey = `${step}:${mode}`;
+    if (focusKey !== nextFocusKey) {
+      focusKey = nextFocusKey;
+      requestAnimationFrame(() => {
+        const target = step === 1
+          ? overlay.querySelector("[data-provider-tile]")
+          : step === 2 && mode === "oauth"
+            ? overlay.querySelector('[data-account-action="oauth"]')
+            : step === 2
+              ? (reauth ? overlay.querySelector("#accountPassword") : overlay.querySelector("#accountEmailInput") || overlay.querySelector("#accountPassword"))
+              : overlay.querySelector('[data-account-action="connect"]');
+        target?.focus();
+      });
+    }
+  };
+
+  overlay.addEventListener("click", async (event) => {
+    if (event.target === overlay || event.target.closest("[data-account-dialog-close]")) {
+      overlay.remove();
+      return;
+    }
+    const providerTile = event.target.closest("[data-provider-tile]");
+    if (providerTile) {
+      selected = mailProviderMeta(providerTile.getAttribute("data-provider-tile"));
+      mode = selected.oauth ? "oauth" : "password";
+      testError = "";
+      testedSignature = "";
+      applyProviderDefaults();
+      step = 2;
+      render();
+      return;
+    }
+    if (event.target.closest("[data-account-back]")) {
+      testError = "";
+      testedSignature = "";
+      step = step === 3 ? 2 : (reauth ? 2 : 1);
+      if (step === 2 && !reauth) applyProviderDefaults();
+      render();
+      return;
+    }
+    if (event.target.closest("[data-gmail-password]")) {
+      mode = "password";
+      testedSignature = "";
+      testError = "";
+      render();
+      return;
+    }
+    if (event.target.closest("[data-gmail-oauth]")) {
+      mode = "oauth";
+      testedSignature = "";
+      testError = "";
+      render();
+      return;
+    }
+    if (event.target.closest("[data-password-toggle]")) {
+      passwordVisible = !passwordVisible;
+      const input = overlay.querySelector("#accountPassword");
+      const toggle = overlay.querySelector("[data-password-toggle]");
+      if (input) {
+        input.type = passwordVisible ? "text" : "password";
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+      if (toggle) {
+        toggle.setAttribute("aria-label", passwordVisible ? "Hide password" : "Show password");
+        toggle.innerHTML = icon(passwordVisible ? "i-eye-off" : "i-eye");
       }
       return;
     }
-    const oauth = !reauth ? oauthProviderFor(provider?.value) : "";
-    if (oauth) {
-      status(`Opening ${oauth === "microsoft" ? "Microsoft" : "Google"} sign-in…`);
+    if (event.target.closest('[data-account-action="test"]')) {
+      if (!formReady()) return;
+      busy = true;
+      testError = "";
+      render();
       try {
-        await connectMailAccountWithOAuth(oauth);
-        close();
+        await api("/api/accounts/test", { method: "POST", body: bodyForRequest() });
+        testedSignature = JSON.stringify(bodyForRequest());
+        step = 3;
       } catch (error) {
-        status(error.message || "Could not connect the mail account.", true);
-        submit.disabled = false;
+        testError = error.message || "Could not connect to the mail server.";
+      } finally {
+        busy = false;
+        render();
       }
       return;
     }
-    status(reauth ? "Reconnecting…" : "Connecting…");
-    try {
-      if (reauth) {
-        await api(`/api/accounts/${encodeURIComponent(account.id)}`, { method: "PATCH", body: { password: readBody().password } });
-        close();
-        showToast("Mail account reconnected");
-        await loadBootstrap({ quiet: true });
-      } else {
-        const result = await api("/api/accounts", { method: "POST", body: readBody() });
-        const created = result?.account;
-        close();
-        showToast("Mail account connected");
-        if (created?.id) {
-          state.accounts = [...state.accounts.filter((item) => item.id !== created.id), created];
-          state.activeAccount = created;
-          state.activeAccountId = created.id;
-          try { localStorage.setItem(activeAccountStorageKey(), created.id); } catch {}
+    if (event.target.closest('[data-account-action="oauth"]')) {
+      if (!selected?.oauth || busy) return;
+      busy = true;
+      testError = "";
+      render();
+      try {
+        await connectMailAccountWithOAuth(selected.oauth, reauth ? account.id : "");
+        overlay.remove();
+      } catch (error) {
+        testError = error.message || "Could not connect the mail account.";
+        busy = false;
+        render();
+      }
+      return;
+    }
+    if (event.target.closest('[data-account-action="connect"]')) {
+      if (busy) return;
+      const payload = bodyForRequest();
+      if (testedSignature !== JSON.stringify(payload)) {
+        step = 2;
+        testError = "Test the connection again before connecting this account.";
+        testedSignature = "";
+        render();
+        return;
+      }
+      busy = true;
+      render();
+      try {
+        if (reauth) {
+          await api(`/api/accounts/${encodeURIComponent(account.id)}`, { method: "PATCH", body: { password: draft.password } });
+          overlay.remove();
+          showToast("Mail account reconnected");
+          await loadBootstrap({ quiet: true });
+        } else {
+          const result = await api("/api/accounts", { method: "POST", body: payload });
+          const created = result?.account;
+          overlay.remove();
+          showToast("Mail account connected");
+          if (created?.id) {
+            state.accounts = [...state.accounts.filter((item) => item.id !== created.id), created];
+            state.activeAccount = created;
+            state.activeAccountId = created.id;
+            try { localStorage.setItem(activeAccountStorageKey(), created.id); } catch {}
+          }
+          await loadBootstrap({ quiet: true });
+          setTimeout(() => loadBootstrap({ quiet: true }).catch(() => {}), 4000);
         }
-        await loadBootstrap({ quiet: true });
-        setTimeout(() => loadBootstrap({ quiet: true }).catch(() => {}), 4000);
+      } catch (error) {
+        testError = error.message || "Could not save the mail account.";
+        testedSignature = "";
+        busy = false;
+        step = 2;
+        render();
       }
-    } catch (error) {
-      status(error.message || "Could not save the mail account.", true);
-      submit.disabled = false;
     }
   });
-  const initialFocus = overlay.querySelector("#accountEmailInput");
-  if (initialFocus && !initialFocus.closest("label")?.hidden) initialFocus.focus();
+
+  overlay.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      overlay.remove();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [...overlay.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, a[href]")]
+      .filter((node) => node.getClientRects().length > 0);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+  overlay.addEventListener("input", (event) => {
+    const field = event.target.getAttribute("data-account-field");
+    if (!field) return;
+    draft[field] = ["imapPort", "smtpPort"].includes(field) ? Number(event.target.value || 0) : event.target.value;
+    testedSignature = "";
+    testError = "";
+    updateActionState();
+  });
+  overlay.addEventListener("change", (event) => {
+    const field = event.target.getAttribute("data-account-field");
+    if (!field) return;
+    draft[field] = ["imapPort", "smtpPort"].includes(field) ? Number(event.target.value || 0) : event.target.value;
+    testedSignature = "";
+    testError = "";
+    updateActionState();
+  });
+
+  render();
 }
 
 function openMailAccountServersDialog(account) {
@@ -16967,6 +17283,7 @@ const SETTINGS_META = {
   audit: { title: "Audit log", eyebrow: "Account activity" },
   security: { title: "Security & privacy", eyebrow: "Alt8Mail policy" },
   addons: { title: "Add-ons", eyebrow: "Curated first-party integrations" },
+  accounts: { title: "Connected accounts", eyebrow: "Mailboxes and sending identities" },
   account: { title: "Account", eyebrow: "Profile and sessions" },
   about: { title: "About", eyebrow: "Alt8Mail Email System" }
 };
@@ -17002,7 +17319,7 @@ function openSettings(tab) {
 }
 
 function renderSettingsDynamic() {
-  if (state.task !== "settings" && !["rules", "audit", "account", "security", "regional", "autoreply", "identities"].includes(state.settingsTab)) return;
+  if (state.task !== "settings" && !["rules", "audit", "account", "accounts", "security", "regional", "autoreply", "identities"].includes(state.settingsTab)) return;
   if (state.settingsTab === "rules") renderRules();
   else if (state.settingsTab === "mail") { syncPreferencesUi(); renderSignatureLibrary(); renderLabelSettings(); loadSignatures(); }
   else if (["appearance", "compose"].includes(state.settingsTab)) syncPreferencesUi();
@@ -17013,6 +17330,7 @@ function renderSettingsDynamic() {
   else if (state.settingsTab === "regional") syncPreferencesUi();
   else if (state.settingsTab === "audit") renderAudit();
   else if (state.settingsTab === "account") { renderAliases(); loadProfile(); loadAccountSessions(); }
+  else if (state.settingsTab === "accounts") renderConnectedAccounts();
   else if (state.settingsTab === "security") { updateOutboundUi(); renderSecuritySettings(); }
   else if (state.settingsTab === "addons") renderAddonsSettings();
   else if (state.settingsTab === "about") updateServiceWorkerUi();
@@ -26309,6 +26627,7 @@ function bindEvents() {
   document.getElementById("accountBtn").addEventListener("click", () => openSettings("account"));
   document.getElementById("accountSwitcher")?.addEventListener("change", (event) => switchMailAccount(event.target.value));
   document.getElementById("accountAddBtn")?.addEventListener("click", () => openAddMailAccountDialog());
+  document.getElementById("accountConnectBtn")?.addEventListener("click", () => openAddMailAccountDialog());
   document.getElementById("connectedAccountAdd")?.addEventListener("click", () => openAddMailAccountDialog());
   document.getElementById("connectedAccountsList")?.addEventListener("click", async (event) => {
     const syncButton = event.target.closest("[data-account-sync]");

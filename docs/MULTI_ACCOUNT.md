@@ -51,7 +51,8 @@ accounts will never be exposed through Alt8Mail mailbox delegation.
 
 - `GET /api/accounts` returns the signed-in user's non-secret account list.
 - `GET /api/bootstrap` now includes the same list under `accounts`.
-- `mail.externalAccounts` is a tenant policy flag, off by default. Phase 1
+- `mail.externalAccounts` is a tenant policy flag, enabled by default for
+  tenants that have not explicitly turned it off. Phase 1
   enforces it when the connected-account routes are added.
 - Server helpers resolve a request scope from the `account` query parameter or
   the `X-A8M-Account` header. An empty or `native` scope means the native
@@ -80,9 +81,30 @@ It was also run as the restricted `a8m_app` database role after applying
 The webmail now supports external IMAP/SMTP accounts alongside the native
 Alt8Mail mailbox:
 
+### Where to connect an account
+
+1. Open **Settings → Connected accounts**.
+2. Choose **Add mail account**.
+3. Pick a provider from the gallery — Gmail, Outlook, Hotmail, Yahoo Mail,
+   iCloud Mail, AOL, Zoho, GMX, Yandex, Fastmail, Mail.com or Other IMAP/SMTP —
+   then use Google/Microsoft sign-in or the provider's app password. Server
+   settings are prefilled and can be adjusted under **Advanced server settings**.
+4. Run **Test connection**, then choose **Connect account**. The account appears
+   in the account switcher above the folder list.
+
+The folder pane also shows **Add mail account** when no connected account
+exists, and the account switcher keeps a compact add button after the first
+account is connected. An administrator can turn the feature off under
+**Mail access → Connected accounts**; the Settings tab then explains that the
+organization disabled it.
+
 - **Add account** from the folder-pane account switcher, or from Settings →
-  Connected accounts. The wizard supports Gmail app passwords and generic
-  IMAP/SMTP servers, tests both servers before saving, and stores the password
+  Connected accounts. The three-step wizard presents provider logo tiles for
+  Gmail, Outlook, Hotmail, Yahoo, iCloud, AOL, Zoho, GMX, Yandex, Fastmail,
+  Mail.com and Other IMAP/SMTP, prefills each provider's servers, supports
+  Google/Microsoft OAuth and app passwords, and tests IMAP and SMTP before
+  saving. **Connect account** stays disabled until the test succeeds and is
+  invalidated whenever a credential or server changes. Passwords are stored
   with the same AES-256-GCM workspace key used by the other connected services.
 - **Server-side safety**: hostnames are resolved before dialing, private,
   loopback, link-local and carrier-grade NAT addresses are rejected, DNS is
@@ -107,8 +129,9 @@ Alt8Mail mailbox:
   connection and schedules a fresh sync.
 - **Removal** deletes the cached messages, folders, outbox rows and identities
   for that account. Removing an account never changes the provider mailbox.
-- **Policy**: `mail.externalAccounts` is off by default. The webmail admin
-  console exposes it under Mail access → Connected accounts.
+- **Policy**: `mail.externalAccounts` defaults to on. The webmail admin
+  console exposes it under Mail access → Connected accounts, where an
+  organization can turn it off.
 
 Phase 2 completes the thin Phase 1 edges and adds OAuth2 and a unified view.
 

@@ -1874,10 +1874,18 @@ export async function createApp(options = {}) {
 
   function bootstrapPayload(session) {
     const mailbox = delegatedMailboxFor(session);
+    const nativeAccount = {
+      id: "acct_native", kind: "native", provider: "alt8mail",
+      email: db.user.email, displayName: db.user.name, color: db.user.color,
+      status: "active", isNative: true, isUnified: false
+    };
     const payload = {
       user: mailbox ? delegatedPublicUser(mailbox) : publicUser(db.user),
       organizationName: "Alt8Mail",
       aliases: db.user.aliases,
+      accounts: [nativeAccount],
+      activeAccount: nativeAccount,
+      activeAccountId: nativeAccount.id,
       folders: db.folders,
       people: db.people.map((person) => ({ ...person, source: person.source || "directory" })),
       messages: db.messages.map(publicMessage),
@@ -1902,7 +1910,7 @@ export async function createApp(options = {}) {
       ai: { enabled: aiEnabled, languages: [], styles: [] },
       push: { enabled: false, publicKey: "", subscribed: false, includeSender: true, includeSubject: true },
       tenantPolicy: {
-        mail: { externalTag: true, quarantine: false },
+        mail: { externalTag: true, quarantine: false, externalAccounts: true },
         directory: { contactSharing: true, externalDirectory: false, profileEditing: true, autoAddExternal: true },
         sharing: { externalSharing: true, linkDefault: "view", allowedDomains: [], guestInvites: false },
         dlp: { enabled: MOCK_DLP.enabled, defaultClassification: MOCK_DLP.defaultClassification, labels: MOCK_DLP.labels },
@@ -2621,6 +2629,14 @@ export async function createApp(options = {}) {
       }
       if (pathname === "/api/bootstrap" && req.method === "GET") {
         sendJson(res, 200, bootstrapPayload(session));
+        return;
+      }
+      if (pathname === "/api/accounts/test" && req.method === "POST") {
+        const body = await readJson(req);
+        if (!String(body.email || "").includes("@") || !String(body.password || "").trim()) {
+          throw new ApiError(400, "MAIL_ACCOUNT_TEST", "Enter a valid email address and app password");
+        }
+        sendJson(res, 200, { ok: true, imap: body.imapHost || "provider default", smtp: body.smtpHost || "provider default" });
         return;
       }
       if (pathname === "/api/dlp/check" && req.method === "POST") {
