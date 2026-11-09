@@ -21,6 +21,7 @@ import (
 
 	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/licensing"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -34,29 +35,33 @@ const (
 )
 
 type Server struct {
-	cfg             config.Config
-	store           *store.Store
-	logger          *slog.Logger
-	version         string
-	limit           *loginLimiter
-	davLimit        *loginLimiter
-	adminLimit      *loginLimiter
-	accountLimit    *loginLimiter
-	stateLocksMu    sync.Mutex
-	stateLocks      map[string]*sync.Mutex
-	mailUserMu      sync.Mutex
-	mailLocks       map[string]*sync.Mutex
-	davAuthMu       sync.Mutex
-	davAuthCache    map[string]davAuthEntry
-	sieveSyncMu     sync.Mutex
-	sieveSyncActive map[string]bool
-	sieveSyncAgain  map[string]bool
-	importMu        sync.Mutex
-	activeImports   map[string]bool
-	webAuthn        *webauthn.WebAuthn
-	realtime        *realtimeHub
-	avatarMu        sync.Mutex
-	avatarCache     map[string]senderAvatarCacheEntry
+	cfg               config.Config
+	store             *store.Store
+	logger            *slog.Logger
+	version           string
+	limit             *loginLimiter
+	davLimit          *loginLimiter
+	adminLimit        *loginLimiter
+	accountLimit      *loginLimiter
+	stateLocksMu      sync.Mutex
+	stateLocks        map[string]*sync.Mutex
+	mailUserMu        sync.Mutex
+	mailLocks         map[string]*sync.Mutex
+	davAuthMu         sync.Mutex
+	davAuthCache      map[string]davAuthEntry
+	sieveSyncMu       sync.Mutex
+	sieveSyncActive   map[string]bool
+	sieveSyncAgain    map[string]bool
+	importMu          sync.Mutex
+	activeImports     map[string]bool
+	webAuthn          *webauthn.WebAuthn
+	realtime          *realtimeHub
+	avatarMu          sync.Mutex
+	avatarCache       map[string]senderAvatarCacheEntry
+	license           *licensing.License
+	licenseStatus     licensing.Status
+	licenseError      string
+	licenseConfigured bool
 }
 
 type Options struct {
@@ -85,6 +90,14 @@ func New(opts Options) *Server {
 		realtime:        newRealtimeHub(),
 		avatarCache:     map[string]senderAvatarCacheEntry{},
 	}
+	if license, status, err := loadLicense(opts.Config, opts.Logger); err != nil {
+		server.licenseError = err.Error()
+		opts.Logger.Warn("license not loaded", "err", err)
+	} else if license != nil {
+		server.license = license
+		server.licenseStatus = status
+	}
+	server.licenseConfigured = opts.Config.LicenseFile != ""
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          opts.Config.WebAuthnRPID,
 		RPDisplayName: "Alt8Mail",
@@ -137,6 +150,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/onboarding", s.requireUser(s.getOnboarding))
 	mux.HandleFunc("POST /api/onboarding/complete", s.requireUser(s.completeOnboarding))
 	mux.HandleFunc("GET /api/bootstrap", s.requireUser(s.bootstrap))
+	mux.HandleFunc("GET /api/entitlements", s.requireUser(s.getEntitlements))
 	mux.HandleFunc("GET /api/office/config", s.requireUser(s.officeConfig))
 	s.registerOfficeDocumentRoutes(mux)
 	mux.HandleFunc("GET /office-editor", s.officeEditorHost)
@@ -920,6 +934,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"ai":                  s.aiPublicConfig(ctx, sess.User.TenantID),
 		"push":                s.pushPublicConfig(ctx, sess.User.ID),
 		"capabilities":        capabilities(),
+		"license":             s.licenseSnapshot(),
 		"mailboxMode":         stateString(state, "mailMode"),
 		"mailSync":            mailSync,
 		"attachmentMaxBytes":  8 * 1024 * 1024,

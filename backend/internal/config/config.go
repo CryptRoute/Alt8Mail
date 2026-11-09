@@ -97,6 +97,9 @@ type Config struct {
 	AdminSessionTTL   time.Duration
 	AdminRateLimitMax int
 	AdminRateWindow   time.Duration
+
+	LicenseFile      string
+	LicensePublicKey string
 }
 
 func Load() (Config, error) {
@@ -173,6 +176,8 @@ func Load() (Config, error) {
 		AdminSessionTTL:           8 * time.Hour,
 		AdminRateLimitMax:         10,
 		AdminRateWindow:           10 * time.Minute,
+		LicenseFile:               strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_FILE")),
+		LicensePublicKey:          strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_PUBLIC_KEY")),
 	}
 	if hours, err := strconv.Atoi(env("ALT8MAIL_ADMIN_SESSION_HOURS", "8")); err == nil && hours >= 1 && hours <= 72 {
 		cfg.AdminSessionTTL = time.Duration(hours) * time.Hour
