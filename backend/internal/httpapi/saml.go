@@ -40,12 +40,16 @@ var errSAMLNotConfigured = errors.New("SAML SSO is not configured")
 
 // defaultSAMLMetadataHTTPClient fetches IdP metadata. Every redirect is
 // re-validated so an HTTPS or loopback URL cannot bounce the client to a
-// cleartext or non-loopback location.
+// cleartext or non-loopback location, and an HTTPS URL can never be
+// downgraded to cleartext.
 var defaultSAMLMetadataHTTPClient = &http.Client{
 	Timeout: samlDiscoveryTimeout,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 3 {
 			return errors.New("too many SAML IdP metadata redirects")
+		}
+		if len(via) > 0 && strings.EqualFold(via[0].URL.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
+			return errors.New("SAML IdP metadata redirect must not downgrade from HTTPS")
 		}
 		if !samlMetadataURLAllowed(req.URL) {
 			return errors.New("SAML IdP metadata redirect must use HTTPS (HTTP is allowed only for loopback)")
@@ -89,6 +93,8 @@ func (s *Server) samlDisplayName() string {
 }
 
 // samlPublicURL returns the public origin used for SP metadata and ACS URLs.
+// SAML assertions and AuthnRequests carry session material, so a cleartext
+// origin is accepted only for loopback development and tests.
 func (s *Server) samlPublicURL() (*url.URL, error) {
 	raw := strings.TrimSpace(s.cfg.PublicURL)
 	if raw == "" {
@@ -97,6 +103,9 @@ func (s *Server) samlPublicURL() (*url.URL, error) {
 	publicURL, err := url.Parse(raw)
 	if err != nil || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.Host == "" {
 		return nil, errors.New("ALT8MAIL_PUBLIC_URL must be an absolute HTTP(S) URL for SAML SSO")
+	}
+	if publicURL.Scheme == "http" && !samlLoopbackHost(publicURL.Hostname()) {
+		return nil, errors.New("ALT8MAIL_PUBLIC_URL must use HTTPS for SAML SSO (HTTP is allowed only for loopback)")
 	}
 	return publicURL, nil
 }
@@ -163,7 +172,7 @@ func (s *Server) buildSAMLSP(ctx context.Context) (*samlsp.Middleware, error) {
 	if err != nil {
 		return nil, err
 	}
-	return samlsp.New(samlsp.Options{
+	middleware, err := samlsp.New(samlsp.Options{
 		EntityID:    s.samlEntityID(publicURL),
 		URL:         *publicURL,
 		Key:         key,
@@ -179,6 +188,28 @@ func (s *Server) buildSAMLSP(ctx context.Context) (*samlsp.Middleware, error) {
 		AcsPath:                          samlACSPath,
 		TrackedRequestMaxAge:             samlTrackedRequestMaxAge,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Install the sanitized handler here, at construction time, so the cached
+	// middleware Task 2 serves never uses samlsp.DefaultOnError. That default
+	// logs the raw SAMLResponse, including NameID and attributes.
+	middleware.OnError = s.samlOnError
+	return middleware, nil
+}
+
+// samlOnError is installed on the cached SAML middleware when it is built. It
+// never logs or echoes the error value: crewjam errors can embed the raw
+// SAMLResponse or assertion XML.
+func (s *Server) samlOnError(w http.ResponseWriter, r *http.Request, _ error) {
+	path := ""
+	if r != nil && r.URL != nil {
+		path = r.URL.Path
+	}
+	if s.logger != nil {
+		s.logger.Warn("SAML request failed", "path", path)
+	}
+	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 }
 
 // loadSAMLIDPMetadata reads the configured IdP metadata file, or fetches the
@@ -186,6 +217,9 @@ func (s *Server) buildSAMLSP(ctx context.Context) (*samlsp.Middleware, error) {
 // provisioned deliberately and is not exposed to network tampering.
 func (s *Server) loadSAMLIDPMetadata(ctx context.Context) (*saml.EntityDescriptor, error) {
 	if file := strings.TrimSpace(s.cfg.SAMLIDPMetadataFile); file != "" {
+		if strings.TrimSpace(s.cfg.SAMLIDPMetadataURL) != "" && s.logger != nil {
+			s.logger.Warn("SAML IdP metadata file takes precedence over the configured metadata URL")
+		}
 		data, err := readSAMLMetadataFile(file)
 		if err != nil {
 			return nil, err
@@ -309,6 +343,9 @@ func loadSAMLSPKeyPair(certFile, keyFile string) (*rsa.PrivateKey, *x509.Certifi
 	if err != nil {
 		return nil, nil, err
 	}
+	if key.N.BitLen() < 2048 {
+		return nil, nil, errors.New("SAML SP private key must be at least 2048 bits")
+	}
 
 	certPEM, err := os.ReadFile(strings.TrimSpace(certFile))
 	if err != nil {
@@ -321,6 +358,13 @@ func loadSAMLSPKeyPair(certFile, keyFile string) (*rsa.PrivateKey, *x509.Certifi
 	certificate, err := x509.ParseCertificate(certBlock.Bytes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse SAML SP certificate: %w", err)
+	}
+	now := time.Now()
+	if now.Before(certificate.NotBefore) || now.After(certificate.NotAfter) {
+		return nil, nil, errors.New("SAML SP certificate is not currently valid")
+	}
+	if certificate.KeyUsage != 0 && certificate.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+		return nil, nil, errors.New("SAML SP certificate key usage must include digital signature")
 	}
 	certPublicKey, ok := certificate.PublicKey.(*rsa.PublicKey)
 	if !ok || !certPublicKey.Equal(&key.PublicKey) {

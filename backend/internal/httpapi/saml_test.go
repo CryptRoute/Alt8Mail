@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -38,15 +39,20 @@ type samlTestMaterial struct {
 
 func newSAMLTestMaterial(t *testing.T) samlTestMaterial {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	return newSAMLTestMaterialFor(t, 2048, time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour))
+}
+
+func newSAMLTestMaterialFor(t *testing.T, bits int, notBefore, notAfter time.Time) samlTestMaterial {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
 		t.Fatalf("generate RSA key: %v", err)
 	}
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(time.Now().UnixNano()),
 		Subject:               pkix.Name{CommonName: "Alt8Mail SAML Test"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(24 * time.Hour),
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		BasicConstraintsValid: true,
 	}
@@ -63,6 +69,21 @@ func newSAMLTestMaterial(t *testing.T) samlTestMaterial {
 		keyPEM:  pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
 		certDER: der,
 	}
+}
+
+// writeSAMLTestPair writes a generated key pair and returns its file paths.
+func writeSAMLTestPair(t *testing.T, material samlTestMaterial, prefix string) (certFile, keyFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	certFile = filepath.Join(dir, prefix+".crt")
+	keyFile = filepath.Join(dir, prefix+".key")
+	if err := os.WriteFile(certFile, material.certPEM, 0o600); err != nil {
+		t.Fatalf("write certificate: %v", err)
+	}
+	if err := os.WriteFile(keyFile, material.keyPEM, 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	return certFile, keyFile
 }
 
 // samlTestMetadata is a minimal, local IdP metadata document. It never points
@@ -254,6 +275,26 @@ func TestSAMLConfigured(t *testing.T) {
 			mutate: func(c *config.Config) { c.PublicURL = "mail.example.test" },
 			want:   false,
 		},
+		{
+			name:   "cleartext non-loopback public URL",
+			mutate: func(c *config.Config) { c.PublicURL = "http://mail.example.com" },
+			want:   false,
+		},
+		{
+			name:   "cleartext localhost public URL",
+			mutate: func(c *config.Config) { c.PublicURL = "http://localhost:8001" },
+			want:   true,
+		},
+		{
+			name:   "cleartext loopback IP public URL",
+			mutate: func(c *config.Config) { c.PublicURL = "http://127.0.0.1:8001" },
+			want:   true,
+		},
+		{
+			name:   "HTTPS public URL",
+			mutate: func(c *config.Config) { c.PublicURL = "https://mail.example.com" },
+			want:   true,
+		},
 		{name: "display name optional", mutate: func(c *config.Config) { c.SAMLDisplayName = "" }, want: true},
 		{name: "entity ID optional", mutate: func(c *config.Config) { c.SAMLSPEntityID = "" }, want: true},
 		{name: "email domains optional", mutate: func(c *config.Config) { c.SAMLEmailDomains = nil }, want: true},
@@ -394,6 +435,18 @@ func TestSAMLMetadataEndpoint(t *testing.T) {
 		if strings.Contains(body, "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Artifact") {
 			t.Fatalf("metadata advertises an unsupported artifact ACS binding:\n%s", body)
 		}
+		if !strings.Contains(body, `AuthnRequestsSigned="true"`) {
+			t.Fatalf("metadata does not require signed AuthnRequests:\n%s", body)
+		}
+		if !strings.Contains(body, `WantAssertionsSigned="true"`) {
+			t.Fatalf("metadata does not require signed assertions:\n%s", body)
+		}
+		if !strings.Contains(body, `use="signing"`) {
+			t.Fatalf("metadata has no signing KeyDescriptor:\n%s", body)
+		}
+		if !strings.Contains(body, base64.StdEncoding.EncodeToString(env.material.certDER)) {
+			t.Fatalf("signing KeyDescriptor does not contain the SP certificate:\n%s", body)
+		}
 	})
 
 	t.Run("default entity ID is the metadata URL", func(t *testing.T) {
@@ -504,6 +557,83 @@ func TestSAMLLoopbackMetadataURLs(t *testing.T) {
 	}
 	if samlMetadataURLAllowed(nil) {
 		t.Fatal("samlMetadataURLAllowed(nil) = true")
+	}
+}
+
+func TestSAMLMetadataRedirectPolicy(t *testing.T) {
+	cases := []struct {
+		name     string
+		original string
+		target   string
+		wantErr  bool
+	}{
+		{name: "HTTPS to HTTPS", original: "https://idp.example.test/a", target: "https://idp.example.test/b"},
+		{name: "HTTPS downgrade to loopback HTTP", original: "https://idp.example.test/a", target: "http://127.0.0.1/metadata", wantErr: true},
+		{name: "HTTPS downgrade to public HTTP", original: "https://idp.example.test/a", target: "http://idp.example.test/b", wantErr: true},
+		{name: "loopback HTTP to loopback HTTP", original: "http://127.0.0.1/a", target: "http://localhost/b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			original := httptest.NewRequest(http.MethodGet, tc.original, nil)
+			target := httptest.NewRequest(http.MethodGet, tc.target, nil)
+			err := defaultSAMLMetadataHTTPClient.CheckRedirect(target, []*http.Request{original})
+			if tc.wantErr != (err != nil) {
+				t.Fatalf("CheckRedirect(%q -> %q) error = %v, wantErr %v", tc.original, tc.target, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestSAMLOnErrorSanitized(t *testing.T) {
+	env := newSAMLTestEnv(t)
+	var logs bytes.Buffer
+	server := New(Options{
+		Config: env.cfg,
+		Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+	})
+	installSAMLLicense(t, server)
+	middleware, err := server.samlMiddleware(context.Background())
+	if err != nil {
+		t.Fatalf("samlMiddleware() error = %v", err)
+	}
+
+	const marker = "SECRET-SAML-ASSERTION-MARKER"
+	request := httptest.NewRequest(http.MethodPost, samlACSPath, strings.NewReader(marker))
+	recorder := httptest.NewRecorder()
+	middleware.OnError(recorder, request, fmt.Errorf("parse SAMLResponse: %s", marker))
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if strings.Contains(recorder.Body.String(), marker) {
+		t.Fatalf("error response leaked the error text: %s", recorder.Body.String())
+	}
+	if strings.Contains(logs.String(), marker) {
+		t.Fatalf("logs leaked the error text: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "SAML request failed") {
+		t.Fatalf("logs do not contain the fixed SAML failure message: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), samlACSPath) {
+		t.Fatalf("logs do not contain the request path: %s", logs.String())
+	}
+}
+
+func TestSAMLMetadataFilePrecedenceWarning(t *testing.T) {
+	env := newSAMLTestEnv(t)
+	cfg := env.cfg
+	cfg.SAMLIDPMetadataURL = "https://idp.example.test/metadata"
+	var logs bytes.Buffer
+	server := New(Options{
+		Config: cfg,
+		Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+	})
+	installSAMLLicense(t, server)
+	if _, err := server.samlMiddleware(context.Background()); err != nil {
+		t.Fatalf("samlMiddleware() error = %v", err)
+	}
+	if !strings.Contains(logs.String(), "takes precedence") {
+		t.Fatalf("logs do not warn that the metadata file takes precedence: %s", logs.String())
 	}
 }
 
@@ -725,6 +855,24 @@ func TestSAMLSPKeyPairValidation(t *testing.T) {
 	}
 	if _, _, err := loadSAMLSPKeyPair(env.certFile, ecFile); err == nil {
 		t.Fatal("loadSAMLSPKeyPair() accepted a non-RSA key")
+	}
+
+	weakCert, weakKey := writeSAMLTestPair(t,
+		newSAMLTestMaterialFor(t, 1024, time.Now().Add(-time.Hour), time.Now().Add(time.Hour)), "weak")
+	if _, _, err := loadSAMLSPKeyPair(weakCert, weakKey); err == nil {
+		t.Fatal("loadSAMLSPKeyPair() accepted a 1024-bit RSA key")
+	}
+
+	expiredCert, expiredKey := writeSAMLTestPair(t,
+		newSAMLTestMaterialFor(t, 2048, time.Now().Add(-48*time.Hour), time.Now().Add(-24*time.Hour)), "expired")
+	if _, _, err := loadSAMLSPKeyPair(expiredCert, expiredKey); err == nil {
+		t.Fatal("loadSAMLSPKeyPair() accepted an expired certificate")
+	}
+
+	futureCert, futureKey := writeSAMLTestPair(t,
+		newSAMLTestMaterialFor(t, 2048, time.Now().Add(24*time.Hour), time.Now().Add(48*time.Hour)), "future")
+	if _, _, err := loadSAMLSPKeyPair(futureCert, futureKey); err == nil {
+		t.Fatal("loadSAMLSPKeyPair() accepted a not-yet-valid certificate")
 	}
 
 	key, cert, err := loadSAMLSPKeyPair(env.certFile, env.keyFile)
