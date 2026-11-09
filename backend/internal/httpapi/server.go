@@ -1554,11 +1554,23 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
+const (
+	// loginLimiterMaxEntries bounds every per-IP limiter's map so an
+	// internet-facing endpoint cannot grow it without limit.
+	loginLimiterMaxEntries = 10000
+	// loginLimiterMaxSweepInterval caps how often the map is scanned. Shorter
+	// limiter windows sweep more often (once per window).
+	loginLimiterMaxSweepInterval = time.Minute
+)
+
 type loginLimiter struct {
-	mu       sync.Mutex
-	attempts map[string]limiterEntry
-	limit    int
-	window   time.Duration
+	mu         sync.Mutex
+	attempts   map[string]limiterEntry
+	limit      int
+	window     time.Duration
+	maxEntries int
+	sweepEvery time.Duration
+	lastSweep  time.Time
 }
 
 type limiterEntry struct {
@@ -1567,14 +1579,27 @@ type limiterEntry struct {
 }
 
 func newLoginLimiter(limit int, window time.Duration) *loginLimiter {
-	return &loginLimiter{attempts: map[string]limiterEntry{}, limit: limit, window: window}
+	sweepEvery := window
+	if sweepEvery <= 0 || sweepEvery > loginLimiterMaxSweepInterval {
+		sweepEvery = loginLimiterMaxSweepInterval
+	}
+	return &loginLimiter{
+		attempts:   map[string]limiterEntry{},
+		limit:      limit,
+		window:     window,
+		maxEntries: loginLimiterMaxEntries,
+		sweepEvery: sweepEvery,
+		lastSweep:  time.Now(),
+	}
 }
 
 func (l *loginLimiter) Allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	now := time.Now()
+	l.sweepLocked(now)
 	entry := l.attempts[ip]
-	if time.Now().After(entry.ResetAt) {
+	if now.After(entry.ResetAt) {
 		delete(l.attempts, ip)
 		return true
 	}
@@ -1584,9 +1609,14 @@ func (l *loginLimiter) Allow(ip string) bool {
 func (l *loginLimiter) Fail(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	entry := l.attempts[ip]
-	if time.Now().After(entry.ResetAt) {
-		entry = limiterEntry{ResetAt: time.Now().Add(l.window)}
+	now := time.Now()
+	l.sweepLocked(now)
+	entry, exists := l.attempts[ip]
+	if !exists || now.After(entry.ResetAt) {
+		if !exists {
+			l.ensureCapacityLocked(now)
+		}
+		entry = limiterEntry{ResetAt: now.Add(l.window)}
 	}
 	entry.Count++
 	l.attempts[ip] = entry
@@ -1596,6 +1626,69 @@ func (l *loginLimiter) Reset(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.attempts, ip)
+}
+
+// sweepLocked periodically deletes entries whose window has elapsed. It is
+// called under the limiter lock from Allow and Fail, so the map is swept even
+// when callers only ever test new addresses.
+func (l *loginLimiter) sweepLocked(now time.Time) {
+	interval := l.sweepEvery
+	if interval <= 0 {
+		interval = loginLimiterMaxSweepInterval
+	}
+	if now.Sub(l.lastSweep) < interval {
+		return
+	}
+	for key, entry := range l.attempts {
+		if now.After(entry.ResetAt) {
+			delete(l.attempts, key)
+		}
+	}
+	l.lastSweep = now
+}
+
+// ensureCapacityLocked makes room for one new address. Expired entries are
+// evicted first; if every entry is still active, the oldest entry (earliest
+// reset) is evicted so memory stays bounded. Existing counters are never
+// touched unless the map is already full.
+func (l *loginLimiter) ensureCapacityLocked(now time.Time) {
+	maxEntries := l.maxEntries
+	if maxEntries <= 0 {
+		maxEntries = loginLimiterMaxEntries
+	}
+	if len(l.attempts) < maxEntries {
+		return
+	}
+	for key, entry := range l.attempts {
+		if now.After(entry.ResetAt) {
+			delete(l.attempts, key)
+		}
+	}
+	for len(l.attempts) >= maxEntries {
+		oldestKey := ""
+		var oldestReset time.Time
+		for key, entry := range l.attempts {
+			if oldestKey == "" || entry.ResetAt.Before(oldestReset) {
+				oldestKey, oldestReset = key, entry.ResetAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(l.attempts, oldestKey)
+	}
+}
+
+// retryAfterSeconds is the limiter window in whole seconds for an HTTP
+// Retry-After response.
+func (l *loginLimiter) retryAfterSeconds() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	seconds := int(l.window / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	return seconds
 }
 
 func passwordChangeRequired(user userRecord) bool {

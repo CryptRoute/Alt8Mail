@@ -10,7 +10,7 @@ set -Eeuo pipefail
 SITE="${A8M_NGINX_SITE:-/etc/nginx/sites-available/a8m}"
 SNIPPET="${A8M_NGINX_SNIPPET:-/etc/nginx/snippets/a8m-public-routes.conf}"
 UPSTREAM="${A8M_NGINX_UPSTREAM:-127.0.0.1:8080}"
-ROUTES=(/files/s/ /upload/ /calendar/rsvp/ /calendar/poll/ /calendar/feed/ /oauth/)
+ROUTES=(/files/s/ /upload/ /calendar/rsvp/ /calendar/poll/ /calendar/feed/ /oauth/ /scim/)
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
@@ -54,7 +54,7 @@ fi
 # Routes defined directly in the site are skipped so nginx never sees duplicate
 # location blocks.
 {
-  printf '# Managed by Alt8Mail. Public download, upload, calendar and OAuth callback routes.\n'
+  printf '# Managed by Alt8Mail. Public download, upload, calendar, OAuth callback and SCIM routes.\n'
   for path in "${snippet_routes[@]}"; do
     body=""
     [[ "$path" == "/upload/" ]] && body='        client_max_body_size 12m;\n'
