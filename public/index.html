@@ -174,10 +174,16 @@
         <h2 data-i18n="login.signIn">Sign in</h2>
         <p>Use your Alt8Mail account to continue.</p>
       </div>
-      <button class="sso-btn" id="ssoBtn" type="button" hidden>
-        <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
-        Continue with single sign-on
-      </button>
+      <div class="login-sso-actions">
+        <button class="sso-btn" id="ssoBtn" type="button" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
+          Continue with single sign-on
+        </button>
+        <button class="sso-btn" id="samlBtn" type="button" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>
+          Continue with SAML SSO
+        </button>
+      </div>
       <div class="login-divider" hidden><span>or sign in with your work email</span></div>
       <div class="login-field">
         <label for="loginEmail" data-i18n="login.email">Work email</label>

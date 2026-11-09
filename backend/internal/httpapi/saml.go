@@ -187,29 +187,49 @@ func (s *Server) buildSAMLSP(ctx context.Context) (*samlsp.Middleware, error) {
 		MetadataPath:                     samlMetadataPath,
 		AcsPath:                          samlACSPath,
 		TrackedRequestMaxAge:             samlTrackedRequestMaxAge,
+		// Post-login destination when there is no tracked request. The start
+		// handler also presents the flow as beginning at "/", so ServeACS
+		// redirects successful sign-ins to the application root.
+		DefaultRedirectURI: "/",
+		// Replay protection for accepted assertion IDs: the request-tracking
+		// cookie is single-use, but a captured Response plus cookie could
+		// otherwise be posted twice. Single process only.
+		ReplayCache: samlsp.NewMemoryReplayCache(samlReplayCacheSize),
 	})
 	if err != nil {
 		return nil, err
 	}
-	// Install the sanitized handler here, at construction time, so the cached
-	// middleware Task 2 serves never uses samlsp.DefaultOnError. That default
+	// Install the Alt8Mail session bridge and the sanitized handler here, at
+	// construction time, so the cached middleware Task 2 serves never uses the
+	// library's cookie session provider or samlsp.DefaultOnError. That default
 	// logs the raw SAMLResponse, including NameID and attributes.
+	middleware.Session = s.newSAMLSessionProvider()
 	middleware.OnError = s.samlOnError
 	return middleware, nil
 }
 
 // samlOnError is installed on the cached SAML middleware when it is built. It
 // never logs or echoes the error value: crewjam errors can embed the raw
-// SAMLResponse or assertion XML.
-func (s *Server) samlOnError(w http.ResponseWriter, r *http.Request, _ error) {
+// SAMLResponse or assertion XML. Failures already audited by the session
+// bridge skip the generic audit so a rejected sign-in is recorded once.
+func (s *Server) samlOnError(w http.ResponseWriter, r *http.Request, err error) {
 	path := ""
 	if r != nil && r.URL != nil {
 		path = r.URL.Path
 	}
+	var authErr *samlAuthError
+	if errors.As(err, &authErr) && authErr.audited {
+		s.samlErrorRedirect(w, r)
+		return
+	}
 	if s.logger != nil {
 		s.logger.Warn("SAML request failed", "path", path)
 	}
-	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+	s.auditSAMLFailure(r, userRecord{}, "", samlErrorAssertion)
+	if s.samlLimit != nil {
+		s.samlLimit.Fail(clientIP(r))
+	}
+	s.samlErrorRedirect(w, r)
 }
 
 // loadSAMLIDPMetadata reads the configured IdP metadata file, or fetches the

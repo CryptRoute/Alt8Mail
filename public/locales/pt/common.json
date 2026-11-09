@@ -13,6 +13,7 @@
   "login.emailPlaceholder": "voce@empresa.com.br",
   "login.passwordPlaceholder": "Sua senha",
   "login.sso": "Continuar com logon único",
+  "login.saml": "Continuar com SAML SSO",
   "login.invalidEmail": "Informe um endereço de e-mail corporativo Alt8Mail válido.",
   "login.passwordRequired": "Informe sua senha para continuar.",
   "login.legal": "Protegido pelo Alt8Mail. O acesso é registrado e controlado por políticas.",

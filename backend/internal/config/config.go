@@ -81,6 +81,12 @@ type Config struct {
 	SAMLSPKeyFile       string
 	SAMLDisplayName     string
 	SAMLEmailDomains    []string
+	// SAMLEmailAttribute is the exact SAML Attribute Name that carries the
+	// user's email. Empty means the assertion NameID must itself be an email.
+	SAMLEmailAttribute string
+	// SAMLMFAContexts are additional exact AuthnContextClassRef values that
+	// count as strong MFA evidence for the tenant MFA policy.
+	SAMLMFAContexts []string
 
 	S3Endpoint                string
 	S3Region                  string
@@ -153,6 +159,8 @@ func Load() (Config, error) {
 		SAMLSPKeyFile:             strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_SP_KEY_FILE")),
 		SAMLDisplayName:           strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_DISPLAY_NAME")),
 		SAMLEmailDomains:          parseSAMLEmailDomains(os.Getenv("ALT8MAIL_SAML_EMAIL_DOMAINS")),
+		SAMLEmailAttribute:        strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_EMAIL_ATTRIBUTE")),
+		SAMLMFAContexts:           parseSAMLMFAContexts(os.Getenv("ALT8MAIL_SAML_MFA_AUTHN_CONTEXT_CLASSES")),
 		SessionTTL:                12 * time.Hour,
 		RememberTTL:               30 * 24 * time.Hour,
 		IMAPAddr:                  env("ALT8MAIL_IMAP_ADDR", "127.0.0.1:993"),
@@ -336,6 +344,24 @@ func parseOIDCEmailDomains(value string) []string {
 // rules.
 func parseSAMLEmailDomains(value string) []string {
 	return parseEmailDomains(value)
+}
+
+// parseSAMLMFAContexts splits the comma-separated additional
+// AuthnContextClassRef allowlist. Values keep their case because SAML class
+// references are compared exactly, and only surrounding whitespace, empty
+// entries and exact duplicates are removed.
+func parseSAMLMFAContexts(value string) []string {
+	contexts := []string{}
+	seen := map[string]bool{}
+	for _, item := range strings.Split(value, ",") {
+		context := strings.TrimSpace(item)
+		if context == "" || seen[context] {
+			continue
+		}
+		seen[context] = true
+		contexts = append(contexts, context)
+	}
+	return contexts
 }
 
 // parseEmailDomains splits a comma-separated sign-in allowlist. Entries are

@@ -1288,6 +1288,9 @@ let loginBusy = false;
 let ssoEnabled = false;
 let ssoDisplayName = "";
 let ssoConfigSeq = 0;
+let samlEnabled = false;
+let samlDisplayName = "";
+let samlConfigSeq = 0;
 let currentRulesCache = null;
 let editingRuleId = null;
 let twoFactorChallenge = null;
@@ -1323,6 +1326,7 @@ const loginError = document.getElementById("loginError");
 const loginHint = document.getElementById("loginHint");
 const loginSubmit = document.getElementById("loginSubmit");
 const ssoBtn = document.getElementById("ssoBtn");
+const samlBtn = document.getElementById("samlBtn");
 const ssoDivider = document.querySelector("#loginForm .login-divider");
 const searchInput = document.getElementById("searchInput");
 const searchClear = document.getElementById("searchClear");
@@ -3767,7 +3771,12 @@ function clearThemeAccentForLogout() {
 }
 
 function renderSsoButton() {
-  if (ssoDivider) ssoDivider.hidden = !ssoEnabled;
+  if (ssoDivider) ssoDivider.hidden = !(ssoEnabled || samlEnabled);
+  renderOidcButton();
+  renderSamlButton();
+}
+
+function renderOidcButton() {
   if (!ssoBtn) return;
   ssoBtn.hidden = !ssoEnabled;
   ssoBtn.disabled = false;
@@ -3775,6 +3784,21 @@ function renderSsoButton() {
   const label = ssoDisplayName || t("login.sso");
   const translation = ssoDisplayName ? "" : ' data-i18n="login.sso"';
   ssoBtn.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span${translation}>${esc(label)}</span>`;
+}
+
+function renderSamlButton() {
+  if (!samlBtn) return;
+  samlBtn.hidden = !samlEnabled;
+  samlBtn.disabled = false;
+  if (!samlEnabled) return;
+  const label = samlDisplayName || t("login.saml");
+  const translation = samlDisplayName ? "" : ' data-i18n="login.saml"';
+  samlBtn.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span${translation}>${esc(label)}</span>`;
+}
+
+function setSsoButtonsDisabled(disabled) {
+  if (ssoBtn) ssoBtn.disabled = disabled;
+  if (samlBtn) samlBtn.disabled = disabled;
 }
 
 async function loadSsoConfig() {
@@ -3792,12 +3816,28 @@ async function loadSsoConfig() {
   renderSsoButton();
 }
 
+async function loadSamlConfig() {
+  const seq = ++samlConfigSeq;
+  let enabled = false;
+  let displayName = "";
+  try {
+    const config = await api("/api/auth/saml/config", { skipAuth: true });
+    enabled = Boolean(config && config.enabled);
+    displayName = String((config && config.displayName) || "").trim();
+  } catch {}
+  if (seq !== samlConfigSeq) return;
+  samlEnabled = enabled;
+  samlDisplayName = displayName;
+  renderSsoButton();
+}
+
 function consumeSsoError() {
   try {
     const url = new URL(window.location.href);
-    const code = url.searchParams.get("sso_error");
+    const code = url.searchParams.get("sso_error") || url.searchParams.get("saml_error");
     if (!code) return "";
     url.searchParams.delete("sso_error");
+    url.searchParams.delete("saml_error");
     const search = url.searchParams.toString();
     window.history.replaceState({}, "", url.pathname + (search ? `?${search}` : "") + url.hash);
     return code;
@@ -3862,6 +3902,7 @@ function showLogin() {
     loginError.hidden = false;
   }
   loadSsoConfig().catch(() => {});
+  loadSamlConfig().catch(() => {});
   loginScreen.scrollTop = 0;
   setTimeout(() => { if (loginEmail && !isMobile()) loginEmail.focus(); }, 60);
   stopOutboxPolling();
@@ -3943,7 +3984,7 @@ async function submitLogin() {
   loginBusy = true;
   loginSubmit.disabled = true;
   loginSubmit.textContent = t("login.signingIn");
-  ssoBtn.disabled = true;
+  setSsoButtonsDisabled(true);
   try {
     const remember = document.getElementById("rememberMe").checked;
     const data = await api("/api/session", {
@@ -3976,10 +4017,22 @@ function submitSso() {
   loginError.hidden = true;
   loginHint.hidden = true;
   loginSubmit.disabled = true;
-  ssoBtn.disabled = true;
+  setSsoButtonsDisabled(true);
   ssoBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span>Connecting to SSO…</span>';
   const remember = document.getElementById("rememberMe").checked ? "1" : "0";
   window.location.assign(`/api/auth/oidc/start?remember=${remember}`);
+}
+
+function submitSaml() {
+  if (loginBusy || !samlEnabled) return;
+  loginBusy = true;
+  loginError.hidden = true;
+  loginHint.hidden = true;
+  loginSubmit.disabled = true;
+  setSsoButtonsDisabled(true);
+  samlBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span>Connecting to SSO…</span>';
+  // SAML sessions do not support "Remember me" in this tranche.
+  window.location.assign("/api/auth/saml/start");
 }
 
 function showTwoFactorChallenge(data, remember) {
@@ -27775,6 +27828,7 @@ function bindEvents() {
   /* login */
   loginForm.addEventListener("submit", (event) => { event.preventDefault(); submitLogin(); });
   ssoBtn.addEventListener("click", submitSso);
+  samlBtn.addEventListener("click", submitSaml);
   document.getElementById("passwordToggle").addEventListener("click", () => {
     const show = loginPassword.type === "password";
     loginPassword.type = show ? "text" : "password";

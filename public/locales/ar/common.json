@@ -13,6 +13,7 @@
   "login.emailPlaceholder": "you@company.com",
   "login.passwordPlaceholder": "كلمة المرور",
   "login.sso": "المتابعة باستخدام تسجيل الدخول الموحّد",
+  "login.saml": "المتابعة باستخدام SAML SSO",
   "login.invalidEmail": "أدخل عنوان بريد عمل صالحًا من Alt8Mail.",
   "login.passwordRequired": "أدخل كلمة المرور للمتابعة.",
   "login.legal": "محمي بواسطة Alt8Mail. تتم مراقبة الوصول وتسجيله وفقًا للسياسات.",

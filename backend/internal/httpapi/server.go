@@ -72,9 +72,13 @@ type Server struct {
 	samlCached        *samlsp.Middleware
 	samlLastErr       error
 	samlLastTry       time.Time
+	samlLimit         *loginLimiter
 	// samlMetadataClient is a test seam; production uses the bounded default
 	// client in saml.go.
 	samlMetadataClient *http.Client
+	// samlFailureAudit is a test seam for the sanitized failure audit written
+	// by samlOnError; production uses s.audit.
+	samlFailureAudit func(*http.Request, userRecord, string, string, string)
 }
 
 type Options struct {
@@ -101,6 +105,7 @@ func New(opts Options) *Server {
 		adminLimit:      newLoginLimiter(opts.Config.AdminRateLimitMax, opts.Config.AdminRateWindow),
 		accountLimit:    newLoginLimiter(30, 10*time.Minute),
 		oidcLimit:       newLoginLimiter(oidcCallbackRateLimit, oidcCallbackRateWindow),
+		samlLimit:       newLoginLimiter(oidcCallbackRateLimit, oidcCallbackRateWindow),
 		realtime:        newRealtimeHub(),
 		avatarCache:     map[string]senderAvatarCacheEntry{},
 		licenseNow:      time.Now,
@@ -155,6 +160,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/oidc/callback", s.oidcCallback)
 	mux.HandleFunc("GET /api/auth/saml/config", s.samlConfig)
 	mux.HandleFunc("GET /api/auth/saml/metadata", s.samlMetadata)
+	mux.HandleFunc("GET /api/auth/saml/start", s.samlStart)
+	// Register without a method so a non-POST request reaches samlACS and gets
+	// a 405, rather than falling through to the /api/ catch-all.
+	mux.HandleFunc("/api/auth/saml/acs", s.samlACS)
 	mux.HandleFunc("GET /oauth/slack/callback", s.slackAddonOAuthCallback)
 	mux.HandleFunc("GET /oauth/relay/complete", s.addonRelayComplete)
 	mux.HandleFunc("POST /api/addons/webhooks/slack", s.slackAddonWebhook)

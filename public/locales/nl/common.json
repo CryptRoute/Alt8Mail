@@ -13,6 +13,7 @@
   "login.emailPlaceholder": "u@bedrijf.nl",
   "login.passwordPlaceholder": "Uw wachtwoord",
   "login.sso": "Doorgaan met eenmalige aanmelding",
+  "login.saml": "Doorgaan met SAML SSO",
   "login.invalidEmail": "Voer een geldig zakelijk Alt8Mail-adres in.",
   "login.passwordRequired": "Voer uw wachtwoord in om door te gaan.",
   "login.legal": "Beveiligd door Alt8Mail. Toegang wordt vastgelegd en door beleid beheerd.",

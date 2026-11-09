@@ -13,6 +13,7 @@
   "login.emailPlaceholder": "you@company.com",
   "login.passwordPlaceholder": "Your password",
   "login.sso": "Continue with single sign-on",
+  "login.saml": "Continue with SAML SSO",
   "login.invalidEmail": "Enter a valid Alt8Mail work email address.",
   "login.passwordRequired": "Enter your password to continue.",
   "login.legal": "Protected by Alt8Mail. Access is logged and policy-controlled.",

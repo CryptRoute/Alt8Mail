@@ -602,8 +602,13 @@ func TestSAMLOnErrorSanitized(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	middleware.OnError(recorder, request, fmt.Errorf("parse SAMLResponse: %s", marker))
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	// Task 2 makes the sanitized handler redirect to the login page instead of
+	// answering with a bare 400.
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusFound)
+	}
+	if location := recorder.Header().Get("Location"); location != "/?saml_error=1" {
+		t.Fatalf("error redirect = %q, want /?saml_error=1", location)
 	}
 	if strings.Contains(recorder.Body.String(), marker) {
 		t.Fatalf("error response leaked the error text: %s", recorder.Body.String())
@@ -882,4 +887,43 @@ func TestSAMLSPKeyPairValidation(t *testing.T) {
 	if key == nil || cert == nil {
 		t.Fatal("loadSAMLSPKeyPair() returned nil key or certificate")
 	}
+}
+
+func TestSAMLConfigParsingEmailAttributeAndMFAContexts(t *testing.T) {
+	stabilizeConfigEnv(t)
+	t.Setenv("ALT8MAIL_SAML_EMAIL_ATTRIBUTE", "  urn:oid:0.9.2342.19200300.100.1.3  ")
+	t.Setenv("ALT8MAIL_SAML_MFA_AUTHN_CONTEXT_CLASSES", " urn:example:acme:mfa ,, urn:Example:CaseSensitive , urn:example:acme:mfa , urn:example:acme:second ")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	if cfg.SAMLEmailAttribute != "urn:oid:0.9.2342.19200300.100.1.3" {
+		t.Fatalf("SAMLEmailAttribute = %q, want trimmed attribute name", cfg.SAMLEmailAttribute)
+	}
+	wantContexts := []string{"urn:example:acme:mfa", "urn:Example:CaseSensitive", "urn:example:acme:second"}
+	if len(cfg.SAMLMFAContexts) != len(wantContexts) {
+		t.Fatalf("SAMLMFAContexts = %v, want %v", cfg.SAMLMFAContexts, wantContexts)
+	}
+	for i, want := range wantContexts {
+		if cfg.SAMLMFAContexts[i] != want {
+			t.Fatalf("SAMLMFAContexts = %v, want %v (case must be preserved)", cfg.SAMLMFAContexts, wantContexts)
+		}
+	}
+
+	t.Run("unset is empty", func(t *testing.T) {
+		stabilizeConfigEnv(t)
+		t.Setenv("ALT8MAIL_SAML_EMAIL_ATTRIBUTE", "")
+		t.Setenv("ALT8MAIL_SAML_MFA_AUTHN_CONTEXT_CLASSES", "")
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatalf("config.Load() error = %v", err)
+		}
+		if cfg.SAMLEmailAttribute != "" {
+			t.Fatalf("SAMLEmailAttribute = %q, want empty", cfg.SAMLEmailAttribute)
+		}
+		if len(cfg.SAMLMFAContexts) != 0 {
+			t.Fatalf("SAMLMFAContexts = %v, want empty", cfg.SAMLMFAContexts)
+		}
+	})
 }
