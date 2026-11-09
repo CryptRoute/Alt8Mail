@@ -239,7 +239,7 @@ func stateOutbound(state map[string]any) map[string]any {
 	}
 	baseline := stateInt(outbound, "baselineUsed")
 	cutoff := time.Now().Add(-time.Duration(windowHours) * time.Hour)
-	committed := 0
+	committed := int64(0)
 	if events, ok := outbound["events"].([]any); ok {
 		for _, raw := range events {
 			event, _ := raw.(map[string]any)
@@ -248,36 +248,58 @@ func stateOutbound(state map[string]any) map[string]any {
 			}
 			stamp, err := time.Parse(time.RFC3339Nano, stateString(event, "at"))
 			if err == nil && stamp.After(cutoff) {
-				committed++
+				// Each accepted recipient consumes one unit. Events written
+				// before recipient counting existed fall back to one.
+				units := stateInt(event, "recipients")
+				if units <= 0 {
+					units = 1
+				}
+				committed += units
 			}
 		}
 	}
 	queued, scheduled := 0, 0
+	queuedRecipients := int64(0)
 	for _, raw := range stateSlice(state, "outbox") {
 		item, _ := raw.(map[string]any)
 		if item == nil {
 			continue
 		}
 		queued++
+		queuedRecipients += outboxRecipientUnits(item)
 		if stateBool(item, "scheduled") {
 			scheduled++
 		}
 	}
-	used := baseline + int64(committed)
-	usedWithQueued := used + int64(queued)
+	used := baseline + committed
+	usedWithQueued := used + queuedRecipients
 	percentage := 0.0
 	if limit > 0 {
 		percentage = math.Round(float64(usedWithQueued)/float64(limit)*1000) / 10
 	}
 	return map[string]any{
 		"limit": limit, "windowHours": windowHours, "baseline": baseline,
-		"committed": committed, "used": used, "queued": queued,
+		"committed": committed, "used": used, "queued": queued, "queuedRecipients": queuedRecipients,
 		"undoQueued": queued - scheduled, "scheduled": scheduled,
 		"usedWithQueued": usedWithQueued,
 		"remaining":      max(int64(0), limit-usedWithQueued),
 		"percent":        percentage, "source": "alt8mail+control-plane",
 		"refreshedAt": nowISO(),
 	}
+}
+
+// outboxRecipientUnits counts the recipients a queued message will consume.
+// A queued item with no parsed recipient array still consumes one unit so old
+// state cannot make the cap appear disabled.
+func outboxRecipientUnits(item map[string]any) int64 {
+	total := int64(0)
+	for _, key := range []string{"to", "cc", "bcc"} {
+		total += int64(len(stateSlice(item, key)))
+	}
+	if total <= 0 {
+		return 1
+	}
+	return total
 }
 
 // outboundPayload starts from the webmail's rolling counter and, when the
@@ -334,9 +356,9 @@ func applyControlOutboundCap(outbound map[string]any, controlCap int) map[string
 	return outbound
 }
 
-func outboundCapReached(outbound map[string]any) bool {
+func outboundCapReached(outbound map[string]any, recipientUnits int) bool {
 	limit := stateInt(outbound, "limit")
-	return limit > 0 && stateInt(outbound, "usedWithQueued") >= limit
+	return limit > 0 && stateInt(outbound, "usedWithQueued")+int64(recipientUnits) > limit
 }
 
 func publicOutboxItem(item map[string]any) map[string]any {

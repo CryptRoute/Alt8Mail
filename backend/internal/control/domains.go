@@ -201,8 +201,14 @@ func (s *Server) handleDomainDetail(w http.ResponseWriter, r *http.Request, sess
 	}
 	mailboxes := []map[string]any{}
 	rows, _ := s.db.Query(r.Context(), `
-		SELECT m.id::text, m.email::text, m.local_part::text, m.active, m.provision_status, u.used_bytes
-		FROM public.mailboxes m JOIN public.users u ON u.id=m.user_id WHERE m.domain=$1 ORDER BY m.local_part
+		SELECT m.id::text, m.email::text, m.local_part::text, m.active, m.provision_status, mb.used_bytes
+		FROM public.mailboxes m
+		JOIN public.users u ON u.id=m.user_id
+		LEFT JOIN LATERAL (
+		  SELECT GREATEST(u.used_bytes, COALESCE(SUM(mm.size_bytes)::bigint, 0)) AS used_bytes
+		  FROM public.mail_messages mm WHERE mm.user_id=u.id
+		) mb ON true
+		WHERE m.domain=$1 ORDER BY m.local_part
 	`, domain)
 	if rows != nil {
 		defer rows.Close()

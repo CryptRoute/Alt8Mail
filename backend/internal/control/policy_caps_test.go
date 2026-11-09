@@ -9,15 +9,15 @@ func TestOutboundCapDecisionPerMailbox(t *testing.T) {
 	const domain = "a8m.test"
 
 	if reason, allowed := outboundCapDecision(false, 0, 0, 0, 0, 150, 0, 0, 0, 149, domain); !allowed {
-		t.Fatalf("the 150th message should be allowed, got %q", reason)
+		t.Fatalf("the 150th recipient should be allowed, got %q", reason)
 	}
 	reason, allowed := outboundCapDecision(false, 0, 0, 0, 0, 150, 0, 0, 0, 150, domain)
-	if allowed || !strings.Contains(reason, "150/day") {
-		t.Fatalf("the 151st message should be deferred by the mailbox cap, got %q", reason)
+	if allowed || !strings.Contains(reason, "150 recipients/day") {
+		t.Fatalf("the 151st recipient should be deferred by the mailbox cap, got %q", reason)
 	}
 
 	// Zero means unlimited, even after a very large number of accepted
-	// messages and with domain rolling caps disabled.
+	// recipients and with domain rolling caps disabled.
 	if reason, allowed := outboundCapDecision(false, 0, 0, 0, 0, 0, 0, 0, 0, 1_000_000, domain); !allowed {
 		t.Fatalf("zero mailbox cap must be unlimited, got %q", reason)
 	}

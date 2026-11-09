@@ -1267,6 +1267,7 @@ const OFFICE_DOCK_LIMIT = 6;
 let officeHubUploadType = "word";
 let pendingAttachSessionId = null;
 let attachPickerSessionId = null;
+let composeUploadHideTimer = null;
 let composeAiSessionId = null;
 let aiSummarySeq = 0;
 let composePointer = null;
@@ -7504,7 +7505,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "0.36.0";
+const MAIL_PROVIDER_ASSET_VERSION = "0.37.0";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -15520,9 +15521,37 @@ function updateComposeIdentity(session) {
   }
 }
 
+function composeAttachmentPreviewKind(file) {
+  const mime = String(file?.mime || "").toLowerCase();
+  const name = String(file?.name || "");
+  if (mime === "application/pdf" || /\.pdf$/i.test(name)) return "pdf";
+  if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(name)) return "image";
+  return "";
+}
+
+function openComposeAttachment(session, index) {
+  const file = session?.files?.[Number(index)];
+  if (!session || !file) return;
+  if (composeAttachmentPreviewKind(file)) {
+    const previewFiles = session.files.filter((item) => composeAttachmentPreviewKind(item));
+    const previewIndex = previewFiles.findIndex((item) =>
+      file.id ? item.id === file.id : item.name === file.name && item.sizeBytes === file.sizeBytes
+    );
+    openPreview(file, { files: previewFiles, index: previewIndex < 0 ? 0 : previewIndex });
+    return;
+  }
+  if (state.office?.ready && file.id && officeMetaForName(file.name)) {
+    editComposeAttachmentInOffice(session.id, Number(index)).catch(showError);
+    return;
+  }
+  openComposeAttach(session.id);
+}
+
 function composeFileCard(file, index, sessionId = "") {
-  const office = index != null && state.office.ready && file.id && officeMetaForName(file.name);
-  return `<div class="compose-file-card">
+  const preview = index != null && Boolean(composeAttachmentPreviewKind(file));
+  const office = index != null && !preview && state.office.ready && file.id && officeMetaForName(file.name);
+  const title = office ? `Open ${file.name || "attachment"} in Office` : preview ? `Preview ${file.name || "attachment"}` : "Manage attachments";
+  return `<div class="compose-file-card${preview ? " is-previewable" : ""}" data-compose-file-index="${index ?? ""}" role="button" tabindex="0" title="${esc(title)}" aria-label="${esc(title)}">
     <span class="file-art"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></span>
     <span class="file-copy"><strong>${esc(file.name || "Attachment")}</strong><span>${esc(file.mime || file.type || "File")} · ${esc(file.size || formatBytes(file.sizeBytes))}</span></span>
     <span class="file-card-actions">
@@ -15945,10 +15974,96 @@ function renderComposeAttachPicker() {
   </button>`).join("") : '<div class="settings-note">No files in your workspace yet. Upload one from the Files tab or browse this device.</div>';
 }
 
+function setComposeUploadProgress(percent, label, scanning = false) {
+  const box = document.getElementById("composeUploadProgress");
+  if (!box) return;
+  if (composeUploadHideTimer) {
+    clearTimeout(composeUploadHideTimer);
+    composeUploadHideTimer = null;
+  }
+  box.hidden = false;
+  const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+  const bar = document.getElementById("composeUploadBar");
+  const track = document.getElementById("composeUploadTrack");
+  const percentLabel = document.getElementById("composeUploadPercent");
+  const text = document.getElementById("composeUploadLabel");
+  if (bar) bar.style.width = `${clamped}%`;
+  if (track) track.setAttribute("aria-valuenow", String(Math.round(clamped)));
+  if (percentLabel) percentLabel.textContent = `${Math.round(clamped)}%`;
+  if (text) text.textContent = label || "Uploading…";
+  box.classList.toggle("is-scanning", Boolean(scanning));
+}
+
+function finishComposeUploadProgress() {
+  const box = document.getElementById("composeUploadProgress");
+  if (!box) return;
+  setComposeUploadProgress(100, "Upload complete");
+  composeUploadHideTimer = setTimeout(() => {
+    box.hidden = true;
+    box.classList.remove("is-scanning");
+    composeUploadHideTimer = null;
+  }, 900);
+}
+
+function uploadAttachmentWithProgress(file, dataBase64, hooks = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/attachments");
+    xhr.withCredentials = true;
+    xhr.timeout = 120000;
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.setRequestHeader("Content-Type", "application/json");
+    if (!state.delegatedMode && state.activeAccountId) xhr.setRequestHeader("X-A8M-Account", state.activeAccountId);
+    const delegatedSession = state.delegatedSession;
+    if (delegatedSession?.token) xhr.setRequestHeader(DELEGATED_SESSION_HEADER, delegatedSession.token);
+    const csrf = delegatedSession?.csrf || state.csrf;
+    if (csrf) xhr.setRequestHeader("X-CSRF-Token", csrf);
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && hooks.onProgress) hooks.onProgress(event.loaded / event.total);
+    });
+    xhr.upload.addEventListener("load", () => {
+      if (hooks.onUploaded) hooks.onUploaded();
+    });
+    xhr.addEventListener("load", () => {
+      setOffline(false);
+      let payload = null;
+      try { payload = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch { payload = null; }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload);
+        return;
+      }
+      if (xhr.status === 401) {
+        if (state.delegatedMode) {
+          const revoked = payload && payload.error ? payload.error.message : "";
+          expireDelegatedWindow(revoked || "Your primary Alt8Mail session ended. This delegated mailbox has been signed out.");
+        } else {
+          handleSessionExpired();
+        }
+      }
+      const detail = payload && payload.error ? payload.error : {};
+      reject(new ApiFailure(xhr.status, detail.code || `HTTP_${xhr.status}`,
+        detail.message || `Upload failed (${xhr.status})`, detail.details || null));
+    });
+    xhr.addEventListener("error", () => {
+      setOffline(true);
+      reject(new ApiFailure(0, "NETWORK", "Cannot reach the mail server. Check your connection."));
+    });
+    xhr.addEventListener("timeout", () => {
+      reject(new ApiFailure(0, "TIMEOUT", "The upload timed out. Try again."));
+    });
+    xhr.send(JSON.stringify({
+      name: file.name,
+      mime: file.type || "application/octet-stream",
+      dataBase64
+    }));
+  });
+}
+
 async function uploadComposeFiles(session, files) {
   const uploaded = [];
   if (!session || !files?.length) return uploaded;
   const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
+  const queue = [];
   for (const file of files) {
     if (file.size > max) {
       showToast(`${file.name} is larger than ${formatBytes(max)}`);
@@ -15958,13 +16073,30 @@ async function uploadComposeFiles(session, files) {
       showToast(`${file.name} is already attached`);
       continue;
     }
+    queue.push(file);
+  }
+  if (!queue.length) return uploaded;
+  const totalBytes = queue.reduce((sum, file) => sum + Math.max(1, file.size || 0), 0);
+  let completedBytes = 0;
+  for (let index = 0; index < queue.length; index += 1) {
+    const file = queue[index];
+    const fileWeight = Math.max(1, file.size || 0);
+    setComposeUploadProgress((completedBytes / totalBytes) * 100,
+      `Preparing ${file.name} · ${index + 1} of ${queue.length}`);
     try {
       const status = session.el?.querySelector("[data-compose-status]");
       if (status) status.textContent = `Uploading ${file.name}…`;
       const dataBase64 = await fileToBase64(file);
-      const data = await api("/api/attachments", {
-        method: "POST",
-        body: { name: file.name, mime: file.type || "application/octet-stream", dataBase64 }
+      const data = await uploadAttachmentWithProgress(file, dataBase64, {
+        onProgress: (fraction) => setComposeUploadProgress(
+          ((completedBytes + fileWeight * fraction) / totalBytes) * 100,
+          `Uploading ${file.name} · ${index + 1} of ${queue.length}`
+        ),
+        onUploaded: () => setComposeUploadProgress(
+          ((completedBytes + fileWeight) / totalBytes) * 100,
+          `Scanning ${file.name} · ${index + 1} of ${queue.length}`,
+          true
+        )
       });
       session.files.push(data.attachment);
       uploaded.push(data.attachment);
@@ -15974,7 +16106,9 @@ async function uploadComposeFiles(session, files) {
     } catch (error) {
       showError(error);
     }
+    completedBytes += fileWeight;
   }
+  finishComposeUploadProgress();
   updateComposeStatus(session);
   renderComposeDockTabs();
   return uploaded;
@@ -17395,13 +17529,14 @@ function updateOutboundUi() {
   const outboundText = document.getElementById("outboundText");
   if (data) {
     const value = data.usedWithQueued != null ? data.usedWithQueued : data.used;
+    const queuedUnits = data.queuedRecipients != null ? data.queuedRecipients : data.queued;
     const unlimited = outboundIsUnlimited(data);
     if (outboundText) outboundText.textContent = unlimited
-      ? `${value} sent${data.queued ? ` · ${data.queued} queued` : ""} · no cap`
-      : `${value} / ${data.limit} sent${data.queued ? ` · ${data.queued} queued` : ""}`;
+      ? `${value} sent${queuedUnits ? ` · ${queuedUnits} queued` : ""} · no cap`
+      : `${value} / ${data.limit} sent${queuedUnits ? ` · ${queuedUnits} queued` : ""}`;
     if (outboundChip) outboundChip.title = unlimited
-      ? `No per-mailbox daily cap · ${data.used} sent in the last ${data.windowHours}h${data.queued ? `, ${data.queued} queued` : ""}`
-      : `Outbound caps enforced by Alt8Mail and the Control Plane · ${data.used} sent in the last ${data.windowHours}h${data.queued ? `, ${data.queued} queued` : ""}`;
+      ? `No per-mailbox daily cap · ${data.used} sent in the last ${data.windowHours}h${queuedUnits ? `, ${queuedUnits} queued` : ""}`
+      : `Outbound caps enforced by Alt8Mail and the Control Plane · ${data.used} sent in the last ${data.windowHours}h${queuedUnits ? `, ${queuedUnits} queued` : ""}`;
     const usedValue = document.getElementById("outboundUsedValue");
     const limitChip = document.getElementById("outboundLimitChip");
     const fill = document.getElementById("outboundBarFill");
@@ -17517,11 +17652,12 @@ function statusPopMarkup(kind) {
     if (!data) return "<p>Usage unavailable.</p>";
     const value = data.usedWithQueued != null ? data.usedWithQueued : data.used;
     const unlimited = outboundIsUnlimited(data);
+    const queuedUnits = data.queuedRecipients != null ? data.queuedRecipients : data.queued;
     return `<div class="status-pop-metric"><strong>${value}</strong><span>${unlimited ? "messages · no daily cap" : `of ${data.limit} messages`}</span></div>
       <div class="usage-bar"><span style="width:${unlimited ? 0 : Math.min(100, data.percent)}%"></span></div>
-      <div class="status-pop-meta"><span>Rolling ${data.windowHours}-hour window</span><span>${data.queued} queued</span></div>
-      <div class="status-breakdown"><div><span>Sent</span><span>${data.used}</span></div><div><span>Waiting in undo queue</span><span>${data.queued}</span></div><div><span>Remaining</span><span>${unlimited ? "Unlimited" : data.remaining}</span></div></div>
-      <p class="status-pop-note">Enforced per user by Alt8Mail, with a per-mailbox daily safety cap enforced by the Control Plane's Postfix policy service. The cap includes messages still in the undo-send queue. Set the cap to 0 for unlimited sending.</p>
+      <div class="status-pop-meta"><span>Rolling ${data.windowHours}-hour window</span><span>${queuedUnits} queued</span></div>
+      <div class="status-breakdown"><div><span>Sent</span><span>${data.used}</span></div><div><span>Waiting in undo queue</span><span>${queuedUnits}</span></div><div><span>Remaining</span><span>${unlimited ? "Unlimited" : data.remaining}</span></div></div>
+      <p class="status-pop-note">Enforced per user by Alt8Mail, with a per-mailbox daily safety cap enforced by the Messaging policy service. The cap includes messages still in the undo-send queue.</p>
       <button class="btn-secondary status-refresh" data-status-refresh="outbound" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh usage</button>`;
   }
   if (kind === "pending") {
@@ -27844,7 +27980,11 @@ function bindEvents() {
       editComposeAttachmentInOffice(session.id, Number(composeOffice.getAttribute("data-compose-office"))).catch(showError);
       return;
     }
-    if (event.target.closest(".compose-file-card")) { openComposeAttach(session.id); return; }
+    const fileCard = event.target.closest(".compose-file-card");
+    if (fileCard) {
+      openComposeAttachment(session, Number(fileCard.getAttribute("data-compose-file-index")));
+      return;
+    }
     if (event.target.closest("[data-ai-compose-close]")) {
       session.aiOpen = false;
       const panel = session.el.querySelector("[data-compose-ai-panel]");
@@ -27972,6 +28112,12 @@ function bindEvents() {
     if (event.target.closest(".recipient-suggestion")) event.preventDefault();
   }, true);
   composeLayer.addEventListener("keydown", (event) => {
+    const fileCard = event.target.closest(".compose-file-card");
+    if (fileCard && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      fileCard.click();
+      return;
+    }
     const section = event.target.closest(".compose[data-compose-id]");
     const activeSession = section ? sessionById(section.getAttribute("data-compose-id")) : null;
     if (activeSession?.mentionMenu) {
@@ -28133,6 +28279,21 @@ function bindEvents() {
         session.dirty = true;
         scheduleComposeSave(session);
       }
+      return;
+    }
+    if (event.target.closest("[data-compose-office]")) return;
+    const card = event.target.closest("[data-compose-file-index]");
+    if (card) {
+      const session = sessionById(attachPickerSessionId);
+      if (session) openComposeAttachment(session, Number(card.getAttribute("data-compose-file-index")));
+      return;
+    }
+  });
+  composeAttachOverlay?.addEventListener("keydown", (event) => {
+    const card = event.target.closest("[data-compose-file-index]");
+    if (card && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      card.click();
     }
   });
   document.getElementById("composeNewOfficeDoc")?.addEventListener("click", (event) => {

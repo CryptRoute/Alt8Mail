@@ -10,14 +10,14 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=0.36.0">
-<link rel="stylesheet" href="/features.css?v=0.36.0">
-<link rel="stylesheet" href="/workspace.css?v=0.36.0">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=0.36.0">
-<link rel="stylesheet" href="/features-0.7.css?v=0.36.0">
-<link rel="stylesheet" href="/onboarding.css?v=0.36.0">
-<link rel="stylesheet" href="/email-ui.css?v=0.36.0">
-<link rel="stylesheet" href="/selects.css?v=0.36.0">
+<link rel="stylesheet" href="/styles.css?v=0.37.0">
+<link rel="stylesheet" href="/features.css?v=0.37.0">
+<link rel="stylesheet" href="/workspace.css?v=0.37.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=0.37.0">
+<link rel="stylesheet" href="/features-0.7.css?v=0.37.0">
+<link rel="stylesheet" href="/onboarding.css?v=0.37.0">
+<link rel="stylesheet" href="/email-ui.css?v=0.37.0">
+<link rel="stylesheet" href="/selects.css?v=0.37.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -1752,7 +1752,7 @@
                   <div class="settings-block">
                     <div class="settings-block-head">
                       <h3>Outbound sending</h3>
-                      <p>Enforced per user by Alt8Mail, with a per-mailbox daily safety cap in the Control Plane's Postfix policy. Usage is live for the current rolling window.</p>
+                      <p>Enforced per user by Alt8Mail, with a per-mailbox daily safety cap enforced by the Messaging policy service. Usage is live for the current rolling window.</p>
                     </div>
                     <div class="usage-card" id="outboundUsageCard">
                       <div class="usage-card-top">
@@ -2377,6 +2377,16 @@
       <div class="compose-attach-current">
         <div class="compose-attach-current-head"><strong>Attached to this message</strong><span id="composeAttachCurrentCount">0 files</span></div>
         <div class="compose-attach-current-list" id="composeAttachCurrentList"><div class="settings-note">No attachments yet.</div></div>
+      </div>
+    </div>
+    <div class="compose-upload-progress" id="composeUploadProgress" hidden>
+      <div class="compose-upload-progress-copy">
+        <span class="compose-upload-spinner" aria-hidden="true"></span>
+        <span id="composeUploadLabel">Uploading…</span>
+        <strong id="composeUploadPercent">0%</strong>
+      </div>
+      <div class="compose-upload-track" id="composeUploadTrack" role="progressbar" aria-label="Attachment upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <span id="composeUploadBar"></span>
       </div>
     </div>
     <footer class="compose-attach-foot">
@@ -3304,6 +3314,6 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script type="module" src="/app.js?v=0.36.0"></script>
+<script type="module" src="/app.js?v=0.37.0"></script>
 </body>
 </html>

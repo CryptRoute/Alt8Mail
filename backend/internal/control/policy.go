@@ -164,22 +164,26 @@ func (s *Server) checkDomainCaps(ctx context.Context, domain, queueID, recipient
 	if err != nil {
 		return "Outbound policy is temporarily unavailable", false
 	}
-	var hourCount, dayCount, monthCount, userMessageCount int64
+	var hourCount, dayCount, monthCount, userRecipientCount int64
 	_ = tx.QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE attempted_at > now()-interval '1 hour'),
 		       count(*) FILTER (WHERE attempted_at > now()-interval '24 hours'),
 		       count(*) FILTER (WHERE attempted_at > now()-interval '30 days')
 		FROM control.outbound_attempts WHERE sender_domain=$1 AND action='permit'
 	`, domain).Scan(&hourCount, &dayCount, &monthCount)
+	// Count accepted recipients, not messages. A message with six recipients
+	// consumes six units of the mailbox allowance. Exclude only a retry of the
+	// exact queue/recipient pair currently being evaluated so prior recipients
+	// in the same multi-recipient message are still counted.
 	_ = tx.QueryRow(ctx, `
-		SELECT count(DISTINCT NULLIF(queue_id,'')) + count(*) FILTER (WHERE queue_id='')
+		SELECT count(*)
 		FROM control.outbound_attempts
 		WHERE sender_domain=$1 AND action='permit' AND attempted_at > now()-interval '24 hours'
 		  AND (($2 <> '' AND lower(sasl_user)=lower($2)) OR ($2 = '' AND lower(sender::text)=lower($3)))
-		  AND ($4 = '' OR queue_id <> $4)
-	`, domain, saslUser, sender, queueID).Scan(&userMessageCount)
+		  AND ($4 = '' OR NOT (queue_id=$4 AND lower(recipient::text)=lower($5)))
+	`, domain, saslUser, sender, queueID, recipient).Scan(&userRecipientCount)
 	reason, allowed := outboundCapDecision(capsEnabled, capHour, capDay, capMonth, burst, userDailyCap,
-		hourCount, dayCount, monthCount, userMessageCount, domain)
+		hourCount, dayCount, monthCount, userRecipientCount, domain)
 	if !allowed {
 		_, _ = tx.Exec(ctx, attemptInsertSQL(), queueID, sender, domain, recipient, size, saslUser, client, "defer", reason)
 		_ = tx.Commit(ctx)
@@ -200,9 +204,9 @@ func (s *Server) checkDomainCaps(ctx context.Context, domain, queueID, recipient
 // domain can leave rolling caps off and still stop a single mailbox from
 // turning into an abuse source. A zero per-mailbox cap disables that check.
 func outboundCapDecision(capsEnabled bool, capHour, capDay, capMonth, burst, userDailyCap int,
-	hourCount, dayCount, monthCount, userMessageCount int64, domain string) (string, bool) {
-	if userDailyCap > 0 && userMessageCount+1 > int64(userDailyCap) {
-		return fmt.Sprintf("Outgoing daily cap reached for this mailbox (%d/day)", userDailyCap), false
+	hourCount, dayCount, monthCount, userRecipientCount int64, domain string) (string, bool) {
+	if userDailyCap > 0 && userRecipientCount+1 > int64(userDailyCap) {
+		return fmt.Sprintf("Outgoing daily cap reached for this mailbox (%d recipients/day)", userDailyCap), false
 	}
 	if capsEnabled {
 		effectiveHour := capHour

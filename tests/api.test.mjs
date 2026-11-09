@@ -1067,7 +1067,8 @@ test("scheduled messages can be edited and sent immediately from the outbox", as
   assert.equal(sendNow.status, 200);
   assert.ok(sendNow.body.sentMessageId);
   assert.equal(sendNow.body.pending.length, 0);
-  assert.equal(sendNow.body.outbound.used, beforeSend.used + 1);
+  // The edit above changed this message to two To and one Cc recipient.
+  assert.equal(sendNow.body.outbound.used, beforeSend.used + 3);
   assert.equal(sendNow.body.outbound.queued, 0);
   const after = (await client.request("/api/bootstrap")).body;
   assert.equal(after.pendingSends.length, 0);

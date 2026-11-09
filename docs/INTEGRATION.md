@@ -295,9 +295,10 @@ writes audit events. `cancel` restores a draft from the queue snapshot.
 6. **Outbound caps:** check the same counter the Postfix policy daemon enforces,
    before enqueue. The Control Plane's per-mailbox daily cap is authoritative;
    the webmail reads it from `control.domain_settings` and treats `0` as
-   unlimited. Count queued messages too, as the demo does. Expose usage through
-   `/api/outbound` and let the status bar/security card poll it. Decide on the
-   reset semantics (rolling vs calendar) and make the UI text match.
+   unlimited. Count every To, Cc and Bcc recipient as one unit, including queued
+   recipients. Expose usage through `/api/outbound` and let the status
+   bar/security card poll it. Decide on the reset semantics (rolling vs
+   calendar) and make the UI text match.
 7. **Failure handling:** if delivery bounces or the MTA rejects, surface a
    per-message state in Sent/queue and write an audit entry. Do not silently
    drop.

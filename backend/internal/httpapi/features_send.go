@@ -153,10 +153,11 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		outbound := s.outboundPayload(r.Context(), sess.User, state)
-		if outboundCapReached(outbound) {
+		recipientUnits := len(to) + len(cc) + len(bcc)
+		if outboundCapReached(outbound, recipientUnits) {
 			return failDetails(http.StatusTooManyRequests, "OUTBOUND_CAP",
-				fmt.Sprintf("Daily outbound cap reached (%d/%d). Try again after the window resets.",
-					stateInt(outbound, "usedWithQueued"), stateInt(outbound, "limit")),
+				fmt.Sprintf("Daily outbound cap reached (%d/%d recipients). Try again after the window resets.",
+					stateInt(outbound, "usedWithQueued")+int64(recipientUnits), stateInt(outbound, "limit")),
 				map[string]any{"outbound": outbound})
 		}
 		now := time.Now().UTC()
@@ -722,7 +723,10 @@ func commitQueued(state map[string]any, item map[string]any) string {
 	user := stateMap(state, "user")
 	outbound := stateMap(user, "outbound")
 	events, _ := outbound["events"].([]any)
-	events = append(events, map[string]any{"at": now, "id": itemID, "messageId": sentMessageID})
+	events = append(events, map[string]any{
+		"at": now, "id": itemID, "messageId": sentMessageID,
+		"recipients": outboxRecipientUnits(item),
+	})
 	outbound["events"] = events
 	user["outbound"] = outbound
 	from, _ := item["from"].(map[string]any)

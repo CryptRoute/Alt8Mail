@@ -406,12 +406,16 @@ func TestControlOutboundCapOverridesDefault(t *testing.T) {
 	if stateBool(capped, "unlimited") || stateString(capped, "source") != "control-plane" {
 		t.Fatalf("cap metadata incorrect: %#v", capped)
 	}
-	if outboundCapReached(capped) {
+	if outboundCapReached(capped, 1) {
 		t.Fatal("42 of 150 must not be treated as reached")
 	}
 	capped["usedWithQueued"] = int64(150)
-	if !outboundCapReached(capped) {
+	if !outboundCapReached(capped, 1) {
 		t.Fatal("150 of 150 must be treated as reached")
+	}
+	capped["usedWithQueued"] = int64(145)
+	if !outboundCapReached(capped, 6) {
+		t.Fatal("six recipients at 145 of 150 must be treated as reached")
 	}
 
 	unlimited := applyControlOutboundCap(map[string]any{
@@ -421,8 +425,33 @@ func TestControlOutboundCapOverridesDefault(t *testing.T) {
 	if !stateBool(unlimited, "unlimited") || stateInt(unlimited, "limit") != 0 {
 		t.Fatalf("zero cap must mean unlimited: %#v", unlimited)
 	}
-	if outboundCapReached(unlimited) {
+	if outboundCapReached(unlimited, 100) {
 		t.Fatal("an unlimited outbound policy must never block a send")
+	}
+}
+
+func TestStateOutboundCountsRecipients(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+	state := map[string]any{
+		"user": map[string]any{"outbound": map[string]any{
+			"limit": float64(200), "windowHours": float64(24), "baselineUsed": float64(0),
+			"events": []any{
+				map[string]any{"at": now, "recipients": float64(6)},
+				// Events created before recipient counting count as one.
+				map[string]any{"at": now},
+			},
+		}},
+		"outbox": []any{
+			map[string]any{
+				"to": []any{"a", "b"}, "cc": []any{"c"}, "bcc": []any{"d"},
+				"scheduled": false,
+			},
+		},
+	}
+	outbound := stateOutbound(state)
+	if stateInt(outbound, "used") != 7 || stateInt(outbound, "queuedRecipients") != 4 ||
+		stateInt(outbound, "usedWithQueued") != 11 || stateInt(outbound, "queued") != 1 {
+		t.Fatalf("recipient accounting incorrect: %#v", outbound)
 	}
 }
 

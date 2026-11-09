@@ -288,7 +288,7 @@ export async function renderDomainDetail(ctx) {
                 ${ui.field({ label: 'Burst allowance', name: 'burst', type: 'number', value: caps.burst || 0, min: 0, help: 'Extra recipients added to the hourly cap for short spikes.' })}
                 ${ui.field({ label: 'Daily cap', name: 'capDay', type: 'number', value: caps.day || 0, min: 0, help: 'Maximum accepted recipients in 24 rolling hours. 0 disables the domain cap.' })}
                 ${ui.field({ label: 'Monthly cap', name: 'capMonth', type: 'number', value: caps.month || 0, min: 0, help: 'Maximum accepted recipients in 30 rolling days. 0 disables.' })}
-                ${ui.field({ label: 'Per-mailbox daily cap', name: 'userDailyCap', type: 'number', value: caps.userDailyCap ?? 200, min: 0, help: 'Maximum accepted messages per authenticated mailbox in 24 hours. This safety cap applies even when the domain rolling caps are off. 0 means unlimited; the default is 200.' })}
+                ${ui.field({ label: 'Per-mailbox daily cap', name: 'userDailyCap', type: 'number', value: caps.userDailyCap ?? 200, min: 0, help: 'Maximum accepted recipients per authenticated mailbox in 24 hours. Every To, Cc and Bcc recipient counts separately. This safety cap applies even when the domain rolling caps are off. 0 means unlimited; the default is 200.' })}
                 <div class="span-2">${ui.field({ label: 'DMARC policy', name: 'dmarcPolicy', type: 'select', value: detail.dmarcPolicy || 'none', options: [
                   { value: 'none', label: 'none — monitor only' },
                   { value: 'quarantine', label: 'quarantine — send suspicious mail to spam' },

@@ -91,6 +91,14 @@ async function composeBodyText(composeSel) {
   })()`);
 }
 
+async function addComposeRecipient(composeSel, field, email) {
+  const inputSel = `${composeSel} [data-recipient-input="${field}"]`;
+  await page.click(inputSel);
+  await page.setValue(inputSel, email);
+  await page.pressKey("Enter");
+  await sleep(80);
+}
+
 async function clickByText(selector, text) {
   await page.eval(`(() => {
     const node = [...document.querySelectorAll(${JSON.stringify(selector)})].find((element) => element.textContent.includes(${JSON.stringify(text)}));
@@ -526,13 +534,50 @@ try {
   await page.click("#statusPopClose");
   await page.click("#outboundChip");
   await sleep(250);
-  check(await page.eval("document.getElementById('statusPopBody').textContent.includes('Control Plane')"), "outbound popover names the Control Plane enforcement");
+  check(await page.eval("document.getElementById('statusPopBody').textContent.includes('Messaging policy service')"), "outbound popover names the Messaging policy enforcement");
   app.db.user.outbound.limit = 0;
   await page.click("[data-status-refresh='outbound']");
   await sleep(500);
   check(await page.eval("document.getElementById('statusPopBody').textContent.includes('no daily cap') && document.getElementById('statusPopBody').textContent.includes('Unlimited')"), "zero outbound cap renders as unlimited");
   app.db.user.outbound.limit = 200;
   await page.click("#statusPopClose");
+
+  console.log("\n[7a] Outbound usage counts every recipient");
+  const accountingRecipients = app.db.people
+    .map((person) => person.email)
+    .filter((email) => email && email !== app.db.user.email)
+    .slice(0, 6);
+  equal(accountingRecipients.length, 6, "directory provides six recipients for the outbound accounting test");
+  await page.eval("window.__a8mAutoConfirm = true");
+  await page.click("#cmdCompose");
+  await sleep(350);
+  const recipientsComposeId = await page.eval("[...document.querySelectorAll('.compose:not([hidden])')].at(-1).getAttribute('data-compose-id')");
+  const recipientsComposeSel = `[data-compose-id="${recipientsComposeId}"]`;
+  await addComposeRecipient(recipientsComposeSel, "to", accountingRecipients[0]);
+  await addComposeRecipient(recipientsComposeSel, "to", accountingRecipients[1]);
+  await page.click(`${recipientsComposeSel} [data-compose-action="cc"]`);
+  await sleep(150);
+  await addComposeRecipient(recipientsComposeSel, "cc", accountingRecipients[2]);
+  await addComposeRecipient(recipientsComposeSel, "cc", accountingRecipients[3]);
+  await addComposeRecipient(recipientsComposeSel, "cc", accountingRecipients[4]);
+  await addComposeRecipient(recipientsComposeSel, "bcc", accountingRecipients[5]);
+  await page.setValue(`${recipientsComposeSel} [data-compose-field="subject"]`, "Recipient accounting");
+  await setComposeBody(recipientsComposeSel, "Checking recipient usage.");
+  equal(await page.eval(`document.querySelectorAll(${JSON.stringify(recipientsComposeSel + ' [data-recipient-chips="to"] .recipient-chip')}).length`), 2, "compose keeps two To recipients");
+  equal(await page.eval(`document.querySelectorAll(${JSON.stringify(recipientsComposeSel + ' [data-recipient-chips="cc"] .recipient-chip')}).length`), 3, "compose keeps three Cc recipients");
+  equal(await page.eval(`document.querySelectorAll(${JSON.stringify(recipientsComposeSel + ' [data-recipient-chips="bcc"] .recipient-chip')}).length`), 1, "compose keeps one Bcc recipient");
+  const usageBeforeSend = await page.eval("fetch('/api/outbound').then((response) => response.json()).then((data) => data.usedWithQueued)");
+  await page.click(`${recipientsComposeSel} [data-compose-action="send"]`);
+  await page.waitFor(() => !document.getElementById("pendingChip").hidden, 5000);
+  const usageAfterSend = await page.eval("fetch('/api/outbound').then((response) => response.json()).then((data) => data.usedWithQueued)");
+  equal(usageAfterSend - usageBeforeSend, 6, "outbound usage increases by all six recipients");
+  await page.click(".toast-action");
+  await page.waitFor(() => document.getElementById("pendingChip").hidden, 5000);
+  await sleep(400);
+  const restoredRecipientsId = await openComposeBySubject("Recipient accounting");
+  await page.click(`[data-compose-id="${restoredRecipientsId}"] [data-compose-action="discard"]`);
+  await sleep(600);
+
   await page.click("[data-folder='sent']");
   await sleep(600);
   check(await page.eval("[...document.querySelectorAll('.msg-subject')].some(e=>e.textContent.includes('E2E draft'))"), "sent message appears in the Sent folder after commit");
@@ -1241,6 +1286,58 @@ try {
   await page.eval("window.__a8mAutoConfirm = true");
   await page.click(`${officeComposeSel} [data-compose-action="discard"]`);
   await sleep(700);
+
+  console.log("\n[9g-compose] Compose upload progress, compact attachments and preview");
+  await page.click("#cmdCompose");
+  await sleep(350);
+  const attachComposeId = await page.eval("[...document.querySelectorAll('.compose:not([hidden])')].at(-1).getAttribute('data-compose-id')");
+  const attachComposeSel = `[data-compose-id="${attachComposeId}"]`;
+  await page.click(`${attachComposeSel} [data-compose-action="attach"]`);
+  await sleep(300);
+  check(await page.eval("document.getElementById('composeUploadProgress').hidden"), "attachment upload progress is idle before a file is chosen");
+  check(await page.eval("document.getElementById('composeUploadProgress').nextElementSibling?.classList.contains('compose-attach-foot')"), "upload progress sits immediately above the attachment footer");
+  await page.eval(`(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array(1200)], "preview-one.pdf", { type: "application/pdf" }));
+    transfer.items.add(new File([new Uint8Array(1200000)], "preview-two.pdf", { type: "application/pdf" }));
+    const input = document.getElementById("attachInput");
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await page.waitFor(() => !document.getElementById("composeUploadProgress").hidden, 5000);
+  check(await page.eval("document.getElementById('composeUploadLabel').textContent.length > 0 && !document.getElementById('composeUploadTrack').hidden"), "large uploads expose a progress label and track");
+  await page.screenshot(path.join(artifacts, "17d-compose-upload-progress.png"));
+  await page.waitFor(`document.querySelectorAll(${JSON.stringify(attachComposeSel + " [data-compose-files] .compose-file-card")}).length === 2`, 12000);
+  await page.waitFor(() => document.getElementById("composeUploadProgress").hidden, 5000);
+  const attachmentLayout = await page.eval(`(() => {
+    const grid = document.querySelector(${JSON.stringify(attachComposeSel + " [data-compose-files]")});
+    const cards = [...grid.querySelectorAll(".compose-file-card")];
+    return {
+      direction: getComputedStyle(grid).flexDirection,
+      wrap: getComputedStyle(grid).flexWrap,
+      overflow: getComputedStyle(grid).overflowX,
+      widths: cards.map((card) => Math.round(card.getBoundingClientRect().width))
+    };
+  })()`);
+  check(attachmentLayout.direction === "row" && attachmentLayout.wrap === "nowrap" && attachmentLayout.overflow === "auto", "multiple attachments use one horizontal scrolling row");
+  check(attachmentLayout.widths.every((width) => width > 0 && width < 360), "attachment cards stay compact instead of stretching the compose window");
+  await page.click("#composeAttachDone");
+  await sleep(250);
+  await page.click(`${attachComposeSel} [data-compose-files] .compose-file-card`);
+  await page.waitFor(() => !document.getElementById("previewOverlay").hidden, 4000);
+  check(await page.eval("document.querySelector('.preview-pdf')?.getAttribute('src').includes('/api/attachments/')"), "clicking an uploaded PDF opens the attachment preview");
+  equal(await page.eval("document.getElementById('previewCounter').textContent"), "1 of 2", "compose attachment preview starts on the selected PDF");
+  await page.click("#previewNext");
+  await sleep(300);
+  check(await page.eval("document.getElementById('previewTitle').textContent === 'preview-two.pdf'"), "compose attachment preview navigates to the next PDF");
+  await page.click("#previewClose");
+  check(await page.eval("document.getElementById('previewOverlay').hidden"), "compose attachment preview closes cleanly");
+  await page.click(`${attachComposeSel} [data-compose-files] .compose-file-card .file-remove`);
+  await sleep(200);
+  check(await page.eval(`document.querySelectorAll(${JSON.stringify(attachComposeSel + " [data-compose-files] .compose-file-card")}).length === 1`), "the attachment remove control still works without opening preview");
+  await page.click(`${attachComposeSel} [data-compose-action="discard"]`);
+  await sleep(700);
+
   await page.click(".rail-btn[data-task='files']");
   await sleep(350);
 

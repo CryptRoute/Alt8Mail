@@ -124,10 +124,11 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
   copy and zone-file export.
 - PTR/provider action notes when the reverse zone is outside this host.
 - Per-domain rolling outbound caps with current usage from PostgreSQL, plus a
-  per-mailbox daily cap (default **200 messages/24h**) enforced by the built-in
-  Postfix policy daemon even when domain caps are disabled. Set the mailbox cap
-  to `0` for unlimited sending. The webmail reads the same cap through the
-  `a8m_app` database role so its meter and pre-send check match enforcement.
+  per-mailbox daily cap (default **200 recipients/24h**) enforced by the built-in
+  Postfix policy daemon even when domain caps are disabled. Every To, Cc and Bcc
+  recipient counts as one unit. Set the mailbox cap to `0` for unlimited sending.
+  The webmail reads the same cap through the `a8m_app` database role so its meter
+  and pre-send check match enforcement.
 - Domain detail exposes alias, identity and group counts.
 
 ### Mailboxes, users, aliases and Sieve

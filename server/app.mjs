@@ -751,12 +751,18 @@ export async function createApp(options = {}) {
     outbound.events = outbound.events.filter((event) => Date.parse(event.at) >= cutoff);
   }
 
+  function outboundRecipientUnits(item) {
+    const count = (item.to || []).length + (item.cc || []).length + (item.bcc || []).length;
+    return count > 0 ? count : 1;
+  }
+
   function outboundInfo() {
     pruneOutbound();
     const outbound = db.user.outbound;
-    const committed = outbound.events.length;
+    const committed = outbound.events.reduce((sum, event) => sum + Math.max(1, Number(event.recipients) || 0), 0);
     const used = outbound.baselineUsed + committed;
     const queued = db.outbox.length;
+    const queuedRecipients = db.outbox.reduce((sum, item) => sum + outboundRecipientUnits(item), 0);
     const scheduled = db.outbox.filter((item) => item.scheduled).length;
     return {
       limit: outbound.limit,
@@ -765,11 +771,12 @@ export async function createApp(options = {}) {
       committed,
       used,
       queued,
+      queuedRecipients,
       undoQueued: queued - scheduled,
       scheduled,
-      usedWithQueued: used + queued,
-      remaining: Math.max(0, outbound.limit - used - queued),
-      percent: outbound.limit ? Math.round(((used + queued) / outbound.limit) * 1000) / 10 : 0,
+      usedWithQueued: used + queuedRecipients,
+      remaining: Math.max(0, outbound.limit - used - queuedRecipients),
+      percent: outbound.limit ? Math.round(((used + queuedRecipients) / outbound.limit) * 1000) / 10 : 0,
       unlimited: !(Number(outbound.limit) > 0),
       source: "alt8mail+control-plane",
       refreshedAt: nowIso()
@@ -1624,7 +1631,7 @@ export async function createApp(options = {}) {
       db.messages.push(sent);
       sentMessageId = sent.id;
     }
-    db.user.outbound.events.push({ at: now, id: item.id, messageId: sentMessageId });
+    db.user.outbound.events.push({ at: now, id: item.id, messageId: sentMessageId, recipients: outboundRecipientUnits(item) });
     addAudit(
       { headers: { "user-agent": item.userAgent || "" }, socket: { remoteAddress: item.ip || "127.0.0.1" } },
       "send.committed",
@@ -3797,6 +3804,9 @@ export async function createApp(options = {}) {
         }
         if (!buffer.length) throw new ApiError(400, "ATTACHMENT_EMPTY", "Choose a file to upload");
         if (buffer.length > MAX_UPLOAD_BYTES) throw new ApiError(413, "ATTACHMENT_TOO_LARGE", `Attachments are limited to ${formatBytes(MAX_UPLOAD_BYTES)}`);
+        // Simulate the antivirus scan window for large files so the E2E suite
+        // can observe the compose upload progress state.
+        if (buffer.length > 1_000_000) await new Promise((resolve) => setTimeout(resolve, 600));
         const name = safeFileName(body.name || "attachment");
         const detected = detectUpload(buffer, String(body.mime || ""), name);
         const attachmentId = id("att");
@@ -4669,9 +4679,10 @@ export async function createApp(options = {}) {
           draft = findMessage(draftId);
           if (!draft || draft.folder !== "drafts") throw new ApiError(409, "DRAFT_MISSING", "This draft is no longer available");
         }
+        const recipientUnits = recipients.people.length + cc.people.length + bcc.people.length;
         const usage = outboundInfo();
-        if (usage.usedWithQueued >= usage.limit) {
-          throw new ApiError(429, "OUTBOUND_CAP", `Daily outbound cap reached (${usage.usedWithQueued}/${usage.limit}). Try again after the window resets.`, { outbound: usage });
+        if (!usage.unlimited && usage.usedWithQueued + recipientUnits > usage.limit) {
+          throw new ApiError(429, "OUTBOUND_CAP", `Daily outbound cap reached (${usage.usedWithQueued + recipientUnits}/${usage.limit} recipients). Try again after the window resets.`, { outbound: usage });
         }
         const now = Date.now();
         let scheduledFor = null;

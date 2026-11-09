@@ -450,8 +450,9 @@
   .ai-writing-line, .ai-writing-hand, .ai-writing-pulse i, .compose-ai-thinking-card { animation: none; }
 }
 
-.compose-file-grid { display: flex; flex-direction: column; gap: 6px; padding: 0 14px 12px; }
-.compose-file-card { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
+.compose-file-grid { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; padding: 0 14px 12px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.compose-file-card { flex: 0 0 228px; min-width: 0; display: grid; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); cursor: pointer; transition: border-color .15s, background .15s; }
+.compose-file-card.is-previewable:hover, .compose-file-card.is-previewable:focus-visible, .compose-file-card:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: 0; }
 .compose-file-card .file-art { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
 .compose-file-card .file-art svg { width: 16px; height: 16px; }
 .compose-file-card .file-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -482,7 +483,10 @@
 .compose-attach-tabs { display: flex; gap: 3px; }
 .compose-attach-tabs button { border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: .67rem; font-weight: 600; padding: 4px 7px; border-radius: 6px; cursor: pointer; }
 .compose-attach-tabs button.is-active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
-.compose-attach-file-list, .compose-attach-current-list { max-height: 220px; overflow: auto; padding: 6px; }
+.compose-attach-file-list { max-height: 220px; overflow: auto; padding: 6px; }
+.compose-attach-current-list { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px; max-height: 220px; overflow-x: auto; overflow-y: hidden; padding: 6px; }
+.compose-attach-current-list .compose-file-card { flex: 0 0 228px; }
+.compose-attach-current-list > .settings-note { flex: 1 0 100%; }
 .compose-attach-pick { width: 100%; display: grid; grid-template-columns: 31px minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 7px; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .compose-attach-pick:hover { background: var(--surface-2); }
 .compose-attach-pick .file-art { width: 31px; height: 31px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
@@ -492,6 +496,19 @@
 .compose-attach-pick .file-copy span { font-size: .62rem; color: var(--text-3); }
 .compose-attach-pick .file-add { color: var(--accent-ink); font-size: .65rem; font-weight: 650; }
 .compose-attach-current-list .compose-file-card { background: var(--surface); }
+.compose-upload-progress { padding: 10px 20px 12px; border-top: 1px solid var(--border); background: var(--surface); }
+.compose-upload-progress[hidden] { display: none !important; }
+.compose-upload-progress-copy { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: .68rem; color: var(--text-2); }
+.compose-upload-progress-copy #composeUploadLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compose-upload-progress-copy strong { margin-left: auto; color: var(--text); font-variant-numeric: tabular-nums; }
+.compose-upload-spinner { width: 14px; height: 14px; flex: 0 0 14px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: compose-upload-spin .8s linear infinite; }
+.compose-upload-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--surface-3, var(--surface-2)); }
+.compose-upload-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #22d3ee)); transition: width .15s ease; }
+@keyframes compose-upload-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .compose-upload-spinner { animation: none; }
+  .compose-upload-track span { transition: none; }
+}
 .compose-attach-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-2); }
 .compose-attach-footnote { display: inline-flex; align-items: center; gap: 6px; font-size: .66rem; color: var(--text-3); }
 .compose-attach-footnote svg { width: 14px; height: 14px; }

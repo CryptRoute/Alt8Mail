@@ -79,8 +79,8 @@ func (s *Server) handleMailboxes(w http.ResponseWriter, r *http.Request, sess *s
 		"email":     "m.email ASC",
 		"name":      "lower(u.name) ASC",
 		"status":    "CASE WHEN u.status='active' AND m.active AND m.provision_status <> 'error' AND u.deleted_at IS NULL THEN 0 WHEN m.active THEN 1 ELSE 2 END ASC, m.email ASC",
-		"quota":     "CASE WHEN u.quota_bytes > 0 THEN u.used_bytes::float8 / u.quota_bytes::float8 ELSE -1 END DESC, m.email ASC",
-		"used":      "u.used_bytes DESC, m.email ASC",
+		"quota":     "CASE WHEN u.quota_bytes > 0 THEN mb.used_bytes::float8 / u.quota_bytes::float8 ELSE -1 END DESC, m.email ASC",
+		"used":      "mb.used_bytes DESC, m.email ASC",
 		"created":   "m.created_at DESC, m.email ASC",
 		"lastLogin": "u.last_login_at DESC NULLS LAST, m.email ASC",
 	}[sortBy]
@@ -107,8 +107,13 @@ func (s *Server) handleMailboxes(w http.ResponseWriter, r *http.Request, sess *s
 		SELECT count(*),
 		       count(*) FILTER (WHERE u.status='active' AND u.deleted_at IS NULL AND m.active AND m.provision_status <> 'error'),
 		       count(*) FILTER (WHERE u.status <> 'active' OR u.deleted_at IS NOT NULL OR NOT m.active OR m.provision_status = 'error'),
-		       count(*) FILTER (WHERE u.quota_bytes > 0 AND u.used_bytes::float8 / u.quota_bytes::float8 > 0.85)
-		FROM public.mailboxes m JOIN public.users u ON u.id=m.user_id
+		       count(*) FILTER (WHERE u.quota_bytes > 0 AND mb.used_bytes::float8 / u.quota_bytes::float8 > 0.85)
+		FROM public.mailboxes m
+		JOIN public.users u ON u.id=m.user_id
+		LEFT JOIN LATERAL (
+		  SELECT GREATEST(u.used_bytes, COALESCE(SUM(mm.size_bytes)::bigint, 0)) AS used_bytes
+		  FROM public.mail_messages mm WHERE mm.user_id=u.id
+		) mb ON true
 		`+where, query).Scan(&total, &enabledCount, &suspendedCount, &nearQuota); err != nil {
 		writeFromError(w, err)
 		return
@@ -123,10 +128,15 @@ func (s *Server) handleMailboxes(w http.ResponseWriter, r *http.Request, sess *s
 	offset := (page - 1) * pageSize
 	rows, err := s.db.Query(r.Context(), `
 		SELECT m.id::text, m.email::text, m.active, m.provision_status, m.created_at,
-		       u.id::text, u.name, u.status, u.quota_bytes, u.used_bytes, u.last_login_at,
+		       u.id::text, u.name, u.status, u.quota_bytes,
+		       mb.used_bytes, u.last_login_at,
 		       m.domain::text, m.local_part::text
 		FROM public.mailboxes m
 		JOIN public.users u ON u.id=m.user_id
+		LEFT JOIN LATERAL (
+		  SELECT GREATEST(u.used_bytes, COALESCE(SUM(mm.size_bytes)::bigint, 0)) AS used_bytes
+		  FROM public.mail_messages mm WHERE mm.user_id=u.id
+		) mb ON true
 		`+where+`
 		ORDER BY `+orderBy+`
 		LIMIT $2 OFFSET $3
@@ -367,9 +377,15 @@ func (s *Server) handleMailboxDetail(w http.ResponseWriter, r *http.Request, ses
 	var lastLogin *time.Time
 	err := s.db.QueryRow(r.Context(), `
 		SELECT m.id::text,m.email::text,u.name,u.status,m.provision_status,m.domain::text,m.local_part::text,
-		       m.maildir_path,u.quota_bytes,u.used_bytes,m.active,m.created_at,u.last_login_at,
+		       m.maildir_path,u.quota_bytes,mb.used_bytes,m.active,m.created_at,u.last_login_at,
 		       m.user_id::text
-		FROM public.mailboxes m JOIN public.users u ON u.id=m.user_id WHERE m.id=$1
+		FROM public.mailboxes m
+		JOIN public.users u ON u.id=m.user_id
+		LEFT JOIN LATERAL (
+		  SELECT GREATEST(u.used_bytes, COALESCE(SUM(mm.size_bytes)::bigint, 0)) AS used_bytes
+		  FROM public.mail_messages mm WHERE mm.user_id=u.id
+		) mb ON true
+		WHERE m.id=$1
 	`, id).Scan(&mailboxID, &email, &name, &status, &provision, &domain, &local, &maildir,
 		&quota, &used, &active, &createdAt, &lastLogin, &userID)
 	if err != nil {
