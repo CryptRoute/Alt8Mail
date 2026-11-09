@@ -62,6 +62,10 @@ type Server struct {
 	licenseStatus     licensing.Status
 	licenseError      string
 	licenseConfigured bool
+	oidcMu            sync.Mutex
+	oidcCached        *oidcClient
+	oidcLastErr       error
+	oidcLastTry       time.Time
 }
 
 type Options struct {
@@ -134,6 +138,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/ready", s.health)
 	mux.HandleFunc("GET /api/branding", s.publicBranding)
+	mux.HandleFunc("GET /api/auth/oidc/config", s.oidcConfig)
 	mux.HandleFunc("GET /oauth/slack/callback", s.slackAddonOAuthCallback)
 	mux.HandleFunc("GET /oauth/relay/complete", s.addonRelayComplete)
 	mux.HandleFunc("POST /api/addons/webhooks/slack", s.slackAddonWebhook)

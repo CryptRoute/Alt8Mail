@@ -67,6 +67,13 @@ type Config struct {
 	WebAuthnOrigins  []string
 	PushVAPIDKeyFile string
 
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCRedirectURL  string
+	OIDCDisplayName  string
+	OIDCEmailDomains []string
+
 	S3Endpoint                string
 	S3Region                  string
 	S3Bucket                  string
@@ -125,6 +132,12 @@ func Load() (Config, error) {
 		StaticCacheBust:           os.Getenv("ALT8MAIL_BUILD_ID"),
 		ReadHeaderTimeout:         10 * time.Second,
 		PushVAPIDKeyFile:          env("ALT8MAIL_PUSH_VAPID_KEY_FILE", "/etc/a8m/web_push_vapid.key"),
+		OIDCIssuer:                strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_ISSUER")),
+		OIDCClientID:              strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_CLIENT_ID")),
+		OIDCClientSecret:          os.Getenv("ALT8MAIL_OIDC_CLIENT_SECRET"),
+		OIDCRedirectURL:           strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_REDIRECT_URL")),
+		OIDCDisplayName:           strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_DISPLAY_NAME")),
+		OIDCEmailDomains:          parseOIDCEmailDomains(os.Getenv("ALT8MAIL_OIDC_EMAIL_DOMAINS")),
 		SessionTTL:                12 * time.Hour,
 		RememberTTL:               30 * 24 * time.Hour,
 		IMAPAddr:                  env("ALT8MAIL_IMAP_ADDR", "127.0.0.1:993"),
@@ -296,6 +309,25 @@ func envBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
+}
+
+// parseOIDCEmailDomains splits a comma-separated sign-in allowlist. Entries are
+// trimmed and lowercased, an optional leading "@" is accepted, and duplicates
+// and empty entries are dropped so an operator cannot accidentally loosen the
+// allowlist with punctuation.
+func parseOIDCEmailDomains(value string) []string {
+	domains := []string{}
+	seen := map[string]bool{}
+	for _, item := range strings.Split(value, ",") {
+		domain := strings.ToLower(strings.TrimSpace(item))
+		domain = strings.TrimPrefix(domain, "@")
+		if domain == "" || seen[domain] {
+			continue
+		}
+		seen[domain] = true
+		domains = append(domains, domain)
+	}
+	return domains
 }
 
 // urlEscape escapes a password for use in a URL DSN. pgx accepts URL DSNs; the
