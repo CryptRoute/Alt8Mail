@@ -12,8 +12,9 @@ hides the button and the start and callback endpoints redirect with
 `sso_unavailable`. A license in its grace period keeps SSO enabled.
 
 This first deployment is configured through environment variables. Per-tenant
-Control Plane SSO configuration, SAML, SCIM, group-to-role mapping, IdP-initiated
-login and JIT user provisioning are out of scope.
+Control Plane SSO configuration, SCIM, group-to-role mapping, IdP-initiated
+login and JIT user provisioning are out of scope. Environment-configured SAML
+SSO is documented in [SAML.md](SAML.md).
 
 ## Required environment variables
 
