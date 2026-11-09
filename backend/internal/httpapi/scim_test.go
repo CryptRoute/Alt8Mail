@@ -14,6 +14,8 @@ import (
 
 	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/licensing"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // newSCIMTestServer builds a server through the production constructor with a
@@ -58,6 +60,7 @@ func TestSCIMBaseURL(t *testing.T) {
 		{name: "query", public: "https://mail.example.test/?tenant=1", wantErr: true},
 		{name: "empty query", public: "https://mail.example.test/?", wantErr: true},
 		{name: "fragment", public: "https://mail.example.test/#fragment", wantErr: true},
+		{name: "empty fragment", public: "https://mail.example.test/#", wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,6 +285,120 @@ func TestSCIMTokenMaterial(t *testing.T) {
 	}
 }
 
+func TestSCIMBareSubtreeFailsClosed(t *testing.T) {
+	unlicensed := New(Options{
+		Config: config.Config{PublicURL: "https://mail.example.test"},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	for _, path := range []string{"/scim/v2", "/scim/v2/"} {
+		recorder := httptest.NewRecorder()
+		unlicensed.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("unlicensed %s status = %d, want 404 (no redirect)", path, recorder.Code)
+		}
+	}
+
+	licensed, _ := newSCIMTestServer(t, "https://mail.example.test", "scim")
+	for _, path := range []string{"/scim/v2", "/scim/v2/"} {
+		recorder := httptest.NewRecorder()
+		licensed.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		assertSCIMError(t, recorder, http.StatusUnauthorized, "")
+	}
+}
+
+func TestSCIMDiscoveryMethodsAllowGet(t *testing.T) {
+	server, _ := newSCIMTestServer(t, "https://mail.example.test", "scim")
+	handler := server.scimAllowMethod(http.MethodGet, server.scimServiceProviderConfig)
+
+	recorder := httptest.NewRecorder()
+	handler(recorder, httptest.NewRequest(http.MethodGet, "/scim/v2/ServiceProviderConfig", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
+	handler(recorder, httptest.NewRequest(http.MethodPost, "/scim/v2/ServiceProviderConfig", nil))
+	assertSCIMError(t, recorder, http.StatusMethodNotAllowed, "")
+	if got := recorder.Header().Get("Allow"); got != http.MethodGet {
+		t.Fatalf("Allow = %q, want GET", got)
+	}
+}
+
+func TestSCIMResourceTypeSubpaths(t *testing.T) {
+	server, _ := newSCIMTestServer(t, "https://mail.example.test", "scim")
+	for id, endpoint := range map[string]string{"User": "/Users", "Group": "/Groups"} {
+		recorder := httptest.NewRecorder()
+		server.scimResourceType(id)(recorder, httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes/"+id, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s status = %d: %s", id, recorder.Code, recorder.Body.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode %s resource type: %v", id, err)
+		}
+		if payload["id"] != id || payload["endpoint"] != endpoint {
+			t.Fatalf("%s resource type = %#v", id, payload)
+		}
+		meta, _ := payload["meta"].(map[string]any)
+		if meta["location"] != "https://mail.example.test/scim/v2/ResourceTypes/"+id {
+			t.Fatalf("%s meta = %#v", id, meta)
+		}
+	}
+
+	recorder := httptest.NewRecorder()
+	server.scimResourceType("Device")(recorder, httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes/Device", nil))
+	assertSCIMError(t, recorder, http.StatusNotFound, "")
+}
+
+// TestSCIMAdminTokenDatabaseErrorsReturn500 proves a backend failure is not
+// misreported as a missing token. The pool is closed before the call, so every
+// query fails with a driver error rather than pgx.ErrNoRows.
+func TestSCIMAdminTokenDatabaseErrorsReturn500(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(), "postgres://user:pass@127.0.0.1:1/a8m?sslmode=disable")
+	if err != nil {
+		t.Fatalf("create pgx pool: %v", err)
+	}
+	pool.Close()
+	server := New(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	server.store = &store.Store{DB: pool}
+	sess := &adminSessionRecord{ActiveTenantID: "tenant-1", User: adminUser{ID: "user-1"}}
+	cases := []struct {
+		name   string
+		method string
+		call   http.HandlerFunc
+	}{
+		{name: "rotate", method: http.MethodPost, call: server.adminRotateSCIMToken},
+		{name: "revoke", method: http.MethodDelete, call: server.adminRevokeSCIMToken},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, "/scim/tokens/00000000-0000-0000-0000-000000000000", nil)
+			request.SetPathValue("id", "00000000-0000-0000-0000-000000000000")
+			request = request.WithContext(context.WithValue(request.Context(), adminSessionContextKey{}, sess))
+			recorder := httptest.NewRecorder()
+			tc.call(recorder, request)
+			if recorder.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500: %s", recorder.Code, recorder.Body.String())
+			}
+			var payload struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode error: %v", err)
+			}
+			if payload.Error.Code != "SCIM_TOKEN" || payload.Error.Message == "" {
+				t.Fatalf("unexpected error payload: %#v", payload.Error)
+			}
+			if strings.Contains(strings.ToLower(recorder.Body.String()), "pool") || strings.Contains(recorder.Body.String(), "127.0.0.1") {
+				t.Fatalf("response leaked database internals: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestSCIMTokenPayloadHasNoSecretMaterial(t *testing.T) {
 	now := time.Now().UTC()
 	expires := now.Add(time.Hour)
@@ -414,6 +531,7 @@ func TestSCIMAdminTokenCreateValidation(t *testing.T) {
 		{name: "missing name", body: `{}`, contentType: "application/json", wantCode: "NAME"},
 		{name: "blank name", body: `{"name":"   "}`, contentType: "application/json", wantCode: "NAME"},
 		{name: "long name", body: `{"name":"` + strings.Repeat("n", scimTokenNameMaxLength+1) + `"}`, contentType: "application/json", wantCode: "NAME"},
+		{name: "oversized body", body: `{"name":"` + strings.Repeat("a", scimTokenBodyLimit) + `"}`, contentType: "application/json", wantCode: "BAD_JSON"},
 		{name: "invalid expiresAt", body: `{"name":"Entra","expiresAt":"tomorrow"}`, contentType: "application/json", wantCode: "EXPIRES_AT"},
 		{name: "past expiresAt", body: `{"name":"Entra","expiresAt":"2020-01-01T00:00:00Z"}`, contentType: "application/json", wantCode: "EXPIRES_AT"},
 	}
@@ -466,6 +584,17 @@ func assertSCIMError(t *testing.T, recorder *httptest.ResponseRecorder, status i
 	}
 	if detail, _ := payload["detail"].(string); detail == "" {
 		t.Fatalf("detail is empty: %#v", payload)
+	}
+	if status == http.StatusUnauthorized {
+		if got := recorder.Header().Get("WWW-Authenticate"); got != "Bearer" {
+			t.Fatalf("WWW-Authenticate = %q, want Bearer", got)
+		}
+	}
+	if status == http.StatusTooManyRequests {
+		seconds, err := strconv.Atoi(recorder.Header().Get("Retry-After"))
+		if err != nil || seconds <= 0 {
+			t.Fatalf("Retry-After = %q, want a positive number of seconds", recorder.Header().Get("Retry-After"))
+		}
 	}
 	if scimType == "" {
 		if _, exists := payload["scimType"]; exists {

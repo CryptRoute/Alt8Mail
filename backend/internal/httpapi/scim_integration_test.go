@@ -101,9 +101,31 @@ func TestSCIMIntegration(t *testing.T) {
 	}
 	adminA, csrfA := createAdminSession(userA, tenantA)
 	adminB, csrfB := createAdminSession(userB, tenantB)
+
+	// A tenant admin whose role can read users but cannot create SCIM tokens.
+	var limitedUser, limitedRole string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (tenant_id, email, name, role)
+		VALUES ($1, $2, 'SCIM limited admin', 'member') RETURNING id::text
+	`, tenantA, fmt.Sprintf("scim-limited-%s@example.test", slug)).Scan(&limitedUser); err != nil {
+		t.Fatalf("create limited admin: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO admin_roles (tenant_id, name, permissions)
+		VALUES ($1, 'SCIM read only', ARRAY['users.read']::text[]) RETURNING id::text
+	`, tenantA).Scan(&limitedRole); err != nil {
+		t.Fatalf("create limited admin role: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_role_assignments (user_id, role_id, tenant_id) VALUES ($1, $2, $3)
+	`, limitedUser, limitedRole, tenantA); err != nil {
+		t.Fatalf("assign limited admin role: %v", err)
+	}
+	limitedCookie, limitedCSRF := createAdminSession(limitedUser, tenantA)
+
 	defer func() {
 		cleanup := context.Background()
-		_, _ = pool.Exec(cleanup, `DELETE FROM admin_audit_log WHERE actor_id IN ($1, $2)`, userA, userB)
+		_, _ = pool.Exec(cleanup, `DELETE FROM admin_audit_log WHERE actor_id IN ($1, $2, $3)`, userA, userB, limitedUser)
 		_, _ = pool.Exec(cleanup, `DELETE FROM tenants WHERE id IN ($1, $2)`, tenantA, tenantB)
 	}()
 
@@ -126,14 +148,17 @@ func TestSCIMIntegration(t *testing.T) {
 		server.AdminHandler().ServeHTTP(recorder, request)
 		return recorder
 	}
-	scimRequest := func(rawToken, path string) *httptest.ResponseRecorder {
-		request := httptest.NewRequest(http.MethodGet, path, nil)
+	methodRequest := func(method, rawToken, path string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, path, nil)
 		if rawToken != "" {
 			request.Header.Set("Authorization", "Bearer "+rawToken)
 		}
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, request)
 		return recorder
+	}
+	scimRequest := func(rawToken, path string) *httptest.ResponseRecorder {
+		return methodRequest(http.MethodGet, rawToken, path)
 	}
 	decode := func(t *testing.T, recorder *httptest.ResponseRecorder, target any) {
 		t.Helper()
@@ -243,6 +268,29 @@ func TestSCIMIntegration(t *testing.T) {
 				t.Fatal("last_used_at was not recorded asynchronously")
 			}
 			time.Sleep(25 * time.Millisecond)
+		}
+	})
+
+	t.Run("discovery routes, bare subtree and methods", func(t *testing.T) {
+		// The bare base path reaches scimAuth instead of a ServeMux redirect.
+		assertSCIMError(t, scimRequest(activeRaw, "/scim/v2"), http.StatusNotFound, "")
+
+		for _, id := range []string{"User", "Group"} {
+			recorder := scimRequest(activeRaw, "/scim/v2/ResourceTypes/"+id)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("ResourceTypes/%s status = %d: %s", id, recorder.Code, recorder.Body.String())
+			}
+			var payload map[string]any
+			decode(t, recorder, &payload)
+			if payload["id"] != id {
+				t.Fatalf("ResourceTypes/%s payload = %#v", id, payload)
+			}
+		}
+
+		recorder := methodRequest(http.MethodPost, activeRaw, "/scim/v2/ServiceProviderConfig")
+		assertSCIMError(t, recorder, http.StatusMethodNotAllowed, "")
+		if got := recorder.Header().Get("Allow"); got != http.MethodGet {
+			t.Fatalf("Allow = %q, want GET", got)
 		}
 	})
 
@@ -363,6 +411,63 @@ func TestSCIMIntegration(t *testing.T) {
 			t.Fatalf("seed expired token: %v", err)
 		}
 		assertSCIMError(t, scimRequest(expiredRaw, "/scim/v2/ServiceProviderConfig"), http.StatusUnauthorized, "")
+	})
+
+	t.Run("admin permission is required", func(t *testing.T) {
+		for _, tc := range []struct {
+			method string
+			path   string
+			body   string
+		}{
+			{method: http.MethodGet, path: "/admin/api/scim/tokens"},
+			{method: http.MethodPost, path: "/admin/api/scim/tokens", body: `{"name":"Denied"}`},
+		} {
+			recorder := adminRequest(limitedCookie, limitedCSRF, tc.method, tc.path, tc.body)
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("%s %s status = %d, want 403: %s", tc.method, tc.path, recorder.Code, recorder.Body.String())
+			}
+		}
+	})
+
+	t.Run("successful auth resets the rate limiter", func(t *testing.T) {
+		created := createToken(t, adminA, csrfA, "Limiter reset", "")
+		raw, _ := created["token"].(string)
+		server.scimLimit = newLoginLimiter(2, time.Minute)
+		defer func() {
+			server.scimLimit = newLoginLimiter(oidcCallbackRateLimit, oidcCallbackRateWindow)
+		}()
+		badAttempt := func() *httptest.ResponseRecorder {
+			return scimRequest(scimTokenPrefix+randomToken(32), "/scim/v2/ServiceProviderConfig")
+		}
+		assertSCIMError(t, badAttempt(), http.StatusUnauthorized, "")
+		if recorder := scimRequest(raw, "/scim/v2/ServiceProviderConfig"); recorder.Code != http.StatusOK {
+			t.Fatalf("valid token after a failure status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		// The successful request reset the counter, so a full window of
+		// failures is available again before the limiter returns 429.
+		assertSCIMError(t, badAttempt(), http.StatusUnauthorized, "")
+		assertSCIMError(t, badAttempt(), http.StatusUnauthorized, "")
+		assertSCIMError(t, badAttempt(), http.StatusTooManyRequests, "tooMany")
+	})
+
+	t.Run("a8m_app can use scim_tokens", func(t *testing.T) {
+		var roleExists bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'a8m_app')`).Scan(&roleExists); err != nil {
+			t.Fatalf("check a8m_app role: %v", err)
+		}
+		if !roleExists {
+			t.Skip("a8m_app role is not present in this database")
+		}
+		var schemaUsage bool
+		if err := pool.QueryRow(ctx, `SELECT has_schema_privilege('a8m_app', 'public', 'USAGE')`).Scan(&schemaUsage); err != nil || !schemaUsage {
+			t.Fatalf("a8m_app lacks public schema USAGE: %v", err)
+		}
+		for _, privilege := range []string{"SELECT", "INSERT", "UPDATE", "DELETE"} {
+			var allowed bool
+			if err := pool.QueryRow(ctx, `SELECT has_table_privilege('a8m_app', 'public.scim_tokens', $1)`, privilege).Scan(&allowed); err != nil || !allowed {
+				t.Fatalf("a8m_app lacks %s on scim_tokens: %v", privilege, err)
+			}
+		}
 	})
 
 	t.Run("audit records token ids but never token material", func(t *testing.T) {
