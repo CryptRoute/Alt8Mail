@@ -86,7 +86,14 @@ func (s *Server) oidcAuthDeps() oidcAuthDeps {
 		updateLastLogin: func(ctx context.Context, userID string) {
 			_, _ = s.store.DB.Exec(ctx, `UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1`, userID)
 		},
-		audit: s.audit,
+		audit: func(r *http.Request, user userRecord, action, target, detail string) {
+			// Focused flow tests call the handler with nil storage; production
+			// always has a store.
+			if s.store == nil || s.store.DB == nil {
+				return
+			}
+			s.audit(r, user, action, target, detail)
+		},
 	}
 }
 
@@ -144,101 +151,104 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request, deps
 	// outcome, including malformed callbacks, retires it.
 	s.clearOIDCStateCookie(w)
 
+	ip := clientIP(r)
 	if !s.oidcConfigured() {
-		s.oidcErrorRedirect(w, r, ssoErrorUnavailable)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorUnavailable, ip)
 		return
 	}
-	ip := clientIP(r)
 	if s.oidcLimit != nil && !s.oidcLimit.Allow(ip) {
+		// Already over the limit: record the failure but do not extend it.
+		s.auditOIDCFailure(r, deps, userRecord{}, "", ssoErrorRateLimited)
 		s.oidcErrorRedirect(w, r, ssoErrorRateLimited)
 		return
 	}
 
 	cookie, err := r.Cookie(oidcStateCookie)
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorState, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorState, ip)
 		return
 	}
 	state, err := s.parseOIDCState(cookie.Value)
 	if err != nil {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorState, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorState, ip)
 		return
 	}
 	query := r.URL.Query()
 	if subtle.ConstantTimeCompare([]byte(query.Get("state")), []byte(state.State)) != 1 {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorState, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorState, ip)
 		return
 	}
 	if query.Get("error") != "" {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorDenied, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorDenied, ip)
 		return
 	}
 	code := strings.TrimSpace(query.Get("code"))
 	if code == "" {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorExchange, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorExchange, ip)
 		return
 	}
 
 	client, err := s.oidcClient(r.Context())
 	if err != nil {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorUnavailable, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorUnavailable, ip)
 		return
 	}
 	token, err := client.config.Exchange(r.Context(), code, oauth2.VerifierOption(state.Verifier))
 	if err != nil {
 		// Do not log the OAuth2 error: it can contain provider response details.
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorExchange, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorExchange, ip)
 		return
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok || strings.TrimSpace(rawIDToken) == "" {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorToken, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorToken, ip)
 		return
 	}
 	idToken, err := client.verifier.Verify(r.Context(), rawIDToken)
 	if err != nil {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorToken, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorToken, ip)
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(state.Nonce)) != 1 {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorNonce, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorNonce, ip)
 		return
 	}
 	var claims oidcIDTokenClaims
 	if err := idToken.Claims(&claims); err != nil {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorToken, ip)
-		return
-	}
-	if claims.EmailVerified != nil && !*claims.EmailVerified {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorEmailUnverified, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorToken, ip)
 		return
 	}
 	email := strings.ToLower(strings.TrimSpace(claims.Email))
+	auditTarget := ""
+	if email != "" && strings.Contains(email, "@") {
+		auditTarget = email
+	}
+	if claims.EmailVerified != nil && !*claims.EmailVerified {
+		s.failOIDCCallback(w, r, deps, userRecord{}, auditTarget, ssoErrorEmailUnverified, ip)
+		return
+	}
 	if email == "" || !strings.Contains(email, "@") {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorEmail, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorEmail, ip)
 		return
 	}
 	if !s.oidcEmailDomainAllowed(email) {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", "", "", ssoErrorDomain, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, email, ssoErrorDomain, ip)
 		return
 	}
 
 	// SSO only signs in existing active users. There is no JIT provisioning.
 	user, err := deps.userByEmail(r.Context(), email)
 	if err != nil || user.ID == "" {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "auth.failed", email,
-			"OIDC SSO · unknown or inactive user", ssoErrorUnknownUser, ip)
+		s.failOIDCCallback(w, r, deps, userRecord{}, email, ssoErrorUnknownUser, ip)
 		return
 	}
 	policy := deps.tenantPolicy(r.Context(), user.TenantID)
 	if !adminIPAllowed(policy.Security.AllowedIPRanges, ip) {
-		s.failOIDCCallback(w, r, deps, user, "auth.ip_blocked", user.Email,
-			"OIDC SSO · tenant network policy", ssoErrorIPBlocked, ip)
+		s.failOIDCCallback(w, r, deps, user, user.Email, ssoErrorIPBlocked, ip)
 		return
 	}
 	if oidcPolicyRequiresMFA(policy, user) && !oidcMFAStrength(claims.AMR, claims.ACR) {
-		s.failOIDCCallback(w, r, deps, user, "auth.failed", user.Email,
-			"OIDC SSO · MFA required by tenant policy", ssoErrorMFARequired, ip)
+		s.failOIDCCallback(w, r, deps, user, user.Email, ssoErrorMFARequired, ip)
 		return
 	}
 
@@ -248,8 +258,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request, deps
 	}
 	session, rawToken, err := deps.createSession(r, user, ttl)
 	if err != nil || session == nil || rawToken == "" {
-		s.failOIDCCallback(w, r, deps, user, "auth.failed", user.Email,
-			"OIDC SSO · session creation failed", ssoErrorSession, ip)
+		s.failOIDCCallback(w, r, deps, user, user.Email, ssoErrorSession, ip)
 		return
 	}
 	if s.oidcLimit != nil {
@@ -265,17 +274,23 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request, deps
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-// failOIDCCallback records a failed attempt for rate limiting, audits
-// identity-bearing failures when possible and sends the browser to a fixed,
-// non-leaking error location.
-func (s *Server) failOIDCCallback(w http.ResponseWriter, r *http.Request, deps oidcAuthDeps, user userRecord, action, target, detail, code, ip string) {
+// failOIDCCallback records a failed attempt for rate limiting, writes a
+// sanitized audit entry and sends the browser to a fixed, non-leaking error
+// location. The audit target is only a normalized email after a verified ID
+// token; the detail is the fixed safe error code and nothing else.
+func (s *Server) failOIDCCallback(w http.ResponseWriter, r *http.Request, deps oidcAuthDeps, user userRecord, target, code, ip string) {
 	if s.oidcLimit != nil {
 		s.oidcLimit.Fail(ip)
 	}
-	if deps.audit != nil && action != "" {
-		deps.audit(r, user, action, target, detail)
-	}
+	s.auditOIDCFailure(r, deps, user, target, code)
 	s.oidcErrorRedirect(w, r, code)
+}
+
+func (s *Server) auditOIDCFailure(r *http.Request, deps oidcAuthDeps, user userRecord, target, code string) {
+	if deps.audit == nil {
+		return
+	}
+	deps.audit(r, user, "auth.sso_failed", target, code)
 }
 
 func (s *Server) oidcErrorRedirect(w http.ResponseWriter, r *http.Request, code string) {

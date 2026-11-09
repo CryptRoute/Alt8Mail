@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -144,6 +146,7 @@ type oidcTestBackend struct {
 }
 
 type oidcTestAudit struct {
+	userID string
 	action string
 	target string
 	detail string
@@ -179,8 +182,20 @@ func (backend *oidcTestBackend) deps() oidcAuthDeps {
 			backend.lastLogins = append(backend.lastLogins, userID)
 		},
 		audit: func(r *http.Request, user userRecord, action, target, detail string) {
-			backend.audits = append(backend.audits, oidcTestAudit{action: action, target: target, detail: detail})
+			backend.audits = append(backend.audits, oidcTestAudit{userID: user.ID, action: action, target: target, detail: detail})
 		},
+	}
+}
+
+func requireSSOFailureAudit(t *testing.T, backend *oidcTestBackend, wantUserID, wantTarget, wantDetail string) {
+	t.Helper()
+	if len(backend.audits) != 1 {
+		t.Fatalf("audits = %#v, want exactly one failure", backend.audits)
+	}
+	audit := backend.audits[0]
+	if audit.action != "auth.sso_failed" || audit.userID != wantUserID ||
+		audit.target != wantTarget || audit.detail != wantDetail {
+		t.Fatalf("audit = %#v, want auth.sso_failed user=%q target=%q detail=%q", audit, wantUserID, wantTarget, wantDetail)
 	}
 }
 
@@ -198,29 +213,49 @@ func oidcFlowClaims(cfg config.Config, provider *mockOIDCProvider, nonce string)
 	}
 }
 
+// validateOIDCTokenRequest asserts the authorization-code exchange used the
+// expected code and PKCE S256 verifier.
+func validateOIDCTokenRequest(t *testing.T, w http.ResponseWriter, r *http.Request, start oidcStartResult) bool {
+	t.Helper()
+	if err := r.ParseForm(); err != nil {
+		t.Errorf("parse token request: %v", err)
+		http.Error(w, "bad token request", http.StatusBadRequest)
+		return false
+	}
+	if got := r.Form.Get("grant_type"); got != "authorization_code" {
+		t.Errorf("grant_type = %q, want authorization_code", got)
+	}
+	if got := r.Form.Get("code"); got != "test-code" {
+		t.Errorf("code = %q, want test-code", got)
+	}
+	verifier := r.Form.Get("code_verifier")
+	if verifier != start.state.Verifier {
+		t.Errorf("code_verifier does not match the state cookie verifier")
+	}
+	sum := sha256.Sum256([]byte(verifier))
+	if got := base64.RawURLEncoding.EncodeToString(sum[:]); got != start.challenge {
+		t.Errorf("PKCE challenge mismatch: got %q, want %q", got, start.challenge)
+	}
+	return true
+}
+
+func writeOIDCTokenResponse(w http.ResponseWriter, rawIDToken string) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"access_token": "access-token",
+		"token_type":   "Bearer",
+		"expires_in":   3600,
+		"id_token":     rawIDToken,
+	})
+}
+
 // serveIDToken configures the mock token endpoint to validate the authorization
 // code and PKCE verifier, then issue an ID token with the supplied claims.
 func serveIDToken(t *testing.T, provider *mockOIDCProvider, start oidcStartResult, claims jwt.MapClaims) {
 	t.Helper()
 	provider.tokenHandler = func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			t.Errorf("parse token request: %v", err)
-			http.Error(w, "bad token request", http.StatusBadRequest)
+		if !validateOIDCTokenRequest(t, w, r, start) {
 			return
-		}
-		if got := r.Form.Get("grant_type"); got != "authorization_code" {
-			t.Errorf("grant_type = %q, want authorization_code", got)
-		}
-		if got := r.Form.Get("code"); got != "test-code" {
-			t.Errorf("code = %q, want test-code", got)
-		}
-		verifier := r.Form.Get("code_verifier")
-		if verifier != start.state.Verifier {
-			t.Errorf("code_verifier does not match the state cookie verifier")
-		}
-		sum := sha256.Sum256([]byte(verifier))
-		if got := base64.RawURLEncoding.EncodeToString(sum[:]); got != start.challenge {
-			t.Errorf("PKCE challenge mismatch: got %q, want %q", got, start.challenge)
 		}
 		signed, err := provider.signClaims(claims)
 		if err != nil {
@@ -228,13 +263,19 @@ func serveIDToken(t *testing.T, provider *mockOIDCProvider, start oidcStartResul
 			http.Error(w, "sign", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "access-token",
-			"token_type":   "Bearer",
-			"expires_in":   3600,
-			"id_token":     signed,
-		})
+		writeOIDCTokenResponse(w, signed)
+	}
+}
+
+// serveRawIDToken issues an already-built token so negative tests can exercise
+// signature, issuer, audience, expiry and algorithm rejection.
+func serveRawIDToken(t *testing.T, provider *mockOIDCProvider, start oidcStartResult, rawIDToken string) {
+	t.Helper()
+	provider.tokenHandler = func(w http.ResponseWriter, r *http.Request) {
+		if !validateOIDCTokenRequest(t, w, r, start) {
+			return
+		}
+		writeOIDCTokenResponse(w, rawIDToken)
 	}
 }
 
@@ -357,10 +398,10 @@ func TestOIDCDisabledStartAndCallback(t *testing.T) {
 	server.Handler().ServeHTTP(recorder, request)
 	requireSSOErrorRedirect(t, recorder, ssoErrorUnavailable)
 
-	request = httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=test-code&state=state", nil)
-	recorder = httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, request)
+	backend := newOIDCTestBackend()
+	recorder = callOIDCCallback(server, backend.deps(), nil, "/api/auth/oidc/callback?code=test-code&state=state")
 	requireSSOErrorRedirect(t, recorder, ssoErrorUnavailable)
+	requireSSOFailureAudit(t, backend, "", "", ssoErrorUnavailable)
 }
 
 func TestOIDCCallbackSuccess(t *testing.T) {
@@ -413,7 +454,7 @@ func TestOIDCCallbackSuccess(t *testing.T) {
 			if got := backend.lastLogins; len(got) != 1 || got[0] != "user-1" {
 				t.Fatalf("last login updates = %v, want user-1", got)
 			}
-			if len(backend.audits) != 1 || backend.audits[0].action != "auth.login" ||
+			if len(backend.audits) != 1 || backend.audits[0].userID != "user-1" || backend.audits[0].action != "auth.login" ||
 				backend.audits[0].target != "person@example.test" || backend.audits[0].detail != "OIDC SSO" {
 				t.Fatalf("audit calls = %#v, want auth.login/OIDC SSO", backend.audits)
 			}
@@ -425,7 +466,6 @@ func TestOIDCCallbackStateAndProviderErrors(t *testing.T) {
 	provider := newMockOIDCProvider(t, false)
 	cfg := oidcFlowConfig(provider)
 	server := oidcFlowServer(t, cfg)
-	backend := newOIDCTestBackend()
 
 	valid := beginOIDCFlow(t, server, "")
 	tampered := valid
@@ -455,8 +495,10 @@ func TestOIDCCallbackStateAndProviderErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			backend := newOIDCTestBackend()
 			recorder := callOIDCCallback(server, backend.deps(), tc.start, tc.target)
 			requireSSOErrorRedirect(t, recorder, tc.want)
+			requireSSOFailureAudit(t, backend, "", "", tc.want)
 		})
 	}
 }
@@ -467,9 +509,10 @@ func TestOIDCCallbackRejectsInvalidIDTokenClaims(t *testing.T) {
 	server := oidcFlowServer(t, cfg)
 
 	cases := []struct {
-		name   string
-		mutate func(jwt.MapClaims) jwt.MapClaims
-		want   string
+		name       string
+		mutate     func(jwt.MapClaims) jwt.MapClaims
+		want       string
+		wantTarget string
 	}{
 		{
 			name: "nonce mismatch",
@@ -493,7 +536,8 @@ func TestOIDCCallbackRejectsInvalidIDTokenClaims(t *testing.T) {
 				claims["email_verified"] = false
 				return claims
 			},
-			want: ssoErrorEmailUnverified,
+			want:       ssoErrorEmailUnverified,
+			wantTarget: "person@example.test",
 		},
 		{
 			name: "email missing",
@@ -509,7 +553,26 @@ func TestOIDCCallbackRejectsInvalidIDTokenClaims(t *testing.T) {
 				claims["email"] = "person@other.test"
 				return claims
 			},
-			want: ssoErrorDomain,
+			want:       ssoErrorDomain,
+			wantTarget: "person@other.test",
+		},
+		{
+			name: "domain suffix is not allowed",
+			mutate: func(claims jwt.MapClaims) jwt.MapClaims {
+				claims["email"] = "person@notexample.test"
+				return claims
+			},
+			want:       ssoErrorDomain,
+			wantTarget: "person@notexample.test",
+		},
+		{
+			name: "subdomain is not allowed",
+			mutate: func(claims jwt.MapClaims) jwt.MapClaims {
+				claims["email"] = "person@sub.example.test"
+				return claims
+			},
+			want:       ssoErrorDomain,
+			wantTarget: "person@sub.example.test",
 		},
 	}
 	for _, tc := range cases {
@@ -525,6 +588,10 @@ func TestOIDCCallbackRejectsInvalidIDTokenClaims(t *testing.T) {
 			}
 			if len(backend.sessionTTLs) != 0 {
 				t.Fatal("session was created despite invalid claims")
+			}
+			requireSSOFailureAudit(t, backend, "", tc.wantTarget, tc.want)
+			if strings.Contains(backend.audits[0].detail, "@") || strings.Contains(backend.audits[0].detail, "different-nonce") {
+				t.Fatalf("audit detail leaked claim material: %q", backend.audits[0].detail)
 			}
 		})
 	}
@@ -569,9 +636,7 @@ func TestOIDCCallbackUnknownUserIsNotCreated(t *testing.T) {
 	if len(backend.lastLogins) != 0 {
 		t.Fatal("callback updated last_login_at for an unknown user")
 	}
-	if len(backend.audits) != 1 || backend.audits[0].action != "auth.failed" || backend.audits[0].target != "person@example.test" {
-		t.Fatalf("unknown-user audit = %#v", backend.audits)
-	}
+	requireSSOFailureAudit(t, backend, "", "person@example.test", ssoErrorUnknownUser)
 	if session := findOIDCResponseCookie(recorder.Result().Cookies(), sessionCookie); session != nil {
 		t.Fatal("callback set a session cookie for an unknown user")
 	}
@@ -589,9 +654,7 @@ func TestOIDCCallbackTenantPolicies(t *testing.T) {
 		backend.policy.Security.AllowedIPRanges = []string{"10.0.0.0/8"}
 		recorder := callOIDCCallback(server, backend.deps(), &start, oidcCallbackURL(start, "test-code", start.state.State))
 		requireSSOErrorRedirect(t, recorder, ssoErrorIPBlocked)
-		if len(backend.audits) != 1 || backend.audits[0].action != "auth.ip_blocked" {
-			t.Fatalf("IP-blocked audit = %#v", backend.audits)
-		}
+		requireSSOFailureAudit(t, backend, "user-1", "person@example.test", ssoErrorIPBlocked)
 		if len(backend.sessionTTLs) != 0 {
 			t.Fatal("session created for an IP-blocked user")
 		}
@@ -606,9 +669,7 @@ func TestOIDCCallbackTenantPolicies(t *testing.T) {
 		backend.policy.Security.MFAEnforcement = "all"
 		recorder := callOIDCCallback(server, backend.deps(), &start, oidcCallbackURL(start, "test-code", start.state.State))
 		requireSSOErrorRedirect(t, recorder, ssoErrorMFARequired)
-		if len(backend.audits) != 1 || backend.audits[0].action != "auth.failed" || !strings.Contains(backend.audits[0].detail, "MFA") {
-			t.Fatalf("MFA-required audit = %#v", backend.audits)
-		}
+		requireSSOFailureAudit(t, backend, "user-1", "person@example.test", ssoErrorMFARequired)
 		if len(backend.sessionTTLs) != 0 {
 			t.Fatal("session created despite MFA policy rejection")
 		}
@@ -686,9 +747,133 @@ func TestOIDCCallbackSanitizedProviderErrors(t *testing.T) {
 	if strings.Contains(body, "provider-secret-detail") || strings.Contains(body, "invalid_grant") {
 		t.Fatalf("provider error details leaked into the redirect body: %s", body)
 	}
-	if len(backend.audits) != 0 {
-		t.Fatalf("protocol failure was audited without a known user: %#v", backend.audits)
+	requireSSOFailureAudit(t, backend, "", "", ssoErrorExchange)
+	if strings.Contains(backend.audits[0].detail, "provider-secret-detail") || strings.Contains(backend.audits[0].detail, "invalid_grant") {
+		t.Fatalf("provider details leaked into the audit detail: %q", backend.audits[0].detail)
 	}
+}
+
+func TestOIDCCallbackRejectsInvalidIDTokens(t *testing.T) {
+	provider := newMockOIDCProvider(t, false)
+	cfg := oidcFlowConfig(provider)
+	server := oidcFlowServer(t, cfg)
+	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate second RSA key: %v", err)
+	}
+	signedWith := func(t *testing.T, claims jwt.MapClaims, key *rsa.PrivateKey) string {
+		t.Helper()
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		token.Header["kid"] = provider.kid
+		raw, err := token.SignedString(key)
+		if err != nil {
+			t.Fatalf("sign ID token: %v", err)
+		}
+		return raw
+	}
+	cases := []struct {
+		name  string
+		build func(t *testing.T, nonce string) string
+	}{
+		{
+			name: "signed by a second RSA key",
+			build: func(t *testing.T, nonce string) string {
+				return signedWith(t, oidcFlowClaims(cfg, provider, nonce), otherKey)
+			},
+		},
+		{
+			name: "wrong issuer",
+			build: func(t *testing.T, nonce string) string {
+				claims := oidcFlowClaims(cfg, provider, nonce)
+				claims["iss"] = "https://wrong.example.test/"
+				return signedWith(t, claims, provider.key)
+			},
+		},
+		{
+			name: "wrong audience",
+			build: func(t *testing.T, nonce string) string {
+				claims := oidcFlowClaims(cfg, provider, nonce)
+				claims["aud"] = "other-client"
+				return signedWith(t, claims, provider.key)
+			},
+		},
+		{
+			name: "expired exp",
+			build: func(t *testing.T, nonce string) string {
+				claims := oidcFlowClaims(cfg, provider, nonce)
+				claims["exp"] = time.Now().Add(-time.Hour).Unix()
+				return signedWith(t, claims, provider.key)
+			},
+		},
+		{
+			name: "unsigned alg none",
+			build: func(t *testing.T, nonce string) string {
+				token := jwt.NewWithClaims(jwt.SigningMethodNone, oidcFlowClaims(cfg, provider, nonce))
+				raw, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
+				if err != nil {
+					t.Fatalf("build alg=none token: %v", err)
+				}
+				return raw
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start := beginOIDCFlow(t, server, "")
+			raw := tc.build(t, start.state.Nonce)
+			serveRawIDToken(t, provider, start, raw)
+			backend := newOIDCTestBackend()
+			recorder := callOIDCCallback(server, backend.deps(), &start, oidcCallbackURL(start, "test-code", start.state.State))
+			requireSSOErrorRedirect(t, recorder, ssoErrorToken)
+			if len(backend.lookupEmail) != 0 || len(backend.sessionTTLs) != 0 {
+				t.Fatal("invalid ID token reached account lookup or session creation")
+			}
+			requireSSOFailureAudit(t, backend, "", "", ssoErrorToken)
+			if detail := backend.audits[0].detail; strings.Contains(detail, raw) || strings.Contains(detail, "person@") {
+				t.Fatalf("audit detail leaked token or claim material: %q", detail)
+			}
+		})
+	}
+}
+
+func TestOIDCCallbackSessionCreationFailure(t *testing.T) {
+	provider := newMockOIDCProvider(t, false)
+	cfg := oidcFlowConfig(provider)
+	server := oidcFlowServer(t, cfg)
+	start := beginOIDCFlow(t, server, "")
+	serveIDToken(t, provider, start, oidcFlowClaims(cfg, provider, start.state.Nonce))
+
+	backend := newOIDCTestBackend()
+	backend.sessionErr = errors.New("insert failed")
+	recorder := callOIDCCallback(server, backend.deps(), &start, oidcCallbackURL(start, "test-code", start.state.State))
+	requireSSOErrorRedirect(t, recorder, ssoErrorSession)
+	if len(backend.sessionTTLs) != 1 {
+		t.Fatalf("session attempts = %d, want 1", len(backend.sessionTTLs))
+	}
+	if len(backend.lastLogins) != 0 {
+		t.Fatal("last_login_at was updated despite a session failure")
+	}
+	if session := findOIDCResponseCookie(recorder.Result().Cookies(), sessionCookie); session != nil {
+		t.Fatal("session cookie was set despite a session failure")
+	}
+	requireSSOFailureAudit(t, backend, "user-1", "person@example.test", ssoErrorSession)
+}
+
+func TestOIDCCallbackStateCookieKeyMismatch(t *testing.T) {
+	provider := newMockOIDCProvider(t, false)
+	startCfg := oidcFlowConfig(provider)
+	startServer := oidcFlowServer(t, startCfg)
+	start := beginOIDCFlow(t, startServer, "")
+
+	callbackCfg := oidcFlowConfig(provider)
+	callbackCfg.SessionSecret = "different-session-secret"
+	callbackCfg.CSRFSecret = "different-csrf-secret"
+	callbackServer := oidcFlowServer(t, callbackCfg)
+
+	backend := newOIDCTestBackend()
+	recorder := callOIDCCallback(callbackServer, backend.deps(), &start, oidcCallbackURL(start, "test-code", start.state.State))
+	requireSSOErrorRedirect(t, recorder, ssoErrorState)
+	requireSSOFailureAudit(t, backend, "", "", ssoErrorState)
 }
 
 func TestOIDCCallbackRateLimit(t *testing.T) {
@@ -696,14 +881,22 @@ func TestOIDCCallbackRateLimit(t *testing.T) {
 	cfg := oidcFlowConfig(provider)
 	server := oidcFlowServer(t, cfg)
 	server.oidcLimit = newLoginLimiter(2, time.Minute)
-
+	backend := newOIDCTestBackend()
 	request := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=test-code&state=state", nil)
-		rec := httptest.NewRecorder()
-		server.Handler().ServeHTTP(rec, req)
-		return rec
+		return callOIDCCallback(server, backend.deps(), nil, "/api/auth/oidc/callback?code=test-code&state=state")
 	}
 	requireSSOErrorRedirect(t, request(), ssoErrorState)
 	requireSSOErrorRedirect(t, request(), ssoErrorState)
 	requireSSOErrorRedirect(t, request(), ssoErrorRateLimited)
+	if len(backend.audits) != 3 {
+		t.Fatalf("rate-limit audits = %#v, want three failures", backend.audits)
+	}
+	for index, audit := range backend.audits {
+		if audit.action != "auth.sso_failed" || audit.userID != "" || audit.target != "" {
+			t.Fatalf("rate-limit audit %d = %#v", index, audit)
+		}
+	}
+	if got := backend.audits[2].detail; got != ssoErrorRateLimited {
+		t.Fatalf("rate-limit audit detail = %q, want %q", got, ssoErrorRateLimited)
+	}
 }

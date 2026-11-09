@@ -113,9 +113,12 @@ On success Alt8Mail:
 
 Failed callbacks redirect to `/?sso_error=<code>` using a fixed, safe code.
 Provider responses, authorization codes, tokens and raw claims are never
-included in the redirect or exposed to the browser. Known-user failures such as
-IP-policy or MFA-policy rejections are audited. Callback attempts are rate
-limited per client IP.
+included in the redirect or exposed to the browser. Every failed callback is
+audited as `auth.sso_failed` with the fixed error code as the detail; pre-user
+failures use an anonymous audit entry, and post-verification failures may carry
+the normalized email as the target. Successful sign-ins are audited as
+`auth.login` with detail `OIDC SSO`. Callback attempts are rate limited per
+client IP.
 
 The login page shows a generic error for any `sso_error` value and removes the
 query parameter. Password and passkey sign-in remain available throughout.
