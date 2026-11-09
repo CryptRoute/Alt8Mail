@@ -1285,6 +1285,9 @@ let settingsLoading = false;
 let rulesLoading = false;
 let auditLoading = false;
 let loginBusy = false;
+let ssoEnabled = false;
+let ssoDisplayName = "";
+let ssoConfigSeq = 0;
 let currentRulesCache = null;
 let editingRuleId = null;
 let twoFactorChallenge = null;
@@ -1320,6 +1323,7 @@ const loginError = document.getElementById("loginError");
 const loginHint = document.getElementById("loginHint");
 const loginSubmit = document.getElementById("loginSubmit");
 const ssoBtn = document.getElementById("ssoBtn");
+const ssoDivider = document.querySelector("#loginForm .login-divider");
 const searchInput = document.getElementById("searchInput");
 const searchClear = document.getElementById("searchClear");
 const searchWrap = document.getElementById("searchWrap");
@@ -3762,10 +3766,50 @@ function clearThemeAccentForLogout() {
   });
 }
 
+function renderSsoButton() {
+  if (ssoDivider) ssoDivider.hidden = !ssoEnabled;
+  if (!ssoBtn) return;
+  ssoBtn.hidden = !ssoEnabled;
+  ssoBtn.disabled = false;
+  if (!ssoEnabled) return;
+  const label = ssoDisplayName || t("login.sso");
+  const translation = ssoDisplayName ? "" : ' data-i18n="login.sso"';
+  ssoBtn.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span${translation}>${esc(label)}</span>`;
+}
+
+async function loadSsoConfig() {
+  const seq = ++ssoConfigSeq;
+  let enabled = false;
+  let displayName = "";
+  try {
+    const config = await api("/api/auth/oidc/config", { skipAuth: true });
+    enabled = Boolean(config && config.enabled);
+    displayName = String((config && config.displayName) || "").trim();
+  } catch {}
+  if (seq !== ssoConfigSeq) return;
+  ssoEnabled = enabled;
+  ssoDisplayName = displayName;
+  renderSsoButton();
+}
+
+function consumeSsoError() {
+  try {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("sso_error");
+    if (!code) return "";
+    url.searchParams.delete("sso_error");
+    const search = url.searchParams.toString();
+    window.history.replaceState({}, "", url.pathname + (search ? `?${search}` : "") + url.hash);
+    return code;
+  } catch {
+    return "";
+  }
+}
+
 function resetLoginButtons() {
   loginBusy = false;
   if (loginSubmit) { loginSubmit.disabled = false; loginSubmit.textContent = t("login.signIn"); }
-  if (ssoBtn) { ssoBtn.disabled = false; ssoBtn.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span data-i18n="login.sso">${esc(t("login.sso"))}</span>`; }
+  renderSsoButton();
   if (twoFactorSubmit) { twoFactorSubmit.disabled = false; twoFactorSubmit.textContent = "Verify and sign in"; }
   if (usePasskeyBtn) usePasskeyBtn.disabled = false;
 }
@@ -3813,6 +3857,11 @@ function showLogin() {
   const toggle = document.getElementById("passwordToggle");
   if (toggle) toggle.textContent = "Show";
   resetLoginButtons();
+  if (consumeSsoError()) {
+    loginError.textContent = "Single sign-on could not be completed. Sign in with your password or try again.";
+    loginError.hidden = false;
+  }
+  loadSsoConfig().catch(() => {});
   loginScreen.scrollTop = 0;
   setTimeout(() => { if (loginEmail && !isMobile()) loginEmail.focus(); }, 60);
   stopOutboxPolling();
@@ -3921,26 +3970,16 @@ async function submitLogin() {
   }
 }
 
-async function submitSso() {
-  if (loginBusy) return;
+function submitSso() {
+  if (loginBusy || !ssoEnabled) return;
   loginBusy = true;
   loginError.hidden = true;
+  loginHint.hidden = true;
   loginSubmit.disabled = true;
   ssoBtn.disabled = true;
-  ssoBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Connecting to SSO…';
-  try {
-    const data = await api("/api/session", {
-      method: "POST",
-      skipAuth: true,
-      body: { email: loginEmail.value.trim(), method: "sso", remember: document.getElementById("rememberMe").checked }
-    });
-    state.csrf = data.csrf;
-    await finishAuthenticatedSignIn(data);
-  } catch (error) {
-    loginError.textContent = error.message;
-    loginError.hidden = false;
-    resetLoginButtons();
-  }
+  ssoBtn.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span>Connecting to SSO…</span>';
+  const remember = document.getElementById("rememberMe").checked ? "1" : "0";
+  window.location.assign(`/api/auth/oidc/start?remember=${remember}`);
 }
 
 function showTwoFactorChallenge(data, remember) {

@@ -66,6 +66,7 @@ type Server struct {
 	oidcCached        *oidcClient
 	oidcLastErr       error
 	oidcLastTry       time.Time
+	oidcLimit         *loginLimiter
 }
 
 type Options struct {
@@ -91,6 +92,7 @@ func New(opts Options) *Server {
 		activeImports:   map[string]bool{},
 		adminLimit:      newLoginLimiter(opts.Config.AdminRateLimitMax, opts.Config.AdminRateWindow),
 		accountLimit:    newLoginLimiter(30, 10*time.Minute),
+		oidcLimit:       newLoginLimiter(oidcCallbackRateLimit, oidcCallbackRateWindow),
 		realtime:        newRealtimeHub(),
 		avatarCache:     map[string]senderAvatarCacheEntry{},
 	}
@@ -139,6 +141,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ready", s.health)
 	mux.HandleFunc("GET /api/branding", s.publicBranding)
 	mux.HandleFunc("GET /api/auth/oidc/config", s.oidcConfig)
+	mux.HandleFunc("GET /api/auth/oidc/start", s.oidcStart)
+	mux.HandleFunc("GET /api/auth/oidc/callback", s.oidcCallback)
 	mux.HandleFunc("GET /oauth/slack/callback", s.slackAddonOAuthCallback)
 	mux.HandleFunc("GET /oauth/relay/complete", s.addonRelayComplete)
 	mux.HandleFunc("POST /api/addons/webhooks/slack", s.slackAddonWebhook)

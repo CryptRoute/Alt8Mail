@@ -174,6 +174,8 @@ type mockOIDCProvider struct {
 	jwks          []byte
 	discoveryHits int32
 	jwksHits      int32
+	tokenHits     int32
+	tokenHandler  http.HandlerFunc
 	started       chan struct{}
 	release       chan struct{}
 }
@@ -214,6 +216,14 @@ func newMockOIDCProvider(t *testing.T, blockFirstDiscovery bool) *mockOIDCProvid
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(provider.jwks)
 	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&provider.tokenHits, 1)
+		if provider.tokenHandler == nil {
+			http.Error(w, "unexpected token request", http.StatusInternalServerError)
+			return
+		}
+		provider.tokenHandler(w, r)
+	})
 	provider.server = httptest.NewServer(mux)
 	provider.issuer = provider.server.URL + "/"
 	t.Cleanup(provider.server.Close)
@@ -223,7 +233,7 @@ func newMockOIDCProvider(t *testing.T, blockFirstDiscovery bool) *mockOIDCProvid
 func (m *mockOIDCProvider) signIDToken(t *testing.T, audience, issuer, nonce string) string {
 	t.Helper()
 	now := time.Now()
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+	signed, err := m.signClaims(jwt.MapClaims{
 		"iss":            issuer,
 		"aud":            audience,
 		"sub":            "user-1",
@@ -233,12 +243,18 @@ func (m *mockOIDCProvider) signIDToken(t *testing.T, audience, issuer, nonce str
 		"email":          "person@example.test",
 		"email_verified": true,
 	})
-	token.Header["kid"] = m.kid
-	signed, err := token.SignedString(m.key)
 	if err != nil {
 		t.Fatalf("sign ID token: %v", err)
 	}
 	return signed
+}
+
+// signClaims lets the Task 2 login-flow tests shape the ID-token claims
+// (nonce, email, email_verified, amr, acr) while sharing the mock JWKS key.
+func (m *mockOIDCProvider) signClaims(claims jwt.MapClaims) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = m.kid
+	return token.SignedString(m.key)
 }
 
 func jwksDocument(key *rsa.PublicKey, kid string) []byte {
