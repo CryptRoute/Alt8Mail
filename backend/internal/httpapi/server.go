@@ -68,6 +68,7 @@ type Server struct {
 	oidcLastErr       error
 	oidcLastTry       time.Time
 	oidcLimit         *loginLimiter
+	scimLimit         *loginLimiter
 	samlMu            sync.Mutex
 	samlCached        *samlsp.Middleware
 	samlLastErr       error
@@ -108,6 +109,7 @@ func New(opts Options) *Server {
 		adminLimit:      newLoginLimiter(opts.Config.AdminRateLimitMax, opts.Config.AdminRateWindow),
 		accountLimit:    newLoginLimiter(30, 10*time.Minute),
 		oidcLimit:       newLoginLimiter(oidcCallbackRateLimit, oidcCallbackRateWindow),
+		scimLimit:       newLoginLimiter(oidcCallbackRateLimit, oidcCallbackRateWindow),
 		samlLimit:       newLoginLimiter(oidcCallbackRateLimit, oidcCallbackRateWindow),
 		realtime:        newRealtimeHub(),
 		avatarCache:     map[string]senderAvatarCacheEntry{},
@@ -405,6 +407,9 @@ func (s *Server) Handler() http.Handler {
 	s.registerDLPRoutes(mux)
 	mux.HandleFunc("GET /api/audit", s.requireUser(s.getAudit))
 	mux.HandleFunc("GET /api/audit.csv", s.requireUser(s.getAuditCSV))
+	// SCIM is mounted outside session auth and before the /api/ catch-all so
+	// its bearer middleware owns every /scim/v2 path.
+	s.registerSCIMRoutes(mux)
 	mux.HandleFunc("/api/", s.apiNotFound)
 	return s.middleware(mux)
 }

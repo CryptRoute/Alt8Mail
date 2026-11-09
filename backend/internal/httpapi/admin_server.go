@@ -218,6 +218,14 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /addons", s.adminRequirePermission("policies.read", s.adminListAddons))
 	mux.HandleFunc("PATCH /addons/{id}", s.adminRequirePermission("policies.manage", s.adminUpdateAddon))
 	mux.HandleFunc("POST /addon-requests/{id}/resolve", s.adminRequirePermission("policies.manage", s.adminResolveAddonRequest))
+
+	// SCIM provisioning tokens. The raw token is returned once on create or
+	// rotate; list responses expose only id, name, prefix and timestamps.
+	mux.HandleFunc("GET /scim/tokens", s.adminRequirePermission("users.create", s.adminListSCIMTokens))
+	mux.HandleFunc("POST /scim/tokens", s.adminRequirePermission("users.create", s.adminCreateSCIMToken))
+	mux.HandleFunc("POST /scim/tokens/{id}/rotate", s.adminRequirePermission("users.create", s.adminRotateSCIMToken))
+	mux.HandleFunc("DELETE /scim/tokens/{id}", s.adminRequirePermission("users.create", s.adminRevokeSCIMToken))
+
 	mux.HandleFunc("GET /quarantine", s.adminRequirePermission("users.security", s.adminListQuarantine))
 	mux.HandleFunc("POST /quarantine/{userId}/{messageId}/release", s.adminRequirePermission("users.security", s.adminReleaseQuarantine))
 
