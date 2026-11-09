@@ -583,6 +583,62 @@ func TestSAMLACSRejectsInvalidAssertions(t *testing.T) {
 	}
 }
 
+// TestSAMLACSRejectsRogueSigningKey keeps the response's InResponseTo,
+// audience, recipient, conditions and timing valid and only changes the
+// signing key. It fails if signature verification against the trusted IdP
+// metadata certificate is ever weakened.
+func TestSAMLACSRejectsRogueSigningKey(t *testing.T) {
+	harness := newSAMLFlowHarness(t, nil)
+	attempt := harness.start(t)
+
+	rogueKey, rogueCertificate := newSAMLIDPTestSigner(t)
+	rogueIDP := *harness.idp
+	rogueIDP.Key = rogueKey
+	rogueIDP.Certificate = rogueCertificate
+
+	// Reuse the AuthnRequest the real IdP already validated so the response
+	// still answers the correct request ID for this SP and ACS.
+	rogueRequest := *attempt.request
+	rogueRequest.IDP = &rogueIDP
+	if err := (saml.DefaultAssertionMaker{}).MakeAssertion(&rogueRequest, samlFlowSession()); err != nil {
+		t.Fatalf("rogue IdP make assertion: %v", err)
+	}
+	if err := rogueRequest.MakeResponse(); err != nil {
+		t.Fatalf("rogue IdP make response: %v", err)
+	}
+	form, err := rogueRequest.PostBinding()
+	if err != nil {
+		t.Fatalf("rogue IdP build post form: %v", err)
+	}
+
+	recorder := attempt.post(t, form)
+	requireSAMLErrorRedirect(t, recorder)
+	if len(harness.backend.lookups) != 0 || len(harness.backend.sessionTTLs) != 0 || len(harness.backend.lastLogins) != 0 {
+		t.Fatal("rogue-signed assertion reached account lookup or session creation")
+	}
+	requireSAMLFailureAudit(t, harness.backend, "", "", samlErrorAssertion)
+}
+
+// TestSAMLACSInvalidSignaturePenalty pins the OnError limiter penalty for
+// pre-CreateSession validation failures: exactly one failure is recorded, and
+// the already-sanitized OnError path does not penalize the client twice.
+func TestSAMLACSInvalidSignaturePenalty(t *testing.T) {
+	harness := newSAMLFlowHarness(t, nil)
+	attempt := harness.start(t)
+	form := attempt.response(t, samlFlowSession(), nil)
+	tamperSAMLResponseInResponseTo(t, &form, "different-request-id")
+
+	requireSAMLErrorRedirect(t, attempt.post(t, form))
+
+	harness.server.samlLimit.mu.Lock()
+	count := harness.server.samlLimit.attempts["192.0.2.1"].Count
+	harness.server.samlLimit.mu.Unlock()
+	if count != 1 {
+		t.Fatalf("limiter count = %d, want exactly 1 (no double penalty)", count)
+	}
+	requireSAMLFailureAudit(t, harness.backend, "", "", samlErrorAssertion)
+}
+
 func TestSAMLACSReplayRejected(t *testing.T) {
 	harness := newSAMLFlowHarness(t, nil)
 	attempt := harness.start(t)
