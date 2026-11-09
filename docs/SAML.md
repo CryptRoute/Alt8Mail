@@ -188,9 +188,15 @@ audit write and without extending the limiter.
 
 Request tracking cookies are single-use and expire after 10 minutes. Accepted
 assertion IDs are also recorded in an in-process replay cache with 1024
-entries, so a captured response cannot be posted twice. The cache protects a
-single process only: a deployment with several server processes needs a shared
-replay store, which is not part of this tranche.
+entries, so a captured response cannot be posted twice. An assertion ID is
+consumed before the account and policy checks, so a validly signed assertion
+that is later rejected (for example for a wrong domain or MFA policy) still
+occupies its entry until it expires. When all 1024 entries are unexpired the
+cache refuses new assertions rather than evicting one, so a large tenant can
+be locked out of new sign-ins until an entry expires. The cache protects a
+single process only: large tenants or deployments with several server
+processes need a larger or shared replay store, which is not part of this
+tranche.
 
 ## SP metadata availability and metadata caching
 
@@ -207,7 +213,7 @@ and registered out of band.
 
 If both `ALT8MAIL_SAML_IDP_METADATA_FILE` and
 `ALT8MAIL_SAML_IDP_METADATA_URL` are set, the file always wins and Alt8Mail
-logs one startup warning. Prefer exactly one source.
+logs one first-load warning. Prefer exactly one source.
 
 ## Cleartext and loopback rules
 
