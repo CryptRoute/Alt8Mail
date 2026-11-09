@@ -151,14 +151,17 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request, deps
 	// outcome, including malformed callbacks, retires it.
 	s.clearOIDCStateCookie(w)
 
-	ip := clientIP(r)
+	// With SSO disabled there is no configured failure path: do not audit or
+	// touch the limiter, so an unconfigured deployment gains no new failure
+	// path beyond the fixed redirect.
 	if !s.oidcConfigured() {
-		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorUnavailable, ip)
+		s.oidcErrorRedirect(w, r, ssoErrorUnavailable)
 		return
 	}
+	ip := clientIP(r)
 	if s.oidcLimit != nil && !s.oidcLimit.Allow(ip) {
-		// Already over the limit: record the failure but do not extend it.
-		s.auditOIDCFailure(r, deps, userRecord{}, "", ssoErrorRateLimited)
+		// The limiter is the signal; over-limit requests are not audited and do
+		// not extend the limiter.
 		s.oidcErrorRedirect(w, r, ssoErrorRateLimited)
 		return
 	}

@@ -398,10 +398,46 @@ func TestOIDCDisabledStartAndCallback(t *testing.T) {
 	server.Handler().ServeHTTP(recorder, request)
 	requireSSOErrorRedirect(t, recorder, ssoErrorUnavailable)
 
-	backend := newOIDCTestBackend()
-	recorder = callOIDCCallback(server, backend.deps(), nil, "/api/auth/oidc/callback?code=test-code&state=state")
+	// Exercise the public callback route. A disabled deployment must not audit
+	// or touch the callback limiter.
+	request = httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=test-code&state=state", nil)
+	recorder = httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
 	requireSSOErrorRedirect(t, recorder, ssoErrorUnavailable)
-	requireSSOFailureAudit(t, backend, "", "", ssoErrorUnavailable)
+	server.oidcLimit.mu.Lock()
+	entries := len(server.oidcLimit.attempts)
+	server.oidcLimit.mu.Unlock()
+	if entries != 0 {
+		t.Fatalf("disabled callback touched the limiter: %d entries", entries)
+	}
+
+	// With a limit of one, two disabled callbacks must both stay unavailable:
+	// any Fail call would rate-limit the second. The fake audit sink must stay
+	// empty, proving no audit was even attempted.
+	server.oidcLimit = newLoginLimiter(1, time.Minute)
+	backend := newOIDCTestBackend()
+	for attempt := 0; attempt < 2; attempt++ {
+		recorder = callOIDCCallback(server, backend.deps(), nil, "/api/auth/oidc/callback?code=test-code&state=state")
+		requireSSOErrorRedirect(t, recorder, ssoErrorUnavailable)
+	}
+	if len(backend.audits) != 0 {
+		t.Fatalf("disabled callback produced audits: %#v", backend.audits)
+	}
+	server.oidcLimit.mu.Lock()
+	entries = len(server.oidcLimit.attempts)
+	server.oidcLimit.mu.Unlock()
+	if entries != 0 {
+		t.Fatalf("disabled callback touched the limiter: %d entries", entries)
+	}
+}
+
+func TestOIDCCallbackRouteRegistered(t *testing.T) {
+	provider := newMockOIDCProvider(t, false)
+	server := oidcFlowServer(t, oidcFlowConfig(provider))
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=test-code&state=state", nil)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	requireSSOErrorRedirect(t, recorder, ssoErrorState)
 }
 
 func TestOIDCCallbackSuccess(t *testing.T) {
@@ -887,16 +923,22 @@ func TestOIDCCallbackRateLimit(t *testing.T) {
 	}
 	requireSSOErrorRedirect(t, request(), ssoErrorState)
 	requireSSOErrorRedirect(t, request(), ssoErrorState)
+	// The limiter itself is the signal: over-limit requests are rejected
+	// without an audit entry and without extending the limit.
 	requireSSOErrorRedirect(t, request(), ssoErrorRateLimited)
-	if len(backend.audits) != 3 {
-		t.Fatalf("rate-limit audits = %#v, want three failures", backend.audits)
+	requireSSOErrorRedirect(t, request(), ssoErrorRateLimited)
+	if len(backend.audits) != 2 {
+		t.Fatalf("rate-limit audits = %#v, want only the two in-limit failures", backend.audits)
 	}
 	for index, audit := range backend.audits {
-		if audit.action != "auth.sso_failed" || audit.userID != "" || audit.target != "" {
-			t.Fatalf("rate-limit audit %d = %#v", index, audit)
+		if audit.action != "auth.sso_failed" || audit.userID != "" || audit.target != "" || audit.detail != ssoErrorState {
+			t.Fatalf("in-limit audit %d = %#v", index, audit)
 		}
 	}
-	if got := backend.audits[2].detail; got != ssoErrorRateLimited {
-		t.Fatalf("rate-limit audit detail = %q, want %q", got, ssoErrorRateLimited)
+	server.oidcLimit.mu.Lock()
+	count := server.oidcLimit.attempts["192.0.2.1"].Count
+	server.oidcLimit.mu.Unlock()
+	if count != 2 {
+		t.Fatalf("limiter count = %d, want 2 (over-limit requests must not extend it)", count)
 	}
 }

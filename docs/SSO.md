@@ -21,7 +21,9 @@ login and JIT user provisioning are out of scope.
 
 All four required variables must be non-empty. A partial configuration disables
 SSO rather than failing server startup: there is no button and the start and
-callback endpoints redirect to the login page with a generic error.
+callback endpoints redirect to the login page with a generic error. The disabled
+callback performs no audit write and does not touch the callback limiter, so an
+unconfigured deployment has no new failure path.
 
 ## Identity provider registration
 
@@ -113,12 +115,14 @@ On success Alt8Mail:
 
 Failed callbacks redirect to `/?sso_error=<code>` using a fixed, safe code.
 Provider responses, authorization codes, tokens and raw claims are never
-included in the redirect or exposed to the browser. Every failed callback is
-audited as `auth.sso_failed` with the fixed error code as the detail; pre-user
-failures use an anonymous audit entry, and post-verification failures may carry
-the normalized email as the target. Successful sign-ins are audited as
-`auth.login` with detail `OIDC SSO`. Callback attempts are rate limited per
-client IP.
+included in the redirect or exposed to the browser. Every failed callback
+within the per-IP limit is audited as `auth.sso_failed` with the fixed error
+code as the detail; pre-user failures use an anonymous audit entry, and
+post-verification failures may carry the normalized email as the target.
+Successful sign-ins are audited as `auth.login` with detail `OIDC SSO`.
+Callback attempts are rate limited per client IP. Over-limit callbacks, and all
+callbacks on an SSO-disabled deployment, are rejected without an audit write;
+the limiter itself is the signal for over-limit requests.
 
 The login page shows a generic error for any `sso_error` value and removes the
 query parameter. Password and passkey sign-in remain available throughout.
