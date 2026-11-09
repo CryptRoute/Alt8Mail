@@ -69,8 +69,14 @@ func (s *Server) oidcClient(ctx context.Context) (*oidcClient, error) {
 		return nil, errors.New("OIDC discovery is cooling down")
 	}
 	s.oidcLastTry = time.Now()
-	issuer := strings.TrimRight(strings.TrimSpace(s.cfg.OIDCIssuer), "/")
-	discoveryCtx, cancel := context.WithTimeout(ctx, oidcDiscoveryTimeout)
+	// Keep the issuer exactly as configured. go-oidc compares the configured
+	// issuer against the discovery document byte for byte, and legitimate
+	// issuers may end with a trailing slash.
+	issuer := strings.TrimSpace(s.cfg.OIDCIssuer)
+	// Detach discovery from the caller's request cancellation. A browser
+	// abandoning the sign-in request must not cache a discovery failure that
+	// locks every SSO user out for the retry backoff.
+	discoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oidcDiscoveryTimeout)
 	defer cancel()
 	provider, err := oidc.NewProvider(discoveryCtx, issuer)
 	if err != nil {
