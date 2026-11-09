@@ -11,8 +11,12 @@ on the license.
 | `ALT8MAIL_LICENSE_FILE` | Path to the signed license token |
 | `ALT8MAIL_LICENSE_PUBLIC_KEY` | Base64 Ed25519 public key (standard or URL-safe) |
 
-The server verifies the token at startup. An unreadable or invalid token is
-logged and paid features remain disabled; the server still starts.
+The server reads and verifies the token once, at startup. An unreadable or
+invalid token is logged and paid features remain disabled; the server still
+starts. There is no hot reload: to install a renewed or changed license,
+replace the file and restart Alt8Mail. Expiry is evaluated against the current
+clock on each check, so a running server does move from `valid` to `grace` to
+`expired` without restarting.
 
 ## Token format
 
@@ -42,9 +46,19 @@ Required claims: `version`, `id`, `edition`, `seats` (positive),
 ## Lifecycle
 
 - `valid`: current time is at or before `expiresAt`.
-- `grace`: current time is after expiry but inside `graceDays`.
+- `grace`: current time is after expiry but inside `graceDays`; paid features
+  remain usable.
 - `expired`: outside expiry and grace; paid entitlements are disabled while
-  core mail continues.
+  core mail continues. The redacted snapshot reports `expired: true` and an
+  empty `features` list so clients do not treat expired features as usable.
+- `unlicensed`: no `ALT8MAIL_LICENSE_FILE` is configured; the product runs as
+  `edition: "oss"` with no paid features.
+- `invalid`: a license file is configured but could not be read or verified;
+  the product also runs as `edition: "oss"` with no paid features.
+
+The state, grace and expiry fields are computed from the current clock every
+time the snapshot or an entitlement check runs, so lifecycle changes do not
+require a restart. Loading a new license file does require a restart.
 
 The webmail bootstrap exposes a redacted `license` snapshot with edition,
 state, seats, features, remaining days and expiry. It never exposes the token

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/licensing"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -32,6 +33,21 @@ func oidcTestConfig() config.Config {
 		OIDCDisplayName:  "Example SSO",
 		OIDCEmailDomains: []string{"example.test"},
 	}
+}
+
+// installSSOTestLicense attaches a valid enterprise license with the paid
+// sso feature and an injectable clock to a test server. The returned clock
+// lets a test move the license into grace or expiry.
+func installSSOTestLicense(t *testing.T, server *Server) *mutableClock {
+	t.Helper()
+	clock := newMutableClock(time.Now())
+	server.license = &licensing.License{
+		Version: licensing.Version, ID: "lic_oidc_test", Edition: "enterprise", Seats: 10,
+		Features: []string{"sso"}, IssuedAt: clock.Now(), ExpiresAt: clock.Now().Add(24 * time.Hour),
+		GraceDays: 7,
+	}
+	server.licenseNow = clock.Now
+	return clock
 }
 
 // stabilizeConfigEnv pins the unrelated required settings so config.Load()
@@ -51,7 +67,7 @@ func TestOIDCConfigParsing(t *testing.T) {
 	stabilizeConfigEnv(t)
 	t.Setenv("ALT8MAIL_OIDC_ISSUER", "https://idp.example.test/tenant")
 	t.Setenv("ALT8MAIL_OIDC_CLIENT_ID", "alt8mail-client")
-	t.Setenv("ALT8MAIL_OIDC_CLIENT_SECRET", "client-secret")
+	t.Setenv("ALT8MAIL_OIDC_CLIENT_SECRET", "  client-secret  ")
 	t.Setenv("ALT8MAIL_OIDC_REDIRECT_URL", "https://mail.example.test/api/auth/oidc/callback")
 	t.Setenv("ALT8MAIL_OIDC_DISPLAY_NAME", "Example SSO")
 	t.Setenv("ALT8MAIL_OIDC_EMAIL_DOMAINS", " Example.com, @Example.org ,, example.com ")
@@ -107,6 +123,7 @@ func TestOIDCConfigured(t *testing.T) {
 			cfg := base
 			tc.mutate(&cfg)
 			server := &Server{cfg: cfg}
+			installSSOTestLicense(t, server)
 			if got := server.oidcConfigured(); got != tc.want {
 				t.Fatalf("oidcConfigured() = %v, want %v", got, tc.want)
 			}
@@ -118,6 +135,7 @@ func TestOIDCConfigEndpoint(t *testing.T) {
 	cases := []struct {
 		name        string
 		cfg         config.Config
+		withLicense bool
 		wantEnabled bool
 		wantName    string
 	}{
@@ -128,8 +146,15 @@ func TestOIDCConfigEndpoint(t *testing.T) {
 			wantName:    "",
 		},
 		{
-			name:        "enabled with configuration",
+			name:        "disabled with configuration but no license",
 			cfg:         oidcTestConfig(),
+			wantEnabled: false,
+			wantName:    "Example SSO",
+		},
+		{
+			name:        "enabled with configuration and sso license",
+			cfg:         oidcTestConfig(),
+			withLicense: true,
 			wantEnabled: true,
 			wantName:    "Example SSO",
 		},
@@ -140,6 +165,9 @@ func TestOIDCConfigEndpoint(t *testing.T) {
 				Config: tc.cfg,
 				Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 			})
+			if tc.withLicense {
+				installSSOTestLicense(t, server)
+			}
 			request := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/config", nil)
 			recorder := httptest.NewRecorder()
 			server.Handler().ServeHTTP(recorder, request)
@@ -161,6 +189,98 @@ func TestOIDCConfigEndpoint(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestOIDCSSORequiresLicense proves the paid SSO boundary: unlicensed,
+// expired and non-sso licenses hide the capability and disable both the start
+// and callback endpoints with the fixed sso_unavailable error, without
+// auditing or touching the callback limiter.
+func TestOIDCSSORequiresLicense(t *testing.T) {
+	cases := []struct {
+		name      string
+		configure func(t *testing.T, server *Server)
+	}{
+		{
+			name:      "unlicensed",
+			configure: func(*testing.T, *Server) {},
+		},
+		{
+			name: "expired license",
+			configure: func(t *testing.T, server *Server) {
+				clock := installSSOTestLicense(t, server)
+				clock.Set(server.license.ExpiresAt.Add(time.Duration(server.license.GraceDays+1) * 24 * time.Hour))
+			},
+		},
+		{
+			name: "license without sso feature",
+			configure: func(t *testing.T, server *Server) {
+				installSSOTestLicense(t, server)
+				server.license.Features = []string{"scim"}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := New(Options{
+				Config: oidcTestConfig(),
+				Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			})
+			tc.configure(t, server)
+
+			if server.oidcConfigured() {
+				t.Fatal("SSO reported configured without a valid sso entitlement")
+			}
+
+			request := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/config", nil)
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+			var payload struct {
+				Enabled bool `json:"enabled"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode config response: %v", err)
+			}
+			if payload.Enabled {
+				t.Fatal("config endpoint advertised SSO without a valid sso entitlement")
+			}
+
+			request = httptest.NewRequest(http.MethodGet, "/api/auth/oidc/start", nil)
+			recorder = httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+			requireSSOErrorRedirect(t, recorder, ssoErrorUnavailable)
+
+			// Two callbacks with a limit of one must both stay unavailable;
+			// any Fail call would rate-limit the second, and the fake audit
+			// sink must stay empty.
+			server.oidcLimit = newLoginLimiter(1, time.Minute)
+			backend := newOIDCTestBackend()
+			for attempt := 0; attempt < 2; attempt++ {
+				recorder = callOIDCCallback(server, backend.deps(), nil, "/api/auth/oidc/callback?code=test-code&state=state")
+				requireSSOErrorRedirect(t, recorder, ssoErrorUnavailable)
+			}
+			if len(backend.audits) != 0 {
+				t.Fatalf("disabled callback produced audits: %#v", backend.audits)
+			}
+			server.oidcLimit.mu.Lock()
+			entries := len(server.oidcLimit.attempts)
+			server.oidcLimit.mu.Unlock()
+			if entries != 0 {
+				t.Fatalf("disabled callback touched the limiter: %d entries", entries)
+			}
+		})
+	}
+
+	t.Run("grace license keeps sso enabled", func(t *testing.T) {
+		server := New(Options{
+			Config: oidcTestConfig(),
+			Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		})
+		clock := installSSOTestLicense(t, server)
+		clock.Set(server.license.ExpiresAt.Add(24 * time.Hour))
+		if !server.oidcConfigured() {
+			t.Fatal("grace-period license should keep SSO configured")
+		}
+	})
 }
 
 // mockOIDCProvider is a local, test-only OpenID Provider. It serves a
@@ -283,6 +403,7 @@ func TestOIDCDiscoveryAndCaching(t *testing.T) {
 		Config: cfg,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
+	installSSOTestLicense(t, server)
 	_ = server.Handler()
 	if hits := atomic.LoadInt32(&provider.discoveryHits); hits != 0 {
 		t.Fatalf("server startup performed %d OIDC discovery request(s), want 0", hits)
@@ -354,6 +475,7 @@ func TestOIDCDiscoveryDetachedFromCallerCancellation(t *testing.T) {
 		Config: cfg,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
+	installSSOTestLicense(t, server)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	type outcome struct {

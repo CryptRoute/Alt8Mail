@@ -4,6 +4,13 @@ Alt8Mail supports opt-in OpenID Connect (OIDC) single sign-on for existing
 accounts. When SSO is not configured, the login page never shows an SSO button
 and password, passkey, TOTP and recovery-code sign-in are unchanged.
 
+SSO is a paid entitlement. It is enabled only when every required environment
+variable below is set **and** the verified license includes the `sso` feature
+(see [LICENSING.md](LICENSING.md)). An unlicensed, invalid, expired or
+non-`sso` license behaves like an incomplete configuration: the login page
+hides the button and the start and callback endpoints redirect with
+`sso_unavailable`. A license in its grace period keeps SSO enabled.
+
 This first deployment is configured through environment variables. Per-tenant
 Control Plane SSO configuration, SAML, SCIM, group-to-role mapping, IdP-initiated
 login and JIT user provisioning are out of scope.
@@ -19,11 +26,12 @@ login and JIT user provisioning are out of scope.
 | `ALT8MAIL_OIDC_DISPLAY_NAME` | No | Label shown on the login button. When empty, the login page uses its translated "Continue with single sign-on" label. |
 | `ALT8MAIL_OIDC_EMAIL_DOMAINS` | No | Comma-separated email-domain allowlist. Empty means no domain restriction. |
 
-All four required variables must be non-empty. A partial configuration disables
-SSO rather than failing server startup: there is no button and the start and
-callback endpoints redirect to the login page with a generic error. The disabled
-callback performs no audit write and does not touch the callback limiter, so an
-unconfigured deployment has no new failure path.
+All four required variables must be non-empty after trimming, and the `sso`
+entitlement must be valid. A partial configuration or missing entitlement
+disables SSO rather than failing server startup: there is no button and the
+start and callback endpoints redirect to the login page with a generic error.
+The disabled callback performs no audit write and does not touch the callback
+limiter, so an unconfigured or unlicensed deployment has no new failure path.
 
 ## Identity provider registration
 
@@ -53,7 +61,9 @@ audience, signature, expiry and nonce verification.
 | --- | --- |
 | `iss` | Must match `ALT8MAIL_OIDC_ISSUER`. |
 | `aud` | Must contain `ALT8MAIL_OIDC_CLIENT_ID`. |
-| `exp`, `iat` | Must be valid. |
+| `exp` | Required and must be in the future when the callback runs. |
+| `nbf` | If present, must not be in the future. |
+| `iat` | Not validated by Alt8Mail; go-oidc checks `exp` and `nbf`, not `iat`. |
 | `nonce` | Must equal the nonce stored in the state cookie. |
 | `email` | Required. It is trimmed and lowercased before account lookup. |
 | `email_verified` | If present, it must not be `false`. A missing claim is accepted. |
@@ -73,7 +83,11 @@ ALT8MAIL_OIDC_EMAIL_DOMAINS="example.com, @example.org"
 
 - A non-empty list requires the ID token's email domain to match one entry
   exactly. `user@sub.example.com` does not match `example.com`.
-- An empty or unset list means no domain restriction is applied.
+- An empty or unset list means no domain restriction is applied. Any verified
+  email from the IdP can then sign in to a matching existing account, so set
+  the allowlist in production whenever the IdP can assert more than one
+  domain. The empty list remains supported for single-tenant deployments that
+  intentionally trust every identity the IdP returns.
 
 ## Tenant MFA policy
 
@@ -134,6 +148,10 @@ query parameter. Password and passkey sign-in remain available throughout.
   IdP cannot block server startup or the login page.
 - Rotate the OIDC client secret like any other credential. Restarting Alt8Mail
   clears the in-memory discovery cache.
+- The license file is read at startup. Renewing or changing the `sso`
+  entitlement requires restarting Alt8Mail; the license is not reloaded while
+  the server runs. Expiry, however, is evaluated live: a running server stops
+  offering SSO when the license is already past its grace period.
 - If the IdP requires a different issuer form (for example a trailing slash),
   configure `ALT8MAIL_OIDC_ISSUER` exactly as the discovery document returns it.
 - IdP-initiated login is not supported; users must begin at the Alt8Mail login

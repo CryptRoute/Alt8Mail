@@ -134,7 +134,7 @@ func Load() (Config, error) {
 		PushVAPIDKeyFile:          env("ALT8MAIL_PUSH_VAPID_KEY_FILE", "/etc/a8m/web_push_vapid.key"),
 		OIDCIssuer:                strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_ISSUER")),
 		OIDCClientID:              strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_CLIENT_ID")),
-		OIDCClientSecret:          os.Getenv("ALT8MAIL_OIDC_CLIENT_SECRET"),
+		OIDCClientSecret:          strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_CLIENT_SECRET")),
 		OIDCRedirectURL:           strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_REDIRECT_URL")),
 		OIDCDisplayName:           strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_DISPLAY_NAME")),
 		OIDCEmailDomains:          parseOIDCEmailDomains(os.Getenv("ALT8MAIL_OIDC_EMAIL_DOMAINS")),

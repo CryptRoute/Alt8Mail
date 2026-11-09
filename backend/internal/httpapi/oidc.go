@@ -33,12 +33,14 @@ type oidcClient struct {
 	config   *oauth2.Config
 }
 
-// oidcConfigured reports whether every required OIDC setting is present. An
-// incomplete configuration disables SSO entirely, leaving password and passkey
-// sign-in untouched.
+// oidcConfigured reports whether every required OIDC setting is present and
+// the verified license includes the paid SSO entitlement. An incomplete
+// configuration or a missing/expired entitlement disables SSO entirely,
+// leaving password and passkey sign-in untouched.
 func (s *Server) oidcConfigured() bool {
 	cfg := s.cfg
-	return strings.TrimSpace(cfg.OIDCIssuer) != "" &&
+	return s.entitled("sso") &&
+		strings.TrimSpace(cfg.OIDCIssuer) != "" &&
 		strings.TrimSpace(cfg.OIDCClientID) != "" &&
 		strings.TrimSpace(cfg.OIDCClientSecret) != "" &&
 		strings.TrimSpace(cfg.OIDCRedirectURL) != ""

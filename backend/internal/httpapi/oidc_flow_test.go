@@ -36,7 +36,11 @@ func oidcFlowConfig(provider *mockOIDCProvider) config.Config {
 
 func oidcFlowServer(t *testing.T, cfg config.Config) *Server {
 	t.Helper()
-	return New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	server := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	// SSO is a paid feature: install a valid sso entitlement so the flow tests
+	// exercise the protocol rather than the licensing gate.
+	installSSOTestLicense(t, server)
+	return server
 }
 
 func findOIDCResponseCookie(cookies []*http.Cookie, name string) *http.Cookie {

@@ -59,9 +59,9 @@ type Server struct {
 	avatarMu          sync.Mutex
 	avatarCache       map[string]senderAvatarCacheEntry
 	license           *licensing.License
-	licenseStatus     licensing.Status
 	licenseError      string
 	licenseConfigured bool
+	licenseNow        func() time.Time
 	oidcMu            sync.Mutex
 	oidcCached        *oidcClient
 	oidcLastErr       error
@@ -95,15 +95,17 @@ func New(opts Options) *Server {
 		oidcLimit:       newLoginLimiter(oidcCallbackRateLimit, oidcCallbackRateWindow),
 		realtime:        newRealtimeHub(),
 		avatarCache:     map[string]senderAvatarCacheEntry{},
+		licenseNow:      time.Now,
 	}
-	if license, status, err := loadLicense(opts.Config, opts.Logger); err != nil {
+	if license, err := loadLicense(opts.Config, opts.Logger); err != nil {
 		server.licenseError = err.Error()
-		opts.Logger.Warn("license not loaded", "err", err)
+		if opts.Logger != nil {
+			opts.Logger.Warn("license not loaded", "err", err)
+		}
 	} else if license != nil {
 		server.license = license
-		server.licenseStatus = status
 	}
-	server.licenseConfigured = opts.Config.LicenseFile != ""
+	server.licenseConfigured = strings.TrimSpace(opts.Config.LicenseFile) != ""
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          opts.Config.WebAuthnRPID,
 		RPDisplayName: "Alt8Mail",
