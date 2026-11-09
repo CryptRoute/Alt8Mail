@@ -638,10 +638,6 @@ func (s *Server) messageActions(w http.ResponseWriter, r *http.Request) {
 				"ignored":      stateBool(message, "ignored"), "ignoredAt": stateString(message, "ignoredAt"),
 			}
 			mutation := imapActionForMessage(message)
-			if originalIMAPFolder != "" {
-				mutation.SourceFolder = originalIMAPFolder
-				mutation.SourceIMAPFolder = originalIMAPFolder
-			}
 			targetFolder := originalFolder
 			permanent := false
 			hardDelete := false

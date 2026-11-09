@@ -30,9 +30,9 @@ type imapAction struct {
 }
 
 func imapActionForMessage(message map[string]any) imapAction {
-	source := stateString(message, "imapFolder")
+	source := stateString(message, "folder")
 	if source == "" {
-		source = stateString(message, "folder")
+		source = stateString(message, "imapFolder")
 	}
 	return imapAction{
 		AccountID:        stateString(message, "accountId"),
@@ -41,6 +41,21 @@ func imapActionForMessage(message map[string]any) imapAction {
 		SourceFolder:     source,
 		SourceIMAPFolder: stateString(message, "imapFolder"),
 	}
+}
+
+// sourceIMAPFolderForAction resolves the mailbox name used for IMAP commands.
+// Native messages keep the app folder in imapFolder (for example "spam"), while
+// the provider mailbox is "Junk"; using the app name here silently skipped
+// remote deletes and let the next sync pull the message back. Connected
+// accounts already store the provider's remote name in imapFolder.
+func sourceIMAPFolderForAction(accountKind string, action imapAction, resolved string) string {
+	if accountKind == mailAccountKindNative && resolved != "" {
+		return resolved
+	}
+	if action.SourceIMAPFolder != "" {
+		return action.SourceIMAPFolder
+	}
+	return resolved
 }
 
 func imapFolderFor(appFolder string) string {
@@ -155,10 +170,8 @@ func (s *Server) applyIMAPActionsForAccount(ctx context.Context, conn *imapclien
 		if account.Kind == mailAccountKindExternal && action.SetSeen != nil {
 			s.propagateExternalSeen(ctx, conn, user, account, action)
 		}
-		source := action.SourceIMAPFolder
-		if source == "" {
-			source = s.actionIMAPFolder(ctx, account, state, action.SourceFolder)
-		}
+		resolved := s.actionIMAPFolder(ctx, account, state, action.SourceFolder)
+		source := sourceIMAPFolderForAction(account.Kind, action, resolved)
 		if source == "" || (action.MessageID == "" && action.SourceUID == 0) {
 			continue
 		}

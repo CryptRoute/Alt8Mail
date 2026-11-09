@@ -125,7 +125,7 @@ func TestIMAPActionCarriesConnectedAccountAndRemoteFolder(t *testing.T) {
 		"imapFolder": "[Gmail]/All Mail", "folder": "archive",
 	})
 	if action.AccountID != "acct-gmail" || action.MessageID != "<m@example.test>" ||
-		action.SourceUID != 42 || action.SourceFolder != "[Gmail]/All Mail" ||
+		action.SourceUID != 42 || action.SourceFolder != "archive" ||
 		action.SourceIMAPFolder != "[Gmail]/All Mail" {
 		t.Fatalf("unexpected action: %#v", action)
 	}
