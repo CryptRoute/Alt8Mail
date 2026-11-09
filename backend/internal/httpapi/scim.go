@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -61,8 +63,10 @@ func (s *Server) scimBaseURL() (string, error) {
 	}
 	// The public URL is used as the token-authenticated provisioning origin.
 	// Reject embedded credentials and parameters so they can never leak into
-	// resource locations or IdP configuration.
-	if publicURL.User != nil || publicURL.RawQuery != "" || publicURL.ForceQuery || publicURL.Fragment != "" {
+	// resource locations or IdP configuration. A literal "#" is rejected too:
+	// url.Parse accepts a bare trailing fragment as an empty string while the
+	// configured value would still contain it.
+	if publicURL.User != nil || publicURL.RawQuery != "" || publicURL.ForceQuery || publicURL.Fragment != "" || strings.Contains(raw, "#") {
 		return "", errors.New("ALT8MAIL_PUBLIC_URL must be a bare origin without userinfo, query or fragment for SCIM provisioning")
 	}
 	if publicURL.Scheme == "http" && !samlLoopbackHost(publicURL.Hostname()) {
@@ -130,17 +134,20 @@ func (s *Server) scimAuth(next http.Handler) http.Handler {
 		}
 		ip := clientIP(r)
 		if !s.scimLimit.Allow(ip) {
+			w.Header().Set("Retry-After", strconv.Itoa(s.scimLimit.retryAfterSeconds()))
 			writeSCIMError(w, http.StatusTooManyRequests, "tooMany", "Too many SCIM authentication attempts. Try again later.")
 			return
 		}
 		raw, ok := parseSCIMBearer(r.Header.Get("Authorization"))
 		if !ok {
+			w.Header().Set("WWW-Authenticate", "Bearer")
 			s.scimLimit.Fail(ip)
 			writeSCIMError(w, http.StatusUnauthorized, "", "A valid SCIM bearer token is required")
 			return
 		}
 		tenant, err := s.scimTokenTenant(r.Context(), raw)
 		if err != nil {
+			w.Header().Set("WWW-Authenticate", "Bearer")
 			s.scimLimit.Fail(ip)
 			writeSCIMError(w, http.StatusUnauthorized, "", "A valid SCIM bearer token is required")
 			return
@@ -187,10 +194,28 @@ func (s *Server) touchSCIMToken(tokenID, tenantID string) {
 func (s *Server) registerSCIMRoutes(mux *http.ServeMux) {
 	// Register the concrete discovery endpoints before the subtree handler so
 	// ServeMux's specificity rules always pick them; the subtree handler keeps
-	// unsupported SCIM paths behind authentication and fails closed.
-	mux.Handle("GET /scim/v2/ServiceProviderConfig", s.scimAuth(http.HandlerFunc(s.scimServiceProviderConfig)))
-	mux.Handle("GET /scim/v2/ResourceTypes", s.scimAuth(http.HandlerFunc(s.scimResourceTypes)))
+	// unsupported SCIM paths behind authentication and fails closed. The bare
+	// /scim/v2 pattern is explicit so it reaches scimAuth instead of a
+	// ServeMux 307 redirect before the license gate.
+	mux.Handle("/scim/v2", s.scimAuth(http.HandlerFunc(s.scimNotFound)))
+	mux.Handle("/scim/v2/ServiceProviderConfig", s.scimAuth(s.scimAllowMethod(http.MethodGet, s.scimServiceProviderConfig)))
+	mux.Handle("/scim/v2/ResourceTypes", s.scimAuth(s.scimAllowMethod(http.MethodGet, s.scimResourceTypes)))
+	mux.Handle("/scim/v2/ResourceTypes/User", s.scimAuth(s.scimAllowMethod(http.MethodGet, s.scimResourceType("User"))))
+	mux.Handle("/scim/v2/ResourceTypes/Group", s.scimAuth(s.scimAllowMethod(http.MethodGet, s.scimResourceType("Group"))))
 	mux.Handle("/scim/v2/", s.scimAuth(http.HandlerFunc(s.scimNotFound)))
+}
+
+// scimAllowMethod rejects unsupported methods with a SCIM 405 and an Allow
+// header instead of falling through to the subtree 404.
+func (s *Server) scimAllowMethod(method string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != method {
+			w.Header().Set("Allow", method)
+			writeSCIMError(w, http.StatusMethodNotAllowed, "", "Method not allowed")
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) scimNotFound(w http.ResponseWriter, r *http.Request) {
@@ -227,39 +252,46 @@ func (s *Server) scimServiceProviderConfig(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// scimResourceTypeObject builds one RFC 7643 ResourceType document. It returns
+// false for an unknown type so callers can answer with a SCIM 404.
+func scimResourceTypeObject(base, id string) (map[string]any, bool) {
+	var name, endpoint, description, schema string
+	switch id {
+	case "User":
+		name, endpoint, description, schema = "User", "/Users", "User Account", scimUserSchema
+	case "Group":
+		name, endpoint, description, schema = "Group", "/Groups", "Group", scimGroupSchema
+	default:
+		return nil, false
+	}
+	return map[string]any{
+		"schemas":          []string{scimResourceTypeSchema},
+		"id":               id,
+		"name":             name,
+		"endpoint":         endpoint,
+		"description":      description,
+		"schema":           schema,
+		"schemaExtensions": []any{},
+		"meta": map[string]any{
+			"resourceType": "ResourceType",
+			"location":     base + "/ResourceTypes/" + id,
+		},
+	}, true
+}
+
 func (s *Server) scimResourceTypes(w http.ResponseWriter, r *http.Request) {
 	base, err := s.scimBaseURL()
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	resources := []map[string]any{
-		{
-			"schemas":          []string{scimResourceTypeSchema},
-			"id":               "User",
-			"name":             "User",
-			"endpoint":         "/Users",
-			"description":      "User Account",
-			"schema":           scimUserSchema,
-			"schemaExtensions": []any{},
-			"meta": map[string]any{
-				"resourceType": "ResourceType",
-				"location":     base + "/ResourceTypes/User",
-			},
-		},
-		{
-			"schemas":          []string{scimResourceTypeSchema},
-			"id":               "Group",
-			"name":             "Group",
-			"endpoint":         "/Groups",
-			"description":      "Group",
-			"schema":           scimGroupSchema,
-			"schemaExtensions": []any{},
-			"meta": map[string]any{
-				"resourceType": "ResourceType",
-				"location":     base + "/ResourceTypes/Group",
-			},
-		},
+	resources := make([]map[string]any, 0, 2)
+	for _, id := range []string{"User", "Group"} {
+		resource, ok := scimResourceTypeObject(base, id)
+		if !ok {
+			continue
+		}
+		resources = append(resources, resource)
 	}
 	writeSCIMJSON(w, http.StatusOK, map[string]any{
 		"schemas":      []string{scimListResponseSchema},
@@ -268,6 +300,22 @@ func (s *Server) scimResourceTypes(w http.ResponseWriter, r *http.Request) {
 		"startIndex":   1,
 		"Resources":    resources,
 	})
+}
+
+func (s *Server) scimResourceType(id string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		base, err := s.scimBaseURL()
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		resource, ok := scimResourceTypeObject(base, id)
+		if !ok {
+			writeSCIMError(w, http.StatusNotFound, "", "SCIM resource type not found")
+			return
+		}
+		writeSCIMJSON(w, http.StatusOK, resource)
+	}
 }
 
 // scimTokenRecord is the non-secret projection of a scim_tokens row. The token
@@ -419,6 +467,10 @@ func (s *Server) adminRotateSCIMToken(w http.ResponseWriter, r *http.Request) {
 		WHERE id = $1 AND tenant_id = $2
 		FOR UPDATE
 	`, tokenID, sess.ActiveTenantID).Scan(&name, &expiresAt, &revokedAt); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "SCIM_TOKEN", "Could not rotate the SCIM token")
+			return
+		}
 		writeError(w, http.StatusNotFound, "SCIM_TOKEN_NOT_FOUND", "SCIM token not found")
 		return
 	}
@@ -476,6 +528,10 @@ func (s *Server) adminRevokeSCIMToken(w http.ResponseWriter, r *http.Request) {
 		RETURNING name
 	`, tokenID, sess.ActiveTenantID).Scan(&name)
 	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "SCIM_TOKEN", "Could not revoke the SCIM token")
+			return
+		}
 		writeError(w, http.StatusNotFound, "SCIM_TOKEN_NOT_FOUND", "SCIM token not found or already revoked")
 		return
 	}
