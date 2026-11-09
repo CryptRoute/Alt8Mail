@@ -23,6 +23,7 @@ import (
 	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/licensing"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
+	"github.com/crewjam/saml/samlsp"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
@@ -67,6 +68,13 @@ type Server struct {
 	oidcLastErr       error
 	oidcLastTry       time.Time
 	oidcLimit         *loginLimiter
+	samlMu            sync.Mutex
+	samlCached        *samlsp.Middleware
+	samlLastErr       error
+	samlLastTry       time.Time
+	// samlMetadataClient is a test seam; production uses the bounded default
+	// client in saml.go.
+	samlMetadataClient *http.Client
 }
 
 type Options struct {
@@ -145,6 +153,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/oidc/config", s.oidcConfig)
 	mux.HandleFunc("GET /api/auth/oidc/start", s.oidcStart)
 	mux.HandleFunc("GET /api/auth/oidc/callback", s.oidcCallback)
+	mux.HandleFunc("GET /api/auth/saml/config", s.samlConfig)
+	mux.HandleFunc("GET /api/auth/saml/metadata", s.samlMetadata)
 	mux.HandleFunc("GET /oauth/slack/callback", s.slackAddonOAuthCallback)
 	mux.HandleFunc("GET /oauth/relay/complete", s.addonRelayComplete)
 	mux.HandleFunc("POST /api/addons/webhooks/slack", s.slackAddonWebhook)

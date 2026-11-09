@@ -74,6 +74,14 @@ type Config struct {
 	OIDCDisplayName  string
 	OIDCEmailDomains []string
 
+	SAMLIDPMetadataURL  string
+	SAMLIDPMetadataFile string
+	SAMLSPEntityID      string
+	SAMLSPCertFile      string
+	SAMLSPKeyFile       string
+	SAMLDisplayName     string
+	SAMLEmailDomains    []string
+
 	S3Endpoint                string
 	S3Region                  string
 	S3Bucket                  string
@@ -138,6 +146,13 @@ func Load() (Config, error) {
 		OIDCRedirectURL:           strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_REDIRECT_URL")),
 		OIDCDisplayName:           strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_DISPLAY_NAME")),
 		OIDCEmailDomains:          parseOIDCEmailDomains(os.Getenv("ALT8MAIL_OIDC_EMAIL_DOMAINS")),
+		SAMLIDPMetadataURL:        strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_IDP_METADATA_URL")),
+		SAMLIDPMetadataFile:       strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_IDP_METADATA_FILE")),
+		SAMLSPEntityID:            strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_SP_ENTITY_ID")),
+		SAMLSPCertFile:            strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_SP_CERT_FILE")),
+		SAMLSPKeyFile:             strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_SP_KEY_FILE")),
+		SAMLDisplayName:           strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_DISPLAY_NAME")),
+		SAMLEmailDomains:          parseSAMLEmailDomains(os.Getenv("ALT8MAIL_SAML_EMAIL_DOMAINS")),
 		SessionTTL:                12 * time.Hour,
 		RememberTTL:               30 * 24 * time.Hour,
 		IMAPAddr:                  env("ALT8MAIL_IMAP_ADDR", "127.0.0.1:993"),
@@ -311,11 +326,23 @@ func envBool(key string, fallback bool) bool {
 	return parsed
 }
 
-// parseOIDCEmailDomains splits a comma-separated sign-in allowlist. Entries are
+// parseOIDCEmailDomains splits the comma-separated OIDC sign-in allowlist.
+func parseOIDCEmailDomains(value string) []string {
+	return parseEmailDomains(value)
+}
+
+// parseSAMLEmailDomains splits the comma-separated SAML sign-in allowlist. It
+// shares normalization with OIDC so both providers apply the same exact-match
+// rules.
+func parseSAMLEmailDomains(value string) []string {
+	return parseEmailDomains(value)
+}
+
+// parseEmailDomains splits a comma-separated sign-in allowlist. Entries are
 // trimmed and lowercased, an optional leading "@" is accepted, and duplicates
 // and empty entries are dropped so an operator cannot accidentally loosen the
 // allowlist with punctuation.
-func parseOIDCEmailDomains(value string) []string {
+func parseEmailDomains(value string) []string {
 	domains := []string{}
 	seen := map[string]bool{}
 	for _, item := range strings.Split(value, ",") {
