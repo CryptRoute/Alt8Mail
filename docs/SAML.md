@@ -186,6 +186,11 @@ per client IP with the same budget as the OIDC callback. Over-limit requests,
 and all requests on a disabled/unlicensed deployment, are rejected without an
 audit write and without extending the limiter.
 
+The ACS accepts only `application/x-www-form-urlencoded` POSTs up to 1 MiB;
+other content types and larger bodies are rejected before parsing. Artifact
+binding is not supported and requests carrying `SAMLart` are rejected, so a
+client cannot consume the replay cache through the artifact branch.
+
 Request tracking cookies expire after 10 minutes. The middleware stops tracking
 a request when the ACS response carries a RelayState, which a conforming IdP
 normally echoes; a response without one leaves the tracking cookie in place,
