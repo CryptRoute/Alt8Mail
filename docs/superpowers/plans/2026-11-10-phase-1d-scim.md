@@ -42,6 +42,7 @@ Each focus line has tests in the task that owns the code.
 - Create: `backend/migrations/rollback/0061_scim_down.sql`
 - Create: `backend/internal/httpapi/scim.go`
 - Create: `backend/internal/httpapi/scim_test.go`
+- Create: `backend/internal/httpapi/scim_integration_test.go` (skip unless `A8M_SCIM_TEST_DSN`)
 - Modify: `backend/internal/httpapi/server.go`
 - Modify: `backend/internal/httpapi/admin_server.go`
 
@@ -85,7 +86,8 @@ INSERT INTO schema_migrations (version) VALUES ('0061_scim')
 ON CONFLICT (version) DO NOTHING;
 ```
 
-- [ ] Write failing tests: unlicensed/expired/missing-feature `/scim/v2/ServiceProviderConfig` → 404; cleartext non-loopback public URL → 404; missing/wrong/revoked/expired token → 401 SCIM error; valid token → 200; over-limit token attempts → 429 without auth; raw token never appears in list responses.
+- [ ] Write failing unit tests: unlicensed/expired/missing-feature `/scim/v2/ServiceProviderConfig` → 404; cleartext non-loopback public URL → 404; missing/malformed Bearer → 401 SCIM error without a DB; over-limit attempts → 429; SCIM error/JSON shapes.
+- [ ] Write failing integration tests (skip unless `A8M_SCIM_TEST_DSN`): wrong/revoked/expired token → 401; valid token → 200; raw token never appears in list responses; admin create/rotate/revoke; cross-tenant token isolation.
 - [ ] Implement migration, `scimBaseURL`, `scimAuth` (Bearer parse, SHA-256 lookup, `tenant_id` context, async `last_used_at`, per-IP `scimLimit`), base `/scim/v2/ServiceProviderConfig` and `/scim/v2/ResourceTypes`, and SCIM error/JSON helpers.
 - [ ] Implement admin token list/create/rotate/revoke. Create returns `{"token":"a8m_scim_...", "id", "prefix", ...}` once; rotate revokes the old row and returns a new raw token; revoke sets `revoked_at`; all audit `admin.scim_token_created|rotated|revoked` with the token ID, never the raw value. Use `crypto/rand`/`randomToken(32)`.
 - [ ] Register `/scim/` routes before any catch-all; add `scimLimit *loginLimiter` to `Server` with `newLoginLimiter(oidcCallbackRateLimit, oidcCallbackRateWindow)`.
