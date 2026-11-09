@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -15,8 +16,6 @@ import (
 // audit log only; the browser always receives the same generic
 // /?saml_error=1 redirect.
 const (
-	samlErrorUnavailable = "saml_unavailable"
-	samlErrorRateLimited = "saml_rate_limited"
 	samlErrorAssertion   = "saml_assertion"
 	samlErrorEmail       = "saml_email"
 	samlErrorDomain      = "saml_domain"
@@ -28,15 +27,15 @@ const (
 	// samlReplayCacheSize bounds the in-process memory replay cache. It only
 	// protects one process; a multi-server deployment needs a shared store.
 	samlReplayCacheSize = 1024
+	// samlMaxACSBodySize caps the ACS form body before it is parsed. The ACS
+	// accepts only an HTTP-POST form, so 1 MiB is far above any real response.
+	samlMaxACSBodySize = 1 << 20
 )
 
 // samlAuthError is returned by the session provider after it has already
 // audited a failure and applied the rate-limit penalty. Its message is fixed
 // and generic: crewjam validation errors can embed the raw assertion.
 type samlAuthError struct {
-	code    string
-	user    userRecord
-	target  string
 	audited bool
 }
 
@@ -105,7 +104,7 @@ func (provider *samlSessionProvider) CreateSession(w http.ResponseWriter, r *htt
 	if err != nil {
 		return provider.fail(r, userRecord{}, "", samlErrorEmail, ip)
 	}
-	if !server.samlEmailDomainAllowed(email) {
+	if !emailDomainAllowed(server.cfg.SAMLEmailDomains, email) {
 		return provider.fail(r, userRecord{}, email, samlErrorDomain, ip)
 	}
 
@@ -119,7 +118,7 @@ func (provider *samlSessionProvider) CreateSession(w http.ResponseWriter, r *htt
 	if !adminIPAllowed(policy.Security.AllowedIPRanges, ip) {
 		return provider.fail(r, user, user.Email, samlErrorIPBlocked, ip)
 	}
-	if samlPolicyRequiresMFA(policy, user) && !samlMFAStrength(assertion, server.cfg.SAMLMFAContexts) {
+	if policyRequiresMFA(policy, user) && !samlMFAStrength(assertion, server.cfg.SAMLMFAContexts) {
 		return provider.fail(r, user, user.Email, samlErrorMFARequired, ip)
 	}
 
@@ -154,7 +153,7 @@ func (provider *samlSessionProvider) fail(r *http.Request, user userRecord, targ
 	if provider.deps.audit != nil {
 		provider.deps.audit(r, user, "auth.sso_failed", target, code)
 	}
-	return &samlAuthError{code: code, user: user, target: target, audited: true}
+	return &samlAuthError{audited: true}
 }
 
 // GetSession reports that no SAML session exists. No route is protected by
@@ -222,6 +221,28 @@ func (s *Server) samlACS(w http.ResponseWriter, r *http.Request) {
 		s.samlErrorRedirect(w, r)
 		return
 	}
+
+	// Bound and parse the only ACS representation in scope before the library
+	// sees it. Reject any other content type without parsing, then cap the body
+	// and parse exactly once; ServeACS reuses the parsed form.
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/x-www-form-urlencoded" {
+		s.samlRejectRequest(w, r)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, samlMaxACSBodySize)
+	if err := r.ParseForm(); err != nil {
+		s.samlRejectRequest(w, r)
+		return
+	}
+	// Artifact binding is out of scope and must never reach ServeACS. Its
+	// resolution path consumes entries from the shared assertion replay cache
+	// before authentication and could lock legitimate logins out.
+	if r.PostForm.Has("SAMLart") || r.Form.Has("SAMLart") {
+		s.samlRejectRequest(w, r)
+		return
+	}
+
 	middleware, err := s.samlMiddleware(r.Context())
 	if err != nil {
 		if s.logger != nil {
@@ -231,6 +252,34 @@ func (s *Server) samlACS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	middleware.ServeACS(w, r)
+}
+
+// samlRejectRequest records one fixed assertion failure, applies one rate-limit
+// penalty and sends the fixed redirect. It is shared by the ACS input gates
+// and the middleware's sanitized OnError handler so neither path can audit or
+// penalize twice.
+func (s *Server) samlRejectRequest(w http.ResponseWriter, r *http.Request) {
+	path := ""
+	if r != nil && r.URL != nil {
+		path = r.URL.Path
+	}
+	if s.logger != nil {
+		s.logger.Warn("SAML request failed", "path", path)
+	}
+	s.auditSAMLFailure(r, userRecord{}, "", samlErrorAssertion)
+	if s.samlLimit != nil {
+		s.samlLimit.Fail(clientIP(r))
+	}
+	s.samlErrorRedirect(w, r)
+}
+
+// samlReplayCacheEntriesOrDefault returns the configured replay cache bound,
+// or the production default when no test override is set.
+func (s *Server) samlReplayCacheEntriesOrDefault() int {
+	if s.samlReplayCacheEntries > 0 {
+		return s.samlReplayCacheEntries
+	}
+	return samlReplayCacheSize
 }
 
 // samlErrorRedirect sends the browser to a fixed, non-leaking location. It is
@@ -307,39 +356,6 @@ func samlEmailValid(email string) bool {
 		return false
 	}
 	return !strings.Contains(email[at+1:], "@")
-}
-
-// samlEmailDomainAllowed applies the exact domain allowlist. An empty list
-// means any domain is accepted.
-func (s *Server) samlEmailDomainAllowed(email string) bool {
-	if len(s.cfg.SAMLEmailDomains) == 0 {
-		return true
-	}
-	at := strings.LastIndex(email, "@")
-	if at <= 0 || at == len(email)-1 {
-		return false
-	}
-	domain := strings.ToLower(strings.TrimSpace(email[at+1:]))
-	for _, allowed := range s.cfg.SAMLEmailDomains {
-		allowed = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(allowed, "@")))
-		if allowed != "" && domain == allowed {
-			return true
-		}
-	}
-	return false
-}
-
-// samlPolicyRequiresMFA mirrors the OIDC tenant policy: "all" requires MFA for
-// every user, "admins" for owner and admin roles only.
-func samlPolicyRequiresMFA(policy adminTenantPolicy, user userRecord) bool {
-	switch policy.Security.MFAEnforcement {
-	case "all":
-		return true
-	case "admins":
-		return user.Role == "owner" || user.Role == "admin"
-	default:
-		return false
-	}
 }
 
 // samlMFAContextClassRefs is the built-in allowlist of exact

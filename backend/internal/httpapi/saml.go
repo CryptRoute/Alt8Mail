@@ -104,6 +104,12 @@ func (s *Server) samlPublicURL() (*url.URL, error) {
 	if err != nil || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.Host == "" {
 		return nil, errors.New("ALT8MAIL_PUBLIC_URL must be an absolute HTTP(S) URL for SAML SSO")
 	}
+	// The public URL is used as an origin, not as a redirect target: reject
+	// userinfo, query and fragment so credentials or extra parameters can
+	// never be embedded in the SP metadata, ACS or entity ID.
+	if publicURL.User != nil || publicURL.RawQuery != "" || publicURL.ForceQuery || publicURL.Fragment != "" {
+		return nil, errors.New("ALT8MAIL_PUBLIC_URL must be a bare origin without userinfo, query or fragment for SAML SSO")
+	}
 	if publicURL.Scheme == "http" && !samlLoopbackHost(publicURL.Hostname()) {
 		return nil, errors.New("ALT8MAIL_PUBLIC_URL must use HTTPS for SAML SSO (HTTP is allowed only for loopback)")
 	}
@@ -147,8 +153,9 @@ func (s *Server) samlMiddleware(ctx context.Context) (*samlsp.Middleware, error)
 	middleware, err := s.buildSAMLSP(loadCtx)
 	if err != nil {
 		s.samlLastErr = err
+		// Never log the raw error: metadata URL values can embed credentials.
 		if s.logger != nil {
-			s.logger.Warn("SAML SP initialization failed", "err", err)
+			s.logger.Warn("SAML SP initialization failed")
 		}
 		return nil, err
 	}
@@ -191,10 +198,10 @@ func (s *Server) buildSAMLSP(ctx context.Context) (*samlsp.Middleware, error) {
 		// handler also presents the flow as beginning at "/", so ServeACS
 		// redirects successful sign-ins to the application root.
 		DefaultRedirectURI: "/",
-		// Replay protection for accepted assertion IDs: the request-tracking
-		// cookie is single-use, but a captured Response plus cookie could
-		// otherwise be posted twice. Single process only.
-		ReplayCache: samlsp.NewMemoryReplayCache(samlReplayCacheSize),
+		// Replay protection for accepted assertion IDs: the request tracker
+		// stops a request when RelayState is echoed, but a captured Response
+		// plus cookie could otherwise be posted twice. Single process only.
+		ReplayCache: samlsp.NewMemoryReplayCache(s.samlReplayCacheEntriesOrDefault()),
 	})
 	if err != nil {
 		return nil, err
@@ -213,23 +220,12 @@ func (s *Server) buildSAMLSP(ctx context.Context) (*samlsp.Middleware, error) {
 // SAMLResponse or assertion XML. Failures already audited by the session
 // bridge skip the generic audit so a rejected sign-in is recorded once.
 func (s *Server) samlOnError(w http.ResponseWriter, r *http.Request, err error) {
-	path := ""
-	if r != nil && r.URL != nil {
-		path = r.URL.Path
-	}
 	var authErr *samlAuthError
 	if errors.As(err, &authErr) && authErr.audited {
 		s.samlErrorRedirect(w, r)
 		return
 	}
-	if s.logger != nil {
-		s.logger.Warn("SAML request failed", "path", path)
-	}
-	s.auditSAMLFailure(r, userRecord{}, "", samlErrorAssertion)
-	if s.samlLimit != nil {
-		s.samlLimit.Fail(clientIP(r))
-	}
-	s.samlErrorRedirect(w, r)
+	s.samlRejectRequest(w, r)
 }
 
 // loadSAMLIDPMetadata reads the configured IdP metadata file, or fetches the
@@ -428,9 +424,10 @@ func (s *Server) samlMetadata(w http.ResponseWriter, r *http.Request) {
 	middleware, err := s.samlMiddleware(r.Context())
 	if err != nil {
 		// The error describes configuration or fetch failures, never metadata
-		// contents, assertions or key material.
+		// contents, assertions or key material. Do not log its value: a
+		// metadata URL can embed credentials.
 		if s.logger != nil {
-			s.logger.Warn("SAML SP metadata unavailable", "err", err)
+			s.logger.Warn("SAML SP metadata unavailable", "path", r.URL.Path)
 		}
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return

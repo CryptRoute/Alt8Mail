@@ -234,7 +234,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request, deps
 		s.failOIDCCallback(w, r, deps, userRecord{}, "", ssoErrorEmail, ip)
 		return
 	}
-	if !s.oidcEmailDomainAllowed(email) {
+	if !emailDomainAllowed(s.cfg.OIDCEmailDomains, email) {
 		s.failOIDCCallback(w, r, deps, userRecord{}, email, ssoErrorDomain, ip)
 		return
 	}
@@ -250,7 +250,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request, deps
 		s.failOIDCCallback(w, r, deps, user, user.Email, ssoErrorIPBlocked, ip)
 		return
 	}
-	if oidcPolicyRequiresMFA(policy, user) && !oidcMFAStrength(claims.AMR, claims.ACR) {
+	if policyRequiresMFA(policy, user) && !oidcMFAStrength(claims.AMR, claims.ACR) {
 		s.failOIDCCallback(w, r, deps, user, user.Email, ssoErrorMFARequired, ip)
 		return
 	}
@@ -361,35 +361,6 @@ func oidcRememberRequested(raw string) bool {
 		return false
 	default:
 		return true
-	}
-}
-
-func (s *Server) oidcEmailDomainAllowed(email string) bool {
-	if len(s.cfg.OIDCEmailDomains) == 0 {
-		return true
-	}
-	at := strings.LastIndex(email, "@")
-	if at <= 0 || at == len(email)-1 {
-		return false
-	}
-	domain := strings.ToLower(strings.TrimSpace(email[at+1:]))
-	for _, allowed := range s.cfg.OIDCEmailDomains {
-		allowed = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(allowed, "@")))
-		if allowed != "" && domain == allowed {
-			return true
-		}
-	}
-	return false
-}
-
-func oidcPolicyRequiresMFA(policy adminTenantPolicy, user userRecord) bool {
-	switch policy.Security.MFAEnforcement {
-	case "all":
-		return true
-	case "admins":
-		return user.Role == "owner" || user.Role == "admin"
-	default:
-		return false
 	}
 }
 

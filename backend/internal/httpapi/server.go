@@ -73,6 +73,9 @@ type Server struct {
 	samlLastErr       error
 	samlLastTry       time.Time
 	samlLimit         *loginLimiter
+	// samlReplayCacheEntries overrides the replay cache size in tests; zero
+	// uses samlReplayCacheSize.
+	samlReplayCacheEntries int
 	// samlMetadataClient is a test seam; production uses the bounded default
 	// client in saml.go.
 	samlMetadataClient *http.Client

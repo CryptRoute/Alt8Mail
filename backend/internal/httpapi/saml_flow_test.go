@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -137,7 +138,7 @@ type samlFlowHarness struct {
 	logs    *strings.Builder
 }
 
-func newSAMLFlowHarness(t *testing.T, mutate func(*config.Config)) *samlFlowHarness {
+func newSAMLFlowHarness(t *testing.T, mutate func(*config.Config), setup ...func(*Server)) *samlFlowHarness {
 	t.Helper()
 	env := newSAMLTestEnv(t)
 	idpKey, idpCertificate := newSAMLIDPTestSigner(t)
@@ -170,6 +171,11 @@ func newSAMLFlowHarness(t *testing.T, mutate func(*config.Config)) *samlFlowHarn
 	var logs strings.Builder
 	server := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
 	installSAMLLicense(t, server)
+	// A test setup hook can adjust Server-only seams (for example the replay
+	// cache bound) before the middleware is built.
+	for _, apply := range setup {
+		apply(server)
+	}
 
 	middleware, err := server.samlMiddleware(context.Background())
 	if err != nil {
@@ -581,6 +587,243 @@ func TestSAMLACSRejectsInvalidAssertions(t *testing.T) {
 			requireSAMLFailureAudit(t, harness.backend, "", "", samlErrorAssertion)
 		})
 	}
+}
+
+// TestSAMLMetadataErrorsAreSanitized proves initialization failures never log
+// the raw error, which can embed a metadata file path or URL credentials.
+func TestSAMLMetadataErrorsAreSanitized(t *testing.T) {
+	const marker = "SAML_METADATA_SECRET_MARKER"
+	requireSanitized := func(t *testing.T, server *Server, logs *strings.Builder) {
+		t.Helper()
+		if _, err := server.samlMiddleware(context.Background()); err == nil {
+			t.Fatal("samlMiddleware() accepted broken metadata configuration")
+		}
+		request := httptest.NewRequest(http.MethodGet, samlMetadataPath, nil)
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusServiceUnavailable {
+			t.Fatalf("metadata status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+		}
+		if strings.Contains(logs.String(), marker) || strings.Contains(recorder.Body.String(), marker) {
+			t.Fatalf("raw metadata error leaked: logs=%q body=%q", logs.String(), recorder.Body.String())
+		}
+		if !strings.Contains(logs.String(), "SAML SP initialization failed") {
+			t.Fatalf("fixed initialization warning missing: %q", logs.String())
+		}
+		if !strings.Contains(logs.String(), "SAML SP metadata unavailable") {
+			t.Fatalf("fixed metadata warning missing: %q", logs.String())
+		}
+	}
+
+	t.Run("metadata file path", func(t *testing.T) {
+		env := newSAMLTestEnv(t)
+		cfg := env.cfg
+		cfg.SAMLIDPMetadataFile = filepath.Join(t.TempDir(), marker+"-idp-metadata.xml")
+		cfg.SAMLIDPMetadataURL = ""
+		var logs strings.Builder
+		server := New(Options{Config: cfg, Logger: newTestSAMLTextLogger(&logs)})
+		installSAMLLicense(t, server)
+		requireSanitized(t, server, &logs)
+	})
+
+	t.Run("metadata URL credentials", func(t *testing.T) {
+		env := newSAMLTestEnv(t)
+		cfg := env.cfg
+		cfg.SAMLIDPMetadataFile = ""
+		cfg.SAMLIDPMetadataURL = "https://" + marker + ":secret@127.0.0.1:1/metadata"
+		var logs strings.Builder
+		server := New(Options{Config: cfg, Logger: newTestSAMLTextLogger(&logs)})
+		installSAMLLicense(t, server)
+		// Fail the fetch deterministically with an error that embeds the URL,
+		// as a *url.Error would, rather than depending on the network.
+		server.samlMetadataClient = &http.Client{Transport: samlTestRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return nil, errors.New("dial " + request.URL.String() + ": connection refused")
+		})}
+		requireSanitized(t, server, &logs)
+	})
+}
+
+type samlTestRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function samlTestRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+// TestSAMLACSRejectsArtifactBinding proves artifact-binding POSTs are refused
+// before ServeACS. The replay cache is deliberately tiny (2 entries): had the
+// artifact requests reached the library, their resolution path would consume
+// both entries and the following legitimate login would fail with a full
+// replay cache.
+func TestSAMLACSRejectsArtifactBinding(t *testing.T) {
+	harness := newSAMLFlowHarness(t, nil, func(server *Server) {
+		server.samlReplayCacheEntries = 2
+	})
+
+	postArtifact := func(id string) *httptest.ResponseRecorder {
+		body := url.Values{"SAMLart": {id}}.Encode()
+		request := httptest.NewRequest(http.MethodPost, samlACSPath, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		recorder := httptest.NewRecorder()
+		harness.server.Handler().ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	requireSAMLErrorRedirect(t, postArtifact("artifact-unique-1"))
+	requireSAMLErrorRedirect(t, postArtifact("artifact-unique-2"))
+
+	if len(harness.backend.audits) != 2 {
+		t.Fatalf("artifact audits = %#v, want exactly two", harness.backend.audits)
+	}
+	for index, audit := range harness.backend.audits {
+		if audit.action != "auth.sso_failed" || audit.userID != "" || audit.target != "" || audit.detail != samlErrorAssertion {
+			t.Fatalf("artifact audit %d = %#v, want one fixed saml_assertion per request", index, audit)
+		}
+	}
+	harness.server.samlLimit.mu.Lock()
+	count := harness.server.samlLimit.attempts["192.0.2.1"].Count
+	harness.server.samlLimit.mu.Unlock()
+	if count != 2 {
+		t.Fatalf("limiter count = %d, want exactly 2 (one penalty per artifact request)", count)
+	}
+
+	// The replay cache is still empty, so a normal signed login succeeds.
+	harness.backend.reset()
+	attempt := harness.start(t)
+	requireSAMLSuccess(t, attempt.post(t, attempt.response(t, samlFlowSession(), nil)))
+	requireSAMLLoginAudit(t, harness.backend, "person@example.test")
+}
+
+// TestSAMLACSRequestBounds rejects non-urlencoded, missing-content-type and
+// oversized ACS bodies before they can reach the SAML library.
+func TestSAMLACSRequestBounds(t *testing.T) {
+	harness := newSAMLFlowHarness(t, nil)
+	const marker = "SAML_BODY_SECRET_MARKER"
+
+	post := func(contentType, body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, samlACSPath, strings.NewReader(body))
+		if contentType != "" {
+			request.Header.Set("Content-Type", contentType)
+		}
+		recorder := httptest.NewRecorder()
+		harness.server.Handler().ServeHTTP(recorder, request)
+		return recorder
+	}
+	requireNoSAMLLeak := func(t *testing.T, recorder *httptest.ResponseRecorder) {
+		t.Helper()
+		requireSAMLErrorRedirect(t, recorder)
+		if strings.Contains(recorder.Body.String(), marker) || strings.Contains(recorder.Header().Get("Location"), marker) {
+			t.Fatalf("request body leaked into the response: %q", recorder.Body.String())
+		}
+		if strings.Contains(harness.logs.String(), marker) {
+			t.Fatalf("request body leaked into the log: %q", harness.logs.String())
+		}
+		for _, audit := range harness.backend.audits {
+			if strings.Contains(audit.detail, marker) || strings.Contains(audit.target, marker) {
+				t.Fatalf("request body leaked into an audit: %#v", audit)
+			}
+		}
+	}
+
+	t.Run("multipart rejected without parsing", func(t *testing.T) {
+		body := "--boundary\r\nContent-Disposition: form-data; name=\"SAMLResponse\"\r\n\r\n" +
+			marker + "\r\n--boundary--\r\n"
+		requireNoSAMLLeak(t, post("multipart/form-data; boundary=boundary", body))
+	})
+	t.Run("missing content type rejected without parsing", func(t *testing.T) {
+		requireNoSAMLLeak(t, post("", "SAMLResponse="+marker))
+	})
+	t.Run("oversized body rejected", func(t *testing.T) {
+		body := "SAMLResponse=" + strings.Repeat("A", samlMaxACSBodySize)
+		requireNoSAMLLeak(t, post("application/x-www-form-urlencoded", body))
+	})
+
+	if len(harness.backend.audits) != 3 {
+		t.Fatalf("rejection audits = %#v, want exactly three", harness.backend.audits)
+	}
+	for index, audit := range harness.backend.audits {
+		if audit.action != "auth.sso_failed" || audit.userID != "" || audit.target != "" || audit.detail != samlErrorAssertion {
+			t.Fatalf("rejection audit %d = %#v, want one fixed saml_assertion per request", index, audit)
+		}
+	}
+	harness.server.samlLimit.mu.Lock()
+	count := harness.server.samlLimit.attempts["192.0.2.1"].Count
+	harness.server.samlLimit.mu.Unlock()
+	if count != 3 {
+		t.Fatalf("limiter count = %d, want exactly 3 (no double penalty)", count)
+	}
+	if !strings.Contains(harness.logs.String(), "SAML request failed") {
+		t.Fatalf("fixed rejection log line missing: %q", harness.logs.String())
+	}
+
+	// Parameters are allowed on the accepted media type, and a normal signed
+	// login still succeeds after the rejections.
+	harness.backend.reset()
+	attempt := harness.start(t)
+	form := attempt.response(t, samlFlowSession(), nil)
+	body := url.Values{"SAMLResponse": {form.SAMLResponse}, "RelayState": {form.RelayState}}.Encode()
+	request := httptest.NewRequest(http.MethodPost, samlACSPath, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	request.AddCookie(&http.Cookie{Name: attempt.cookie.Name, Value: attempt.cookie.Value})
+	recorder := httptest.NewRecorder()
+	harness.server.Handler().ServeHTTP(recorder, request)
+	requireSAMLSuccess(t, recorder)
+	requireSAMLLoginAudit(t, harness.backend, "person@example.test")
+}
+
+// TestSAMLACSRejectsWrongDestination leaves the signature, audience,
+// recipient, InResponseTo and conditions valid, but points the Response
+// Destination at another ACS URL.
+func TestSAMLACSRejectsWrongDestination(t *testing.T) {
+	harness := newSAMLFlowHarness(t, nil)
+	attempt := harness.start(t)
+
+	request := attempt.request
+	if err := (saml.DefaultAssertionMaker{}).MakeAssertion(request, samlFlowSession()); err != nil {
+		t.Fatalf("IdP make assertion: %v", err)
+	}
+	// MakeAssertion already fixed the assertion Recipient from the real ACS;
+	// only the Response Destination below is changed before signing.
+	request.ACSEndpoint.Location = "https://wrong.example.test/api/auth/saml/acs"
+	if err := request.MakeResponse(); err != nil {
+		t.Fatalf("IdP make wrong-destination response: %v", err)
+	}
+	form, err := request.PostBinding()
+	if err != nil {
+		t.Fatalf("IdP build wrong-destination post form: %v", err)
+	}
+
+	requireSAMLErrorRedirect(t, attempt.post(t, form))
+	if len(harness.backend.lookups) != 0 || len(harness.backend.sessionTTLs) != 0 || len(harness.backend.lastLogins) != 0 {
+		t.Fatal("wrong-destination response reached account lookup or session creation")
+	}
+	requireSAMLFailureAudit(t, harness.backend, "", "", samlErrorAssertion)
+}
+
+// TestSAMLACSRejectsIdPInitiatedResponse sends a validly signed response that
+// is not tied to the SP's tracked AuthnRequest. IdP-initiated SSO is disabled.
+func TestSAMLACSRejectsIdPInitiatedResponse(t *testing.T) {
+	harness := newSAMLFlowHarness(t, nil)
+	attempt := harness.start(t)
+
+	request := attempt.request
+	if err := (saml.DefaultAssertionMaker{}).MakeAssertion(request, samlFlowSession()); err != nil {
+		t.Fatalf("IdP make assertion: %v", err)
+	}
+	request.Assertion.Subject.SubjectConfirmations[0].SubjectConfirmationData.InResponseTo = ""
+	request.Request.ID = ""
+	if err := request.MakeResponse(); err != nil {
+		t.Fatalf("IdP make unsolicited response: %v", err)
+	}
+	form, err := request.PostBinding()
+	if err != nil {
+		t.Fatalf("IdP build unsolicited post form: %v", err)
+	}
+
+	requireSAMLErrorRedirect(t, attempt.post(t, form))
+	if len(harness.backend.lookups) != 0 || len(harness.backend.sessionTTLs) != 0 || len(harness.backend.lastLogins) != 0 {
+		t.Fatal("unsolicited response reached account lookup or session creation")
+	}
+	requireSAMLFailureAudit(t, harness.backend, "", "", samlErrorAssertion)
 }
 
 // TestSAMLACSRejectsRogueSigningKey keeps the response's InResponseTo,

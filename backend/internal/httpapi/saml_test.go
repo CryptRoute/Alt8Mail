@@ -295,6 +295,26 @@ func TestSAMLConfigured(t *testing.T) {
 			mutate: func(c *config.Config) { c.PublicURL = "https://mail.example.com" },
 			want:   true,
 		},
+		{
+			name:   "public URL with userinfo",
+			mutate: func(c *config.Config) { c.PublicURL = "https://user:secret@mail.example.com" },
+			want:   false,
+		},
+		{
+			name:   "public URL with query",
+			mutate: func(c *config.Config) { c.PublicURL = "https://mail.example.com/?tenant=1" },
+			want:   false,
+		},
+		{
+			name:   "public URL with empty query",
+			mutate: func(c *config.Config) { c.PublicURL = "https://mail.example.com/?" },
+			want:   false,
+		},
+		{
+			name:   "public URL with fragment",
+			mutate: func(c *config.Config) { c.PublicURL = "https://mail.example.com/#fragment" },
+			want:   false,
+		},
 		{name: "display name optional", mutate: func(c *config.Config) { c.SAMLDisplayName = "" }, want: true},
 		{name: "entity ID optional", mutate: func(c *config.Config) { c.SAMLSPEntityID = "" }, want: true},
 		{name: "email domains optional", mutate: func(c *config.Config) { c.SAMLEmailDomains = nil }, want: true},
