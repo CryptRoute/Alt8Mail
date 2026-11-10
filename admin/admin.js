@@ -1222,9 +1222,10 @@ async function renderDomains() {
   try {
     const data = await api("domains");
     const domains = data.domains || [];
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Domains</h1><p>Mail domains, DNS ownership and authentication records for ${esc(state.activeTenant.name)}.</p></div>${can("domains.manage") ? `<div class="view-actions"><button class="btn primary" data-action="new-domain">${icon("plus")}Add domain</button></div>` : ""}</div><div class="entity-grid">${domains.map(domainCard).join("") || `<div class="card card-pad"><div class="empty">${icon("globe")}<h3>No domains</h3><p>Add the domain your organization sends and receives mail on.</p></div></div>`}</div><div class="card" style="margin-top:16px"><div class="card-head"><div><h2>DMARC aggregate reports</h2><p>Aggregated authentication outcomes from the last 30 days. A pass rate below 90% with failures raises an alert.</p></div></div><div class="card-pad" id="dmarcSummary"><div class="settings-note">Loading DMARC summary…</div></div></div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Domains</h1><p>Mail domains, DNS ownership and authentication records for ${esc(state.activeTenant.name)}.</p></div>${can("domains.manage") ? `<div class="view-actions"><button class="btn primary" data-action="new-domain">${icon("plus")}Add domain</button></div>` : ""}</div><div class="entity-grid">${domains.map(domainCard).join("") || `<div class="card card-pad"><div class="empty">${icon("globe")}<h3>No domains</h3><p>Add the domain your organization sends and receives mail on.</p></div></div>`}</div><div class="card" style="margin-top:16px"><div class="card-head"><div><h2>DMARC aggregate reports</h2><p>Aggregated authentication outcomes from the last 30 days. A pass rate below 90% with failures raises an alert.</p></div></div><div class="card-pad" id="dmarcSummary"><div class="settings-note">Loading DMARC summary…</div></div><div class="card-pad" style="border-top:1px solid var(--line)" id="dmarcPoller"><div class="settings-note">Loading DMARC poller…</div></div></div>`;
     state.domains = domains;
     loadDMARCSummary().catch(() => {});
+    loadDMARCPoller().catch(() => {});
     $$("[data-domain-id]").forEach((card) => card.addEventListener("click", () => openDomainDrawer(card.dataset.domainId)));
   } catch (error) { viewError(error); }
 }
@@ -1240,6 +1241,30 @@ async function loadDMARCSummary() {
     host.innerHTML = `<div class="detail-list"><div class="detail-row"><span>Messages evaluated</span><b>${totals.messages || 0}</b></div><div class="detail-row"><span>DMARC pass rate</span><b>${Number(totals.passRate || 0).toFixed(1)}%</b></div><div class="detail-row"><span>Failures</span><b>${totals.fail || 0}</b></div></div>${domains.length ? `<div class="mini-section"><h3>By domain</h3>${domains.map((item) => `<div class="detail-row"><span>${esc(item.domain)} ${item.alert ? `<span class="badge warning">Alert</span>` : ""}</span><b>${item.messages} messages · ${Number(item.passRate).toFixed(1)}% pass</b></div>`).join("")}</div>` : `<div class="empty-mini">No aggregate reports ingested yet.</div>`}${failing.length ? `<div class="mini-section"><h3>Top failing sources</h3>${failing.slice(0, 8).map((item) => `<div class="detail-row"><span>${esc(item.sourceIp || "Unknown")} · ${esc(item.domain)}</span><b>${item.count} messages</b></div>`).join("")}</div>` : ""}`;
   } catch (error) {
     host.innerHTML = `<div class="settings-note">DMARC summary is unavailable: ${esc(error.message)}</div>`;
+  }
+}
+
+async function loadDMARCPoller() {
+  const host = $("#dmarcPoller");
+  if (!host) return;
+  const manage = can("domains.manage");
+  try {
+    const config = await api("dmarc/poller");
+    host.innerHTML = `<div class="mini-section"><h3>Automatic rua polling</h3><p class="muted" style="font-size:11px">Read DMARC aggregate-report attachments from a mailbox and folder. XML, gzip and ZIP reports are supported.</p><div class="field-row"><label class="field"><span>Mailbox</span><input id="dmarcPollMailbox" type="email" value="${esc(config.mailboxEmail || "")}" placeholder="dmarc@example.com" ${manage ? "" : "disabled"}></label><label class="field"><span>Folder</span><input id="dmarcPollFolder" value="${esc(config.folder || "INBOX")}" ${manage ? "" : "disabled"}></label></div><label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:8px 0"><input id="dmarcPollEnabled" type="checkbox" ${config.enabled ? "checked" : ""} ${manage ? "" : "disabled"}> Poll this mailbox automatically</label><div class="detail-list"><div class="detail-row"><span>Last poll</span><b>${config.lastPollAt ? formatDate(config.lastPollAt, { time: true }) : "Never"}</b></div><div class="detail-row"><span>Last processed UID</span><b>${config.lastUid || 0}</b></div>${config.lastError ? `<div class="detail-row"><span>Last error</span><b>${esc(config.lastError)}</b></div>` : ""}</div>${manage ? `<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn secondary small" type="button" id="dmarcPollRun">Poll now</button><button class="btn primary small" type="button" id="dmarcPollSave">Save poller</button></div>` : ""}</div>`;
+    $("#dmarcPollSave")?.addEventListener("click", async (event) => {
+      setBusy(event.currentTarget, true, "Saving…");
+      try {
+        await api("dmarc/poller", { method: "PUT", body: { enabled: $("#dmarcPollEnabled").checked, mailboxEmail: $("#dmarcPollMailbox").value.trim(), folder: $("#dmarcPollFolder").value.trim() || "INBOX" } });
+        toast("DMARC poller saved"); await loadDMARCPoller();
+      } catch (error) { showError(error); setBusy(event.currentTarget, false); }
+    });
+    $("#dmarcPollRun")?.addEventListener("click", async (event) => {
+      setBusy(event.currentTarget, true, "Polling…");
+      try { const result = await api("dmarc/poller/run", { method: "POST", body: {} }); toast(`Ingested ${result.ingested} DMARC report(s)`); await loadDMARCPoller(); await loadDMARCSummary(); }
+      catch (error) { showError(error); setBusy(event.currentTarget, false); }
+    });
+  } catch (error) {
+    host.innerHTML = `<div class="settings-note">DMARC poller is unavailable: ${esc(error.message)}</div>`;
   }
 }
 
@@ -1535,6 +1560,9 @@ function policySections(policy) {
   const features = policy.features || { stickyNotes: true, reactions: true };
   const office = policy.office || { enabled: true, internalSharing: true, externalEditing: true, ai: true, dlpOnSave: true, versionRetention: 0, allowedGroups: [], allowedDomains: [] };
   const files = policy.files || { retentionDays: 0, versionRetentionDays: 0, retentionByClassification: {}, shareApprovalRequired: false, dlpOnShare: true, watermarkDownloads: false };
+  const mcp = policy.mcp || { allowedScopes: [], writeApprovalRequired: true, maxRequestsPerHour: 120, connectionRequestsPerHour: 120, toolApprovals: {} };
+  const mcpTools = [["calendar_write", "Create calendar event"], ["tasks_write", "Create task"], ["labels_write", "Add label"], ["draft_send", "Send message"]];
+  const mcpApproval = (tool) => mcp.toolApprovals?.[tool] || "inherit";
   return `<section class="card policy-panel active" data-policy-panel="security">
     <div class="policy-section"><h3>Password policy</h3><p>Applied to new users and password resets issued from this console.</p>
       <div class="setting-row"><div class="setting-copy"><b>Minimum length</b><small>Passwords shorter than this are rejected.</small></div><div class="setting-control"><div class="input-group"><input class="input" type="number" min="8" max="64" data-policy-input="security.passwordMinLength" value="${security.passwordMinLength}"><span class="muted">chars</span></div></div></div>
@@ -1637,6 +1665,11 @@ function policySections(policy) {
       ${toggleRow("Sticky notes", "One short markdown-lite note per mailbox, including shared team notes for delegated mailboxes. Visible above Inbox and on Mail Home.", "features.stickyNotes", features.stickyNotes)}
       ${toggleRow("Message reactions", "Allow private and emailed reactions on inbound conversations. Disabling hides the React control and rejects new reactions.", "features.reactions", features.reactions)}
     </div>
+    <div class="policy-section"><h3>MCP governance</h3><p>Per-tool approval policy and distributed per-connection request limits for connected MCP clients.</p>
+      ${toggleRow("Require approval for write tools by default", "Tools set to Inherit require a signed-in user's approval before execution.", "mcp.writeApprovalRequired", mcp.writeApprovalRequired)}
+      <div class="setting-row"><div class="setting-copy"><b>Per-connection requests per hour</b><small>Distributed across server instances. 0 uses the tenant-wide limit of ${Number(mcp.maxRequestsPerHour) || 120}.</small></div><div class="setting-control"><input class="input" type="number" min="0" max="10000" data-policy-input="mcp.connectionRequestsPerHour" value="${Number(mcp.connectionRequestsPerHour) || 0}"></div></div>
+      ${mcpTools.map(([tool, label]) => `<div class="setting-row"><div class="setting-copy"><b>${esc(label)}</b><small><code>${esc(tool)}</code></small></div><div class="setting-control"><select class="input" data-policy-input="mcp.toolApprovals.${esc(tool)}">${[["inherit", "Inherit"], ["approval", "Require approval"], ["auto", "Execute automatically"], ["deny", "Block tool"]].map(([value, text]) => `<option value="${value}" ${mcpApproval(tool) === value ? "selected" : ""}>${text}</option>`).join("")}</select></div></div>`).join("")}
+    </div>
   </section>
   <section class="card policy-panel" data-policy-panel="branding">
     <div class="policy-section"><h3>Organization branding</h3><p>Shown in the admin console and organization communications.</p>
@@ -1706,6 +1739,8 @@ function collectPolicy() {
     policy.office = { enabled: true, internalSharing: true, externalEditing: true, ai: true, dlpOnSave: true, versionRetention: 0, allowedGroups: [], allowedDomains: [] };
   }
   if (!policy.files) policy.files = { retentionDays: 0, versionRetentionDays: 0, retentionByClassification: {}, shareApprovalRequired: false, dlpOnShare: true, watermarkDownloads: false };
+  if (!policy.mcp) policy.mcp = { allowedScopes: [], writeApprovalRequired: true, maxRequestsPerHour: 120, connectionRequestsPerHour: 120, toolApprovals: {} };
+  if (!policy.mcp.toolApprovals) policy.mcp.toolApprovals = {};
   const parseRetentionMap = (value) => {
     const map = {};
     String(value || "").split(",").forEach((entry) => {

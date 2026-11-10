@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -52,18 +53,50 @@ type dmarcFeedback struct {
 	} `xml:"record"`
 }
 
-func parseDMARCReport(raw []byte) (dmarcFeedback, error) {
-	var feedback dmarcFeedback
+func dmarcReportXML(raw []byte) ([]byte, error) {
+	if len(raw) > 4 && bytes.Equal(raw[:4], []byte{'P', 'K', 3, 4}) {
+		reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+		if err != nil {
+			return nil, fmt.Errorf("DMARC report ZIP is unreadable")
+		}
+		for _, file := range reader.File {
+			if !strings.HasSuffix(strings.ToLower(file.Name), ".xml") && !strings.HasSuffix(strings.ToLower(file.Name), ".xml.gz") {
+				continue
+			}
+			opened, err := file.Open()
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(io.LimitReader(opened, 8*1024*1024+1))
+			opened.Close()
+			if err != nil || len(data) > 8*1024*1024 {
+				return nil, fmt.Errorf("DMARC report is too large")
+			}
+			return dmarcReportXML(data)
+		}
+		return nil, fmt.Errorf("DMARC report ZIP contains no XML report")
+	}
 	if len(raw) > 2 && raw[0] == 0x1f && raw[1] == 0x8b {
 		reader, err := gzip.NewReader(bytes.NewReader(raw))
 		if err != nil {
-			return feedback, fmt.Errorf("DMARC report is not readable gzip")
+			return nil, fmt.Errorf("DMARC report is not readable gzip")
 		}
 		defer reader.Close()
-		raw, err = io.ReadAll(io.LimitReader(reader, 8*1024*1024+1))
-		if err != nil || len(raw) > 8*1024*1024 {
-			return feedback, fmt.Errorf("DMARC report is too large")
+		data, err := io.ReadAll(io.LimitReader(reader, 8*1024*1024+1))
+		if err != nil || len(data) > 8*1024*1024 {
+			return nil, fmt.Errorf("DMARC report is too large")
 		}
+		return dmarcReportXML(data)
+	}
+	return raw, nil
+}
+
+func parseDMARCReport(raw []byte) (dmarcFeedback, error) {
+	var feedback dmarcFeedback
+	var err error
+	raw, err = dmarcReportXML(raw)
+	if err != nil {
+		return feedback, err
 	}
 	if len(raw) == 0 || len(raw) > 8*1024*1024 {
 		return feedback, fmt.Errorf("DMARC report is empty or too large")
@@ -252,6 +285,9 @@ func (s *Server) adminDMARCSummary(w http.ResponseWriter, r *http.Request) {
 func (s *Server) registerDMARCRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dmarc/ingest", s.adminFeature("domains.manage", FeatureDeliverability, s.adminIngestDMARC))
 	mux.HandleFunc("GET /dmarc/summary", s.adminFeature("domains.read", FeatureDeliverability, s.adminDMARCSummary))
+	mux.HandleFunc("GET /dmarc/poller", s.adminFeature("domains.read", FeatureDeliverability, s.adminDMARCPoller))
+	mux.HandleFunc("PUT /dmarc/poller", s.adminFeature("domains.manage", FeatureDeliverability, s.adminSaveDMARCPoller))
+	mux.HandleFunc("POST /dmarc/poller/run", s.adminFeature("domains.manage", FeatureDeliverability, s.adminRunDMARCPoller))
 }
 
 // parseDMARCDate is used by tests and future report exporters.

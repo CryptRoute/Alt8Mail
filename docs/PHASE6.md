@@ -17,7 +17,9 @@ encryption metadata from `0081_encrypted_storage.sql` is documented in
   per key. The raw token is shown once; revocation is immediate. Admin
   endpoints: `GET/POST /admin/api/api-keys`, `DELETE /admin/api/api-keys/{id}`.
 - `/api/v1` supports message list/read/send, task list/create and calendar
-  event list. POSTs support `Idempotency-Key`.
+  event list. Message, task and calendar list endpoints use stable
+  `nextCursor` keyset pagination with `limit` and `cursor`; POSTs support
+  `Idempotency-Key`.
 - Webhooks store endpoints and per-event deliveries. Delivery is idempotent by
   `(endpoint, event_id)`, HMAC-signed over timestamp + body, retried with
   backoff, and visible in System Control. Test events are supported.
@@ -91,8 +93,12 @@ encryption metadata from `0081_encrypted_storage.sql` is documented in
   idempotency key and replayed on reconnect. Replays are deduplicated server-
   side, so a reconnect cannot create duplicate messages.
 - Existing PWA offline shell, web push, theme and density controls remain.
-  MDM packaging is the existing manifest/PWA install path; no separate native
-  bundle is produced.
+  The offline queue now persists compose/send, archive/move/read/label mailbox
+  actions and task create/update/delete mutations, with server-side idempotency
+  for replayed task creation. MDM packaging is the existing manifest/PWA
+  install path; no separate native bundle is produced.
+- Keyboard shortcuts are customizable in Settings → Keyboard shortcuts and the
+  reference dialog reflects the saved bindings.
 - Tests: `TestPhase6PlatformOpsIntegration` covers analytics, redacted support
   bundle, telemetry delivery and phishing create/launch/click/report.
 

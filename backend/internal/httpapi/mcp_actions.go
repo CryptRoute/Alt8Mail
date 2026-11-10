@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+func mcpWriteTools() []string {
+	return []string{"calendar_write", "tasks_write", "labels_write", "draft_send"}
+}
+
 func mcpWriteRequiredArgs(tool string, args map[string]any) error {
 	required := map[string][]string{
 		"calendar_write": {"title", "startAt", "endAt"},
@@ -31,13 +35,27 @@ func (s *Server) mcpRequestWrite(r *http.Request, token mcpTokenRecord, tool str
 	if err := mcpWriteRequiredArgs(tool, args); err != nil {
 		return nil, err
 	}
+	policy := s.tenantPolicyFor(r.Context(), token.TenantID)
+	toolPolicy := strings.ToLower(strings.TrimSpace(policy.MCP.ToolApprovals[tool]))
+	if toolPolicy == "deny" {
+		return nil, fmt.Errorf("the organization blocks the %s tool", tool)
+	}
 	if dryRun {
-		return mcpTextResult("Dry run: this action would create an approval request and would not execute until a signed-in user approves it.", map[string]any{
-			"structuredContent": map[string]any{"status": "pending_approval", "dryRun": true, "tool": tool},
+		status := "pending_approval"
+		if toolPolicy == "auto" || (toolPolicy != "approval" && !policy.MCP.WriteApprovalRequired) {
+			status = "would_execute"
+		}
+		return mcpTextResult("Dry run: no write was executed. The organization's current MCP tool policy was evaluated.", map[string]any{
+			"structuredContent": map[string]any{"status": status, "dryRun": true, "tool": tool, "policy": toolPolicy},
 		}), nil
 	}
-	policy := s.tenantPolicyFor(r.Context(), token.TenantID)
-	if !policy.MCP.WriteApprovalRequired {
+	requiresApproval := policy.MCP.WriteApprovalRequired
+	if toolPolicy == "auto" {
+		requiresApproval = false
+	} else if toolPolicy == "approval" {
+		requiresApproval = true
+	}
+	if !requiresApproval {
 		if err := s.executeMCPAction(r.Context(), token.User, tool, args); err != nil {
 			return nil, err
 		}

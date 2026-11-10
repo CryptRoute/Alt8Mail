@@ -553,16 +553,176 @@ func (s *Server) addBookingMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) bookingPageForOwner(ctx context.Context, user userRecord, id string) (bookingPageRecord, error) {
-	var slug string
-	if err := s.store.DB.QueryRow(ctx, `SELECT slug::text FROM public.booking_pages WHERE id=$1 AND user_id=$2`, id, user.ID).Scan(&slug); err != nil {
-		return bookingPageRecord{}, fail(http.StatusNotFound, "BOOKING_NOT_FOUND", "Booking page not found")
+	var page bookingPageRecord
+	err := s.store.DB.QueryRow(ctx, `
+		SELECT id, tenant_id::text, user_id::text, slug::text, title, description, duration_minutes,
+		       buffer_before_minutes, buffer_after_minutes, working_start_hour, working_end_hour,
+		       timezone, weekdays, round_robin, active, created_at
+		FROM public.booking_pages WHERE id=$1 AND user_id=$2
+	`, id, user.ID).Scan(
+		&page.ID, &page.TenantID, &page.UserID, &page.Slug, &page.Title, &page.Description, &page.Duration,
+		&page.BufferBefore, &page.BufferAfter, &page.StartHour, &page.EndHour, &page.Timezone,
+		&page.Weekdays, &page.RoundRobin, &page.Active, &page.CreatedAt)
+	if err != nil {
+		return page, fail(http.StatusNotFound, "BOOKING_NOT_FOUND", "Booking page not found")
 	}
-	return s.bookingPageBySlug(ctx, slug)
+	page.Members, _ = s.bookingMembers(ctx, page.ID, page.UserID)
+	return page, nil
+}
+
+func (s *Server) updateBookingPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBookingEntitlement(w) {
+		return
+	}
+	sess := s.requireSessionFromContext(r)
+	page, err := s.bookingPageForOwner(r.Context(), sess.User, r.PathValue("id"))
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	var body bookingPageBody
+	if !s.decodeBody(w, r, &body, 32*1024) {
+		return
+	}
+	body, err = sanitizeBookingBody(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "BOOKING", err.Error())
+		return
+	}
+	active := page.Active
+	if body.Active != nil {
+		active = *body.Active
+	}
+	_, err = s.store.DB.Exec(r.Context(), `
+		UPDATE public.booking_pages
+		SET slug=$3, title=$4, description=$5, duration_minutes=$6, buffer_before_minutes=$7,
+		    buffer_after_minutes=$8, working_start_hour=$9, working_end_hour=$10, timezone=$11,
+		    weekdays=$12, round_robin=$13, active=$14, updated_at=now()
+		WHERE id=$1 AND user_id=$2
+	`, page.ID, sess.User.ID, body.Slug, body.Title, body.Description, body.Duration,
+		body.BufferBefore, body.BufferAfter, body.StartHour, body.EndHour, body.Timezone,
+		body.Weekdays, body.RoundRobin, active)
+	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "BOOKING_EXISTS", "That booking slug is already in use")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "BOOKING", "Could not update the booking page")
+		return
+	}
+	s.audit(r, sess.User, "booking.page_updated", page.ID, "Updated booking page "+body.Title)
+	updated, _ := s.bookingPageForOwner(r.Context(), sess.User, page.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "page": bookingPageMap(updated)})
+}
+
+func (s *Server) deleteBookingPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBookingEntitlement(w) {
+		return
+	}
+	sess := s.requireSessionFromContext(r)
+	page, err := s.bookingPageForOwner(r.Context(), sess.User, r.PathValue("id"))
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	_, err = s.store.DB.Exec(r.Context(), `
+		UPDATE public.booking_pages SET active=false, updated_at=now() WHERE id=$1 AND user_id=$2
+	`, page.ID, sess.User.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "BOOKING", "Could not disable the booking page")
+		return
+	}
+	s.audit(r, sess.User, "booking.page_disabled", page.ID, "Disabled booking page "+page.Title)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "active": false})
+}
+
+func (s *Server) listBookingPageBookings(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBookingEntitlement(w) {
+		return
+	}
+	sess := s.requireSessionFromContext(r)
+	page, err := s.bookingPageForOwner(r.Context(), sess.User, r.PathValue("id"))
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	rows, err := s.store.DB.Query(r.Context(), `
+		SELECT b.id, b.start_at, b.end_at, b.booker_name, b.booker_email::text, b.note,
+		       b.status, COALESCE(b.calendar_event_id,''), b.created_at,
+		       COALESCE(u.name,''), COALESCE(u.email::text,'')
+		FROM public.bookings b
+		LEFT JOIN public.users u ON u.id=b.booked_user_id
+		WHERE b.page_id=$1 AND b.tenant_id=$2
+		ORDER BY b.start_at DESC LIMIT 200
+	`, page.ID, sess.User.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "BOOKING", "Could not load bookings")
+		return
+	}
+	defer rows.Close()
+	items := []map[string]any{}
+	for rows.Next() {
+		var id, name, email, note, status, eventID, memberName, memberEmail string
+		var starts, ends, created time.Time
+		if rows.Scan(&id, &starts, &ends, &name, &email, &note, &status, &eventID, &created,
+			&memberName, &memberEmail) == nil {
+			items = append(items, map[string]any{
+				"id": id, "startAt": starts.UTC().Format(time.RFC3339), "endAt": ends.UTC().Format(time.RFC3339),
+				"bookerName": name, "bookerEmail": email, "note": note, "status": status,
+				"calendarEventId": eventID, "createdAt": created.UTC().Format(time.RFC3339),
+				"memberName": memberName, "memberEmail": memberEmail,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"bookings": items, "count": len(items), "page": bookingPageMap(page)})
+}
+
+func (s *Server) cancelBooking(w http.ResponseWriter, r *http.Request) {
+	if !s.requireBookingEntitlement(w) {
+		return
+	}
+	sess := s.requireSessionFromContext(r)
+	page, err := s.bookingPageForOwner(r.Context(), sess.User, r.PathValue("id"))
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	bookingID := strings.TrimSpace(r.PathValue("bookingId"))
+	tx, err := s.store.DB.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "BOOKING", "Could not cancel the booking")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var eventID string
+	var status string
+	err = tx.QueryRow(r.Context(), `
+		UPDATE public.bookings SET status='cancelled', updated_at=now()
+		WHERE id=$1 AND page_id=$2 AND tenant_id=$3 AND status='confirmed'
+		RETURNING COALESCE(calendar_event_id,''), status
+	`, bookingID, page.ID, sess.User.TenantID).Scan(&eventID, &status)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "BOOKING_NOT_FOUND", "Confirmed booking not found")
+		return
+	}
+	if eventID != "" {
+		_, _ = tx.Exec(r.Context(), `UPDATE public.calendar_events SET status='cancelled', updated_at=now() WHERE id=$1`, eventID)
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "BOOKING", "Could not cancel the booking")
+		return
+	}
+	s.audit(r, sess.User, "booking.cancelled", bookingID, "Cancelled booking on page "+page.Title)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "cancelled"})
 }
 
 func (s *Server) registerBookingRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/booking-pages", s.requireUser(featureGate(s, "booking_pages", s.listBookingPages)))
 	mux.HandleFunc("POST /api/booking-pages", s.requireUser(featureGate(s, "booking_pages", s.createBookingPage)))
+	mux.HandleFunc("PUT /api/booking-pages/{id}", s.requireUser(featureGate(s, "booking_pages", s.updateBookingPage)))
+	mux.HandleFunc("DELETE /api/booking-pages/{id}", s.requireUser(featureGate(s, "booking_pages", s.deleteBookingPage)))
+	mux.HandleFunc("GET /api/booking-pages/{id}/bookings", s.requireUser(featureGate(s, "booking_pages", s.listBookingPageBookings)))
+	mux.HandleFunc("POST /api/booking-pages/{id}/bookings/{bookingId}/cancel", s.requireUser(featureGate(s, "booking_pages", s.cancelBooking)))
 	mux.HandleFunc("POST /api/booking-pages/{id}/members", s.requireUser(featureGate(s, "booking_pages", s.addBookingMember)))
 	mux.HandleFunc("GET /api/public/booking/{slug}/slots", s.publicBookingSlots)
 	mux.HandleFunc("POST /api/public/booking/{slug}/book", s.bookSlot)

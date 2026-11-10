@@ -99,19 +99,47 @@ func (s *Server) mcpCheckScopePolicy(ctx context.Context, tenantID string, scope
 	return nil
 }
 
-func (s *Server) mcpWithinRateLimit(ctx context.Context, tenantID, userID string) (bool, error) {
+func (s *Server) mcpWithinRateLimit(ctx context.Context, tenantID, connectionID string) (bool, error) {
 	policy := s.tenantPolicyFor(ctx, tenantID)
-	if policy.MCP.MaxRequestsPerHour <= 0 {
+	limit := policy.MCP.ConnectionRequestsPerHour
+	if limit <= 0 {
+		limit = policy.MCP.MaxRequestsPerHour
+	}
+	if policy.MCP.MaxRequestsPerHour > 0 && (limit <= 0 || policy.MCP.MaxRequestsPerHour < limit) {
+		limit = policy.MCP.MaxRequestsPerHour
+	}
+	if limit <= 0 {
 		return true, nil
 	}
-	var count int
-	if err := s.store.DB.QueryRow(ctx, `
-		SELECT count(*) FROM public.audit_log
-		WHERE user_id=$1 AND action LIKE 'mcp.%' AND created_at > now() - interval '1 hour'
-	`, userID).Scan(&count); err != nil {
+	tx, err := s.store.DB.Begin(ctx)
+	if err != nil {
 		return false, err
 	}
-	return count < policy.MCP.MaxRequestsPerHour, nil
+	defer tx.Rollback(ctx)
+	// The advisory lock makes the count-and-insert atomic across server
+	// instances: two nodes cannot both consume the last permit.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "mcp-rate:"+connectionID); err != nil {
+		return false, err
+	}
+	var count int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM public.mcp_rate_events
+		WHERE connection_id=$1 AND created_at > now() - interval '1 hour'
+	`, connectionID).Scan(&count); err != nil {
+		return false, err
+	}
+	if count >= limit {
+		return false, nil
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO public.mcp_rate_events (tenant_id, connection_id) VALUES ($1,$2)
+	`, tenantID, connectionID); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM public.mcp_rate_events WHERE created_at < now() - interval '25 hours'`); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
 }
 
 func (s *Server) mcpLoadClient(ctx context.Context, clientID string) (mcpClient, error) {
@@ -524,7 +552,7 @@ func (s *Server) mcpJSONRPC(w http.ResponseWriter, r *http.Request) {
 			respond(nil, map[string]any{"code": -32001, "message": "This MCP write scope requires an mcp_governance license"})
 			return
 		}
-		if allowed, err := s.mcpWithinRateLimit(r.Context(), token.TenantID, token.User.ID); err != nil || !allowed {
+		if allowed, err := s.mcpWithinRateLimit(r.Context(), token.TenantID, token.ConnectionID); err != nil || !allowed {
 			respond(nil, map[string]any{"code": -32003, "message": "MCP request rate limit reached. Try again later."})
 			return
 		}

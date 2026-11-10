@@ -62,13 +62,15 @@ type calendarRecord struct {
 }
 
 type calendarResourcePublic struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Kind     string `json:"kind"`
-	Location string `json:"location"`
-	Capacity int    `json:"capacity"`
-	Status   string `json:"status,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Email            string `json:"email"`
+	Kind             string `json:"kind"`
+	Location         string `json:"location"`
+	Capacity         int    `json:"capacity"`
+	RequiresApproval bool   `json:"requiresApproval"`
+	ApproverEmail    string `json:"approverEmail,omitempty"`
+	Status           string `json:"status,omitempty"`
 }
 
 type calendarExceptionPublic struct {
@@ -1215,11 +1217,14 @@ func (s *Server) replaceCalendarEventResources(ctx context.Context, tx pgx.Tx, e
 		return err
 	}
 	type resourceRow struct {
-		id, name, email string
+		id, name, email, approver string
+		requiresApproval          bool
 	}
 	found := map[string]resourceRow{}
 	rows, err := tx.Query(ctx, `
-		SELECT id, name, email::text FROM calendar_resources
+		SELECT id, name, email::text, requires_approval,
+		       COALESCE(approver_user_id::text, created_by::text, '')
+		FROM calendar_resources
 		WHERE tenant_id=$1 AND id = ANY($2::text[])
 		  AND ((created_by=$3 AND active=true)
 		       OR id IN (SELECT resource_id FROM calendar_event_resources WHERE event_id=$4))
@@ -1229,7 +1234,7 @@ func (s *Server) replaceCalendarEventResources(ctx context.Context, tx pgx.Tx, e
 	}
 	for rows.Next() {
 		var item resourceRow
-		if rows.Scan(&item.id, &item.name, &item.email) == nil {
+		if rows.Scan(&item.id, &item.name, &item.email, &item.requiresApproval, &item.approver) == nil {
 			found[item.id] = item
 		}
 	}
@@ -1262,11 +1267,24 @@ func (s *Server) replaceCalendarEventResources(ctx context.Context, tx pgx.Tx, e
 	}
 	for _, id := range unique {
 		item := found[id]
+		status := "accepted"
+		if item.requiresApproval {
+			status = "pending"
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO calendar_event_resources (event_id, resource_id, name, email, status)
-			VALUES ($1,$2,$3,$4,'accepted')
-		`, eventID, id, item.name, item.email); err != nil {
+			VALUES ($1,$2,$3,$4,$5)
+		`, eventID, id, item.name, item.email, status); err != nil {
 			return err
+		}
+		if status == "pending" && item.approver != "" {
+			_, _ = tx.Exec(ctx, `
+				INSERT INTO public.mail_notifications (id, tenant_id, user_id, kind, title, body, detail)
+				SELECT $1,$2,$3,'resource_approval',$4,COALESCE(e.title,'Calendar event'),
+				       'Event ' || $5 || ' · resource ' || $6
+				FROM public.calendar_events e WHERE e.id=$5
+				  AND NOT EXISTS (SELECT 1 FROM public.mail_notifications n WHERE n.user_id=$3 AND n.kind='resource_approval' AND n.detail LIKE '%' || $5 || '%' AND n.title=$4)
+			`, newID("notification"), tenantID, item.approver, truncate("Room approval: "+item.name, 240), eventID, id)
 		}
 	}
 	return nil

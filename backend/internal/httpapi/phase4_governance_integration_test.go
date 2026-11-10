@@ -156,9 +156,8 @@ func TestPhase4MCPGovernanceIntegration(t *testing.T) {
 		t.Fatalf("allowed scope rejected: %v", err)
 	}
 
-	// Rate limiting counts recent MCP audit rows.
-	mustExec(`INSERT INTO public.audit_log (tenant_id, user_id, actor, action) VALUES ($1,$2,$3,'mcp.tool_called')`, tenant, user, email)
-	mustExec(`INSERT INTO public.audit_log (tenant_id, user_id, actor, action) VALUES ($1,$2,$3,'mcp.tool_called')`, tenant, user, email)
+	// Rate limiting is distributed through mcp_rate_events per connection.
+	mustExec(`INSERT INTO public.mcp_rate_events (tenant_id, connection_id) VALUES ($1,$2),($1,$2)`, tenant, user)
 	if allowed, err := server.mcpWithinRateLimit(ctx, tenant, user); err != nil || allowed {
 		t.Fatalf("rate limit allowed=%v err=%v", allowed, err)
 	}

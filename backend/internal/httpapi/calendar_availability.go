@@ -112,4 +112,5 @@ func (s *Server) calendarResourceUtilization(w http.ResponseWriter, r *http.Requ
 func (s *Server) registerCalendarAvailabilityRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/calendar/free-busy", s.requireUser(s.calendarFreeBusy))
 	mux.HandleFunc("GET /api/calendar/resources/utilization", s.requireUser(s.calendarResourceUtilization))
+	s.registerCalDAVRoutes(mux)
 }

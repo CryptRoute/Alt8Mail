@@ -15,9 +15,12 @@ tenant AI policy columns.
   `mcp_action_requests` row; a signed-in user approves or denies it in
   **Settings → Security & privacy → AI actions waiting for review**. Dry-run
   (`dryRun` or `_meta.dryRun`) returns `pending_approval` without writing.
-- Organization policy (`policy.mcp`) controls the allowed scope list,
-  whether write actions still require approval, and a per-user hourly request
-  budget. Request counts are derived from recent `mcp.*` audit rows.
+- Organization policy (`policy.mcp`) controls the allowed scope list, the
+  default approval requirement, a per-tool matrix (`inherit`, `approval`,
+  `auto`, `deny`) for `calendar_write`, `tasks_write`, `labels_write` and
+  `draft_send`, and an hourly per-connection request budget. Request counts use
+  `mcp_rate_events` with a PostgreSQL advisory lock, so the limit is enforced
+  across server instances.
 - The MCP connection inventory and revocation remain in the same settings
   page. Authorization pages explain that write scopes require review.
 - `crm_read` returns only active CRM connector names. Deep CRM record access
@@ -147,8 +150,8 @@ Migration `ai_obligations`, `ai_obligations.go`, webmail AI workspace.
 - Live AI precision/recall evaluation against a labeled corpus is an operator
   acceptance step; the committed tests are deterministic parser, threshold,
   permission and storage tests with a local fake provider.
-- MCP organization policy allows or denies scopes globally and can turn off
-  per-action approval. There is no per-tool approval matrix yet.
+- MCP per-tool approval and distributed per-connection rate limits are
+  implemented; live multi-node soak validation remains an operator step.
 - `crm_read`, sender profiles and meeting prep expose connector names only;
   deep CRM record sync and deal links remain Phase 6.
 - Document Q&A citations point into the document. Linking a citation back to the

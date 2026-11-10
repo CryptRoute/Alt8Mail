@@ -27,6 +27,12 @@ contents; the tag, push and publication are separate authorized actions.
   fidelity reports; tenant analytics, support bundle, opt-in telemetry,
   phishing-awareness simulation, command palette and offline compose/send
   queue.
+- **Phase scope completion:** recurring tasks and reminder notifications,
+  policy-checked auto-sent auto-replies, booking edit/disable/cancel with
+  booking lists, scheduled DMARC rua polling, per-tool MCP approvals and
+  distributed per-connection rate limits, API cursor pagination, persistent
+  offline mailbox/task mutation queues, customizable keyboard shortcuts,
+  calendar resource approval workflows and external CalDAV free/busy.
 - **Paid entitlements:** every Phase 3–6 paid capability is gated by canonical
   license feature keys. Licenses may use `all`/`*`; System Control and the
   webmail license snapshot report `availableFeatures`/`missingFeatures` for
@@ -40,11 +46,13 @@ contents; the tag, push and publication are separate authorized actions.
 
 ## Migrations
 
-The release applies migrations `0061_scim` through `0082_addon_action_tokens`
-on top of the `v0.27.6`/`0060` schema. The upgrade smoke test applies the
+The release applies migrations `0061_scim` through
+`0083_phase_scope_completion` on top of the `v0.27.6`/`0060` schema. The upgrade smoke test applies the
 release tag, upgrades, rolls back new migrations in reverse order and reapplies
 them. `0081_encrypted_storage` adds blob encryption metadata;
-`0082_addon_action_tokens` adds single-use Slack/Teams action capabilities.
+`0082_addon_action_tokens` adds single-use Slack/Teams action capabilities;
+`0083_phase_scope_completion` adds task recurrence/reminder state, DMARC poller
+state, distributed MCP rate events and resource-approval metadata.
 
 ## Upgrade notes
 

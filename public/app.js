@@ -1155,6 +1155,8 @@ const state = {
   eventOccurrenceDate: "",
   eventEditScope: "series",
   calendarResources: [],
+  bookingPages: [],
+  bookingEditId: "",
   calendarPolls: [],
   calendarPollsLoading: false,
   pollDraftSlots: [],
@@ -14039,6 +14041,12 @@ async function runMailActionQueue() {
         continue;
       }
       mailActionQueue.shift();
+      if (retryableMailActionError(error)) {
+        job.ids.forEach((id) => state.pendingMailRemoval.delete(id));
+        persistOfflineMailAction(job);
+        showToast("Offline — mailbox change saved and will sync when you reconnect");
+        continue;
+      }
       await revertMailActionJob(job, error);
     }
   }
@@ -17798,6 +17806,82 @@ function showDataProtectionBlock(error) {
 }
 
 const OFFLINE_SENDS_KEY = "a8mOfflineSends";
+const OFFLINE_MAIL_ACTIONS_KEY = "a8mOfflineMailActions";
+const OFFLINE_TASKS_KEY = "a8mOfflineTasks";
+
+function persistOfflineMailAction(job) {
+  try {
+    const queue = JSON.parse(localStorage.getItem(OFFLINE_MAIL_ACTIONS_KEY) || "[]");
+    queue.push({
+      key: job.requestId || uid("act"),
+      ids: job.ids || [], action: job.action, folder: job.folder || "",
+      reason: job.reason || "", note: job.note || "", categories: job.categories || [],
+      until: job.until || "", threadCount: job.threadCount || 1, at: new Date().toISOString()
+    });
+    localStorage.setItem(OFFLINE_MAIL_ACTIONS_KEY, JSON.stringify(queue.slice(-100)));
+  } catch {}
+}
+
+async function flushOfflineMailActions() {
+  let queue = [];
+  try { queue = JSON.parse(localStorage.getItem(OFFLINE_MAIL_ACTIONS_KEY) || "[]"); } catch { return; }
+  if (!queue.length) return;
+  const remaining = [];
+  for (const item of queue) {
+    try {
+      await api("/api/messages/actions", { method: "POST", body: {
+        ids: item.ids, action: item.action, folder: item.folder, reason: item.reason,
+        note: item.note, categories: item.categories, until: item.until, requestId: item.key
+      } });
+    } catch (error) {
+      if (error.code === "NETWORK") { remaining.push(item); break; }
+      showError(error);
+    }
+  }
+  try {
+    if (remaining.length) localStorage.setItem(OFFLINE_MAIL_ACTIONS_KEY, JSON.stringify(remaining));
+    else localStorage.removeItem(OFFLINE_MAIL_ACTIONS_KEY);
+  } catch {}
+  if (!remaining.length) {
+    showToast(`${queue.length} offline mailbox change${queue.length === 1 ? "" : "s"} synced`);
+    refreshMailbox({ quiet: true }).catch(() => {});
+  }
+}
+
+function queueOfflineTask(job) {
+  try {
+    const queue = JSON.parse(localStorage.getItem(OFFLINE_TASKS_KEY) || "[]");
+    queue.push({ ...job, at: new Date().toISOString() });
+    localStorage.setItem(OFFLINE_TASKS_KEY, JSON.stringify(queue.slice(-100)));
+  } catch {}
+}
+
+async function flushOfflineTasks() {
+  let queue = [];
+  try { queue = JSON.parse(localStorage.getItem(OFFLINE_TASKS_KEY) || "[]"); } catch { return; }
+  if (!queue.length) return;
+  const remaining = [];
+  for (const item of queue) {
+    try {
+      const data = await api(item.path, { method: item.method, body: item.body });
+      if (item.tempId && data?.task?.id) {
+        const index = state.tasks.findIndex((task) => task.id === item.tempId);
+        if (index >= 0) state.tasks[index] = data.task;
+      }
+    } catch (error) {
+      if (error.code === "NETWORK") { remaining.push(item); break; }
+      showError(error);
+    }
+  }
+  try {
+    if (remaining.length) localStorage.setItem(OFFLINE_TASKS_KEY, JSON.stringify(remaining));
+    else localStorage.removeItem(OFFLINE_TASKS_KEY);
+  } catch {}
+  if (!remaining.length) {
+    showToast(`${queue.length} offline task change${queue.length === 1 ? "" : "s"} synced`);
+    refreshTasks().catch(() => {});
+  }
+}
 
 function offlineSendKey() {
   try { return crypto.randomUUID(); } catch { return "offline-" + Date.now() + "-" + Math.random().toString(36).slice(2); }
@@ -18959,11 +19043,71 @@ const SETTINGS_META = {
   audit: { title: "Audit log", eyebrow: "Account activity" },
   security: { title: "Security & privacy", eyebrow: "Alt8Mail policy" },
   ai: { title: "AI workspace", eyebrow: "Priority inbox, obligations and search" },
+  shortcuts: { title: "Keyboard shortcuts", eyebrow: "Make the mailbox yours" },
   addons: { title: "Add-ons", eyebrow: "Curated first-party integrations" },
   accounts: { title: "Connected accounts", eyebrow: "Mailboxes and sending identities" },
   account: { title: "Account", eyebrow: "Profile and sessions" },
   about: { title: "About", eyebrow: "Alt8Mail Email System" }
 };
+
+const SHORTCUT_DEFAULTS = {
+  next: "j", previous: "k", select: "x", compose: "c", search: "/",
+  archive: "e", delete: "#", unread: "u", reply: "r", replyAll: "a",
+  forward: "f", star: "s", help: "?"
+};
+const SHORTCUT_META = [
+  ["next", "Next conversation"], ["previous", "Previous conversation"],
+  ["select", "Select conversation"], ["compose", "New message"], ["search", "Search mail"],
+  ["archive", "Archive conversation"], ["delete", "Delete conversation"],
+  ["unread", "Mark unread"], ["reply", "Reply"], ["replyAll", "Reply all"],
+  ["forward", "Forward"], ["star", "Star conversation"], ["help", "Shortcut reference"]
+];
+const SHORTCUTS_KEY = "a8mShortcuts";
+
+function shortcutMap() {
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(SHORTCUTS_KEY) || "{}") || {}; } catch { stored = {}; }
+  const result = { ...SHORTCUT_DEFAULTS };
+  for (const [key] of SHORTCUT_META) {
+    const value = String(stored[key] || "").trim();
+    if (value.length === 1) result[key] = value.toLowerCase();
+  }
+  return result;
+}
+
+function saveShortcutMap(map) {
+  try { localStorage.setItem(SHORTCUTS_KEY, JSON.stringify(map)); } catch {}
+}
+
+function renderShortcutSettings() {
+  const host = document.getElementById("shortcutSettings");
+  if (!host) return;
+  const map = shortcutMap();
+  host.innerHTML = `<div class="detail-list">${SHORTCUT_META.map(([key, label]) => `<div class="detail-row"><span>${esc(label)}</span><b><input class="input" maxlength="1" data-shortcut-key="${key}" value="${esc(map[key])}" aria-label="${esc(label)} shortcut" style="width:52px;text-align:center"></b></div>`).join("")}</div><div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn-secondary small" type="button" id="shortcutReset">Reset to defaults</button></div>`;
+  $$("[data-shortcut-key]", host).forEach((input) => input.addEventListener("change", () => {
+    const next = shortcutMap();
+    const value = String(input.value || "").trim();
+    if (value.length !== 1) { input.value = next[input.dataset.shortcutKey]; showToast("Use one character per shortcut", "error"); return; }
+    next[input.dataset.shortcutKey] = value.toLowerCase();
+    saveShortcutMap(next);
+    input.value = next[input.dataset.shortcutKey];
+    showToast("Shortcut saved");
+  }));
+  document.getElementById("shortcutReset")?.addEventListener("click", () => {
+    try { localStorage.removeItem(SHORTCUTS_KEY); } catch {}
+    renderShortcutSettings();
+    showToast("Shortcuts reset");
+  });
+}
+
+function shortcutReferenceRows() {
+  const map = shortcutMap();
+  return SHORTCUT_META.filter(([key]) => key !== "help" && key !== "search").map(([key, label]) => `<div class="shortcut-row"><span>${esc(label)}</span><span class="shortcut-keys"><kbd>${esc(map[key].toUpperCase())}</kbd></span></div>`).join("") +
+    `<div class="shortcut-row"><span>Search mail</span><span class="shortcut-keys"><kbd>${esc(map.search.toUpperCase())}</kbd><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
+     <div class="shortcut-row"><span>Send from compose</span><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>Enter</kbd></span></div>
+     <div class="shortcut-row"><span>This dialog</span><span class="shortcut-keys"><kbd>${esc(map.help.toUpperCase())}</kbd></span></div>
+     <div class="shortcut-row"><span>Close a panel</span><span class="shortcut-keys"><kbd>Esc</kbd></span></div>`;
+}
 
 const AI_TRIAGE_LABELS = {
   action: "Action", fyi: "FYI", newsletter: "Newsletter", spam_like: "Spam-like", needs_reply: "Needs reply"
@@ -19376,6 +19520,7 @@ function renderSettingsDynamic() {
   else if (state.settingsTab === "identities") { renderIdentities(); refreshIdentities(); loadForwardingSettings(); }
   else if (state.settingsTab === "autoreply") renderAutoReply();
   else if (state.settingsTab === "regional") syncPreferencesUi();
+  else if (state.settingsTab === "shortcuts") renderShortcutSettings();
   else if (state.settingsTab === "audit") renderAudit();
   else if (state.settingsTab === "account") { renderAliases(); loadProfile(); loadAccountSessions(); }
   else if (state.settingsTab === "accounts") renderConnectedAccounts();
@@ -20833,8 +20978,10 @@ async function saveTaskForm(event) {
   event.preventDefault();
   const title = document.getElementById("taskTitleInput").value.trim();
   if (!title) { showToast("Give the task a title"); document.getElementById("taskTitleInput").focus(); return; }
+  const offlineKey = `task-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const payload = {
     title,
+    clientRequestId: offlineKey,
     notes: document.getElementById("taskNotesInput").value,
     due: document.getElementById("taskDueInput").value,
     dueTime: document.getElementById("taskDueTimeInput").value,
@@ -20863,6 +21010,24 @@ async function saveTaskForm(event) {
     state.editingTaskId = null;
     renderTasks();
   } catch (error) {
+    if (error.code === "NETWORK" || !navigator.onLine) {
+      if (state.editingTaskId && state.editingTaskId !== "new") {
+        const index = state.tasks.findIndex((task) => task.id === state.editingTaskId);
+        if (index >= 0) state.tasks[index] = { ...state.tasks[index], ...payload };
+        if (!String(state.editingTaskId).startsWith("offline-")) {
+          queueOfflineTask({ method: "PATCH", path: `/api/tasks/${encodeURIComponent(state.editingTaskId)}`, body: payload });
+        }
+        showToast("Offline — task update queued");
+      } else {
+        const tempId = "offline-" + offlineKey;
+        state.tasks.unshift({ id: tempId, ...payload, status: "open", source: "offline", offline: true });
+        queueOfflineTask({ method: "POST", path: "/api/tasks", body: payload, tempId });
+        showToast("Offline — task queued");
+      }
+      state.editingTaskId = null;
+      renderTasks();
+      return;
+    }
     showError(error);
   }
 }
@@ -20878,6 +21043,15 @@ async function toggleTask(taskId) {
     showToast(status === "done" ? "Task completed" : "Task reopened");
     renderTasks();
   } catch (error) {
+    if (error.code === "NETWORK" || !navigator.onLine) {
+      task.status = status;
+      if (!String(taskId).startsWith("offline-")) {
+        queueOfflineTask({ method: "PATCH", path: `/api/tasks/${encodeURIComponent(taskId)}`, body: { status } });
+      }
+      showToast("Offline — task change queued");
+      renderTasks();
+      return;
+    }
     showError(error);
   }
 }
@@ -20894,6 +21068,17 @@ async function deleteTask(taskId) {
     showToast("Task deleted");
     renderTasks();
   } catch (error) {
+    if (error.code === "NETWORK" || !navigator.onLine) {
+      state.tasks = state.tasks.filter((item) => item.id !== taskId);
+      state.selectedTaskId = null;
+      state.editingTaskId = null;
+      if (!String(taskId).startsWith("offline-")) {
+        queueOfflineTask({ method: "DELETE", path: `/api/tasks/${encodeURIComponent(taskId)}` });
+      }
+      showToast("Offline — task deletion queued");
+      renderTasks();
+      return;
+    }
     showError(error);
   }
 }
@@ -25647,6 +25832,9 @@ function ensureCalendarResourceDialog() {
         <label class="form-field"><span>Seats <em>optional</em></span><input id="calendarResourceCapacity" type="number" min="0" max="10000" value="0"></label>
       </div>
       <label class="form-field"><span>Location <em>optional</em></span><input id="calendarResourceLocation" maxlength="160" placeholder="e.g. 2nd floor · East wing"></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:8px 0"><input id="calendarResourceApproval" type="checkbox"> Require approval before this resource is booked</label>
+      <label class="form-field" id="calendarResourceApproverWrap" hidden><span>Approver email</span><input id="calendarResourceApprover" type="email" placeholder="Defaults to you"></label>
+      <div class="mini-section" id="calendarResourceApprovals" hidden></div>
       <p class="resource-dialog-hint">Rooms and resources are visible only in your account. Their internal addresses never receive email.</p>
       <p class="resource-dialog-error" id="calendarResourceError" hidden></p>
     </div>
@@ -25657,6 +25845,10 @@ function ensureCalendarResourceDialog() {
     if (event.target === overlay || event.target.closest("[data-resource-close], [data-resource-cancel]")) closeCalendarResourceDialog();
   });
   document.getElementById("calendarResourceSave")?.addEventListener("click", saveCalendarResource);
+  document.getElementById("calendarResourceApproval")?.addEventListener("change", (event) => {
+    const wrap = document.getElementById("calendarResourceApproverWrap");
+    if (wrap) wrap.hidden = !event.target.checked;
+  });
   document.getElementById("calendarResourceName")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") { event.preventDefault(); saveCalendarResource(); }
   });
@@ -25670,7 +25862,14 @@ function openCalendarResourceDialog() {
   document.getElementById("calendarResourceKind").value = "room";
   document.getElementById("calendarResourceCapacity").value = "0";
   document.getElementById("calendarResourceLocation").value = "";
+  const approval = document.getElementById("calendarResourceApproval");
+  if (approval) approval.checked = false;
+  const approverWrap = document.getElementById("calendarResourceApproverWrap");
+  if (approverWrap) approverWrap.hidden = true;
+  const approver = document.getElementById("calendarResourceApprover");
+  if (approver) approver.value = "";
   if (error) { error.hidden = true; error.textContent = ""; }
+  loadCalendarResourceApprovals().catch(() => {});
   overlay.hidden = false;
   setTimeout(() => document.getElementById("calendarResourceName")?.focus(), 40);
 }
@@ -25685,6 +25884,8 @@ async function saveCalendarResource() {
   const kind = String(document.getElementById("calendarResourceKind")?.value || "room");
   const location = String(document.getElementById("calendarResourceLocation")?.value || "").trim();
   const capacity = Math.max(0, Math.min(10000, Number(document.getElementById("calendarResourceCapacity")?.value) || 0));
+  const requiresApproval = Boolean(document.getElementById("calendarResourceApproval")?.checked);
+  const approverEmail = String(document.getElementById("calendarResourceApprover")?.value || "").trim();
   const error = document.getElementById("calendarResourceError");
   const button = document.getElementById("calendarResourceSave");
   if (!name) {
@@ -25693,7 +25894,7 @@ async function saveCalendarResource() {
   }
   if (button) button.disabled = true;
   try {
-    const data = await api("/api/calendar/resources", { method: "POST", body: { name, kind, location, capacity } });
+    const data = await api("/api/calendar/resources", { method: "POST", body: { name, kind, location, capacity, requiresApproval, approverEmail } });
     if (Array.isArray(data.resources)) state.calendarResources = data.resources;
     if (data.resource) addEventResource(data.resource.id);
     renderEventResources();
@@ -25704,6 +25905,21 @@ async function saveCalendarResource() {
   } finally {
     if (button) button.disabled = false;
   }
+}
+
+async function loadCalendarResourceApprovals() {
+  const host = document.getElementById("calendarResourceApprovals");
+  if (!host) return;
+  const data = await api("/api/calendar/resources/approvals");
+  const rows = data.approvals || [];
+  host.hidden = rows.length === 0;
+  host.innerHTML = rows.length ? `<h3>Pending room requests</h3>${rows.map((item) => `<div class="detail-row"><span>${esc(item.resourceName)} · ${esc(item.title)}<br><small>${formatDate(item.startsAt, { time: true })} · ${esc(item.organizerName || item.organizerEmail)}</small></span><span style="display:flex;gap:6px"><button class="btn-secondary small" type="button" data-resource-approve="${esc(item.eventId)}|${esc(item.resourceId)}">Approve</button><button class="btn-secondary small" type="button" data-resource-deny="${esc(item.eventId)}|${esc(item.resourceId)}">Deny</button></span></div>`).join("")}` : "";
+  $$("[data-resource-approve], [data-resource-deny]").forEach((button) => button.addEventListener("click", async () => {
+    const [eventId, resourceId] = String(button.dataset.resourceApprove || button.dataset.resourceDeny).split("|");
+    await api(`/api/calendar/resources/approvals/${encodeURIComponent(eventId)}/${encodeURIComponent(resourceId)}`, { method: "POST", body: { decision: button.dataset.resourceApprove ? "approve" : "deny" } });
+    showToast(button.dataset.resourceApprove ? "Resource approved" : "Resource request denied");
+    await loadCalendarResourceApprovals();
+  }));
 }
 
 function addEventAttendee(email, name = "") {
@@ -26040,11 +26256,69 @@ async function refreshBookingPages() {
   host.innerHTML = '<div class="settings-note">Loading booking pages…</div>';
   const data = await api("/api/booking-pages");
   state.bookingPages = data.pages || [];
-  host.innerHTML = state.bookingPages.length ? state.bookingPages.map((page) => `<div class="automation-rule-row"><div class="shared-draft-copy"><strong>${esc(page.title)}</strong><span>${esc(page.timezone)} · ${page.durationMinutes} min${page.roundRobin ? " · round-robin" : ""}</span></div><button class="btn-secondary small" type="button" data-booking-copy="${esc(page.url)}">Copy link</button></div>`).join("") : '<div class="empty-mini">No booking pages yet.</div>';
+  host.innerHTML = state.bookingPages.length ? state.bookingPages.map((page) => `<div class="automation-rule-row"><div class="shared-draft-copy"><strong>${esc(page.title)}</strong><span>${esc(page.timezone)} · ${page.durationMinutes} min${page.roundRobin ? " · round-robin" : ""}${page.active === false ? " · disabled" : ""}</span></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-secondary small" type="button" data-booking-copy="${esc(page.url)}">Copy link</button><button class="btn-secondary small" type="button" data-booking-edit="${esc(page.id)}">Edit</button><button class="btn-secondary small" type="button" data-booking-bookings="${esc(page.id)}">Bookings</button><button class="btn-secondary small" type="button" data-booking-disable="${esc(page.id)}">${page.active === false ? "Enable" : "Disable"}</button></div></div>`).join("") : '<div class="empty-mini">No booking pages yet.</div>';
   $$("[data-booking-copy]", host).forEach((button) => button.addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(location.origin + button.dataset.bookingCopy); showToast("Booking link copied"); }
     catch { showToast(location.origin + button.dataset.bookingCopy); }
   }));
+  $$("[data-booking-edit]", host).forEach((button) => button.addEventListener("click", () => editBookingPage(button.dataset.bookingEdit)));
+  $$("[data-booking-bookings]", host).forEach((button) => button.addEventListener("click", () => openBookingList(button.dataset.bookingBookings)));
+  $$("[data-booking-disable]", host).forEach((button) => button.addEventListener("click", () => toggleBookingPage(button.dataset.bookingDisable)));
+}
+
+function resetBookingForm() {
+  state.bookingEditId = "";
+  document.getElementById("bookingPageForm")?.reset();
+  const save = document.getElementById("bookingPageSave");
+  if (save) save.textContent = "Create page";
+  const title = document.querySelector("#bookingPagesOverlay .eyebrow");
+  if (title) title.textContent = "Booking pages";
+}
+
+function editBookingPage(id) {
+  const page = state.bookingPages.find((item) => item.id === id);
+  if (!page) return;
+  state.bookingEditId = page.id;
+  document.getElementById("bookingPageTitle").value = page.title || "";
+  document.getElementById("bookingPageSlug").value = page.slug || "";
+  document.getElementById("bookingPageDuration").value = Number(page.durationMinutes) || 30;
+  document.getElementById("bookingPageTimezone").value = page.timezone || "UTC";
+  document.getElementById("bookingPageStart").value = Number(page.workingStartHour ?? 9);
+  document.getElementById("bookingPageEnd").value = Number(page.workingEndHour ?? 17);
+  document.getElementById("bookingPageRoundRobin").checked = Boolean(page.roundRobin);
+  const save = document.getElementById("bookingPageSave");
+  if (save) save.textContent = "Save page";
+  document.querySelector("#bookingPagesOverlay .eyebrow").textContent = "Editing booking page";
+}
+
+async function openBookingList(id) {
+  const page = state.bookingPages.find((item) => item.id === id);
+  const data = await api(`/api/booking-pages/${encodeURIComponent(id)}/bookings`);
+  const rows = data.bookings || [];
+  const host = document.getElementById("bookingPagesList");
+  if (!host) return;
+  host.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px"><strong>${esc(page?.title || "Bookings")}</strong><button class="btn-secondary small" type="button" id="bookingListBack">Back to pages</button></div><div class="detail-list">${rows.map((booking) => `<div class="detail-row"><span>${esc(booking.bookerName)} · ${esc(booking.bookerEmail)}<br><small>${formatDate(booking.startAt, { time: true })} → ${formatDate(booking.endAt, { time: true })}</small></span><b>${esc(booking.status)}</b>${booking.status === "confirmed" ? `<button class="btn-secondary small" type="button" data-booking-cancel="${esc(booking.id)}" data-booking-page="${esc(id)}">Cancel</button>` : ""}</div>`).join("") || `<div class="empty-mini">No bookings yet.</div>`}</div>`;
+  document.getElementById("bookingListBack")?.addEventListener("click", () => refreshBookingPages().catch(showError));
+  $$("[data-booking-cancel]").forEach((button) => button.addEventListener("click", async () => {
+    if (!(await appConfirm({ title: "Cancel booking?", message: "The booker and the calendar event will be marked cancelled.", confirmLabel: "Cancel booking", tone: "danger" }))) return;
+    await api(`/api/booking-pages/${encodeURIComponent(button.dataset.bookingPage)}/bookings/${encodeURIComponent(button.dataset.bookingCancel)}/cancel`, { method: "POST", body: {} });
+    showToast("Booking cancelled");
+    openBookingList(button.dataset.bookingPage).catch(showError);
+  }));
+}
+
+async function toggleBookingPage(id) {
+  const page = state.bookingPages.find((item) => item.id === id);
+  if (!page) return;
+  if (page.active === false) {
+    await api(`/api/booking-pages/${encodeURIComponent(id)}`, { method: "PUT", body: { title: page.title, slug: page.slug, durationMinutes: page.durationMinutes, timezone: page.timezone, workingStartHour: page.workingStartHour, workingEndHour: page.workingEndHour, roundRobin: page.roundRobin, active: true } });
+    showToast("Booking page enabled");
+  } else {
+    if (!(await appConfirm({ title: "Disable booking page?", message: "The public link stops accepting new bookings. Existing bookings stay in place.", confirmLabel: "Disable page", tone: "danger" }))) return;
+    await api(`/api/booking-pages/${encodeURIComponent(id)}`, { method: "DELETE" });
+    showToast("Booking page disabled");
+  }
+  await refreshBookingPages();
 }
 
 async function createBookingPage() {
@@ -26057,9 +26331,14 @@ async function createBookingPage() {
     workingEndHour: Number(document.getElementById("bookingPageEnd").value),
     roundRobin: document.getElementById("bookingPageRoundRobin").checked
   };
-  await api("/api/booking-pages", { method: "POST", body });
-  showToast("Booking page created");
-  document.getElementById("bookingPageForm").reset();
+  if (state.bookingEditId) {
+    await api(`/api/booking-pages/${encodeURIComponent(state.bookingEditId)}`, { method: "PUT", body });
+    showToast("Booking page updated");
+  } else {
+    await api("/api/booking-pages", { method: "POST", body });
+    showToast("Booking page created");
+  }
+  resetBookingForm();
   await refreshBookingPages();
 }
 
@@ -27143,6 +27422,8 @@ function closeDrawer() {
 
 function openHelp() {
   lastFocus = document.activeElement;
+  const list = helpOverlay.querySelector(".shortcut-list");
+  if (list) list.innerHTML = shortcutReferenceRows();
   helpOverlay.hidden = false;
   setTimeout(() => document.getElementById("helpClose").focus(), 30);
 }
@@ -30157,8 +30438,10 @@ function bindEvents() {
     layoutComposeSessions();
   });
 
-  window.addEventListener("online", () => { setOffline(false); flushOfflineSends().catch(() => {}); });
+  window.addEventListener("online", () => { setOffline(false); flushOfflineSends().catch(() => {}); flushOfflineMailActions().catch(() => {}); flushOfflineTasks().catch(() => {}); });
   flushOfflineSends().catch(() => {});
+  flushOfflineMailActions().catch(() => {});
+  flushOfflineTasks().catch(() => {});
   window.addEventListener("offline", () => { setOffline(true); });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && reactionMenu) closeReactionMenu();
@@ -30276,50 +30559,52 @@ function bindEvents() {
       return;
     }
     if (typing || helpOverlay.hidden === false || !sendNowOverlay.hidden || !scheduledEditOverlay.hidden || !reportOverlay.hidden || !scheduleOverlay.hidden || !previewOverlay.hidden || !storageOverlay.hidden || !shareOverlay.hidden || !recoveryOverlay.hidden || !passkeyOverlay.hidden || composeSessions.some((session) => session.mode !== "minimized") || !detailsOverlay.hidden || !eventOverlay.hidden || state.task !== "mail") return;
-    if (event.key === "j" || event.key === "k") {
+    const keys = shortcutMap();
+    const typedKey = String(event.key || "").toLowerCase();
+    if (typedKey === keys.next || typedKey === keys.previous) {
       event.preventDefault();
-      navigateThread(event.key === "j" ? 1 : -1, event.shiftKey);
-    } else if (event.key === "x" || event.key === "X") {
+      navigateThread(typedKey === keys.next ? 1 : -1, event.shiftKey);
+    } else if (typedKey === keys.select) {
       if (!state.selectedThreadId) return;
       event.preventDefault();
       toggleThreadSelection(state.selectedThreadId);
-    } else if (event.key === "c" || event.key === "C") {
+    } else if (typedKey === keys.compose) {
       event.preventDefault();
       openCompose();
-    } else if (event.key === "/") {
+    } else if (typedKey === keys.search) {
       event.preventDefault();
       focusSearch();
-    } else if (event.key === "?") {
+    } else if (typedKey === keys.help) {
       event.preventDefault();
       openHelp();
-    } else if (event.key === "e" || event.key === "E") {
+    } else if (typedKey === keys.archive) {
       if (!currentThread() && !state.selectedIds.size) return;
       event.preventDefault();
-      if (state.selectedIds.size) performBulkAction("archive"); else performBulkAction("archive");
-    } else if (event.key === "#" || (event.key === "3" && event.shiftKey)) {
+      performBulkAction("archive");
+    } else if (typedKey === keys.delete || (typedKey === "3" && event.shiftKey)) {
       if (!currentThread() && !state.selectedIds.size) return;
       event.preventDefault();
       performBulkAction("delete");
-    } else if (event.key === "u" || event.key === "U") {
+    } else if (typedKey === keys.unread) {
       if (!currentThread() && !state.selectedIds.size) return;
       event.preventDefault();
       if (state.selectedIds.size) performBulkAction("markUnread"); else markThreadUnread(currentThread());
-    } else if (event.key === "r" || event.key === "R") {
+    } else if (typedKey === keys.reply) {
       const thread = currentThread();
       if (!thread) return;
       event.preventDefault();
       replyToMessage(replyTarget(thread));
-    } else if (event.key === "a" || event.key === "A") {
+    } else if (typedKey === keys.replyAll) {
       const thread = currentThread();
       if (!thread) return;
       event.preventDefault();
       replyToMessage(replyTarget(thread), replyAllAvailable(thread));
-    } else if (event.key === "f" || event.key === "F") {
+    } else if (typedKey === keys.forward) {
       const thread = currentThread();
       if (!thread) return;
       event.preventDefault();
       forwardMessage(thread.latest);
-    } else if (event.key === "s" || event.key === "S") {
+    } else if (typedKey === keys.star) {
       if (!state.selectedThreadId) return;
       event.preventDefault();
       toggleThreadStar(state.selectedThreadId);

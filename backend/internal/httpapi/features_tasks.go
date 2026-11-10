@@ -20,14 +20,15 @@ type taskBody struct {
 	Assignee      *struct {
 		Email string `json:"email"`
 	} `json:"assignee"`
-	Tags           []string `json:"tags"`
-	LinkedThreadID *string  `json:"linkedThreadId"`
-	LinkedSubject  *string  `json:"linkedSubject"`
-	ParentTaskID   *string  `json:"parentTaskId"`
-	DependsOn      *string  `json:"dependsOnTaskId"`
-	KanbanStatus   *string  `json:"kanbanStatus"`
-	RecurrenceRule *string  `json:"recurrenceRule"`
-	ReminderAt     *string  `json:"reminderAt"`
+	Tags            []string `json:"tags"`
+	LinkedThreadID  *string  `json:"linkedThreadId"`
+	LinkedSubject   *string  `json:"linkedSubject"`
+	ParentTaskID    *string  `json:"parentTaskId"`
+	DependsOn       *string  `json:"dependsOnTaskId"`
+	KanbanStatus    *string  `json:"kanbanStatus"`
+	RecurrenceRule  *string  `json:"recurrenceRule"`
+	ReminderAt      *string  `json:"reminderAt"`
+	ClientRequestID *string  `json:"clientRequestId"`
 }
 
 var taskDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -139,17 +140,34 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeFromError(w, err)
 		return
 	}
+	clientRequestID := ""
+	if body.ClientRequestID != nil {
+		clientRequestID = truncate(strings.TrimSpace(*body.ClientRequestID), 120)
+	}
+	if clientRequestID != "" {
+		var existingID string
+		if err := s.store.DB.QueryRow(r.Context(), `
+			SELECT id FROM public.tasks WHERE user_id=$1 AND client_request_id=$2
+		`, sess.User.ID, clientRequestID).Scan(&existingID); err == nil && existingID != "" {
+			task, loadErr := s.loadTask(r.Context(), sess.User.ID, existingID)
+			if loadErr == nil {
+				writeJSON(w, http.StatusOK, map[string]any{"task": task, "replayed": true})
+				return
+			}
+		}
+	}
 	id := newID("task")
 	_, err = s.store.DB.Exec(r.Context(), `
 		INSERT INTO tasks (id, tenant_id, user_id, title, notes, status, priority, due_date, due_time,
 		                   assignee_user_id, linked_thread_id, linked_subject, source, tags, completed_at,
-		                   parent_task_id, depends_on_task_id, kanban_status, recurrence_rule, reminder_at)
+		                   parent_task_id, depends_on_task_id, kanban_status, recurrence_rule, reminder_at,
+		                   client_request_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,'')::date, NULLIF($9,'')::time,
 		        $10, $11, $12, 'manual', $13, CASE WHEN $6 = 'done' THEN now() ELSE NULL END,
-		        NULLIF($14,''), NULLIF($15,''), $16, $17, $18)
+		        NULLIF($14,''), NULLIF($15,''), $16, $17, $18, $19)
 	`, id, sess.User.TenantID, sess.User.ID, title, notes, status, priority, due, dueTime,
 		assigneeID, linkedThreadID, linkedSubject, tags, extras.ParentID, extras.DependsID,
-		extras.Kanban, extras.Recurrence, extras.ReminderAt)
+		extras.Kanban, extras.Recurrence, extras.ReminderAt, clientRequestID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "TASK", "Could not create the task")
 		return
@@ -220,6 +238,11 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case status == "done" && stateString(existing, "status") != "done":
 		action = "task.completed"
+		if recurrence := strings.TrimSpace(extras.Recurrence); recurrence != "" {
+			if err := s.createNextRecurringTask(r.Context(), sess, id); err != nil {
+				s.logger.Warn("task recurrence failed", "task", id, "err", err)
+			}
+		}
 	case status == "open" && stateString(existing, "status") == "done":
 		action = "task.reopened"
 	}

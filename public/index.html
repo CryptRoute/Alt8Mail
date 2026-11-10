@@ -1012,6 +1012,10 @@
                 <svg class="icon" aria-hidden="true"><use href="#i-people"/></svg><span>Account</span>
                 <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
               </button>
+              <button class="settings-nav-item" data-settings-tab="shortcuts" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-key"/></svg><span>Keyboard shortcuts</span>
+                <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </button>
               <button class="settings-nav-item" data-settings-tab="about" type="button">
                 <svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>About</span>
                 <svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
@@ -1881,6 +1885,13 @@
                   </div>
                 </section>
 
+                <section class="settings-panel" data-settings-panel="shortcuts" hidden>
+                  <div class="settings-block">
+                    <div class="settings-block-head"><h3>Keyboard shortcuts</h3><p>Choose single-key shortcuts for mail actions. Changes apply immediately and are stored in this browser.</p></div>
+                    <div id="shortcutSettings"></div>
+                    <p class="settings-note">Shortcuts are ignored while typing. Press <kbd>?</kbd> anywhere in Mail to open the shortcut reference.</p>
+                  </div>
+                </section>
                 <section class="settings-panel" data-settings-panel="about" hidden>
                   <div class="settings-block">
                     <div class="settings-block-head"><h3>About Alt8Mail</h3><p>One secure workspace for email, calendars, tasks and files.</p></div>

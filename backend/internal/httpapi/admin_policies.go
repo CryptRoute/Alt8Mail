@@ -251,9 +251,11 @@ type adminOfficePolicy struct {
 }
 
 type adminMCPPolicy struct {
-	AllowedScopes         []string `json:"allowedScopes"`
-	WriteApprovalRequired bool     `json:"writeApprovalRequired"`
-	MaxRequestsPerHour    int      `json:"maxRequestsPerHour"`
+	AllowedScopes             []string          `json:"allowedScopes"`
+	WriteApprovalRequired     bool              `json:"writeApprovalRequired"`
+	MaxRequestsPerHour        int               `json:"maxRequestsPerHour"`
+	ConnectionRequestsPerHour int               `json:"connectionRequestsPerHour"`
+	ToolApprovals             map[string]string `json:"toolApprovals"`
 }
 
 type adminTenantPolicy struct {
@@ -309,7 +311,11 @@ func defaultTenantPolicy() adminTenantPolicy {
 		},
 		MCP: adminMCPPolicy{
 			AllowedScopes: append([]string{}, mcpSupportedScopes...), WriteApprovalRequired: true,
-			MaxRequestsPerHour: 120,
+			MaxRequestsPerHour: 120, ConnectionRequestsPerHour: 120,
+			ToolApprovals: map[string]string{
+				"calendar_write": "approval", "tasks_write": "approval",
+				"labels_write": "approval", "draft_send": "approval",
+			},
 		},
 	}
 }
@@ -354,6 +360,17 @@ func tenantPolicyFromSettings(raw json.RawMessage) adminTenantPolicy {
 	}
 	if policy.MCP.MaxRequestsPerHour <= 0 {
 		policy.MCP.MaxRequestsPerHour = 120
+	}
+	if policy.MCP.ConnectionRequestsPerHour <= 0 {
+		policy.MCP.ConnectionRequestsPerHour = policy.MCP.MaxRequestsPerHour
+	}
+	if policy.MCP.ToolApprovals == nil {
+		policy.MCP.ToolApprovals = map[string]string{}
+	}
+	for _, tool := range mcpWriteTools() {
+		if policy.MCP.ToolApprovals[tool] == "" {
+			policy.MCP.ToolApprovals[tool] = "inherit"
+		}
 	}
 	for index := range policy.DLP.Rules {
 		if policy.DLP.Rules[index].Fields == nil {
@@ -726,6 +743,24 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 			policy.MCP.MaxRequestsPerHour = 10000
 		}
 	}
+	if policy.MCP.ConnectionRequestsPerHour < 0 || policy.MCP.ConnectionRequestsPerHour > 10000 {
+		errors = append(errors, "MCP per-connection rate must be between 0 and 10,000 per hour")
+		policy.MCP.ConnectionRequestsPerHour = policy.MCP.MaxRequestsPerHour
+	}
+	approvals := map[string]string{}
+	for _, tool := range mcpWriteTools() {
+		value := strings.ToLower(strings.TrimSpace(policy.MCP.ToolApprovals[tool]))
+		switch value {
+		case "", "inherit":
+			value = "inherit"
+		case "approval", "auto", "deny":
+		default:
+			errors = append(errors, fmt.Sprintf("MCP tool policy for %s must be inherit, approval, auto or deny", tool))
+			value = "inherit"
+		}
+		approvals[tool] = value
+	}
+	policy.MCP.ToolApprovals = approvals
 	return policy, errors
 }
 

@@ -63,8 +63,29 @@ This section supersedes the blocker statuses above where it is more specific.
    `npm ci`/audit, web tests, a11y and coarse performance budgets. Live staging
    drills remain operator gates.
 
+### Follow-up completion (2026-11-10)
+
+The ten Phase 2–6 follow-ups were implemented and covered by
+`TestPhaseScopeCompletionIntegration`, `TestTaskRecurrenceNextOccurrence`,
+`TestDMARCReportArchives`, `TestCalDAVFreeBusyParsing`,
+`TestAPICursorRoundTrip` and `TestMCPToolApprovalPolicyValidation`:
+
+- task recurrence expansion and reminder worker notifications;
+- automation auto-replies queued through outbound policy/DLP and delivered by
+  the send worker;
+- booking page edit, disable/enable, booking list and cancellation;
+- scheduled DMARC rua mailbox polling with XML/gzip/ZIP support;
+- per-tool MCP approval matrix and distributed per-connection rate limits;
+- keyset cursor pagination on `/api/v1` messages, tasks and calendar events;
+- persistent offline archive/move/read/label and task mutation queues;
+- customizable keyboard shortcuts and a live shortcut reference;
+- calendar resource approval workflow; and
+- external CalDAV `free-busy-query` federation.
+
 Still open before publication: storage-layer encryption for mail rows, live
-provider/IdP/migration drills, a real OCR sidecar and DLP corpus, and explicit
+provider/IdP/migration drills, a real OCR sidecar and DLP corpus, campaign
+tracking beyond mail merges, attachment-binary/OCR DLP, embedded watermarks,
+file byte-copy versions, shared-draft comment pins/restore UI, and explicit
 release authorization.
 
 ## Fixed during this audit

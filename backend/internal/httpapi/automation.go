@@ -691,16 +691,38 @@ func (s *Server) runAutomationAction(ctx context.Context, team teamMailboxRecord
 		if subject == "" {
 			subject = "Re: " + message.Subject
 		}
-		_, err := s.store.DB.Exec(ctx, `
-			INSERT INTO public.mail_messages
-			  (id, tenant_id, user_id, mailbox_id, folder, thread_id, message_id, subject,
-			   from_name, from_email, to_json, snippet, body_text, body_html, sent_at, unread, draft, categories)
-			SELECT $1,$2,$3,m.id,'drafts',$4,$5,$6,$7,$8,jsonb_build_array(jsonb_build_object('email',$9)),
-			       $10,$10,'',now(),false,true,ARRAY['automation-auto-reply']
-			FROM public.mailboxes m WHERE m.user_id=$3 LIMIT 1
-		`, newID("draft"), team.TenantID, team.OwnerID, message.ThreadID,
-			fmt.Sprintf("<auto-%s@a8m.local>", newID("reply")), truncate(subject, 1000),
-			team.OwnerName, team.OwnerEmail, message.FromEmail, action.Body)
+		owner, err := s.userByID(ctx, team.OwnerID)
+		if err != nil {
+			return errors.New("auto-reply owner mailbox is unavailable")
+		}
+		classification, _, _, err := s.validateProgrammaticSend(ctx, owner, []string{message.FromEmail}, nil, nil, subject, action.Body, "Internal")
+		if err != nil {
+			return fmt.Errorf("auto-reply blocked by send policy: %w", err)
+		}
+		var accountID string
+		if err := s.store.DB.QueryRow(ctx, `SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1`, owner.ID).Scan(&accountID); err != nil {
+			return errors.New("auto-reply native mailbox is unavailable")
+		}
+		var alreadyQueued bool
+		_ = s.store.DB.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM public.outbox WHERE user_id=$1 AND source_message_id=$2 AND status IN ('queued','sending','sent'))
+		`, owner.ID, message.ID).Scan(&alreadyQueued)
+		if alreadyQueued {
+			return nil
+		}
+		fromJSON, _ := json.Marshal(map[string]any{"name": owner.Name, "email": owner.Email})
+		toJSON, _ := json.Marshal([]map[string]any{{"email": message.FromEmail, "name": message.FromName}})
+		_, err = s.store.DB.Exec(ctx, `
+			INSERT INTO public.outbox
+			  (id, tenant_id, user_id, from_json, to_json, subject, body_text, body_html,
+			   status, scheduled, send_at, account_id, classification, source_message_id, thread_id)
+			VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,'queued',true,now(),$9,$10,$11,$12)
+		`, newID("send"), owner.TenantID, owner.ID, fromJSON, toJSON, truncate(subject, 1000),
+			truncate(action.Body, 100000), textToHTML(action.Body), accountID, classification,
+			message.ID, message.ThreadID)
+		if err == nil {
+			s.insertAudit(owner, "automation.auto_reply_queued", message.ID, "Auto-reply queued by rule "+rule.Name, "", "automation")
+		}
 		return err
 	}
 	return errors.New("unsupported automation action")

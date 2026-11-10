@@ -12,10 +12,12 @@ import (
 // inherited by new accounts.
 func (s *Server) loadCalendarResources(ctx context.Context, tenantID, userID string) ([]calendarResourcePublic, error) {
 	rows, err := s.store.DB.Query(ctx, `
-		SELECT id, name, email::text, kind, location, capacity
-		FROM calendar_resources
-		WHERE tenant_id=$1 AND created_by=$2 AND active=true
-		ORDER BY kind, name
+		SELECT r.id, r.name, r.email::text, r.kind, r.location, r.capacity, r.requires_approval,
+		       COALESCE(a.email::text, '')
+		FROM calendar_resources r
+		LEFT JOIN users a ON a.id=r.approver_user_id
+		WHERE r.tenant_id=$1 AND r.created_by=$2 AND r.active=true
+		ORDER BY r.kind, r.name
 	`, tenantID, userID)
 	if err != nil {
 		return nil, err
@@ -24,7 +26,8 @@ func (s *Server) loadCalendarResources(ctx context.Context, tenantID, userID str
 	out := []calendarResourcePublic{}
 	for rows.Next() {
 		var item calendarResourcePublic
-		if rows.Scan(&item.ID, &item.Name, &item.Email, &item.Kind, &item.Location, &item.Capacity) == nil {
+		if rows.Scan(&item.ID, &item.Name, &item.Email, &item.Kind, &item.Location, &item.Capacity,
+			&item.RequiresApproval, &item.ApproverEmail) == nil {
 			out = append(out, item)
 		}
 	}
@@ -44,11 +47,13 @@ func (s *Server) getCalendarResources(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createCalendarResource(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	var body struct {
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Kind     string `json:"kind"`
-		Location string `json:"location"`
-		Capacity int    `json:"capacity"`
+		Name             string `json:"name"`
+		Email            string `json:"email"`
+		Kind             string `json:"kind"`
+		Location         string `json:"location"`
+		Capacity         int    `json:"capacity"`
+		RequiresApproval bool   `json:"requiresApproval"`
+		ApproverEmail    string `json:"approverEmail"`
 	}
 	if !s.decodeBody(w, r, &body, 32*1024) {
 		return
@@ -83,14 +88,33 @@ func (s *Server) createCalendarResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "RESOURCE_CAPACITY", "Capacity must be between 0 and 10000")
 		return
 	}
+	approverID := ""
+	approverEmail := ""
+	if body.RequiresApproval {
+		approverEmail = normalizeEmailValue(body.ApproverEmail)
+		if approverEmail == "" {
+			approverEmail = sess.User.Email
+		}
+		approver, approverErr := s.workspaceUserByEmail(r.Context(), sess.User.TenantID, approverEmail)
+		if approverErr != nil {
+			writeError(w, http.StatusBadRequest, "RESOURCE_APPROVER", "Choose an active approver in this organization")
+			return
+		}
+		approverID = approver.ID
+		approverEmail = approver.Email
+	}
 	id := newID("room")
 	err := s.store.DB.QueryRow(r.Context(), `
-		INSERT INTO calendar_resources (id, tenant_id, name, email, kind, location, capacity, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		INSERT INTO calendar_resources (id, tenant_id, name, email, kind, location, capacity, created_by,
+		                                requires_approval, approver_user_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,'')::uuid)
 		ON CONFLICT (tenant_id, email) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind,
-		    location=EXCLUDED.location, capacity=EXCLUDED.capacity, active=true, updated_at=now()
+		    location=EXCLUDED.location, capacity=EXCLUDED.capacity, active=true,
+		    requires_approval=EXCLUDED.requires_approval, approver_user_id=EXCLUDED.approver_user_id,
+		    updated_at=now()
 		RETURNING id
-	`, id, sess.User.TenantID, name, email, kind, truncate(strings.TrimSpace(body.Location), 160), body.Capacity, sess.User.ID).Scan(&id)
+	`, id, sess.User.TenantID, name, email, kind, truncate(strings.TrimSpace(body.Location), 160),
+		body.Capacity, sess.User.ID, body.RequiresApproval, approverID).Scan(&id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "CALENDAR", "Could not save the room or resource")
 		return
@@ -100,5 +124,6 @@ func (s *Server) createCalendarResource(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, map[string]any{"resource": map[string]any{
 		"id": id, "name": name, "email": email, "kind": kind,
 		"location": body.Location, "capacity": body.Capacity,
+		"requiresApproval": body.RequiresApproval, "approverEmail": approverEmail,
 	}, "resources": resources})
 }

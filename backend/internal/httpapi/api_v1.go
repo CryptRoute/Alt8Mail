@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -40,11 +41,11 @@ func apiV1OpenAPI(w http.ResponseWriter, r *http.Request) {
 		"security": []map[string]any{{"bearerAuth": []string{}}},
 		"paths": map[string]any{
 			"/me":              map[string]any{"get": map[string]any{"summary": "Current API key owner", "responses": map[string]any{"200": map[string]any{"description": "OK"}}}},
-			"/messages":        map[string]any{"get": map[string]any{"summary": "List mailbox messages", "parameters": []map[string]any{{"name": "folder", "in": "query", "schema": map[string]any{"type": "string"}}, {"name": "q", "in": "query", "schema": map[string]any{"type": "string"}}, {"name": "limit", "in": "query", "schema": map[string]any{"type": "integer"}}}, "responses": map[string]any{"200": map[string]any{"description": "OK"}}}},
+			"/messages":        map[string]any{"get": map[string]any{"summary": "List mailbox messages", "parameters": []map[string]any{{"name": "folder", "in": "query", "schema": map[string]any{"type": "string"}}, {"name": "q", "in": "query", "schema": map[string]any{"type": "string"}}, {"name": "limit", "in": "query", "schema": map[string]any{"type": "integer"}}, {"name": "cursor", "in": "query", "schema": map[string]any{"type": "string"}}}, "responses": map[string]any{"200": map[string]any{"description": "OK"}}}},
 			"/messages/{id}":   map[string]any{"get": map[string]any{"summary": "Read a message", "responses": map[string]any{"200": map[string]any{"description": "OK"}, "404": map[string]any{"description": "Not found"}}}},
 			"/messages/send":   map[string]any{"post": map[string]any{"summary": "Queue an outbound message", "responses": map[string]any{"202": map[string]any{"description": "Queued"}, "409": map[string]any{"description": "Idempotency replay"}}}},
-			"/tasks":           map[string]any{"get": map[string]any{"summary": "List tasks", "responses": map[string]any{"200": map[string]any{"description": "OK"}}}, "post": map[string]any{"summary": "Create a task", "responses": map[string]any{"201": map[string]any{"description": "Created"}}}},
-			"/calendar/events": map[string]any{"get": map[string]any{"summary": "List calendar events", "responses": map[string]any{"200": map[string]any{"description": "OK"}}}},
+			"/tasks":           map[string]any{"get": map[string]any{"summary": "List tasks with cursor pagination", "parameters": []map[string]any{{"name": "status", "in": "query", "schema": map[string]any{"type": "string"}}, {"name": "limit", "in": "query", "schema": map[string]any{"type": "integer"}}, {"name": "cursor", "in": "query", "schema": map[string]any{"type": "string"}}}, "responses": map[string]any{"200": map[string]any{"description": "OK"}}}, "post": map[string]any{"summary": "Create a task", "responses": map[string]any{"201": map[string]any{"description": "Created"}}}},
+			"/calendar/events": map[string]any{"get": map[string]any{"summary": "List calendar events with cursor pagination", "parameters": []map[string]any{{"name": "from", "in": "query", "schema": map[string]any{"type": "string"}}, {"name": "to", "in": "query", "schema": map[string]any{"type": "string"}}, {"name": "limit", "in": "query", "schema": map[string]any{"type": "integer"}}, {"name": "cursor", "in": "query", "schema": map[string]any{"type": "string"}}}, "responses": map[string]any{"200": map[string]any{"description": "OK"}}}},
 		},
 	})
 }
@@ -58,6 +59,26 @@ func (s *Server) apiV1Me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func encodeAPICursor(stamp time.Time, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(stamp.UTC().Format(time.RFC3339Nano) + "|" + id))
+}
+
+func decodeAPICursor(raw string) (time.Time, string, bool) {
+	value, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	parts := strings.SplitN(string(value), "|", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return time.Time{}, "", false
+	}
+	stamp, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	return stamp, parts[1], true
+}
+
 func (s *Server) apiV1ListMessages(w http.ResponseWriter, r *http.Request) {
 	principal := apiPrincipalFrom(r)
 	folder := strings.TrimSpace(r.URL.Query().Get("folder"))
@@ -68,25 +89,39 @@ func (s *Server) apiV1ListMessages(w http.ResponseWriter, r *http.Request) {
 			limit = parsed
 		}
 	}
+	var cursorTime *time.Time
+	cursorID := ""
+	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
+		stamp, id, ok := decodeAPICursor(raw)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "API_CURSOR", "cursor is invalid")
+			return
+		}
+		cursorTime, cursorID = &stamp, id
+	}
 	rows, err := s.store.DB.Query(r.Context(), `
 		SELECT id, thread_id, subject, from_name, from_email::text, folder, snippet, sent_at, unread, starred, classification
 		FROM public.mail_messages
 		WHERE user_id=$1 AND tenant_id=$2 AND NOT draft
 		  AND ($3='' OR lower(folder)=lower($3))
 		  AND ($4='' OR subject ILIKE $5 ESCAPE '\' OR from_email::text ILIKE $5 ESCAPE '\' OR body_text ILIKE $5 ESCAPE '\')
-		ORDER BY sent_at DESC LIMIT $6
-	`, principal.UserID, principal.TenantID, folder, query, likePattern(query), limit)
+		  AND ($6::timestamptz IS NULL OR (sent_at, id) < ($6::timestamptz, $7))
+		ORDER BY sent_at DESC, id DESC LIMIT $8
+	`, principal.UserID, principal.TenantID, folder, query, likePattern(query), cursorTime, cursorID, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "API_MESSAGES", "Could not list messages")
 		return
 	}
 	defer rows.Close()
 	items := []map[string]any{}
+	var lastSent time.Time
+	lastID := ""
 	for rows.Next() {
 		var id, threadID, subject, fromName, fromEmail, itemFolder, snippet, classification string
 		var sent time.Time
 		var unread, starred bool
 		if rows.Scan(&id, &threadID, &subject, &fromName, &fromEmail, &itemFolder, &snippet, &sent, &unread, &starred, &classification) == nil {
+			lastSent, lastID = sent, id
 			items = append(items, map[string]any{
 				"id": id, "threadId": threadID, "subject": subject, "from": map[string]any{"name": fromName, "email": fromEmail},
 				"folder": itemFolder, "snippet": snippet, "sentAt": sent.UTC().Format(time.RFC3339),
@@ -94,7 +129,11 @@ func (s *Server) apiV1ListMessages(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items), "limit": limit})
+	nextCursor := ""
+	if len(items) == limit {
+		nextCursor = encodeAPICursor(lastSent, lastID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items), "limit": limit, "nextCursor": nextCursor})
 }
 
 func (s *Server) apiV1GetMessage(w http.ResponseWriter, r *http.Request) {
@@ -254,23 +293,43 @@ func (s *Server) apiV1SendMessage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiV1ListTasks(w http.ResponseWriter, r *http.Request) {
 	principal := apiPrincipalFrom(r)
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	limit := 100
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 500 {
+			limit = parsed
+		}
+	}
+	var cursorTime *time.Time
+	cursorID := ""
+	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
+		stamp, id, ok := decodeAPICursor(raw)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "API_CURSOR", "cursor is invalid")
+			return
+		}
+		cursorTime, cursorID = &stamp, id
+	}
 	rows, err := s.store.DB.Query(r.Context(), `
 		SELECT id, title, notes, status, priority, COALESCE(to_char(due_date,'YYYY-MM-DD'),''),
 		       COALESCE(linked_thread_id,''), created_at, updated_at
 		FROM public.tasks
 		WHERE user_id=$1 AND ($2='' OR status=$2)
-		ORDER BY (status='open') DESC, due_date NULLS LAST, created_at DESC LIMIT 500
-	`, principal.UserID, status)
+		  AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4))
+		ORDER BY created_at DESC, id DESC LIMIT $5
+	`, principal.UserID, status, cursorTime, cursorID, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "API_TASKS", "Could not list tasks")
 		return
 	}
 	defer rows.Close()
 	items := []map[string]any{}
+	var lastCreated time.Time
+	lastID := ""
 	for rows.Next() {
 		var id, title, notes, itemStatus, priority, due, threadID string
 		var created, updated time.Time
 		if rows.Scan(&id, &title, &notes, &itemStatus, &priority, &due, &threadID, &created, &updated) == nil {
+			lastCreated, lastID = created, id
 			items = append(items, map[string]any{
 				"id": id, "title": title, "notes": notes, "status": itemStatus, "priority": priority,
 				"due": due, "threadId": threadID, "createdAt": created.UTC().Format(time.RFC3339),
@@ -278,7 +337,11 @@ func (s *Server) apiV1ListTasks(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+	nextCursor := ""
+	if len(items) == limit {
+		nextCursor = encodeAPICursor(lastCreated, lastID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items), "limit": limit, "nextCursor": nextCursor})
 }
 
 func (s *Server) apiV1CreateTask(w http.ResponseWriter, r *http.Request) {
@@ -349,23 +412,43 @@ func (s *Server) apiV1ListCalendar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	limit := 200
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 500 {
+			limit = parsed
+		}
+	}
+	var cursorTime *time.Time
+	cursorID := ""
+	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
+		stamp, id, ok := decodeAPICursor(raw)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "API_CURSOR", "cursor is invalid")
+			return
+		}
+		cursorTime, cursorID = &stamp, id
+	}
 	rows, err := s.store.DB.Query(r.Context(), `
 		SELECT id, calendar_id, title, COALESCE(description,''), COALESCE(location,''), starts_at, ends_at, all_day, status
 		FROM public.calendar_events
 		WHERE user_id=$1 AND starts_at >= $2 AND starts_at < $3
-		ORDER BY starts_at ASC LIMIT 500
-	`, principal.UserID, start, end)
+		  AND ($4::timestamptz IS NULL OR (starts_at, id) > ($4::timestamptz, $5))
+		ORDER BY starts_at ASC, id ASC LIMIT $6
+	`, principal.UserID, start, end, cursorTime, cursorID, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "API_CALENDAR", "Could not list calendar events")
 		return
 	}
 	defer rows.Close()
 	items := []map[string]any{}
+	var lastStart time.Time
+	lastID := ""
 	for rows.Next() {
 		var id, calendarID, title, description, location, status string
 		var starts, ends time.Time
 		var allDay bool
 		if rows.Scan(&id, &calendarID, &title, &description, &location, &starts, &ends, &allDay, &status) == nil {
+			lastStart, lastID = starts, id
 			items = append(items, map[string]any{
 				"id": id, "calendarId": calendarID, "title": title, "description": description,
 				"location": location, "startsAt": starts.UTC().Format(time.RFC3339),
@@ -373,7 +456,11 @@ func (s *Server) apiV1ListCalendar(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items),
+	nextCursor := ""
+	if len(items) == limit {
+		nextCursor = encodeAPICursor(lastStart, lastID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items), "limit": limit, "nextCursor": nextCursor,
 		"from": start.UTC().Format(time.RFC3339), "to": end.UTC().Format(time.RFC3339)})
 }
 

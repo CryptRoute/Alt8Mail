@@ -36,10 +36,13 @@ external system/credential).
   not been run against the live staging Control Plane/webmail.
 - MCP browser consent is implemented but not part of the automated CDP suite;
   verify the consent page and dynamic registration with a real MCP client.
-- Task recurrence and reminders are stored but not yet expanded/dispatched by a
-  scheduler. Auto-replies are staged drafts, not automatically sent.
+- Task recurrence now creates the next occurrence on completion and the
+  reminder worker dispatches in-app notifications. Automation auto-replies are
+  queued through the outbound policy/DLP pipeline and delivered by the send
+  worker.
 - File versions capture metadata/storage pointers, not a new byte copy. Jitsi
   links depend on the public meet.jit.si service.
-- MCP rate limiting is per process, not distributed. No refresh tokens yet.
+- MCP rate limiting is distributed through `mcp_rate_events` with a
+  per-connection advisory lock. No refresh tokens yet.
 - Shared draft comments/version history have APIs but the compose editor does
   not yet render anchored comment pins or a restore UI.

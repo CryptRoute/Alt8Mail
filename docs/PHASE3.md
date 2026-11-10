@@ -54,9 +54,17 @@ Migration `0072_booking_pages.sql`, `booking.go`, calendar booking-page modal.
   events/bookings before insert; concurrent attempts get one confirmation and
   one `BOOKING_TAKEN`.
 - Calendar free/busy endpoint returns only `start`/`end` intervals for internal
-  colleagues; resource utilization reports bookings/booked minutes.
-- Tests: `TestBookingIntegration` covers slot privacy, DST change, duplicate
-  booking rejection and booking count.
+  colleagues; resource utilization reports bookings/booked minutes. External
+  ICS feeds and CalDAV `free-busy-query` REPORT federation are supported; the
+  latter sends request-scoped Basic credentials and stores nothing.
+- Booking pages support edit, disable/enable, booking list and cancellation;
+  cancelling a booking also cancels its calendar event.
+- Resources can require an approver. Pending resource requests notify the
+  approver and are approved/denied from the calendar resource dialog.
+- Tests: `TestBookingIntegration`, `TestPhaseScopeCompletionIntegration` and
+  `TestCalDAVFreeBusyParsing` cover slot privacy, DST change, duplicate
+  booking rejection, booking cancellation, resource approval, ICS/CalDAV
+  parsing and booking counts.
 
 ## 3E Template gallery and payment links
 
@@ -75,11 +83,12 @@ Migration `0073_template_gallery.sql`, `gallery.go`, template manager gallery.
 
 Migration `0074_deliverability.sql`, `dmarc.go`, `campaign_tracking.go`.
 
-- DMARC aggregate XML (or gzip) ingestion deduplicates by
+- DMARC aggregate XML, gzip and ZIP ingestion deduplicates by
   tenant/domain/report/org, stores per-record source/disposition/DKIM/SPF
   results and exposes a 30-day summary with failing sources and sub-90% alerts.
-- The Domains page shows the summary. Ingestion is currently an authenticated
-  API (`POST /admin/api/dmarc/ingest`), not an IMAP rua mailbox poller.
+- The Domains page shows the summary and configures a scheduled rua mailbox
+  poller (`dmarc_pollers`) with a per-tenant folder cursor. Manual ingestion is
+  still available at `POST /admin/api/dmarc/ingest`.
 - Campaign tracking is opt-in via tenant policy. When enabled, mail-merge HTML
   links are wrapped through per-campaign tokens and a transparent open pixel is
   appended. Open/click events hash the visitor IP; reports are available at
@@ -98,12 +107,6 @@ Migration `0074_deliverability.sql`, `dmarc.go`, `campaign_tracking.go`.
 
 ## Known limits
 
-- External CalDAV free/busy federation and resource approval workflows are not
-  part of this slice; internal free/busy and resource utilization are.
-- DMARC ingestion is API-driven; a scheduled rua mailbox poller remains
-  operator/integration work.
 - Campaign tracking applies to mail merges, not every outbound message.
-- Booking pages support create/list/member management; edit/delete and
-  cancellation UI are follow-up work.
-- Task recurrence/reminders remain stored (Phase 2 limit) and are not expanded
-  by a scheduler here.
+- CalDAV federation requires an HTTPS calendar collection URL; provider-specific
+  OAuth discovery remains an operator integration detail.

@@ -12,7 +12,7 @@ OpenAPI: `GET /api/v1/openapi.json`.
 | Method | Path | Scope | Notes |
 | --- | --- | --- | --- |
 | GET | `/me` | any key | Key owner and scopes |
-| GET | `/messages?folder=&q=&limit=` | `mail.read` | Newest first, max 200 |
+| GET | `/messages?folder=&q=&limit=&cursor=` | `mail.read` | Newest first, max 200, keyset `nextCursor` |
 | GET | `/messages/{id}` | `mail.read` | Body, classification, attachments |
 | POST | `/messages/send` | `mail.send` | Queues an outbox message |
 | GET | `/tasks?status=` | `tasks.read` | Open/done filter |
