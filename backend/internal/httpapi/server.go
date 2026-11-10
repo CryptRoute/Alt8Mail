@@ -452,6 +452,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAIObligationRoutes(mux)
 	s.registerAISearchRoutes(mux)
 	s.registerAIInsightRoutes(mux)
+	s.registerAIPolicyAssistRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)
