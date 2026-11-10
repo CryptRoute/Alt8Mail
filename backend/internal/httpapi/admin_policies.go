@@ -168,10 +168,15 @@ type adminDirectoryPolicy struct {
 }
 
 type adminBrandingPolicy struct {
-	ProductName  string `json:"productName"`
-	PrimaryColor string `json:"primaryColor"`
-	SupportEmail string `json:"supportEmail"`
-	LoginMessage string `json:"loginMessage"`
+	ProductName     string   `json:"productName"`
+	PrimaryColor    string   `json:"primaryColor"`
+	SupportEmail    string   `json:"supportEmail"`
+	LoginMessage    string   `json:"loginMessage"`
+	LogoURL         string   `json:"logoUrl"`
+	SupportURL      string   `json:"supportUrl"`
+	LegalURL        string   `json:"legalUrl"`
+	HideAttribution bool     `json:"hideAttribution"`
+	WebmailHosts    []string `json:"webmailHosts"`
 }
 
 type adminDLPRule struct {
@@ -239,7 +244,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 		},
 		Sharing:   adminSharingPolicy{ExternalSharing: true, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
 		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: true},
-		Branding:  adminBrandingPolicy{ProductName: "Alt8Mail", PrimaryColor: "#0f6cbd", SupportEmail: "", LoginMessage: ""},
+		Branding:  adminBrandingPolicy{ProductName: "Alt8Mail", PrimaryColor: "#0f6cbd", SupportEmail: "", LoginMessage: "", WebmailHosts: []string{}},
 		DLP: adminDLPPolicy{
 			Enabled: true, DefaultClassification: "Internal", NotifySender: false,
 			Rules: []adminDLPRule{},
@@ -501,6 +506,9 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 		}
 		rule.Fields = fields
 	}
+	var brandingErrors []string
+	policy.Branding, brandingErrors = normalizeBrandingPolicy(policy.Branding)
+	errors = append(errors, brandingErrors...)
 	if policy.Branding.PrimaryColor != "" && !strings.HasPrefix(policy.Branding.PrimaryColor, "#") {
 		errors = append(errors, "Brand color must be a hex color")
 	}
@@ -679,7 +687,19 @@ func (s *Server) adminUpdateTenantSettings(w http.ResponseWriter, r *http.Reques
 	// Validate a complete candidate policy for branding changes.
 	settings := map[string]any{}
 	_ = json.Unmarshal(sess.ActiveTenant.Settings, &settings)
+	whiteLabel := s.entitled("white_label")
 	if branding, ok := body["branding"].(map[string]any); ok {
+		if brandingExtendedRequested(branding) && !whiteLabel {
+			writeError(w, http.StatusForbidden, "WHITE_LABEL", "White-label branding requires a valid white_label license entitlement")
+			return
+		}
+		if !whiteLabel {
+			// Do not let an unentitled save clear extended branding that a
+			// renewed license may re-enable.
+			for _, key := range []string{"logoUrl", "supportUrl", "legalUrl", "hideAttribution", "webmailHosts"} {
+				delete(branding, key)
+			}
+		}
 		existing, _ := settings["branding"].(map[string]any)
 		if existing == nil {
 			existing = map[string]any{}
@@ -689,10 +709,14 @@ func (s *Server) adminUpdateTenantSettings(w http.ResponseWriter, r *http.Reques
 	}
 	candidate := tenantPolicyFromSettings(mustJSON(settings))
 	candidate, errors := validateTenantPolicy(candidate)
+	if whiteLabel {
+		errors = append(errors, s.validateBrandingHostsDB(r.Context(), sess.ActiveTenantID, candidate.Branding.WebmailHosts)...)
+	}
 	if len(errors) > 0 {
 		writeError(w, http.StatusBadRequest, "SETTINGS_INVALID", strings.Join(errors, "; "))
 		return
 	}
+	settings["branding"] = candidate.Branding
 	encodedSettings, _ := json.Marshal(settings)
 	name := sess.ActiveTenant.Name
 	if value, ok := body["name"].(string); ok && strings.TrimSpace(value) != "" {
@@ -727,10 +751,26 @@ func (s *Server) adminUpdateTenantSettings(w http.ResponseWriter, r *http.Reques
 			billing = value
 		}
 	}
-	if _, err := s.store.DB.Exec(r.Context(), `
+	tx, err := s.store.DB.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "SETTINGS", "Could not save organization settings")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, err := tx.Exec(r.Context(), `
 		UPDATE tenants SET name = $2, plan = $3, region = $4, billing_email = COALESCE($5, billing_email),
 		       settings = $6, updated_at = now() WHERE id = $1
 	`, sess.ActiveTenantID, name, plan, region, billing, encodedSettings); err != nil {
+		writeError(w, http.StatusInternalServerError, "SETTINGS", "Could not save organization settings")
+		return
+	}
+	if whiteLabel {
+		if err := s.syncTenantWebmailHosts(r.Context(), tx, sess.ActiveTenantID, candidate.Branding.WebmailHosts); err != nil {
+			writeError(w, http.StatusConflict, "SETTINGS", "A custom webmail hostname is already in use")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "SETTINGS", "Could not save organization settings")
 		return
 	}

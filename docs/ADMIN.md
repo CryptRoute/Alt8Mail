@@ -105,7 +105,9 @@ Migration `0004_customer_admin.sql` adds:
 
 Policy lives in `tenants.settings` under `security`, `mail`, `sharing`,
 `directory` and `branding`. Every save is validated server-side and written to
-PostgreSQL.
+PostgreSQL. White-label logo/support/legal links, attribution removal and
+custom webmail hostnames require the paid `white_label` entitlement; see
+[WHITE_LABEL.md](WHITE_LABEL.md).
 
 ## Admin API
 

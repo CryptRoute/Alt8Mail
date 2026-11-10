@@ -174,6 +174,11 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
   immediate post-update upload.
   See `docs/LICENSING.md` for the token format, status error categories and
   seat rules.
+- **White-label custom hostnames.** Web Net remains authoritative for DNS, TLS
+  and nginx. A tenant admin can only save a custom webmail hostname when the
+  matching Web Net route is enabled as `webmail` and has a certificate, and
+  the tenant's license includes `white_label`. See
+  [WHITE_LABEL.md](WHITE_LABEL.md).
 
 ### Domains and DNS
 

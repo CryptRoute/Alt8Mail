@@ -17,7 +17,7 @@ external system/credential and is documented for the operator run).
 | 1D SCIM 2.0 | done | `backend/internal/httpapi/scim*.go`, migrations `0061`, `docs/SCIM.md`; final gate adds system-administrator protection and the exact `/scim/v2` nginx route; DSN token/Users/Groups suites pass |
 | 1E License seat/tenant enforcement | in progress | `docs/superpowers/plans/2026-11-10-phase-1e-license-control-plane.md` Task 2; Control status/upload/seat API landed in Task 1 |
 | 1E Control Plane license UI and seat metering | in progress | same plan, Tasks 1/3; Control API landed, web view pending |
-| 1F White-label and custom webmail domains | planned | `docs/superpowers/plans/2026-11-10-phase-1f-white-label.md` |
+| 1F White-label and custom webmail domains | done | Paid white_label branding, login logo/links/attribution, custom hostname resolution against Web Net route/cert inventory, migration 0062, `docs/WHITE_LABEL.md`; unit + PostgreSQL integration tests |
 | 1G Per-mailbox/per-folder restore and DR | planned | `docs/superpowers/plans/2026-11-10-phase-1g-restore-dr.md`, `docs/DR.md` once written |
 | 1H Accessibility baseline and keyboard gate | planned | `docs/superpowers/plans/2026-11-10-phase-1h-accessibility.md`, `tools/a11y-audit.mjs` once written |
 | Upgrade/rollback from v0.27.6 | done | `tools/migration-upgrade-smoke.sh` (apply tag migrations, upgrade, rollback new, reapply) |

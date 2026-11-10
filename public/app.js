@@ -3291,7 +3291,54 @@ function applyTenantBranding(branding) {
   const legal = document.querySelector('.login-card-foot [data-i18n="login.legal"]');
   if (legal) {
     legal.removeAttribute("data-i18n");
-    legal.textContent = `Protected by ${name} · TLS 1.3`;
+    legal.textContent = branding.hideAttribution ? "TLS 1.3" : `Protected by ${name} · TLS 1.3`;
+  }
+  const heading = document.querySelector(".login-heading");
+  const logoURL = String(branding.logoUrl || "").trim();
+  let logo = document.getElementById("tenantLogo");
+  if (heading && /^https:\/\//i.test(logoURL)) {
+    if (!logo) {
+      logo = document.createElement("img");
+      logo.id = "tenantLogo";
+      logo.className = "tenant-logo";
+      logo.style.cssText = "display:block;max-height:48px;max-width:180px;margin:0 auto 18px;object-fit:contain";
+      heading.prepend(logo);
+    }
+    logo.alt = name;
+    logo.hidden = false;
+    logo.onerror = () => { logo.hidden = true; };
+    if (logo.getAttribute("src") !== logoURL) logo.src = logoURL;
+  } else if (logo) {
+    logo.remove();
+  }
+  const addFooterLink = (id, label, href) => {
+    if (!foot) return;
+    const safeHref = String(href || "").trim();
+    let link = document.getElementById(id);
+    if (!/^https:\/\//i.test(safeHref)) {
+      if (link) link.remove();
+      return;
+    }
+    if (!link) {
+      link = document.createElement("a");
+      link.id = id;
+      link.style.marginLeft = "8px";
+      link.style.color = "var(--accent-ink)";
+      foot.appendChild(link);
+    }
+    link.href = safeHref;
+    link.textContent = label;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  };
+  addFooterLink("tenantSupportUrl", "Support", branding.supportUrl);
+  addFooterLink("tenantLegalUrl", "Legal", branding.legalUrl);
+  if (branding.hideAttribution) {
+    document.querySelectorAll(".login-legal").forEach((node) => {
+      const parts = String(node.textContent || "").split("·").map((part) => part.trim()).filter(Boolean);
+      const remaining = parts.filter((part) => part !== name).join(" · ");
+      node.textContent = remaining || "Workspace environment";
+    });
   }
   updateDocumentTitle();
 }
