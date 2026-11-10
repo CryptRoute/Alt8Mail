@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -233,6 +234,11 @@ func (s *Server) adminCreateTenant(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.OwnerName == "" {
 			body.OwnerName = strings.Split(body.OwnerEmail, "@")[0]
+		}
+		// A global license counts the new active owner; a tenant-scoped license
+		// does not count a new, unrelated tenant.
+		if !s.enforceNewTenantSeatTx(ctx, w, tx, sess, tenantID, body.OwnerEmail) {
+			return
 		}
 		password, err := generateTemporaryPassword()
 		if err != nil {
@@ -645,14 +651,68 @@ func (s *Server) adminRevokeSystemAdmin(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "LAST_ADMIN", "At least one system administrator must remain")
 		return
 	}
-	var email string
-	err := s.store.DB.QueryRow(r.Context(), `SELECT email::text FROM users WHERE id = $1 AND is_system_admin = true`, id).Scan(&email)
-	if err != nil {
+	ctx := r.Context()
+	var email, tenantID string
+	if err := s.store.DB.QueryRow(ctx, `
+		SELECT email::text, tenant_id::text FROM users WHERE id = $1 AND is_system_admin = true
+	`, id).Scan(&email, &tenantID); err != nil {
 		writeError(w, http.StatusNotFound, "USER_NOT_FOUND", "System administrator not found")
 		return
 	}
-	_, _ = s.store.DB.Exec(r.Context(), `UPDATE users SET is_system_admin = false, updated_at = now() WHERE id = $1`, id)
-	_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM admin_sessions WHERE user_id = $1`, id)
-	s.recordAdminAudit(r.Context(), sess, sess.User, "admin.system_admin_revoked", email, "Revoked platform-wide administrator access", map[string]any{"userId": id})
+	tx, err := s.store.DB.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ADMIN", "Could not revoke system administrator")
+		return
+	}
+	defer tx.Rollback(ctx)
+	if err := s.lockSeatScopeTx(ctx, tx, tenantID); err != nil {
+		_ = tx.Rollback(ctx)
+		if s.logger != nil {
+			s.logger.Warn("license seat lock failed", "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, "ADMIN", "Could not revoke system administrator")
+		return
+	}
+	var status string
+	var deletedAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT status, deleted_at FROM users
+		WHERE id = $1 AND tenant_id = $2 AND is_system_admin = true FOR UPDATE
+	`, id, tenantID).Scan(&status, &deletedAt); err != nil {
+		writeError(w, http.StatusNotFound, "USER_NOT_FOUND", "System administrator not found")
+		return
+	}
+	// Revoking platform-administrator access turns a user that never consumed a
+	// seat into one that does. Granting it frees a seat and needs no check.
+	if status == "active" && deletedAt == nil && s.seatAppliesToTenant(tenantID) {
+		used, seatErr := s.ensureSeatCapacityTx(ctx, tx, tenantID, 1)
+		if errors.Is(seatErr, errSeatLimit) {
+			s.rejectSeatLimit(ctx, w, tx, sess, tenantID, email, used)
+			return
+		}
+		if seatErr != nil {
+			_ = tx.Rollback(ctx)
+			if s.logger != nil {
+				s.logger.Warn("license seat count failed", "err", seatErr)
+			}
+			writeError(w, http.StatusInternalServerError, "ADMIN", "Could not revoke system administrator")
+			return
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET is_system_admin = false, updated_at = now() WHERE id = $1`, id); err != nil {
+		_ = tx.Rollback(ctx)
+		writeError(w, http.StatusInternalServerError, "ADMIN", "Could not revoke system administrator")
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM admin_sessions WHERE user_id = $1`, id); err != nil {
+		_ = tx.Rollback(ctx)
+		writeError(w, http.StatusInternalServerError, "ADMIN", "Could not revoke system administrator")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "ADMIN", "Could not revoke system administrator")
+		return
+	}
+	s.recordAdminAudit(ctx, sess, sess.User, "admin.system_admin_revoked", email, "Revoked platform-wide administrator access", map[string]any{"userId": id})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

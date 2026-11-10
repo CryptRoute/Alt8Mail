@@ -147,7 +147,9 @@ across all tenants. A license with a `tenant` claim meters and enforces only
 that tenant; every other tenant remains unlimited (core mail and user creation
 stay available there). When `ALT8MAIL_LICENSE_TENANT` is configured it must
 equal the payload's `tenant` claim exactly; an empty or different claim makes
-the whole license `invalid`.
+the whole license `invalid`. A claim that names no existing tenant counts zero
+users, so enforcement limits nobody until that tenant exists; the webmail logs
+a startup warning when that lookup finds no tenant.
 
 Seats are consumed by users with `status='active'`, `deleted_at IS NULL` and
 `is_system_admin = false`. Invited and suspended users do not consume a seat
@@ -156,7 +158,7 @@ Platform system administrators never consume seats. A license that shrinks
 below current usage remains over-limit: existing users are not silently
 deactivated, and new activations are refused until usage falls below the limit.
 
-Every activation path is enforced inside its existing provisioning
+The webmail enforces every activation path inside its existing provisioning
 transaction:
 
 - admin create with `status: "active"` (invited/suspended creates are free);
@@ -165,21 +167,35 @@ transaction:
 - admin bulk activation;
 - each CSV/spreadsheet import row (all imported users are active);
 - SCIM create with `active: true` (or no `active` attribute);
-- SCIM PUT/PATCH reactivation (`active: false` to `true`).
+- SCIM PUT/PATCH reactivation (`active: false` to `true`);
+- creating an organization with an active owner (a global license counts the
+  new owner; a tenant-scoped license does not count a new, unrelated tenant);
+- revoking platform system-administrator access from an active user, which
+  converts a non-counted user into a counted one. Granting system-administrator
+  access frees a seat and is not gated.
 
 Non-activation edits and deactivations are unaffected. Before creating or
 activating, the transaction locks the tenant row
 (`SELECT id FROM tenants WHERE id = $1 FOR UPDATE`); a global license also takes
 a transaction-scoped advisory lock keyed by the license, then re-counts active
-seats. Concurrent activations therefore cannot exceed the licensed limit, both
-within one tenant and across tenants of a global license.
+seats. Decisions that depend on the target user's current status re-read the
+target `FOR UPDATE` after taking the seat lock, so a concurrent suspend,
+restore or create cannot be missed. Concurrent activations therefore cannot
+exceed the licensed limit, both within one tenant and across tenants of a
+global license.
 
-A rejected activation creates no user, mailbox or session. The admin API
-returns HTTP 409 with the fixed code `SEAT_LIMIT`; SCIM returns HTTP 409 with
-`scimType: "invalidValue"` and the fixed detail `License seat limit reached`.
-Both write the audit action `license.seat_limit_blocked` with the tenant, limit
-and live usage (admin operations in `admin_audit_log`, SCIM in `audit_log`).
-The raw license token and signature are never logged or audited.
+A rejected activation creates no user, mailbox, tenant or session. The admin
+API returns HTTP 409 with the fixed code `SEAT_LIMIT`; SCIM returns HTTP 409
+with `scimType: "invalidValue"` and the fixed detail `License seat limit
+reached`. Both write the audit action `license.seat_limit_blocked` with the
+tenant, limit and live usage (admin operations in `admin_audit_log`, SCIM in
+`audit_log`). The raw license token and signature are never logged or audited.
+
+Control Plane mailbox/user status operations, provisioning and sync jobs are
+not gated by this webmail check; whether they should enforce the same limit or
+remain an explicit operator override is a Task 4 decision. A Control Plane
+action that activates users can therefore exceed the webmail limit until that
+decision is made.
 
 The webmail bootstrap and `GET /api/entitlements` expose `usedSeats` and
 `seatLimit` (alongside `seats`) so the UI can show live usage without reading
