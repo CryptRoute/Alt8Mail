@@ -432,6 +432,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerCollaborationRoutes(mux)
 	s.registerTeamInboxRoutes(mux)
 	s.registerSharedDraftRoutes(mux)
+	s.registerTeamTemplateRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)

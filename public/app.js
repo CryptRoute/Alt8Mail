@@ -6229,6 +6229,108 @@ function markTeamReply(threadId) {
   heartbeatTeamPresence(threadId);
 }
 
+function composeTeamInbox(session) {
+  if (!session) return null;
+  if (session.teamInboxId) return state.teamInboxes.find((team) => team.id === session.teamInboxId) || null;
+  if (session.threadId) {
+    const context = teamContextForThread(session.threadId);
+    if (context) return context.team;
+  }
+  const folderTeam = teamInboxForFolder(folderDef(state.folder));
+  if (folderTeam) return folderTeam;
+  return null;
+}
+
+function ensureTeamTemplateOverlay() {
+  let overlay = document.getElementById("teamTemplateOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="teamTemplateOverlay" hidden>
+    <div class="dialog shared-drafts-dialog" role="dialog" aria-modal="true" aria-labelledby="teamTemplateTitle">
+      <div class="dialog-head"><div><p class="eyebrow">Team templates</p><h2 id="teamTemplateTitle">Insert a reply template</h2><p class="dialog-note" id="teamTemplateNote"></p></div><button class="icon-btn" id="teamTemplateClose" type="button" aria-label="Close templates"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body"><div class="shared-draft-list" id="teamTemplateList"></div></div>
+      <div class="dialog-foot"><span class="dialog-note">Variables are filled before the template is inserted.</span><button class="btn-secondary" id="teamTemplateCancel" type="button">Close</button></div>
+    </div>
+  </div>`);
+  overlay = document.getElementById("teamTemplateOverlay");
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
+  document.getElementById("teamTemplateClose").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("teamTemplateCancel").addEventListener("click", () => { overlay.hidden = true; });
+  return overlay;
+}
+
+async function openTeamTemplatePicker(session) {
+  const team = composeTeamInbox(session);
+  if (!team) {
+    showToast("Open the compose window from a team inbox to use shared templates.", "warning");
+    return;
+  }
+  const overlay = ensureTeamTemplateOverlay();
+  document.getElementById("teamTemplateNote").textContent = `${team.name} · ${team.address}`;
+  const list = document.getElementById("teamTemplateList");
+  list.innerHTML = '<div class="settings-note">Loading templates…</div>';
+  overlay.hidden = false;
+  try {
+    const data = await api(`/api/team-templates?teamId=${encodeURIComponent(team.id)}`);
+    const templates = data.templates || [];
+    list.innerHTML = templates.length ? templates.map((template) => `<div class="shared-draft-row">
+      <div class="shared-draft-copy"><strong>${esc(template.name)}</strong><span>${esc(template.category || "Uncategorized")} · v${template.version}${template.aliasEmail ? ` · ${esc(template.aliasEmail)}` : ""}${template.variables?.length ? ` · ${template.variables.length} variable${template.variables.length === 1 ? "" : "s"}` : ""}</span></div>
+      <button class="btn-secondary small" type="button" data-team-template-insert="${esc(template.id)}">Insert</button>
+    </div>`).join("") : '<div class="empty-mini">No templates yet. A team owner can create them through the team templates API.</div>';
+    $$("[data-team-template-insert]", list).forEach((button) => button.addEventListener("click", async () => {
+      try {
+        const detail = await api(`/api/team-templates/${encodeURIComponent(button.dataset.teamTemplateInsert)}`);
+        const template = detail.template;
+        const variables = {};
+        for (const name of template.variables || []) {
+          const value = window.prompt(`Value for {{${name}}}`, "");
+          if (value == null) return;
+          variables[name] = value;
+        }
+        const rendered = await api(`/api/team-templates/${encodeURIComponent(template.id)}/render`, { method: "POST", body: { variables } });
+        applyTeamTemplate(session, rendered);
+        overlay.hidden = true;
+        showToast("Template inserted");
+      } catch (error) { showError(error); }
+    }));
+  } catch (error) {
+    list.innerHTML = `<div class="settings-note">${esc(error.message || "Templates could not be loaded.")}</div>`;
+  }
+}
+
+function applyTeamTemplate(session, template) {
+  if (!session?.el || !template) return;
+  if (template.subject) {
+    session.subject = template.subject;
+    const subjectInput = session.el.querySelector('[data-compose-field="subject"]');
+    if (subjectInput) subjectInput.value = template.subject;
+    const title = session.el.querySelector("[data-compose-title]");
+    if (title) title.textContent = template.subject;
+  }
+  if (template.aliasEmail && aliasForEmail(template.aliasEmail)?.canSend) {
+    session.fromEmail = template.aliasEmail;
+    session.accountId = aliasForEmail(template.aliasEmail)?.accountId || session.accountId;
+    const fromSelect = session.el.querySelector('[data-compose-field="fromEmail"]');
+    if (fromSelect) fromSelect.value = template.aliasEmail;
+  }
+  if (session.htmlMode && template.bodyHtml) {
+    const editor = session.el.querySelector("[data-compose-editor]");
+    if (editor) {
+      editor.innerHTML = sanitizeEditorHTML(template.bodyHtml);
+      normalizeEditorImageSources(editor);
+      updateComposeEditor(session, editor);
+    }
+  } else {
+    session.body = template.bodyText || "";
+    session.bodyHtml = textToEditorHTML(session.body);
+    const textarea = session.el.querySelector('[data-compose-field="body"]');
+    if (textarea) textarea.value = session.body;
+  }
+  session.dirty = true;
+  updateComposeOptions(session);
+  updateComposeStatus(session);
+  scheduleComposeSave(session);
+}
+
 function ensureTeamDraftsOverlay() {
   let overlay = document.getElementById("teamDraftsOverlay");
   if (overlay) return overlay;
@@ -6276,7 +6378,7 @@ async function createSharedDraft(team) {
   });
   const draft = created.draft;
   document.getElementById("teamDraftsOverlay").hidden = true;
-  openCompose({}, { sharedDraft: { id: draft.id, teamId: team.id, version: draft.version, writerToken: created.writerToken } });
+  openCompose({}, { sharedDraft: { id: draft.id, teamId: team.id, version: draft.version, writerToken: created.writerToken }, teamInboxId: team.id });
 }
 
 async function openSharedDraft(draftId) {
@@ -6292,7 +6394,7 @@ async function openSharedDraft(draftId) {
   }, { sharedDraft: {
     id: detail.draft.id, teamId: detail.draft.teamId,
     version: Number(lease.version || detail.draft.version), writerToken: lease.writerToken
-  } });
+  }, teamInboxId: detail.draft.teamId });
 }
 
 function flushSharedDraft(session, { silent = false } = {}) {
@@ -15636,6 +15738,7 @@ function composeTemplate(session) {
       <button class="btn-primary" data-compose-action="send" type="button"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Send</button>
       <button class="btn-secondary compose-send-later" data-compose-action="schedule" type="button"><svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg>Send later</button>
       <div class="compose-actions">
+        <button class="icon-btn" data-compose-action="template" type="button" aria-label="Insert team template" title="Insert team template"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></button>
         <button class="icon-btn" data-compose-action="attach" type="button" aria-label="Attach files" title="Attach files"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></button>
         <button class="icon-btn" data-compose-action="discard" type="button" aria-label="Discard draft" title="Discard draft"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>
       </div>
@@ -15761,6 +15864,9 @@ function openCompose(prefill = {}, options = {}) {
     restoring: !!options.restoring
   };
   if (options.sharedDraft) session.sharedDraft = { ...options.sharedDraft };
+  if (options.teamInboxId) session.teamInboxId = options.teamInboxId;
+  const composeTeam = composeTeamInbox(session);
+  if (composeTeam) session.teamInboxId = composeTeam.id;
   composeSessions.push(session);
   composeLayer.insertAdjacentHTML("beforeend", composeTemplate(session));
   session.el = composeLayer.querySelector(`[data-compose-id="${CSS.escape(id)}"]`);
@@ -28474,6 +28580,7 @@ function bindEvents() {
           if (ok) closeComposeSession(session.id, { discard: true });
         });
       } else if (kind === "attach") { openComposeAttach(session.id); }
+      else if (kind === "template") { openTeamTemplatePicker(session); }
       else if (kind === "mention") { openComposeMentionPicker(session); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
       else if (kind === "editor-light") { setEditorLight(session, !session.editorLight); }
