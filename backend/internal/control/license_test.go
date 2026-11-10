@@ -515,6 +515,9 @@ func TestLicenseWarningThreshold(t *testing.T) {
 			if status.RemainingSeats != testCase.wantRemain {
 				t.Fatalf("remainingSeats = %d, want %d", status.RemainingSeats, testCase.wantRemain)
 			}
+			if status.WarningPercent != testCase.percent {
+				t.Fatalf("warningPercent = %d, want %d", status.WarningPercent, testCase.percent)
+			}
 		})
 	}
 }

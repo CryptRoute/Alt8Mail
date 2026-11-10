@@ -132,7 +132,7 @@ func TestLicenseAPIGetStatus(t *testing.T) {
 	if !status.Configured || status.FilePath != path || status.State != "valid" || status.Edition != "enterprise" {
 		t.Fatalf("unexpected status payload: %#v", status)
 	}
-	if status.Seats != 50 || status.UsedSeats != 40 || status.RemainingSeats != 10 || !status.Warning {
+	if status.Seats != 50 || status.UsedSeats != 40 || status.RemainingSeats != 10 || !status.Warning || status.WarningPercent != 80 {
 		t.Fatalf("unexpected seat payload: %#v", status)
 	}
 	if status.LicenseID != "lic_control_test" || status.Tenant != "" || len(status.Features) != 2 {

@@ -14,6 +14,7 @@ import { renderSecurityReports } from './views-security-reports.js';
 import { renderWebPush } from './views-push.js';
 import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
+import { renderLicense } from './views-license.js';
 import { renderAddons } from './views-addons.js?v=0.11.46-control';
 import { renderOffice } from './views-office.js?v=0.11.46-control';
 import {
@@ -77,6 +78,7 @@ const NAV_GROUPS = [
   ] },
   { label: 'Infrastructure', items: [
     { key: 'system', label: 'System', icon: 'power', href: '#/system', perm: 'server.read', desc: 'Release updates, version history and host reboot' },
+    { key: 'license', label: 'License', icon: 'key', href: '#/license', perm: 'settings.write', desc: 'Offline entitlement, expiry and live seat usage' },
     { key: 'addons', label: 'Add-ons', icon: 'plug', href: '#/addons', perm: 'server.read', desc: 'System-wide first-party connector catalog' },
     { key: 'office', label: 'Office', icon: 'file-code', href: '#/office', perm: 'server.read', desc: 'OnlyOffice lifecycle and webmail Office feature flag' },
     { key: 'services', label: 'Services', icon: 'server', href: '#/services', perm: 'services.read', desc: 'systemd health and lifecycle actions' },
@@ -117,6 +119,7 @@ const ROUTE_DEFS = {
   'web-push': { title: 'Web push', crumb: 'Security', nav: 'web-push', perm: 'notifications.read', render: renderWebPush },
   services: { title: 'Services', crumb: 'Infrastructure', nav: 'services', perm: 'services.read', render: renderServices },
   system: { title: 'System', crumb: 'Infrastructure', nav: 'system', perm: 'server.read', render: renderSystem },
+  license: { title: 'License', crumb: 'Infrastructure', nav: 'license', perm: 'settings.write', render: renderLicense },
   addons: { title: 'Add-ons', crumb: 'Infrastructure', nav: 'addons', perm: 'server.read', render: renderAddons },
   office: { title: 'Office', crumb: 'Infrastructure', nav: 'office', perm: 'server.read', render: renderOffice },
   updates: { title: 'Software updates', crumb: 'Infrastructure', nav: 'updates', perm: 'server.read', render: renderUpdates },

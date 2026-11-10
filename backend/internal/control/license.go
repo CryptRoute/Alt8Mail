@@ -51,6 +51,7 @@ type licenseStatus struct {
 	UsedSeats      int        `json:"usedSeats"`
 	RemainingSeats int        `json:"remainingSeats"`
 	Warning        bool       `json:"warning"`
+	WarningPercent int        `json:"warningPercent"`
 	Features       []string   `json:"features"`
 	ExpiresAt      *time.Time `json:"expiresAt"`
 	Tenant         string     `json:"tenant"`
@@ -155,11 +156,16 @@ func (s *Server) licenseStatus(ctx context.Context) licenseStatus {
 // tenant-scoped licenses always return an empty list so one tenant's usage
 // cannot leak through a deployment-wide license view.
 func (s *Server) licenseStatusView(ctx context.Context) (licenseStatus, []map[string]any) {
+	warningPercent := s.cfg.LicenseWarningPercent
+	if warningPercent < 1 || warningPercent > 100 {
+		warningPercent = 80
+	}
 	status := licenseStatus{
-		FilePath: s.cfg.LicenseFile,
-		State:    "unlicensed",
-		Edition:  "oss",
-		Features: []string{},
+		FilePath:       s.cfg.LicenseFile,
+		State:          "unlicensed",
+		Edition:        "oss",
+		Features:       []string{},
+		WarningPercent: warningPercent,
 	}
 	byTenant := []map[string]any{}
 
@@ -229,11 +235,7 @@ func (s *Server) licenseStatusView(ctx context.Context) (licenseStatus, []map[st
 	if status.RemainingSeats < 0 {
 		status.RemainingSeats = 0
 	}
-	percent := s.cfg.LicenseWarningPercent
-	if percent < 1 || percent > 100 {
-		percent = 80
-	}
-	status.Warning = status.Seats > 0 && used*100 >= status.Seats*percent
+	status.Warning = status.Seats > 0 && used*100 >= status.Seats*warningPercent
 	if license.Tenant == "" {
 		byTenant = perTenant
 	}

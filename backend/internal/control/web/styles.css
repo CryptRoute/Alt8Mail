@@ -636,6 +636,25 @@ a.stat-tile:hover { border-color: var(--border-strong); box-shadow: var(--shadow
 .meter.tone-critical .meter-head strong { color: var(--status-critical-ink); }
 .meter-detail { margin-top: 5px; font-size: 10.5px; color: var(--text-3); }
 .meter-stack { display: flex; flex-direction: column; gap: 15px; }
+
+/* License seat meter ------------------------------------------------------ */
+.seat-meter { display: flex; flex-direction: column; gap: 7px; border-radius: var(--radius-sm); outline-offset: 3px; }
+.seat-meter-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.seat-meter-head span { font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+.seat-meter-head strong { font-size: 19px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.seat-meter-track { position: relative; height: 12px; border-radius: 999px; background: var(--track); overflow: hidden; }
+.seat-meter-fill { height: 100%; border-radius: inherit; background: var(--status-good); transition: width 0.6s ease; }
+.seat-meter-threshold { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--ink); opacity: 0.6; }
+.seat-meter.tone-warning .seat-meter-fill { background: var(--status-warning); }
+.seat-meter.tone-critical .seat-meter-fill { background: var(--status-critical); }
+.seat-meter.tone-neutral .seat-meter-fill { background: var(--text-3); }
+.seat-meter.tone-warning .seat-meter-head strong { color: var(--status-warning-ink); }
+.seat-meter.tone-critical .seat-meter-head strong { color: var(--status-critical-ink); }
+.seat-meter-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.license-features { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.license-file-note { margin-top: 9px; }
+table.data tfoot th, table.data tfoot td { padding: 9px 12px; border-top: 1px solid var(--border); background: var(--surface-muted); font-size: 11.5px; font-weight: 650; color: var(--ink); }
+table.data tfoot td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .host-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .host-metric .meter-head { font-size: 11px; }
 .host-metric .sparkline { margin-top: 6px; width: 100%; height: 30px; }
