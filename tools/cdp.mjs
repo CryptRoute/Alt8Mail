@@ -295,7 +295,7 @@ class CdpPage {
       Enter: "Enter", Escape: "Escape", Tab: "Tab", Backspace: "Backspace", Delete: "Delete",
       " ": "Space", "/": "Slash", "?": "Slash", "#": "Digit3", "3": "Digit3"
     };
-    const code = codeMap[key] || (/^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : key);
+    const code = codeMap[key] || (/^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : /^[0-9]$/.test(key) ? `Digit${key}` : key);
     const modifiers = (shift ? 8 : 0) | (ctrl ? 2 : 0) | (alt ? 1 : 0) | (meta ? 4 : 0);
     const text = shift && key.length === 1 ? key : key.length === 1 ? key : key === "Enter" ? "\r" : undefined;
     await this.send("Input.dispatchKeyEvent", {

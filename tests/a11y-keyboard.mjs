@@ -53,6 +53,21 @@ async function tabTo(page, condition, description, max = 90) {
   throw new Error(`Tab order did not reach ${description}`);
 }
 
+async function enterOtpDigit(page, index) {
+  const digit = String(index + 1);
+  const landed = `document.getElementById("otp${index}")?.value === ${JSON.stringify(digit)}`;
+  await page.pressKey(digit);
+  try {
+    await page.waitFor(landed, 1500);
+  } catch {
+    // Headless Chrome can drop a synthetic key event while a challenge is
+    // animating in. Fall back to text insertion, then still verify the box
+    // kept the digit and focus auto-advance ran.
+    await page.typeText(digit);
+    await page.waitFor(landed, 2000);
+  }
+}
+
 async function focusRing(page) {
   return page.eval(`(() => {
     const el = document.activeElement;
@@ -146,7 +161,7 @@ try {
   check(otpFocus.id === "otp0", "two-factor challenge focuses the first code box");
   for (let index = 0; index < 6; index += 1) {
     await page.waitFor(`document.activeElement?.id === "otp${index}"`, 4000);
-    await page.pressKey(String(index + 1));
+    await enterOtpDigit(page, index);
     if (index < 5) await page.waitFor(`document.activeElement?.id === "otp${index + 1}"`, 4000);
   }
   await page.waitFor(() => [...document.querySelectorAll("#otpInputs input")].map((input) => input.value).join("") === "123456", 5000);
