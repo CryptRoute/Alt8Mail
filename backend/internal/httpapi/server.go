@@ -443,6 +443,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerFollowUpRoutes(mux)
 	s.registerMailMergeRoutes(mux)
 	s.registerBookingRoutes(mux)
+	s.registerGalleryRoutes(mux)
 	s.registerMCPRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)

@@ -6495,6 +6495,37 @@ function insertMeetingLink(session) {
   showToast("Jitsi meeting link inserted");
 }
 
+async function insertPaymentLink(session) {
+  if (!session?.el) return;
+  const raw = window.prompt("Payment link URL (must be approved by your organization)", "https://");
+  if (!raw) return;
+  try {
+    const data = await api("/api/payment-links/validate", { method: "POST", body: { url: raw.trim() } });
+    const url = data.url;
+    if (session.htmlMode) {
+      const editor = session.el.querySelector("[data-compose-editor]");
+      if (editor) {
+        editor.focus();
+        document.execCommand("insertHTML", false, `<p>Pay securely: <a href="${esc(url)}">${esc(url)}</a></p>`);
+        updateComposeEditor(session, editor);
+      }
+    } else {
+      const textarea = session.el.querySelector('[data-compose-field="body"]');
+      if (textarea) {
+        const insert = `${session.body ? "\n\n" : ""}Pay securely: ${url}`;
+        textarea.value += insert;
+        textarea.focus();
+        session.body = textarea.value;
+        session.bodyHtml = textToEditorHTML(session.body);
+      }
+    }
+    session.dirty = true;
+    updateComposeStatus(session);
+    scheduleComposeSave(session);
+    showToast("Payment link inserted");
+  } catch (error) { showError(error); }
+}
+
 function ensureMailMergeOverlay() {
   let overlay = document.getElementById("mailMergeOverlay");
   if (overlay) return overlay;
@@ -6640,19 +6671,45 @@ async function openTeamDrafts(team) {
   }
 }
 
+async function openTemplateGallery(team) {
+  if (!team) return;
+  let overlay = document.getElementById("templateGalleryOverlay");
+  if (!overlay) {
+    document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="templateGalleryOverlay" hidden><div class="dialog shared-drafts-dialog" role="dialog" aria-modal="true" aria-labelledby="templateGalleryTitle"><div class="dialog-head"><div><p class="eyebrow">Template gallery</p><h2 id="templateGalleryTitle">Packaged letters and contracts</h2><p class="dialog-note">Install a starter template, then edit it for your team.</p></div><button class="icon-btn" id="templateGalleryClose" type="button" aria-label="Close gallery"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="dialog-body"><div class="automation-rule-list" id="templateGalleryList"></div></div><div class="dialog-foot"><button class="btn-secondary" id="templateGalleryCancel" type="button">Close</button></div></div></div>`);
+    overlay = document.getElementById("templateGalleryOverlay");
+    overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
+    document.getElementById("templateGalleryClose").addEventListener("click", () => { overlay.hidden = true; });
+    document.getElementById("templateGalleryCancel").addEventListener("click", () => { overlay.hidden = true; });
+  }
+  overlay.hidden = false;
+  const host = document.getElementById("templateGalleryList");
+  host.innerHTML = '<div class="settings-note">Loading gallery…</div>';
+  const data = await api("/api/template-gallery");
+  host.innerHTML = (data.templates || []).map((template) => `<div class="automation-rule-row"><div class="shared-draft-copy"><strong>${esc(template.name)}</strong><span>${esc(template.category)} · ${esc(template.description)}</span></div><button class="btn-primary small" type="button" data-gallery-install="${esc(template.id)}">Install</button></div>`).join("") || '<div class="empty-mini">No gallery templates available.</div>';
+  $$("[data-gallery-install]", host).forEach((button) => button.addEventListener("click", async () => {
+    try {
+      await api(`/api/template-gallery/${encodeURIComponent(button.dataset.galleryInstall)}/install`, { method: "POST", body: { teamId: team.id } });
+      showToast("Template installed");
+      overlay.hidden = true;
+      await refreshTeamTemplateManager();
+    } catch (error) { showError(error); }
+  }));
+}
+
 function ensureTeamTemplateManageOverlay() {
   let overlay = document.getElementById("teamTemplateManageOverlay");
   if (overlay) return overlay;
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="teamTemplateManageOverlay" hidden>
     <div class="dialog shared-drafts-dialog" role="dialog" aria-modal="true" aria-labelledby="teamTemplateManageTitle">
       <div class="dialog-head"><div><p class="eyebrow">Team templates</p><h2 id="teamTemplateManageTitle">Manage templates</h2><p class="dialog-note" id="teamTemplateManageNote"></p></div><button class="icon-btn" id="teamTemplateManageClose" type="button" aria-label="Close template manager"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
-      <div class="dialog-body"><div class="automation-rule-list" id="teamTemplateManageList"></div><form id="teamTemplateForm"><input type="hidden" id="teamTemplateId"><div class="field-row"><label class="field"><span>Name</span><input id="teamTemplateName" required placeholder="Refund received"></label><label class="field"><span>Category</span><input id="teamTemplateCategory" placeholder="Billing"></label></div><label class="field"><span>Sending alias (optional)</span><input id="teamTemplateAlias" type="email" placeholder="billing@company.com"><small class="muted">Must be an active alias of the backing mailbox.</small></label><label class="field"><span>Subject</span><input id="teamTemplateSubject" placeholder="Refund for {{order_id}}"></label><label class="field"><span>Body</span><textarea id="teamTemplateBody" rows="5" placeholder="Hi {{name}}, …"></textarea></label><p class="settings-note">Variables use <code>{{name}}</code>. Version history is kept automatically.</p><div class="dialog-foot"><button class="btn-secondary" id="teamTemplateReset" type="button">Clear</button><button class="btn-primary" type="submit" id="teamTemplateSave">Save template</button></div></form></div>
+      <div class="dialog-body"><div class="automation-rule-list" id="teamTemplateManageList"></div><form id="teamTemplateForm"><input type="hidden" id="teamTemplateId"><div class="field-row"><label class="field"><span>Name</span><input id="teamTemplateName" required placeholder="Refund received"></label><label class="field"><span>Category</span><input id="teamTemplateCategory" placeholder="Billing"></label></div><label class="field"><span>Sending alias (optional)</span><input id="teamTemplateAlias" type="email" placeholder="billing@company.com"><small class="muted">Must be an active alias of the backing mailbox.</small></label><label class="field"><span>Subject</span><input id="teamTemplateSubject" placeholder="Refund for {{order_id}}"></label><label class="field"><span>Body</span><textarea id="teamTemplateBody" rows="5" placeholder="Hi {{name}}, …"></textarea></label><p class="settings-note">Variables use <code>{{name}}</code>. Version history is kept automatically.</p><div class="dialog-foot"><button class="btn-secondary" id="teamGalleryOpen" type="button">Browse gallery</button><button class="btn-secondary" id="teamTemplateReset" type="button">Clear</button><button class="btn-primary" type="submit" id="teamTemplateSave">Save template</button></div></form></div>
     </div>
   </div>`);
   overlay = document.getElementById("teamTemplateManageOverlay");
   overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
   document.getElementById("teamTemplateManageClose").addEventListener("click", () => { overlay.hidden = true; });
   document.getElementById("teamTemplateReset").addEventListener("click", resetTeamTemplateForm);
+  document.getElementById("teamGalleryOpen").addEventListener("click", () => openTemplateGallery(state.teamTemplateTeam).catch(showError));
   document.getElementById("teamTemplateForm").addEventListener("submit", (event) => { event.preventDefault(); saveTeamTemplate().catch(showError); });
   return overlay;
 }
@@ -16118,6 +16175,7 @@ function composeTemplate(session) {
         <button class="icon-btn" data-compose-action="template" type="button" aria-label="Insert team template" title="Insert team template"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></button>
         <button class="icon-btn" data-compose-action="meet" type="button" aria-label="Insert Jitsi meeting link" title="Insert Jitsi meeting link"><svg class="icon" aria-hidden="true"><use href="#i-video"/></svg></button>
         <button class="icon-btn" data-compose-action="merge" type="button" aria-label="Send as mail merge" title="Send as mail merge"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg></button>
+        <button class="icon-btn" data-compose-action="payment" type="button" aria-label="Insert payment link" title="Insert payment link"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></button>
         <button class="icon-btn" data-compose-action="attach" type="button" aria-label="Attach files" title="Attach files"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></button>
         <button class="icon-btn" data-compose-action="discard" type="button" aria-label="Discard draft" title="Discard draft"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>
       </div>
@@ -29074,6 +29132,7 @@ function bindEvents() {
       else if (kind === "template") { openTeamTemplatePicker(session); }
       else if (kind === "meet") { insertMeetingLink(session); }
       else if (kind === "merge") { openMailMergeDialog(session); }
+      else if (kind === "payment") { insertPaymentLink(session); }
       else if (kind === "mention") { openComposeMentionPicker(session); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
       else if (kind === "editor-light") { setEditorLight(session, !session.editorLight); }

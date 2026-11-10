@@ -154,6 +154,8 @@ type adminMailPolicy struct {
 	UndoSendSeconds           int      `json:"undoSendSeconds"`
 	RecipientWindowStartHour  int      `json:"recipientWindowStartHour"`
 	RecipientWindowEndHour    int      `json:"recipientWindowEndHour"`
+	PaymentLinksEnabled       bool     `json:"paymentLinksEnabled"`
+	PaymentLinkDomains        []string `json:"paymentLinkDomains"`
 }
 
 type adminSharingPolicy struct {
@@ -245,6 +247,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 			// review can turn on "Restrict Junk release to administrators".
 			RetentionDays: 0, Quarantine: false, ExternalTag: true,
 			UndoSendSeconds: 8, RecipientWindowStartHour: 9, RecipientWindowEndHour: 17,
+			PaymentLinksEnabled: false, PaymentLinkDomains: []string{"buy.stripe.com", "checkout.stripe.com", "paypal.me"},
 		},
 		Sharing:   adminSharingPolicy{ExternalSharing: true, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
 		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: true},
