@@ -18,23 +18,39 @@ type mailboxDelegation struct {
 	OwnerColor    string
 	CanRead       bool
 	CanSend       bool
+	TeamID        string
+	TeamName      string
+	TeamAddress   string
+	TeamStrategy  string
 }
 
 func (s *Server) delegationsFor(ctx context.Context, tenantID, delegateID string) []mailboxDelegation {
 	rows, err := s.store.DB.Query(ctx, `
 		WITH candidate_grants AS (
-			SELECT d.owner_user_id, d.can_read, d.can_send
+			SELECT d.owner_user_id, d.can_read, d.can_send,
+			       NULL::uuid AS team_id, NULL::text AS team_name,
+			       NULL::citext AS team_address, NULL::text AS team_strategy
 			FROM mailbox_delegates d
 			WHERE d.delegate_user_id = $1 AND d.tenant_id = $2
 			UNION ALL
-			SELECT g.owner_user_id, g.can_read, g.can_send
+			SELECT g.owner_user_id, g.can_read, g.can_send,
+			       NULL::uuid, NULL::text, NULL::citext, NULL::text
 			FROM mailbox_delegate_groups g
 			JOIN groups grp ON grp.id = g.group_id AND grp.tenant_id = g.tenant_id AND grp.status = 'active'
 			JOIN group_members gm ON gm.group_id = g.group_id AND gm.user_id = $1
 			WHERE g.tenant_id = $2
+			UNION ALL
+			SELECT tm.owner_user_id, true, tm.can_send,
+			       tm.id, tm.name, tm.address, tm.assignment_strategy
+			FROM team_mailboxes tm
+			JOIN groups grp ON grp.id = tm.group_id AND grp.tenant_id = tm.tenant_id AND grp.status = 'active'
+			JOIN group_members gm ON gm.group_id = tm.group_id AND gm.user_id = $1
+			WHERE tm.tenant_id = $2 AND tm.active
 		)
 		SELECT c.owner_user_id::text, u.name, u.email::text, u.initials, u.color,
-		       bool_or(c.can_read) AS can_read, bool_or(c.can_send) AS can_send
+		       bool_or(c.can_read) AS can_read, bool_or(c.can_send) AS can_send,
+		       COALESCE(max(c.team_id::text), ''), COALESCE(max(c.team_name), ''),
+		       COALESCE(max(c.team_address::text), ''), COALESCE(max(c.team_strategy), '')
 		FROM candidate_grants c
 		JOIN users u ON u.id = c.owner_user_id
 		WHERE u.deleted_at IS NULL AND u.status = 'active'
@@ -49,7 +65,8 @@ func (s *Server) delegationsFor(ctx context.Context, tenantID, delegateID string
 	result := []mailboxDelegation{}
 	for rows.Next() {
 		var item mailboxDelegation
-		if rows.Scan(&item.OwnerID, &item.OwnerName, &item.OwnerEmail, &item.OwnerInitials, &item.OwnerColor, &item.CanRead, &item.CanSend) == nil {
+		if rows.Scan(&item.OwnerID, &item.OwnerName, &item.OwnerEmail, &item.OwnerInitials, &item.OwnerColor,
+			&item.CanRead, &item.CanSend, &item.TeamID, &item.TeamName, &item.TeamAddress, &item.TeamStrategy) == nil {
 			result = append(result, item)
 		}
 	}
@@ -121,17 +138,31 @@ func (s *Server) applyDelegatedMailboxes(ctx context.Context, user userRecord, f
 			clone["delegateOwnerEmail"] = delegation.OwnerEmail
 			clone["delegateCanSend"] = delegation.CanSend
 			clone["delegateOriginalFolder"] = stateString(message, "folder")
+			if delegation.TeamID != "" {
+				clone["teamInboxId"] = delegation.TeamID
+				clone["teamName"] = delegation.TeamName
+			}
 			clone["attachments"] = delegatedAttachments(message["attachments"], delegation.OwnerID)
 			messages = append(messages, clone)
 			seen[delegatedID] = true
 		}
-		folders = append(folders, map[string]any{
-			"id": folderID, "label": delegation.OwnerName + " · Inbox",
+		folderLabel := delegation.OwnerName + " · Inbox"
+		folderMeta := map[string]any{
+			"id": folderID, "label": folderLabel,
 			"icon": "i-people", "section": "folders", "system": false, "delegated": true,
 			"delegateOwnerId": delegation.OwnerID, "delegateOwnerEmail": delegation.OwnerEmail,
 			"delegateCanSend": delegation.CanSend, "unread": unread, "total": total,
 			"badgeMode": "count", "order": nextOrder,
-		})
+		}
+		if delegation.TeamID != "" {
+			folderMeta["label"] = delegation.TeamName + " · Inbox"
+			folderMeta["teamInboxId"] = delegation.TeamID
+			folderMeta["teamName"] = delegation.TeamName
+			folderMeta["teamAddress"] = delegation.TeamAddress
+			folderMeta["teamStrategy"] = delegation.TeamStrategy
+			folderMeta["icon"] = "i-people"
+		}
+		folders = append(folders, folderMeta)
 		nextOrder++
 	}
 	return folders, messages

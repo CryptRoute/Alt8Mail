@@ -288,7 +288,7 @@ async function logout() {
 /* ------------------------------------------------------------
    Navigation / route
 ------------------------------------------------------------ */
-const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "provisioning", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "tenants", "settings"]);
+const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "team-inboxes", "org-units", "domains", "roles", "provisioning", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "tenants", "settings"]);
 
 function route() {
   if (!state.admin) return;
@@ -301,7 +301,7 @@ function route() {
   else if (view === "mailboxes" && parts[1] === "import") view = "import-mailboxes";
   state.routeParam = routeParam;
   state.view = views.has(view) ? view : "overview";
-  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", provisioning: "roles.manage", policies: "policies.read", addons: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
+  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "team-inboxes": "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", provisioning: "roles.manage", policies: "policies.read", addons: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
   if (required && !can(required)) { state.view = "overview"; location.hash = "#/overview"; return; }
   const navView = ["user-detail", "import-users", "import-mailboxes"].includes(state.view) ? "users" : state.view;
   $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === navView));
@@ -313,6 +313,7 @@ function route() {
     case "import-users": renderImportUsers(); break;
     case "import-mailboxes": renderImportMailboxes(); break;
     case "groups": renderGroups(); break;
+    case "team-inboxes": renderTeamInboxes(); break;
     case "org-units": renderOrgUnits(); break;
     case "domains": renderDomains(); break;
     case "roles": renderRoles(); break;
@@ -1087,6 +1088,75 @@ async function submitGroupForm(formId, groupId) {
     closeModal();
     renderGroups();
   }
+}
+
+/* ------------------------------------------------------------
+   Team inboxes
+------------------------------------------------------------ */
+async function renderTeamInboxes() {
+  loading("Team inboxes");
+  try {
+    const data = await api("team-inboxes");
+    state.teamInboxes = data.teamInboxes || [];
+    const items = state.teamInboxes;
+    $("#viewRoot").innerHTML = `
+      <div class="view-head"><div><h1>Team inboxes</h1><p>Shared queues backed by an organization mailbox, with group membership, assignment policy and SLA targets for ${esc(state.activeTenant.name)}.</p></div>${can("groups.manage") ? `<div class="view-actions"><button class="btn primary" data-action="new-team-inbox">${icon("plus")}Create team inbox</button></div>` : ""}</div>
+      ${items.length ? `<div class="entity-grid">${items.map((team) => `<article class="entity-card" data-team-inbox-id="${esc(team.id)}"><div class="entity-head"><span class="entity-icon">${icon("users")}</span><div class="entity-title"><b>${esc(team.name)}</b><small>${esc(team.address)}</small></div>${badge(team.active ? "active" : "archived")}</div><div class="entity-meta"><span>${esc(team.strategy === "round_robin" ? "Round-robin" : "Manual")}</span><span>·</span><span>${team.members} agent${team.members === 1 ? "" : "s"}</span><span class="spacer"></span>${team.slaFirstResponseMinutes ? `${team.slaFirstResponseMinutes}m SLA` : "No SLA"} ${icon("chevron-right")}</div></article>`).join("")}</div>` : `<div class="card card-pad"><div class="empty">${icon("users")}<h3>No team inboxes yet</h3><p>Create a shared inbox for a support, sales or operations group.</p></div></div>`}`;
+    $$("[data-team-inbox-id]").forEach((card) => card.addEventListener("click", () => openEditTeamInboxModal(state.teamInboxes.find((team) => team.id === card.dataset.teamInboxId))));
+  } catch (error) { viewError(error); }
+}
+
+async function openNewTeamInboxModal() {
+  try {
+    const data = await api("groups");
+    const groups = (data.groups || []).filter((group) => group.status === "active");
+    openModal({
+      title: "Create team inbox",
+      subtitle: "The owner mailbox stores the mail; the group controls who can work the queue.",
+      body: `<form id="newTeamInboxForm"><div class="field-row"><label class="field"><span>Name</span><input data-team-field="name" placeholder="Customer support" required></label><label class="field"><span>Queue address</span><input data-team-field="address" type="email" placeholder="support@company.com"></label></div><div class="field-row"><label class="field"><span>Backing mailbox owner</span><input data-team-field="ownerEmail" type="email" placeholder="support-mailbox@company.com" required><small class="muted">An active user with a mailbox in this organization.</small></label><label class="field"><span>Agent group</span><select data-team-field="groupId" required><option value="">Choose a group</option>${groups.map((group) => `<option value="${esc(group.id)}">${esc(group.name)} · ${esc(group.email)}</option>`).join("")}</select></label></div><div class="field-row"><label class="field"><span>Assignment</span><select data-team-field="assignmentStrategy"><option value="manual">Manual</option><option value="round_robin">Round-robin</option></select></label><label class="field"><span>First-response SLA (minutes)</span><input data-team-field="slaFirstResponseMinutes" type="number" min="0" max="10080" value="0"></label></div><div class="field-row"><label class="field"><span>Resolution SLA (minutes)</span><input data-team-field="slaResolutionMinutes" type="number" min="0" max="10080" value="0"></label><label class="check-field"><input data-team-field="canSend" type="checkbox" checked> Agents may send from this queue</label></div></form>`,
+      footer: `<button class="btn secondary" data-modal-close>Cancel</button><button class="btn primary" data-modal-submit="newTeamInboxForm">Create team inbox</button>`
+    });
+  } catch (error) { showError(error); }
+}
+
+function openEditTeamInboxModal(team) {
+  if (!team) return;
+  state.editingTeamInbox = team;
+  openModal({
+    title: "Edit team inbox",
+    subtitle: `${team.address} · owner and group are fixed after creation`,
+    body: `<form id="editTeamInboxForm"><div class="field-row"><label class="field"><span>Name</span><input data-team-edit-field="name" value="${esc(team.name)}" required></label><label class="field"><span>Queue address</span><input data-team-edit-field="address" type="email" value="${esc(team.address)}"></label></div><div class="field-row"><label class="field"><span>Agent group</span><input value="${esc(team.groupName)}" disabled></label><label class="field"><span>Backing owner</span><input value="${esc(team.ownerEmail)}" disabled></label></div><div class="field-row"><label class="field"><span>Assignment</span><select data-team-edit-field="assignmentStrategy"><option value="manual" ${team.strategy === "manual" ? "selected" : ""}>Manual</option><option value="round_robin" ${team.strategy === "round_robin" ? "selected" : ""}>Round-robin</option></select></label><label class="field"><span>First-response SLA (minutes)</span><input data-team-edit-field="slaFirstResponseMinutes" type="number" min="0" max="10080" value="${Number(team.slaFirstResponseMinutes || 0)}"></label></div><div class="field-row"><label class="field"><span>Resolution SLA (minutes)</span><input data-team-edit-field="slaResolutionMinutes" type="number" min="0" max="10080" value="${Number(team.slaResolutionMinutes || 0)}"></label><label class="check-field"><input data-team-edit-field="canSend" type="checkbox" ${team.canSend ? "checked" : ""}> Agents may send from this queue</label></div><label class="check-field"><input data-team-edit-field="active" type="checkbox" ${team.active ? "checked" : ""}> Team inbox is active</label></form>`,
+    footer: `<button class="btn danger" id="teamInboxDelete" type="button">${icon("trash")}Delete</button><span class="spacer"></span><button class="btn secondary" data-modal-close>Cancel</button><button class="btn primary" data-modal-submit="editTeamInboxForm">Save team inbox</button>`
+  });
+  $("#teamInboxDelete")?.addEventListener("click", async () => {
+    if (!(await confirmDialog("Delete team inbox", `“${team.name}” will stop appearing for its agents. Mail in the backing mailbox is not deleted.`, "Delete team inbox", true))) return;
+    try {
+      await api("team-inboxes/" + encodeURIComponent(team.id), { method: "DELETE" });
+      toast("Team inbox deleted");
+      closeModal();
+      renderTeamInboxes();
+    } catch (error) { showError(error); }
+  });
+}
+
+async function submitTeamInboxForm(formId, teamId) {
+  const form = $("#" + formId);
+  const body = {};
+  $$(teamId ? "[data-team-edit-field]" : "[data-team-field]", form).forEach((input) => {
+    const key = input.dataset.teamEditField || input.dataset.teamField;
+    if (input.type === "checkbox") body[key] = input.checked;
+    else if (input.type === "number") body[key] = Number(input.value || 0);
+    else body[key] = input.value.trim();
+  });
+  if (teamId) {
+    await api("team-inboxes/" + encodeURIComponent(teamId), { method: "PATCH", body });
+    toast("Team inbox updated");
+  } else {
+    await api("team-inboxes", { method: "POST", body });
+    toast("Team inbox created");
+  }
+  closeModal();
+  renderTeamInboxes();
 }
 
 /* ------------------------------------------------------------
@@ -2323,7 +2393,7 @@ function openCommandPalette() {
 function closeCommandPalette() { $("#commandPalette").hidden = true; $("#commandPalette").innerHTML = ""; }
 
 function paletteStatic() {
-  const items = [["overview", "Overview", "grid"], ["users", "Users", "users"], ["groups", "Groups", "group"], ["org-units", "Org units", "tree"], ["domains", "Domains", "globe"], ["roles", "Roles & access", "key"], ["policies", "Policies", "sliders"], ["addons", "Add-ons", "plug"], ["ai", "AI assistant", "sparkles"], ["quarantine", "Quarantine", "alert"], ["audit", "Audit log", "list"]];
+  const items = [["overview", "Overview", "grid"], ["users", "Users", "users"], ["groups", "Groups", "group"], ["team-inboxes", "Team inboxes", "users"], ["org-units", "Org units", "tree"], ["domains", "Domains", "globe"], ["roles", "Roles & access", "key"], ["policies", "Policies", "sliders"], ["addons", "Add-ons", "plug"], ["ai", "AI assistant", "sparkles"], ["quarantine", "Quarantine", "alert"], ["audit", "Audit log", "list"]];
   return items.map(([view, label, iconName]) => `<div class="palette-result" data-palette-nav="${view}">${icon(iconName)}<span>${label}</span></div>`).join("");
 }
 
@@ -2370,6 +2440,7 @@ document.addEventListener("click", async (event) => {
     if (action === "import-mailboxes") { location.hash = "#/mailboxes/import"; return; }
     if (action === "back-users") { location.hash = "#/users"; return; }
     if (action === "new-group") return openNewGroupModal();
+    if (action === "new-team-inbox") return openNewTeamInboxModal();
     if (action === "new-org-unit") return orgUnitModal();
     if (action === "new-domain") return openNewDomainModal();
     if (action === "new-role") return roleModal();
@@ -2406,6 +2477,8 @@ document.addEventListener("click", async (event) => {
       else if (formId === "editUserForm") await submitUserForm(formId, state.drawerUser?.id);
       else if (formId === "newGroupForm") await submitGroupForm(formId);
       else if (formId === "editGroupForm") await submitGroupForm(formId, state.group?.id);
+      else if (formId === "newTeamInboxForm") await submitTeamInboxForm(formId);
+      else if (formId === "editTeamInboxForm") await submitTeamInboxForm(formId, state.editingTeamInbox?.id);
       else if (formId === "newOrgUnitForm") await submitOrgUnitForm(formId);
       else if (formId === "editOrgUnitForm") await submitOrgUnitForm(formId, state.orgUnits?.find((unit) => unit.id === state.editingOrgUnitId)?.id);
       else if (formId === "newDomainForm") await submitDomainForm();

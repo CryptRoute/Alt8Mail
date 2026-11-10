@@ -182,6 +182,21 @@ func (s *Server) patchThreadMeta(w http.ResponseWriter, r *http.Request) {
 	if assignedProvided {
 		email := normalizeEmailValue(*body.AssignedTo)
 		if email != "" {
+			if team, isTeam := s.teamMailboxForOwner(r.Context(), owner.TenantID, owner.ID); isTeam {
+				var member bool
+				_ = s.store.DB.QueryRow(r.Context(), `
+					SELECT EXISTS(
+						SELECT 1 FROM public.group_members gm
+						JOIN public.users u ON u.id = gm.user_id
+						WHERE gm.group_id=$1 AND lower(u.email::text)=$2
+						  AND u.status='active' AND u.deleted_at IS NULL
+					)
+				`, team.GroupID, email).Scan(&member)
+				if !member {
+					writeError(w, http.StatusBadRequest, "THREAD_ASSIGNEE", "Choose an active agent in this team inbox")
+					return
+				}
+			}
 			if err := s.store.DB.QueryRow(r.Context(), `
 				SELECT id::text, name FROM public.users
 				WHERE tenant_id=$1 AND lower(email::text)=lower($2) AND status='active' AND deleted_at IS NULL
@@ -235,6 +250,9 @@ func (s *Server) patchThreadMeta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.audit(r, sess.User, "thread.meta_updated", threadID, "Updated handling: "+strings.Join(changes, ", "))
+	if body.Status != nil && nextStatus != "new" {
+		s.markTeamThreadResponded(r.Context(), owner.TenantID, owner.ID, threadID, sess.User.ID)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "meta": s.loadThreadMeta(r.Context(), owner.ID, threadID)})
 }
 

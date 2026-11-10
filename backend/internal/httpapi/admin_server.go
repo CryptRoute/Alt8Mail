@@ -175,6 +175,11 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /groups/{id}/members", s.adminRequirePermission("groups.manage", s.adminAddGroupMember))
 	mux.HandleFunc("DELETE /groups/{id}/members/{userId}", s.adminRequirePermission("groups.manage", s.adminRemoveGroupMember))
 
+	mux.HandleFunc("GET /team-inboxes", s.adminRequirePermission("groups.read", s.adminListTeamInboxes))
+	mux.HandleFunc("POST /team-inboxes", s.adminRequirePermission("groups.manage", s.adminCreateTeamInbox))
+	mux.HandleFunc("PATCH /team-inboxes/{id}", s.adminRequirePermission("groups.manage", s.adminUpdateTeamInbox))
+	mux.HandleFunc("DELETE /team-inboxes/{id}", s.adminRequirePermission("groups.manage", s.adminDeleteTeamInbox))
+
 	mux.HandleFunc("GET /org-units", s.adminRequirePermission("orgunits.read", s.adminListOrgUnits))
 	mux.HandleFunc("POST /org-units", s.adminRequirePermission("orgunits.manage", s.adminCreateOrgUnit))
 	mux.HandleFunc("PATCH /org-units/{id}", s.adminRequirePermission("orgunits.manage", s.adminUpdateOrgUnit))

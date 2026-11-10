@@ -972,6 +972,10 @@ const state = {
   delegatedMode: false,
   delegatedExpired: false,
   delegatedMailboxes: [],
+  teamInboxes: [],
+  teamQueue: [],
+  teamQueueTeam: "",
+  teamQueueFetchedAt: 0,
   delegatedSwitchOpen: false,
   delegatedSwitchQuery: "",
   delegatedHeartbeat: null,
@@ -5308,6 +5312,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.user = data.user;
   state.organizationName = data.organizationName || "";
   state.delegatedMailboxes = Array.isArray(data.delegatedMailboxes) ? data.delegatedMailboxes : [];
+  state.teamInboxes = Array.isArray(data.teamInboxes) ? data.teamInboxes : [];
   if (data.sessionKind === "delegated" || data.delegated === true) {
     state.delegatedMode = true;
     if (!state.delegatedSession) {
@@ -6143,6 +6148,35 @@ function canonicalThreadId(id) {
 
 function folderDef(folderId) {
   return state.folders.find((folder) => folder.id === folderId) || { id: folderId, label: FOLDER_LABELS[folderId] || folderId, icon: "i-folder" };
+}
+
+function teamInboxForFolder(folder) {
+  if (!folder || !Array.isArray(state.teamInboxes)) return null;
+  if (folder.teamInboxId) return state.teamInboxes.find((team) => team.id === folder.teamInboxId) || null;
+  if (folder.delegateOwnerId) return state.teamInboxes.find((team) => team.ownerId === folder.delegateOwnerId) || null;
+  return null;
+}
+
+function teamInboxForOwner(ownerId) {
+  if (!ownerId || !Array.isArray(state.teamInboxes)) return null;
+  return state.teamInboxes.find((team) => team.ownerId === ownerId) || null;
+}
+
+function refreshTeamQueue(team, force = false) {
+  if (!team) return;
+  if (!force && state.teamQueueTeam === team.id && Date.now() - state.teamQueueFetchedAt < 8000) return;
+  state.teamQueueTeam = team.id;
+  state.teamQueueFetchedAt = Date.now();
+  api(`/api/team-inboxes/${encodeURIComponent(team.id)}/queue`)
+    .then((data) => {
+      if (state.teamQueueTeam !== team.id) return;
+      state.teamQueue = Array.isArray(data.queue) ? data.queue : [];
+      renderList({ preserveScroll: true });
+      renderReader({ preserveScroll: true });
+    })
+    .catch(() => {
+      state.teamQueueFetchedAt = 0;
+    });
 }
 
 function ensureSubscriptionsFolder() {
@@ -9324,6 +9358,26 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
   const page = currentMailPage();
   const def = folderDef(state.folder);
   listTitle.textContent = state.query ? "Search results" : def.label;
+  let teamBadge = document.getElementById("teamInboxBadge");
+  if (!teamBadge) {
+    listTitle.insertAdjacentHTML("afterend", '<span class="team-inbox-badge" id="teamInboxBadge" hidden></span>');
+    teamBadge = document.getElementById("teamInboxBadge");
+  }
+  const teamInbox = teamInboxForFolder(def);
+  if (teamInbox) {
+    const sla = Number(teamInbox.slaFirstResponseMinutes || 0);
+    const loaded = state.teamQueueTeam === teamInbox.id;
+    const unassigned = loaded ? state.teamQueue.filter((entry) => !entry.assignedTo).length : null;
+    const breached = loaded ? state.teamQueue.filter((entry) => entry.sla?.state === "breached").length : 0;
+    teamBadge.textContent = `Shared${unassigned != null ? ` · ${unassigned} unassigned` : ` · ${teamInbox.members || 1} agent${Number(teamInbox.members) === 1 ? "" : "s"}`}${breached ? ` · ${breached} breached` : sla ? ` · ${sla}m first response` : ""}`;
+    teamBadge.title = `${teamInbox.name} (${teamInbox.address}) · ${String(teamInbox.strategy || "manual").replace("_", " ")}`;
+    teamBadge.hidden = false;
+    refreshTeamQueue(teamInbox);
+  } else {
+    teamBadge.hidden = true;
+    state.teamQueue = [];
+    state.teamQueueTeam = "";
+  }
   const scopeCount = state.viewScope.length;
   const pageTotal = state.query
     ? scopeCount
@@ -9769,7 +9823,7 @@ function collabStatusLabel(status) {
   return status === "in_progress" ? "In progress" : status === "done" ? "Done" : "New";
 }
 
-function collabAssigneeOptions(meta) {
+function collabAssigneeOptions(meta, team = null) {
   const assignedEmail = normalizeEmail(meta?.assignedTo?.email || "");
   const seen = new Set();
   const options = [`<option value=""${assignedEmail ? "" : " selected"}>Unassigned</option>`];
@@ -9778,8 +9832,10 @@ function collabAssigneeOptions(meta) {
     seen.add(email);
     options.push(`<option value="${esc(email)}"${assignedEmail === email ? " selected" : ""}>Me · ${esc(state.user.name || email)}</option>`);
   }
-  for (const person of state.people || []) {
-    if (person.source !== "directory") continue;
+  const people = team?.agents?.length
+    ? team.agents
+    : (state.people || []).filter((person) => person.source === "directory");
+  for (const person of people) {
     const email = normalizeEmail(person.email);
     if (!email || seen.has(email)) continue;
     seen.add(email);
@@ -9797,13 +9853,18 @@ function threadCollabMarkup(thread) {
   const meta = threadMetaForThread(thread) || { status: "new", closed: false };
   const status = meta.status || "new";
   const closed = meta.closed === true;
-  return `<div class="thread-collab-bar" data-collab-owner="${esc(ownerId)}" data-collab-thread="${esc(thread.id)}">
+  const team = teamInboxForOwner(ownerId);
+  const queue = team ? state.teamQueue?.find((entry) => entry.threadId === thread.id) : null;
+  const sla = queue?.sla?.state || "";
+  return `<div class="thread-collab-bar" data-collab-owner="${esc(ownerId)}" data-collab-thread="${esc(thread.id)}"${team ? ` data-collab-team="${esc(team.id)}"` : ""}>
       <div class="collab-field"><span>Handling</span><select data-thread-status aria-label="Conversation handling status">
         ${["new", "in_progress", "done"].map((value) => `<option value="${value}"${status === value ? " selected" : ""}>${esc(collabStatusLabel(value))}</option>`).join("")}
       </select></div>
-      <div class="collab-field"><span>Assigned</span><select data-thread-assignee aria-label="Assign conversation">${collabAssigneeOptions(meta)}</select></div>
+      <div class="collab-field"><span>Assigned</span><select data-thread-assignee aria-label="Assign conversation">${collabAssigneeOptions(meta, team)}</select></div>
+      ${team ? `<button class="collab-action" data-thread-claim type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Claim</button>` : ""}
       <button class="collab-action${closed ? " is-reopen" : ""}" data-thread-close type="button">${closed ? "Reopen conversation" : "Close conversation"}</button>
       <button class="collab-action" data-thread-notes-toggle type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Team notes</button>
+      ${team ? `<span class="collab-chip" title="${esc(team.name)} · ${esc(team.strategy === "round_robin" ? "round-robin" : "manual")} assignment">Shared inbox${sla ? ` · ${esc(sla.replace("_", " "))}` : ""}</span>` : ""}
       ${closed ? '<span class="collab-chip is-closed"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Closed</span>' : ""}
     </div>
     <div class="thread-notes-panel" data-thread-notes-panel data-owner-id="${esc(ownerId)}" data-thread-id="${esc(thread.id)}" hidden></div>`;
@@ -27719,6 +27780,25 @@ function bindEvents() {
     if (unsubscribeButton) {
       const message = messageById(unsubscribeButton.getAttribute("data-unsubscribe"));
       if (message) requestUnsubscribe(message, unsubscribeButton);
+      return;
+    }
+    const claimButton = event.target.closest("[data-thread-claim]");
+    if (claimButton) {
+      const bar = claimButton.closest(".thread-collab-bar");
+      const thread = bar ? threadById(bar.getAttribute("data-collab-thread")) : null;
+      const teamId = bar?.getAttribute("data-collab-team") || "";
+      if (bar && thread && teamId) {
+        api(`/api/team-inboxes/${encodeURIComponent(teamId)}/threads/${encodeURIComponent(thread.id)}/assign`, {
+          method: "POST", body: { assignee: state.user?.email || "" }
+        }).then((data) => {
+          const ownerId = bar.getAttribute("data-collab-owner");
+          if (data?.meta) state.threadMeta.set(threadMetaKey(ownerId, thread.id), data.meta);
+          refreshTeamQueue(teamInboxForOwner(ownerId), true);
+          renderList({ preserveScroll: true });
+          renderReader({ preserveScroll: true });
+          showToast("Conversation claimed.");
+        }).catch(showError);
+      }
       return;
     }
     const threadCloseButton = event.target.closest("[data-thread-close]");

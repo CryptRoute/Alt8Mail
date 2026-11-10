@@ -1630,3 +1630,19 @@
 @media (prefers-reduced-motion: reduce) {
   .msg.is-removing { animation-duration: .01ms; }
 }
+
+.team-inbox-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-height: 20px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}

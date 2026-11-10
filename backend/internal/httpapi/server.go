@@ -430,6 +430,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/catch-up", s.requireUser(s.catchUpSummary))
 	mux.HandleFunc("GET /api/messages/{id}/trust-explanation", s.requireUser(s.messageTrustExplanation))
 	s.registerCollaborationRoutes(mux)
+	s.registerTeamInboxRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)
@@ -913,6 +914,10 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		recentAudit = recentAudit[:12]
 	}
 	threadMeta := s.collaborationThreadMeta(ctx, sess.User)
+	teamInboxes := []map[string]any{}
+	if s.entitled("shared_inbox") {
+		teamInboxes = s.teamMailboxesForUser(ctx, sess.User)
+	}
 	serverNotifications := s.loadMailNotifications(ctx, sess.User.ID, 50)
 	unsubscribeActions := s.loadUnsubscribeActions(ctx, sess.User.ID)
 	mailSync := map[string]any{
@@ -934,6 +939,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"signatures":       signatures,
 		"labels":           labels,
 		"folders":          folders,
+		"teamInboxes":      teamInboxes,
 		"people":           people,
 		"messages":         messages,
 		"mailPage": map[string]any{
