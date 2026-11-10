@@ -1222,10 +1222,25 @@ async function renderDomains() {
   try {
     const data = await api("domains");
     const domains = data.domains || [];
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Domains</h1><p>Mail domains, DNS ownership and authentication records for ${esc(state.activeTenant.name)}.</p></div>${can("domains.manage") ? `<div class="view-actions"><button class="btn primary" data-action="new-domain">${icon("plus")}Add domain</button></div>` : ""}</div><div class="entity-grid">${domains.map(domainCard).join("") || `<div class="card card-pad"><div class="empty">${icon("globe")}<h3>No domains</h3><p>Add the domain your organization sends and receives mail on.</p></div></div>`}</div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Domains</h1><p>Mail domains, DNS ownership and authentication records for ${esc(state.activeTenant.name)}.</p></div>${can("domains.manage") ? `<div class="view-actions"><button class="btn primary" data-action="new-domain">${icon("plus")}Add domain</button></div>` : ""}</div><div class="entity-grid">${domains.map(domainCard).join("") || `<div class="card card-pad"><div class="empty">${icon("globe")}<h3>No domains</h3><p>Add the domain your organization sends and receives mail on.</p></div></div>`}</div><div class="card" style="margin-top:16px"><div class="card-head"><div><h2>DMARC aggregate reports</h2><p>Aggregated authentication outcomes from the last 30 days. A pass rate below 90% with failures raises an alert.</p></div></div><div class="card-pad" id="dmarcSummary"><div class="settings-note">Loading DMARC summary…</div></div></div>`;
     state.domains = domains;
+    loadDMARCSummary().catch(() => {});
     $$("[data-domain-id]").forEach((card) => card.addEventListener("click", () => openDomainDrawer(card.dataset.domainId)));
   } catch (error) { viewError(error); }
+}
+
+async function loadDMARCSummary() {
+  const host = $("#dmarcSummary");
+  if (!host) return;
+  try {
+    const data = await api("dmarc/summary?days=30");
+    const totals = data.totals || {};
+    const domains = data.domains || [];
+    const failing = data.failingSources || [];
+    host.innerHTML = `<div class="detail-list"><div class="detail-row"><span>Messages evaluated</span><b>${totals.messages || 0}</b></div><div class="detail-row"><span>DMARC pass rate</span><b>${Number(totals.passRate || 0).toFixed(1)}%</b></div><div class="detail-row"><span>Failures</span><b>${totals.fail || 0}</b></div></div>${domains.length ? `<div class="mini-section"><h3>By domain</h3>${domains.map((item) => `<div class="detail-row"><span>${esc(item.domain)} ${item.alert ? `<span class="badge warning">Alert</span>` : ""}</span><b>${item.messages} messages · ${Number(item.passRate).toFixed(1)}% pass</b></div>`).join("")}</div>` : `<div class="empty-mini">No aggregate reports ingested yet.</div>`}${failing.length ? `<div class="mini-section"><h3>Top failing sources</h3>${failing.slice(0, 8).map((item) => `<div class="detail-row"><span>${esc(item.sourceIp || "Unknown")} · ${esc(item.domain)}</span><b>${item.count} messages</b></div>`).join("")}</div>` : ""}`;
+  } catch (error) {
+    host.innerHTML = `<div class="settings-note">DMARC summary is unavailable: ${esc(error.message)}</div>`;
+  }
 }
 
 function domainCard(domain) {
@@ -1559,6 +1574,7 @@ function policySections(policy) {
       <div class="setting-row"><div class="setting-copy"><b>Recipient working hours</b><small>Used for recipient-time suggestions. Hours are local to the recipient.</small></div><div class="setting-control" style="display:flex;gap:6px"><input class="input" type="number" min="0" max="23" data-policy-input="mail.recipientWindowStartHour" value="${Number(mail.recipientWindowStartHour) || 9}"><input class="input" type="number" min="1" max="24" data-policy-input="mail.recipientWindowEndHour" value="${Number(mail.recipientWindowEndHour) || 17}"></div></div>
       ${toggleRow("Payment links", "Allow HTTPS payment links from the approved hosts to be inserted from compose.", "mail.paymentLinksEnabled", mail.paymentLinksEnabled)}
       <div class="setting-row"><div class="setting-copy"><b>Payment link hosts</b><small>Comma-separated hostnames. Subdomains are allowed.</small></div><div class="setting-control"><input class="input" data-policy-input="mail.paymentLinkDomains" value="${esc((mail.paymentLinkDomains || []).join(", "))}" placeholder="buy.stripe.com, paypal.me"></div></div>
+      ${toggleRow("Campaign tracking", "Opt in to transparent open receipts and link clicks for mail merges. Tracking is disclosed in the message and disabled by default.", "mail.campaignTrackingEnabled", mail.campaignTrackingEnabled)}
     </div>
   </section>
   <section class="card policy-panel" data-policy-panel="sharing">

@@ -156,6 +156,7 @@ type adminMailPolicy struct {
 	RecipientWindowEndHour    int      `json:"recipientWindowEndHour"`
 	PaymentLinksEnabled       bool     `json:"paymentLinksEnabled"`
 	PaymentLinkDomains        []string `json:"paymentLinkDomains"`
+	CampaignTrackingEnabled   bool     `json:"campaignTrackingEnabled"`
 }
 
 type adminSharingPolicy struct {
@@ -248,6 +249,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 			RetentionDays: 0, Quarantine: false, ExternalTag: true,
 			UndoSendSeconds: 8, RecipientWindowStartHour: 9, RecipientWindowEndHour: 17,
 			PaymentLinksEnabled: false, PaymentLinkDomains: []string{"buy.stripe.com", "checkout.stripe.com", "paypal.me"},
+			CampaignTrackingEnabled: false,
 		},
 		Sharing:   adminSharingPolicy{ExternalSharing: true, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
 		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: true},

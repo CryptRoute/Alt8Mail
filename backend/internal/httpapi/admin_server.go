@@ -167,6 +167,8 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /mail-import/jobs/{id}/mapping", s.adminRequirePermission("users.update", s.adminMailImportMapping))
 	mux.HandleFunc("POST /mail-import/jobs/{id}/cancel", s.adminRequirePermission("users.update", s.adminMailImportCancel))
 
+	s.registerDMARCRoutes(mux)
+
 	mux.HandleFunc("GET /groups", s.adminRequirePermission("groups.read", s.adminListGroups))
 	mux.HandleFunc("POST /groups", s.adminRequirePermission("groups.manage", s.adminCreateGroup))
 	mux.HandleFunc("GET /groups/{id}", s.adminRequirePermission("groups.read", s.adminGetGroup))

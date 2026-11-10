@@ -445,6 +445,7 @@ func (s *Server) queueMailMerge(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rows.Close()
+	policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
 	suppressed := map[string]bool{}
 	suppRows, _ := s.store.DB.Query(r.Context(), `SELECT email::text FROM public.mail_suppressions WHERE user_id=$1`, sess.User.ID)
 	if suppRows != nil {
@@ -472,6 +473,10 @@ func (s *Server) queueMailMerge(w http.ResponseWriter, r *http.Request) {
 			Email: recipient.Email, Name: recipient.Name, Variables: recipient.Variables,
 		}, subject, bodyText, bodyHTML, unsubscribeURL)
 		outboxID := newID("send")
+		trackingID := ""
+		if policy.Mail.CampaignTrackingEnabled && renderedHTML != "" {
+			renderedHTML, trackingID, _ = s.addCampaignTracking(r.Context(), sess.User, mergeID, outboxID, recipient.Email, renderedHTML, s.publicBaseURL(r))
+		}
 		toJSON, _ := json.Marshal([]map[string]any{{"email": recipient.Email, "name": recipient.Name}})
 		fromJSON, _ := json.Marshal(map[string]any{"name": sess.User.Name, "email": fromEmail})
 		sendAt := base.Add(time.Duration(index*throttle) * time.Second)
@@ -485,6 +490,9 @@ func (s *Server) queueMailMerge(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			_, _ = s.store.DB.Exec(r.Context(), `UPDATE public.mail_merge_recipients SET status='failed', error=$2, updated_at=now() WHERE id=$1`, recipient.ID, truncate(err.Error(), 300))
 			continue
+		}
+		if trackingID != "" {
+			_, _ = s.store.DB.Exec(r.Context(), `UPDATE public.campaign_tracking SET outbox_id=$2 WHERE id=$1`, trackingID, outboxID)
 		}
 		_, _ = s.store.DB.Exec(r.Context(), `UPDATE public.mail_merge_recipients SET status='queued', outbox_id=$2, updated_at=now() WHERE id=$1`, recipient.ID, outboxID)
 		queued++
