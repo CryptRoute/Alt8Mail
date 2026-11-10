@@ -2,8 +2,10 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -19,7 +21,21 @@ import (
 // A real signed token is a few hundred bytes; anything larger is invalid.
 const licenseTokenMaxBytes = 64 << 10
 
+// licenseFileMode keeps the token root-owned but group-readable so the a8m
+// webmail can load the same file. The Control service writes it; the webmail
+// only reads it.
+const licenseFileMode os.FileMode = 0o640
+
 var errLicenseFileTooLarge = errors.New("license file exceeds the size limit")
+
+// licenseFileOwner describes the uid/gid to install on the license file.
+// apply is false on non-root development installs and Windows, where chown is
+// skipped and the 0640 mode is used as-is.
+type licenseFileOwner struct {
+	uid   int
+	gid   int
+	apply bool
+}
 
 // licenseStatus is the non-secret Control Plane view of the shared license
 // file. It never contains the token or signature. error is one of the fixed
@@ -62,7 +78,7 @@ func (s *Server) handleLicenseUpload(w http.ResponseWriter, r *http.Request, ses
 	var body struct {
 		Token string `json:"token"`
 	}
-	if err := decodeJSON(w, r, &body, licenseTokenMaxBytes); err != nil {
+	if err := decodeLicenseUpload(w, r, &body, licenseTokenMaxBytes); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			writeError(w, http.StatusRequestEntityTooLarge, "LICENSE_TOO_LARGE", "License tokens must be 64 KiB or smaller")
@@ -104,6 +120,27 @@ func (s *Server) handleLicenseUpload(w http.ResponseWriter, r *http.Request, ses
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "restartRequired": true, "license": status,
 	})
+}
+
+// decodeLicenseUpload additionally requires a clean EOF after the JSON object.
+// Without the second decode, a valid object followed by trailing bytes beyond
+// the request limit could otherwise be accepted after only the prefix was
+// read, bypassing the 64 KiB body cap.
+func decodeLicenseUpload(w http.ResponseWriter, r *http.Request, target any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("unexpected trailing JSON")
+		}
+		return err
+	}
+	return nil
 }
 
 // licenseStatus reads and verifies the license file on every call. The file is
@@ -240,7 +277,8 @@ func (s *Server) licenseSeatUsage(ctx context.Context, tenant string) (int, []ma
 		var used int
 		err := s.db.QueryRow(ctx, `
 			SELECT count(*) FROM public.users
-			WHERE status = 'active' AND deleted_at IS NULL AND tenant_id = $1::uuid
+			WHERE status = 'active' AND deleted_at IS NULL
+			  AND is_system_admin = false AND tenant_id = $1::uuid
 		`, tenant).Scan(&used)
 		if err != nil {
 			return 0, byTenant, err
@@ -253,6 +291,7 @@ func (s *Server) licenseSeatUsage(ctx context.Context, tenant string) (int, []ma
 		FROM public.tenants t
 		LEFT JOIN public.users u
 		  ON u.tenant_id = t.id AND u.status = 'active' AND u.deleted_at IS NULL
+		 AND u.is_system_admin = false
 		GROUP BY t.id, t.name
 		ORDER BY lower(t.name), t.name, t.id
 	`)
@@ -297,13 +336,20 @@ func readLicenseTokenFile(path string) ([]byte, error) {
 // writeLicenseToken is the handler-facing method; the package-level helper is
 // directly testable because it does not depend on Server state.
 func (s *Server) writeLicenseToken(path, publicKey, token string) error {
-	return writeLicenseToken(path, publicKey, token)
+	return writeLicenseTokenFile(path, publicKey, token, s.cfg.LicenseGroup, s.logger)
 }
 
 // writeLicenseToken verifies the envelope and only then replaces the shared
 // license file. Every failure path (bad key, malformed, wrong key, expired,
-// write error) leaves the previous file byte-for-byte intact.
+// write error) leaves the previous file byte-for-byte intact. This helper uses
+// the root group so unit tests do not depend on an installed a8m group;
+// production always goes through Server.writeLicenseToken and its configured
+// group.
 func writeLicenseToken(path, publicKey, token string) error {
+	return writeLicenseTokenFile(path, publicKey, token, "0", nil)
+}
+
+func writeLicenseTokenFile(path, publicKey, token, group string, logger *slog.Logger) error {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return fail(http.StatusServiceUnavailable, "LICENSE_NOT_CONFIGURED",
@@ -325,7 +371,7 @@ func writeLicenseToken(path, publicKey, token string) error {
 	if license.Status(time.Now()).Expired {
 		return fail(http.StatusBadRequest, "LICENSE_EXPIRED", "That license token has expired")
 	}
-	return writeLicenseFileAtomic(path, token)
+	return writeLicenseFileAtomic(path, token, group, logger)
 }
 
 func licenseUploadError(err error) error {
@@ -340,8 +386,14 @@ func licenseUploadError(err error) error {
 	}
 }
 
-func writeLicenseFileAtomic(path, token string) error {
+func writeLicenseFileAtomic(path, token, group string, logger *slog.Logger) error {
 	dir := filepath.Dir(path)
+	owner, err := resolveLicenseFileOwner(path, group)
+	if err != nil {
+		// Production Control runs as root; if the a8m group cannot be resolved
+		// the webmail would not be able to read the installed file.
+		return fail(http.StatusInternalServerError, "LICENSE_WRITE", "Could not write the license file")
+	}
 	tmp, err := os.CreateTemp(dir, ".license-token-*.tmp")
 	if err != nil {
 		return fail(http.StatusInternalServerError, "LICENSE_WRITE", "Could not write the license file")
@@ -355,13 +407,18 @@ func writeLicenseFileAtomic(path, token string) error {
 		}
 	}()
 
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Chmod(licenseFileMode); err != nil {
 		return fail(http.StatusInternalServerError, "LICENSE_WRITE", "Could not write the license file")
 	}
 	if _, err := tmp.WriteString(token); err != nil {
 		return fail(http.StatusInternalServerError, "LICENSE_WRITE", "Could not write the license file")
 	}
 	if err := tmp.Sync(); err != nil {
+		return fail(http.StatusInternalServerError, "LICENSE_WRITE", "Could not write the license file")
+	}
+	// Ownership is applied to the temporary inode before rename so the target
+	// never briefly exists with the wrong owner.
+	if err := owner.applyTo(name); err != nil {
 		return fail(http.StatusInternalServerError, "LICENSE_WRITE", "Could not write the license file")
 	}
 	if err := tmp.Close(); err != nil {
@@ -372,11 +429,17 @@ func writeLicenseFileAtomic(path, token string) error {
 	}
 	renamed = true
 
-	// Best-effort directory sync so the rename survives a crash. Some
-	// platforms (notably Windows) do not permit syncing a directory handle;
-	// the token itself is already fsynced above.
-	if dirHandle, err := os.Open(dir); err == nil {
-		_ = dirHandle.Sync()
+	// Directory sync so the rename survives a crash. Some platforms (notably
+	// Windows) do not permit syncing a directory handle; the token itself is
+	// already fsynced above, so this failure is logged but not fatal.
+	if dirHandle, err := os.Open(dir); err != nil {
+		if logger != nil {
+			logger.Warn("license directory sync skipped", "dir", dir, "err", err)
+		}
+	} else {
+		if err := dirHandle.Sync(); err != nil && logger != nil {
+			logger.Warn("license directory sync failed", "dir", dir, "err", err)
+		}
 		_ = dirHandle.Close()
 	}
 	return nil

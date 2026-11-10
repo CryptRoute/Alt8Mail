@@ -55,6 +55,7 @@ type Config struct {
 	OfficeSecretFile      string
 	LicenseFile           string
 	LicensePublicKey      string
+	LicenseGroup          string
 	LicenseWarningPercent int
 	IngestInterval        time.Duration
 	HealthInterval        time.Duration
@@ -111,7 +112,8 @@ func LoadConfig() (Config, error) {
 		// an upload here is the file the webmail loads after its next restart.
 		LicenseFile:           env("CONTROL_LICENSE_FILE", "/etc/a8m/license.token"),
 		LicensePublicKey:      strings.TrimSpace(os.Getenv("CONTROL_LICENSE_PUBLIC_KEY")),
-		LicenseWarningPercent: envInt("CONTROL_LICENSE_WARNING_PERCENT", 80),
+		LicenseGroup:          env("CONTROL_LICENSE_GROUP", "a8m"),
+		LicenseWarningPercent: 80,
 		IngestInterval:        envDuration("CONTROL_INGEST_INTERVAL", 8*time.Second),
 		HealthInterval:        envDuration("CONTROL_HEALTH_INTERVAL", 15*time.Second),
 		MetricsInterval:       envDuration("CONTROL_METRICS_INTERVAL", 5*time.Second),
@@ -129,7 +131,15 @@ func LoadConfig() (Config, error) {
 	}
 	// A missing license file or public key is a valid OSS deployment and must
 	// never stop System Control from starting; only a malformed percentage is
-	// a hard configuration error.
+	// a hard configuration error. An explicitly set value must parse: 0 and
+	// non-numeric input are rejected instead of silently becoming 80.
+	if raw := strings.TrimSpace(os.Getenv("CONTROL_LICENSE_WARNING_PERCENT")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			return cfg, fmt.Errorf("CONTROL_LICENSE_WARNING_PERCENT must be a number between 1 and 100")
+		}
+		cfg.LicenseWarningPercent = parsed
+	}
 	if cfg.LicenseWarningPercent < 1 || cfg.LicenseWarningPercent > 100 {
 		return cfg, fmt.Errorf("CONTROL_LICENSE_WARNING_PERCENT must be between 1 and 100")
 	}

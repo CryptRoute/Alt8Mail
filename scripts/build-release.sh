@@ -112,6 +112,10 @@ CONTROL_OFFICE_IMAGE=onlyoffice/documentserver:9.4.0.1
 CONTROL_OFFICE_JWT_SECRET_FILE=/etc/a8m/office-jwt-secret
 CONTROL_RETENTION_DAYS=365
 CONTROL_TRUSTED_PROXY=false
+CONTROL_LICENSE_FILE=/etc/a8m/license.token
+CONTROL_LICENSE_GROUP=a8m
+CONTROL_LICENSE_PUBLIC_KEY=
+CONTROL_LICENSE_WARNING_PERCENT=80
 EOF
 
 # Normalize line endings for text files. The repository is edited on Windows

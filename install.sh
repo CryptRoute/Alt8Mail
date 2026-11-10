@@ -33,11 +33,15 @@ SECRETS_DIR=$INSTALL_ROOT/secrets
 RELEASES_DIR=$INSTALL_ROOT/releases
 SERVICE_USER=a8m
 LOG_FILE=/var/log/a8m-install.log
+LICENSE_FILE="${A8M_LICENSE_FILE:-/etc/a8m/license.token}"
+LICENSE_PUBLIC_KEY="${A8M_LICENSE_PUBLIC_KEY:-}"
+LICENSE_GROUP="${A8M_LICENSE_GROUP:-a8m}"
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 warn() { printf '[%s] WARNING: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 die() { printf '[%s] ERROR: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
 env_file_value() { grep -E "^${1}=" "$CONFIG_ROOT/app.env" 2>/dev/null | tail -n1 | cut -d= -f2- || true; }
+control_env_value() { grep -E "^${1}=" "$CONFIG_ROOT/control.env" 2>/dev/null | tail -n1 | cut -d= -f2- || true; }
 restore_env_file_value() {
   local key="$1" value="$2"
   [[ -n "$value" ]] || return 0
@@ -66,7 +70,8 @@ Options:
 
 Environment equivalents: A8M_DOMAIN, A8M_MAIL_HOSTNAME, A8M_ADMIN_EMAIL,
 A8M_ADMIN_NAME, A8M_CONTROL_EMAIL, A8M_TENANT_NAME, A8M_TENANT_SLUG,
-A8M_TLS_MODE, A8M_TLS_EMAIL.
+A8M_TLS_MODE, A8M_TLS_EMAIL, A8M_LICENSE_FILE, A8M_LICENSE_PUBLIC_KEY,
+A8M_LICENSE_GROUP.
 USAGE
 }
 
@@ -506,7 +511,32 @@ if [[ -f "$CONFIG_ROOT/app.env" ]]; then
   PRESERVE_ADDON_RELAY_URL="$(env_file_value ALT8MAIL_ADDON_RELAY_URL)"
   PRESERVE_ADDON_RELAY_SECRET="$(env_file_value ALT8MAIL_ADDON_RELAY_SECRET)"
   PRESERVE_ADDON_GATEWAY_URL="$(env_file_value ALT8MAIL_ADDON_GATEWAY_URL)"
+  PRESERVE_ALT8MAIL_LICENSE_FILE="$(env_file_value ALT8MAIL_LICENSE_FILE)"
+  PRESERVE_ALT8MAIL_LICENSE_PUBLIC_KEY="$(env_file_value ALT8MAIL_LICENSE_PUBLIC_KEY)"
 fi
+PRESERVE_CONTROL_LICENSE_FILE=""
+PRESERVE_CONTROL_LICENSE_PUBLIC_KEY=""
+PRESERVE_CONTROL_LICENSE_GROUP=""
+PRESERVE_CONTROL_LICENSE_WARNING_PERCENT=""
+if [[ -f "$CONFIG_ROOT/control.env" ]]; then
+  PRESERVE_CONTROL_LICENSE_FILE="$(control_env_value CONTROL_LICENSE_FILE)"
+  PRESERVE_CONTROL_LICENSE_PUBLIC_KEY="$(control_env_value CONTROL_LICENSE_PUBLIC_KEY)"
+  PRESERVE_CONTROL_LICENSE_GROUP="$(control_env_value CONTROL_LICENSE_GROUP)"
+  PRESERVE_CONTROL_LICENSE_WARNING_PERCENT="$(control_env_value CONTROL_LICENSE_WARNING_PERCENT)"
+fi
+
+# The Control Plane and webmail share one token file. Keep manually configured
+# values across reinstalls; seed the webmail path from the Control path only
+# when a license file already exists so a fresh OSS install stays untouched.
+CONTROL_LICENSE_FILE="${PRESERVE_CONTROL_LICENSE_FILE:-$LICENSE_FILE}"
+CONTROL_LICENSE_GROUP="${PRESERVE_CONTROL_LICENSE_GROUP:-$LICENSE_GROUP}"
+CONTROL_LICENSE_PUBLIC_KEY="${LICENSE_PUBLIC_KEY:-$PRESERVE_CONTROL_LICENSE_PUBLIC_KEY}"
+CONTROL_LICENSE_WARNING_PERCENT="${PRESERVE_CONTROL_LICENSE_WARNING_PERCENT:-80}"
+APP_LICENSE_FILE="${PRESERVE_ALT8MAIL_LICENSE_FILE:-}"
+if [[ -z "$APP_LICENSE_FILE" && -f "$CONTROL_LICENSE_FILE" ]]; then
+  APP_LICENSE_FILE="$CONTROL_LICENSE_FILE"
+fi
+APP_LICENSE_PUBLIC_KEY="${LICENSE_PUBLIC_KEY:-${PRESERVE_ALT8MAIL_LICENSE_PUBLIC_KEY:-$PRESERVE_CONTROL_LICENSE_PUBLIC_KEY}}"
 
 cat > "$CONFIG_ROOT/app.env" <<EOF
 ALT8MAIL_ENV=production
@@ -567,6 +597,8 @@ fi
 restore_env_file_value ALT8MAIL_ADDON_RELAY_URL "$PRESERVE_ADDON_RELAY_URL"
 restore_env_file_value ALT8MAIL_ADDON_RELAY_SECRET "$PRESERVE_ADDON_RELAY_SECRET"
 restore_env_file_value ALT8MAIL_ADDON_GATEWAY_URL "$PRESERVE_ADDON_GATEWAY_URL"
+restore_env_file_value ALT8MAIL_LICENSE_FILE "$APP_LICENSE_FILE"
+restore_env_file_value ALT8MAIL_LICENSE_PUBLIC_KEY "$APP_LICENSE_PUBLIC_KEY"
 chown root:$SERVICE_USER "$CONFIG_ROOT/app.env"
 chmod 0640 "$CONFIG_ROOT/app.env"
 
@@ -608,6 +640,10 @@ CONTROL_OFFICE_IMAGE=onlyoffice/documentserver:9.4.0.1
 CONTROL_OFFICE_JWT_SECRET_FILE=/etc/a8m/office-jwt-secret
 CONTROL_RETENTION_DAYS=365
 CONTROL_TRUSTED_PROXY=false
+CONTROL_LICENSE_FILE=$CONTROL_LICENSE_FILE
+CONTROL_LICENSE_GROUP=$CONTROL_LICENSE_GROUP
+CONTROL_LICENSE_PUBLIC_KEY=$CONTROL_LICENSE_PUBLIC_KEY
+CONTROL_LICENSE_WARNING_PERCENT=$CONTROL_LICENSE_WARNING_PERCENT
 EOF
 if [[ "$WEB_NET_MANAGED" -eq 1 && -n "$PRESERVE_CONTROL_WEBMAIL_URL" ]]; then
   # Keep the control plane's notification and link target aligned with the
@@ -617,6 +653,16 @@ if [[ "$WEB_NET_MANAGED" -eq 1 && -n "$PRESERVE_CONTROL_WEBMAIL_URL" ]]; then
 fi
 chown root:root "$CONFIG_ROOT/control.env"
 chmod 0600 "$CONFIG_ROOT/control.env"
+
+# A pre-existing license token may have been written by root before group
+# readability was enforced. Normalize it so the a8m webmail can load it.
+if [[ -f "$CONTROL_LICENSE_FILE" ]]; then
+  if chown root:"$CONTROL_LICENSE_GROUP" "$CONTROL_LICENSE_FILE" 2>/dev/null; then
+    chmod 0640 "$CONTROL_LICENSE_FILE"
+  else
+    warn "could not set group $CONTROL_LICENSE_GROUP on $CONTROL_LICENSE_FILE"
+  fi
+fi
 
 # Optional local OnlyOffice lifecycle agent. It is safe to run without Docker;
 # the install action reports a clear error until Docker is installed.

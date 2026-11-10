@@ -119,15 +119,19 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
   on every request and shows edition, lifecycle (`valid`, `grace`, `expired`,
   `unlicensed`, `invalid`), expiry, features, the configured path and a live
   seat meter.
-- Seats count `public.users` rows with `status='active'` and
-  `deleted_at IS NULL`. A license `tenant` claim scopes the count; a global
-  license also returns per-tenant `activeSeats` ordered by name.
+- Seats count `public.users` rows with `status='active'`,
+  `deleted_at IS NULL` and `is_system_admin = false`; platform system
+  administrators never consume a seat. A license `tenant` claim scopes the
+  count; a global license also returns per-tenant `activeSeats` ordered by
+  name.
 - The warning threshold is `CONTROL_LICENSE_WARNING_PERCENT` (default 80):
   `warning` is true when `usedSeats * 100 >= seats * percent`.
 - Upload validates the envelope before writing, replaces the file atomically
-  with mode `0600`, audits `license.uploaded` without the token and reports
-  `restartRequired: true`. Restart the webmail service to activate a new
-  token; seat usage updates without a restart.
+  with mode `0640` and group `a8m` (or `CONTROL_LICENSE_GROUP`), preserving an
+  existing file's uid/gid, audits `license.uploaded` without the token and
+  reports `restartRequired: true`. The webmail server reads the token at
+  startup; restart it to activate a new token. Control re-reads the file on
+  every status request, and seat usage updates without a restart.
 - A failed upload leaves the previous file byte-for-byte unchanged, and a
   missing file/key keeps the deployment in OSS mode without breaking startup.
   See `docs/LICENSING.md` for the token format, status error categories and
@@ -416,6 +420,7 @@ The installer:
 | `CONTROL_RETENTION_DAYS` | `365` | Default log retention (1–3650) |
 | `CONTROL_LICENSE_FILE` | `/etc/a8m/license.token` | Shared license token; must match the webmail `ALT8MAIL_LICENSE_FILE` |
 | `CONTROL_LICENSE_PUBLIC_KEY` | empty | Ed25519 license public key; empty keeps OSS mode |
+| `CONTROL_LICENSE_GROUP` | `a8m` | Group owning the installed token for webmail readability |
 | `CONTROL_LICENSE_WARNING_PERCENT` | `80` | Seat warning threshold (1–100) |
 | `CONTROL_TRUSTED_PROXY` | `false` | Trust `X-Forwarded-For` from a local proxy |
 
@@ -672,12 +677,15 @@ tenant-scoped license or an OSS/unlicensed deployment. Status fields:
 `usedSeats`, `remainingSeats`, `warning`, `features`, `expiresAt`, `tenant`,
 `licenseId`, `lastModified`, `error`.
 
-`POST` accepts JSON up to 64 KiB and returns
+`POST` accepts JSON up to 64 KiB with no trailing data and returns
 `{"ok":true,"restartRequired":true,"license":{...}}`. Rejections use fixed
 codes: `LICENSE_NOT_CONFIGURED` (503), `LICENSE_TOKEN` (400),
-`LICENSE_EXPIRED` (400), `LICENSE_TOO_LARGE` (413) and `CONTENT_TYPE` (415).
-A rejected upload leaves the existing file unchanged. After a successful
-upload, restart the webmail service to load the token.
+`LICENSE_EXPIRED` (400), `BAD_JSON` (400), `LICENSE_TOO_LARGE` (413),
+`CONTENT_TYPE` (415) and `LICENSE_WRITE` (500). A rejected upload leaves the
+existing file unchanged. The token is installed atomically as `0640` with
+group `a8m` (or `CONTROL_LICENSE_GROUP`); an existing file's uid/gid is
+preserved. The webmail server reads the token at startup, so restart it after a
+successful upload; Control re-reads the file on every GET.
 
 ### Public API v1
 
