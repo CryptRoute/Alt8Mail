@@ -30,6 +30,9 @@ const (
 	// scimSystemAdminDetail is returned for any attempted SCIM mutation of a
 	// platform administrator. Their lifecycle belongs to the admin console.
 	scimSystemAdminDetail = "System administrator accounts are managed in the admin console"
+	// scimSeatLimitDetail is the fixed RFC 7644 detail returned when an
+	// activation would exceed the licensed seat count.
+	scimSeatLimitDetail = "License seat limit reached"
 )
 
 // scimUserColumns is the projection shared by every Users query. deleted_at is
@@ -846,6 +849,13 @@ func (s *Server) scimAuditUserChange(r *http.Request, tenant scimTenant, email s
 	}
 }
 
+// scimAuditSeatLimit records a blocked SCIM activation. The detail carries the
+// tenant, license limit and live usage only; token material is never included.
+func (s *Server) scimAuditSeatLimit(r *http.Request, tenant scimTenant, target string, used int) {
+	detail := fmt.Sprintf("seat limit reached; tenant %s; limit %d; used %d", tenant.TenantID, s.licenseSeatLimit(), used)
+	s.scimAudit(r, tenant, "license.seat_limit_blocked", target, detail)
+}
+
 // registerSCIMUserRoutes mounts the Users collection and item endpoints behind
 // bearer authentication. Both patterns are more specific than the /scim/v2/
 // fallback, which stays registered last.
@@ -1015,6 +1025,15 @@ func (s *Server) scimCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	if active {
+		// Seat-consuming SCIM creates lock the tenant scope before touching a
+		// user row so admin and SCIM activation paths share one lock order.
+		if err := s.lockSeatScopeTx(ctx, tx, tenant.TenantID); err != nil {
+			s.logger.Warn("SCIM license seat lock failed")
+			writeSCIMError(w, http.StatusInternalServerError, "", "Could not create the SCIM user")
+			return
+		}
+	}
 
 	existing, lookupErr := scanSCIMUser(tx.QueryRow(ctx, `SELECT `+scimUserColumns+` FROM users WHERE tenant_id = $1 AND email = $2 FOR UPDATE`, tenant.TenantID, email))
 	if lookupErr == nil {
@@ -1064,6 +1083,20 @@ func (s *Server) scimCreateUser(w http.ResponseWriter, r *http.Request) {
 	status := "active"
 	if !active {
 		status = "suspended"
+	}
+	if active {
+		used, seatErr := s.ensureSeatCapacityTx(ctx, tx, tenant.TenantID, 1)
+		if errors.Is(seatErr, errSeatLimit) {
+			_ = tx.Rollback(ctx)
+			s.scimAuditSeatLimit(r, tenant, email, used)
+			writeSCIMError(w, http.StatusConflict, "invalidValue", scimSeatLimitDetail)
+			return
+		}
+		if seatErr != nil {
+			s.logger.Warn("SCIM license seat count failed")
+			writeSCIMError(w, http.StatusInternalServerError, "", "Could not create the SCIM user")
+			return
+		}
 	}
 	userID, err := provisionUserTx(ctx, tx, tenant.TenantID, name, email, "member", webHash, mailHash,
 		scimUserProvisionQuota, "", "", "", "", "", nil, status, true, s.cfg.MaildirBase)
@@ -1268,6 +1301,15 @@ func (s *Server) scimReplaceUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	if s.seatAppliesToTenant(tenant.TenantID) {
+		// Lock the seat scope before the user row. Activation re-counts after
+		// the requested changes are known, so concurrent reactivations serialize.
+		if err := s.lockSeatScopeTx(ctx, tx, tenant.TenantID); err != nil {
+			s.logger.Warn("SCIM license seat lock failed")
+			writeSCIMError(w, http.StatusInternalServerError, "", "Could not update the SCIM user")
+			return
+		}
+	}
 	existing, err := scimUserByIDTx(ctx, tx, tenant.TenantID, r.PathValue("id"))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1290,6 +1332,22 @@ func (s *Server) scimReplaceUser(w http.ResponseWriter, r *http.Request) {
 	if handlerErr != nil {
 		writeSCIMHandlerError(w, handlerErr)
 		return
+	}
+	if changes.ActiveSet && changes.Active && existing.Status != "active" {
+		// Reactivating a suspended user consumes a seat; the scope is already
+		// locked, so this re-count sees every committed activation.
+		used, seatErr := s.ensureSeatCapacityTx(ctx, tx, tenant.TenantID, 1)
+		if errors.Is(seatErr, errSeatLimit) {
+			_ = tx.Rollback(ctx)
+			s.scimAuditSeatLimit(r, tenant, existing.Email, used)
+			writeSCIMError(w, http.StatusConflict, "invalidValue", scimSeatLimitDetail)
+			return
+		}
+		if seatErr != nil {
+			s.logger.Warn("SCIM license seat count failed")
+			writeSCIMError(w, http.StatusInternalServerError, "", "Could not update the SCIM user")
+			return
+		}
 	}
 	updated, transition, handlerErr := s.scimApplyUserChanges(ctx, tx, tenant.TenantID, existing, changes)
 	if handlerErr != nil {
@@ -1326,6 +1384,15 @@ func (s *Server) scimPatchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	if s.seatAppliesToTenant(tenant.TenantID) {
+		// Lock the seat scope before the user row. Activation re-counts after
+		// the requested changes are known, so concurrent reactivations serialize.
+		if err := s.lockSeatScopeTx(ctx, tx, tenant.TenantID); err != nil {
+			s.logger.Warn("SCIM license seat lock failed")
+			writeSCIMError(w, http.StatusInternalServerError, "", "Could not update the SCIM user")
+			return
+		}
+	}
 	existing, err := scimUserByIDTx(ctx, tx, tenant.TenantID, r.PathValue("id"))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1348,6 +1415,22 @@ func (s *Server) scimPatchUser(w http.ResponseWriter, r *http.Request) {
 	if handlerErr != nil {
 		writeSCIMHandlerError(w, handlerErr)
 		return
+	}
+	if changes.ActiveSet && changes.Active && existing.Status != "active" {
+		// Reactivating a suspended user consumes a seat; the scope is already
+		// locked, so this re-count sees every committed activation.
+		used, seatErr := s.ensureSeatCapacityTx(ctx, tx, tenant.TenantID, 1)
+		if errors.Is(seatErr, errSeatLimit) {
+			_ = tx.Rollback(ctx)
+			s.scimAuditSeatLimit(r, tenant, existing.Email, used)
+			writeSCIMError(w, http.StatusConflict, "invalidValue", scimSeatLimitDetail)
+			return
+		}
+		if seatErr != nil {
+			s.logger.Warn("SCIM license seat count failed")
+			writeSCIMError(w, http.StatusInternalServerError, "", "Could not update the SCIM user")
+			return
+		}
 	}
 	updated, transition, handlerErr := s.scimApplyUserChanges(ctx, tx, tenant.TenantID, existing, changes)
 	if handlerErr != nil {

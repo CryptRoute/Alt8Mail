@@ -385,6 +385,14 @@ func (s *Server) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	if body.Status == "active" {
+		// Only active users consume a seat. The check locks the tenant (and, for
+		// a global license, the license scope) and re-counts before provisioning,
+		// so concurrent creates cannot exceed the limit.
+		if !s.enforceAdminSeatTx(ctx, w, tx, sess, sess.ActiveTenantID, body.Email, 1) {
+			return
+		}
+	}
 	if err := ensureTenantDomain(ctx, tx, sess.ActiveTenantID, body.Email); err != nil {
 		writeError(w, http.StatusBadRequest, "DOMAIN", err.Error())
 		return
@@ -675,12 +683,20 @@ func (s *Server) adminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		position++
 	}
 	ctx := r.Context()
+	// Activating an invited or suspended user consumes a seat; an already-active
+	// user (or a platform administrator, who never consumes one) does not.
+	activation := body.Status != nil && *body.Status == "active" && user.Status != "active" && !user.IsSystemAdmin
 	tx, err := s.store.DB.Begin(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "USER", "Could not update user")
 		return
 	}
 	defer tx.Rollback(ctx)
+	if activation {
+		if !s.enforceAdminSeatTx(ctx, w, tx, sess, sess.ActiveTenantID, user.Email, 1) {
+			return
+		}
+	}
 	if _, err := tx.Exec(ctx, "UPDATE users SET "+strings.Join(setParts, ", ")+" WHERE id = $1", args...); err != nil {
 		writeError(w, http.StatusInternalServerError, "USER", "Could not update user")
 		return
@@ -782,6 +798,13 @@ func (s *Server) adminRestoreUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	if !user.IsSystemAdmin {
+		// Restoring a closed account activates it and consumes a seat. Platform
+		// administrators never consume one, so they are not gated.
+		if !s.enforceAdminSeatTx(ctx, w, tx, sess, sess.ActiveTenantID, user.Email, 1) {
+			return
+		}
+	}
 	_, _ = tx.Exec(ctx, `UPDATE users SET deleted_at = NULL, status = 'active', updated_at = now() WHERE id = $1`, user.ID)
 	_, _ = tx.Exec(ctx, `UPDATE mailboxes SET active = true WHERE user_id = $1`, user.ID)
 	if err := tx.Commit(ctx); err != nil {
@@ -1107,7 +1130,13 @@ func (s *Server) adminBulkUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ctx := r.Context()
-	affected := 0
+	type bulkTarget struct {
+		user     adminUser
+		consumes bool
+	}
+	targets := make([]bulkTarget, 0, len(body.IDs))
+	activationIDs := map[string]bool{}
+	activations := 0
 	for _, id := range body.IDs {
 		user, err := s.adminUserByID(ctx, id)
 		if err != nil || user.TenantID != sess.ActiveTenantID || user.ID == sess.User.ID {
@@ -1116,29 +1145,61 @@ func (s *Server) adminBulkUsers(w http.ResponseWriter, r *http.Request) {
 		if !s.adminCanManageTarget(sess, user) {
 			continue
 		}
+		target := bulkTarget{user: user}
 		switch body.Action {
 		case "activate":
 			if user.DeletedAt != nil {
 				continue
 			}
-			_, _ = s.store.DB.Exec(ctx, `UPDATE users SET status='active', updated_at=now() WHERE id=$1`, user.ID)
-			_, _ = s.store.DB.Exec(ctx, `UPDATE mailboxes SET active=true WHERE user_id=$1`, user.ID)
-		case "suspend":
-			_, _ = s.store.DB.Exec(ctx, `UPDATE users SET status='suspended', updated_at=now() WHERE id=$1`, user.ID)
-			_, _ = s.store.DB.Exec(ctx, `UPDATE mailboxes SET active=false WHERE user_id=$1`, user.ID)
-			_, _ = s.store.DB.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, user.ID)
-			_, _ = s.store.DB.Exec(ctx, `DELETE FROM auth_challenges WHERE user_id=$1`, user.ID)
-			_, _ = s.store.DB.Exec(ctx, `DELETE FROM admin_sessions WHERE user_id=$1`, user.ID)
+			if user.Status != "active" && !user.IsSystemAdmin && !activationIDs[user.ID] {
+				activationIDs[user.ID] = true
+				target.consumes = true
+				activations++
+			}
 		case "delete":
 			if user.IsSystemAdmin {
 				continue
 			}
-			_, _ = s.store.DB.Exec(ctx, `UPDATE users SET deleted_at=now(), status='suspended', updated_at=now() WHERE id=$1`, user.ID)
-			_, _ = s.store.DB.Exec(ctx, `UPDATE mailboxes SET active=false WHERE user_id=$1`, user.ID)
-			_, _ = s.store.DB.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, user.ID)
-			_, _ = s.store.DB.Exec(ctx, `DELETE FROM admin_sessions WHERE user_id=$1`, user.ID)
+		}
+		targets = append(targets, target)
+	}
+	tx, err := s.store.DB.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "USER", "Could not update users")
+		return
+	}
+	defer tx.Rollback(ctx)
+	if activations > 0 {
+		// Reject the whole batch before any status change so a partially applied
+		// bulk activation can never cross the seat limit.
+		if !s.enforceAdminSeatTx(ctx, w, tx, sess, sess.ActiveTenantID, "bulk activate", activations) {
+			return
+		}
+	}
+	affected := 0
+	for _, target := range targets {
+		user := target.user
+		switch body.Action {
+		case "activate":
+			_, _ = tx.Exec(ctx, `UPDATE users SET status='active', updated_at=now() WHERE id=$1`, user.ID)
+			_, _ = tx.Exec(ctx, `UPDATE mailboxes SET active=true WHERE user_id=$1`, user.ID)
+		case "suspend":
+			_, _ = tx.Exec(ctx, `UPDATE users SET status='suspended', updated_at=now() WHERE id=$1`, user.ID)
+			_, _ = tx.Exec(ctx, `UPDATE mailboxes SET active=false WHERE user_id=$1`, user.ID)
+			_, _ = tx.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, user.ID)
+			_, _ = tx.Exec(ctx, `DELETE FROM auth_challenges WHERE user_id=$1`, user.ID)
+			_, _ = tx.Exec(ctx, `DELETE FROM admin_sessions WHERE user_id=$1`, user.ID)
+		case "delete":
+			_, _ = tx.Exec(ctx, `UPDATE users SET deleted_at=now(), status='suspended', updated_at=now() WHERE id=$1`, user.ID)
+			_, _ = tx.Exec(ctx, `UPDATE mailboxes SET active=false WHERE user_id=$1`, user.ID)
+			_, _ = tx.Exec(ctx, `DELETE FROM sessions WHERE user_id=$1`, user.ID)
+			_, _ = tx.Exec(ctx, `DELETE FROM admin_sessions WHERE user_id=$1`, user.ID)
 		}
 		affected++
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "USER", "Could not update users")
+		return
 	}
 	s.recordAdminAudit(ctx, sess, sess.User, "admin.users_bulk", fmt.Sprintf("%d users", affected), "Bulk action: "+body.Action, map[string]any{"action": body.Action, "count": affected})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "affected": affected, "action": body.Action})

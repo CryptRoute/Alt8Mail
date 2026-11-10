@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -345,6 +346,22 @@ func (s *Server) provisionImportedUser(ctx context.Context, job userImportJobRec
 		return "", "", "", fmt.Errorf("Could not start user provisioning")
 	}
 	defer tx.Rollback(ctx)
+	// Every imported row provisions an active user, so each one consumes a
+	// seat. Lock, re-count and reject inside this row's transaction.
+	if err := s.lockSeatScopeTx(ctx, tx, job.TenantID); err != nil {
+		return "", "", "", err
+	}
+	used, err := s.ensureSeatCapacityTx(ctx, tx, job.TenantID, 1)
+	if errors.Is(err, errSeatLimit) {
+		// End the transaction before the audit insert; its tenant foreign key
+		// would otherwise wait on the tenant lock held here.
+		_ = tx.Rollback(ctx)
+		s.recordSeatLimitBlocked(ctx, nil, job.TenantID, email, used)
+		return "", "", "", errSeatLimit
+	}
+	if err != nil {
+		return "", "", "", err
+	}
 	if err := ensureTenantDomain(ctx, tx, job.TenantID, email); err != nil {
 		return "", "", "", err
 	}

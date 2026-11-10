@@ -972,7 +972,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"ai":                  s.aiPublicConfig(ctx, sess.User.TenantID),
 		"push":                s.pushPublicConfig(ctx, sess.User.ID),
 		"capabilities":        capabilities(),
-		"license":             s.licenseSnapshot(),
+		"license":             s.licenseSnapshot(ctx),
 		"mailboxMode":         stateString(state, "mailMode"),
 		"mailSync":            mailSync,
 		"attachmentMaxBytes":  8 * 1024 * 1024,

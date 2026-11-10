@@ -10,6 +10,7 @@ on the license.
 |---|---|
 | `ALT8MAIL_LICENSE_FILE` | Webmail path to the signed license token |
 | `ALT8MAIL_LICENSE_PUBLIC_KEY` | Base64 Ed25519 public key (standard or URL-safe) |
+| `ALT8MAIL_LICENSE_TENANT` | Optional expected tenant claim; a missing or different claim makes the license invalid |
 | `CONTROL_LICENSE_FILE` | System Control path to the same token (default `/etc/a8m/license.token`) |
 | `CONTROL_LICENSE_PUBLIC_KEY` | System Control copy of the same Ed25519 public key |
 | `CONTROL_LICENSE_GROUP` | Group that owns the installed token (default `a8m`) |
@@ -134,6 +135,56 @@ administrators do not consume a seat, matching webmail enforcement):
 `usedSeats * 100 >= seats * CONTROL_LICENSE_WARNING_PERCENT`. `remainingSeats`
 never drops below zero, and `usedSeats` may exceed `seats` to show overage.
 
+### Seat enforcement
+
+User activation is gated only by a loaded license whose lifecycle state is
+`valid` or `grace` and whose `seats` claim is positive. OSS, unlicensed,
+`invalid` and `expired` deployments keep core user creation available; expired
+paid features are gated separately by the entitlement checks.
+
+A license with an empty `tenant` claim meters and enforces the seat limit
+across all tenants. A license with a `tenant` claim meters and enforces only
+that tenant; every other tenant remains unlimited (core mail and user creation
+stay available there). When `ALT8MAIL_LICENSE_TENANT` is configured it must
+equal the payload's `tenant` claim exactly; an empty or different claim makes
+the whole license `invalid`.
+
+Seats are consumed by users with `status='active'`, `deleted_at IS NULL` and
+`is_system_admin = false`. Invited and suspended users do not consume a seat
+until they become active. Deleting or suspending an active user frees its seat.
+Platform system administrators never consume seats. A license that shrinks
+below current usage remains over-limit: existing users are not silently
+deactivated, and new activations are refused until usage falls below the limit.
+
+Every activation path is enforced inside its existing provisioning
+transaction:
+
+- admin create with `status: "active"` (invited/suspended creates are free);
+- admin restore of a closed account;
+- admin status update that activates an invited or suspended user;
+- admin bulk activation;
+- each CSV/spreadsheet import row (all imported users are active);
+- SCIM create with `active: true` (or no `active` attribute);
+- SCIM PUT/PATCH reactivation (`active: false` to `true`).
+
+Non-activation edits and deactivations are unaffected. Before creating or
+activating, the transaction locks the tenant row
+(`SELECT id FROM tenants WHERE id = $1 FOR UPDATE`); a global license also takes
+a transaction-scoped advisory lock keyed by the license, then re-counts active
+seats. Concurrent activations therefore cannot exceed the licensed limit, both
+within one tenant and across tenants of a global license.
+
+A rejected activation creates no user, mailbox or session. The admin API
+returns HTTP 409 with the fixed code `SEAT_LIMIT`; SCIM returns HTTP 409 with
+`scimType: "invalidValue"` and the fixed detail `License seat limit reached`.
+Both write the audit action `license.seat_limit_blocked` with the tenant, limit
+and live usage (admin operations in `admin_audit_log`, SCIM in `audit_log`).
+The raw license token and signature are never logged or audited.
+
+The webmail bootstrap and `GET /api/entitlements` expose `usedSeats` and
+`seatLimit` (alongside `seats`) so the UI can show live usage without reading
+the token.
+
 ### Status error categories
 
 `license.error` is always one of these fixed values, never parser or path
@@ -168,5 +219,6 @@ payload="$(printf '%s' "$json" | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
 
 `internal/licensing` contains verifier tests that generate ephemeral test keys.
 Do not commit a production private key. System Control provides the status and
-upload API plus live seat metering; per-tenant license records, online
-activation and hot reloading remain out of scope.
+upload API plus live seat metering; the webmail enforces the limit on user
+activation as described above. Per-tenant license records, online activation
+and hot reloading remain out of scope.

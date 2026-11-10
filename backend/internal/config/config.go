@@ -121,6 +121,9 @@ type Config struct {
 
 	LicenseFile      string
 	LicensePublicKey string
+	// LicenseTenant optionally pins the license payload's tenant claim. When
+	// set, a license whose tenant claim is missing or different is invalid.
+	LicenseTenant string
 }
 
 func Load() (Config, error) {
@@ -214,6 +217,7 @@ func Load() (Config, error) {
 		AdminRateWindow:           10 * time.Minute,
 		LicenseFile:               strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_FILE")),
 		LicensePublicKey:          strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_PUBLIC_KEY")),
+		LicenseTenant:             strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_TENANT")),
 	}
 	if hours, err := strconv.Atoi(env("ALT8MAIL_ADMIN_SESSION_HOURS", "8")); err == nil && hours >= 1 && hours <= 72 {
 		cfg.AdminSessionTTL = time.Duration(hours) * time.Hour
