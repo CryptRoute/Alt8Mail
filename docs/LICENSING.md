@@ -141,7 +141,7 @@ detail:
 
 | Value | Meaning |
 |---|---|
-| `not_configured` | No configured path, an empty/invalid public key, or the default file is absent |
+| `not_configured` | No configured path, an empty/invalid public key, or any configured license file is absent |
 | `unreadable` | Read failure or a file larger than 64 KiB |
 | `malformed` | Bad envelope, unsupported version or invalid claims |
 | `signature` | Tampered payload or a token signed by a different key |
