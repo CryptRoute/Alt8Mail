@@ -1925,6 +1925,67 @@ nginx -t && systemctl reload nginx
 
 Do not expose 5432/6379/8080. The API is bound to `127.0.0.1:8080`.
 
+### License operations
+
+Alt8Mail verifies a signed offline license; there is no activation network
+call and no private key on the host. A missing token is normal OSS mode, not a
+failure.
+
+- **Shared file.** `CONTROL_LICENSE_FILE` in `/etc/a8m/control.env` and
+  `ALT8MAIL_LICENSE_FILE` in `/etc/a8m/app.env` must point at the same path
+  (default `/etc/a8m/license.token`). The Control Plane writes it; the webmail
+  reads it at startup. `CONTROL_LICENSE_GROUP` (default `a8m`) and mode `0640`
+  keep it readable by the unprivileged webmail user.
+- **Upload.** Sign in to System Control with `settings.write`, open
+  **Infrastructure → License**, select the token file or paste `A8M1.…`, and
+  choose **Validate and upload**. A rejected token returns a fixed error
+  (`LICENSE_NOT_CONFIGURED`, `LICENSE_TOKEN`, `LICENSE_EXPIRED`,
+  `LICENSE_TOO_LARGE`, `CONTENT_TYPE`, `BAD_JSON`, `LICENSE_WRITE`) and leaves
+  the existing file byte-for-byte unchanged. The raw token is never logged,
+  audited or rendered back.
+- **Restart.** The webmail verifies the token only at startup. After a
+  successful upload run `systemctl restart a8m-server`. The Control view shows
+  the new status and live seat usage immediately; the webmail keeps using its
+  previous token until the restart. Restarting does not flush the mail queue.
+- **Manual placement.** To install without the UI, copy the token to the shared
+  path as root, then apply ownership and mode:
+
+  ```bash
+  install -m 0640 -o root -g a8m /path/to/license.token /etc/a8m/license.token
+  systemctl restart a8m-server
+  ```
+
+  A legacy root:root `0600` file is unreadable by the webmail and silently
+  results in OSS mode; re-running `install.sh` or
+  `scripts/alt8mail-update.sh` normalizes an existing token.
+- **Installer/updater.** `install.sh` preserves manually configured license
+  values, seeds the Control path/key from existing `ALT8MAIL_LICENSE_*` values
+  (and the webmail values from Control), and provisions
+  `ALT8MAIL_LICENSE_FILE` even before a token exists.
+  `scripts/alt8mail-update.sh` applies the same fallback seeding and permission
+  normalization when that updater version runs. The updater replaces itself at
+  the end of an update, so an installation coming from an older release should
+  re-run `install.sh` (safe and idempotent) or add the two `CONTROL_LICENSE_*`
+  and two `ALT8MAIL_LICENSE_*` values manually before relying on an immediate
+  post-update upload.
+- **Existing installs.** Add to `/etc/a8m/control.env`:
+  `CONTROL_LICENSE_FILE=/etc/a8m/license.token`,
+  `CONTROL_LICENSE_PUBLIC_KEY=<base64 key>` and optionally
+  `CONTROL_LICENSE_GROUP=a8m`; add the same path/key as
+  `ALT8MAIL_LICENSE_FILE`/`ALT8MAIL_LICENSE_PUBLIC_KEY` to
+  `/etc/a8m/app.env`, then restart `alt8mail-control` and `a8m-server`.
+- **Seats.** Active, non-deleted, non-system-administrator users consume a
+  seat. A license `tenant` claim scopes counting/enforcement to that tenant; a
+  global license counts all tenants and shows a per-tenant table in Control.
+  `CONTROL_LICENSE_WARNING_PERCENT` (default 80) controls the warning banner.
+  Seat usage is live and does not need a restart. An expired license disables
+  paid features but not core mail; OSS/unlicensed/invalid/expired deployments
+  do not block user activation.
+- **Status/debugging.** `GET /control/api/license` requires `settings.write`.
+  The view shows the configured path and fixed failure categories; check
+  `journalctl -u alt8mail-control` and `journalctl -u a8m-server` for
+  `license loaded` / `license not loaded` lines (never token material).
+
 ### Backups (implemented)
 
 `a8m-backup.timer` runs `/usr/local/sbin/a8m-backup.sh` daily at 02:30

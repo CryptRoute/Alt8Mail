@@ -111,29 +111,55 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
 - `/healthz` for load balancers; `/healthz/stacks` for authenticated stack
   detail; `/metrics` for a Prometheus-compatible scrape; `/events` for SSE.
 - Config-sync status banner, drift detail and run history.
-- A 30-route command palette with `Ctrl/Cmd+K`.
+- A 31-route command palette with `Ctrl/Cmd+K`.
 
 ### License and seat metering
 
+- **Infrastructure → License** (route `#/license`) requires `settings.write`;
+  read-only roles do not see the nav item and receive the existing forbidden
+  state if they open the route directly.
 - The License view reads the shared offline token from `CONTROL_LICENSE_FILE`
-  on every request and shows edition, lifecycle (`valid`, `grace`, `expired`,
-  `unlicensed`, `invalid`), expiry, features, the configured path and a live
-  seat meter.
+  on every request and shows edition, a text label for each lifecycle state
+  (`valid`, `grace`, `expired`, `unlicensed`, `invalid`; not color alone),
+  expiry, days remaining, feature chips, tenant scope, license ID, the
+  configured path and a link to `docs/LICENSING.md`.
+- Unconfigured or missing files render an OSS empty state. Invalid files render
+  a fixed explanation for `not_configured`, `unreadable`, `malformed` or
+  `signature`; parser/path detail is never shown.
 - Seats count `public.users` rows with `status='active'`,
   `deleted_at IS NULL` and `is_system_admin = false`; platform system
   administrators never consume a seat. A license `tenant` claim scopes the
   count; a global license also returns per-tenant `activeSeats` ordered by
-  name.
-- The warning threshold is `CONTROL_LICENSE_WARNING_PERCENT` (default 80):
-  `warning` is true when `usedSeats * 100 >= seats * percent`.
-- Upload validates the envelope before writing, replaces the file atomically
-  with mode `0640` and group `a8m` (or `CONTROL_LICENSE_GROUP`), preserving an
-  existing file's uid/gid, audits `license.uploaded` without the token and
-  reports `restartRequired: true`. The webmail server reads the token at
-  startup; restart it to activate a new token. Control re-reads the file on
-  every status request, and seat usage updates without a restart.
+  name and renders them in a table with a total row. Tenant-scoped licenses
+  show an empty state instead so other tenants cannot leak into the view.
+- The seat meter exposes used, licensed and remaining counts with
+  `role="meter"`, `aria-valuenow`/`aria-valuemin`/`aria-valuemax`/
+  `aria-valuetext` and a visible text fallback. The warning threshold is
+  `CONTROL_LICENSE_WARNING_PERCENT` (default 80): `warning` is true when
+  `usedSeats * 100 >= seats * percent`, and the view shows a warning banner
+  when it is reached (a critical banner when usage exceeds the limit).
+- Upload accepts a token file or pasted token, enforces the 64 KiB limit in the
+  browser, POSTs `{"token":"…"}` as JSON, shows an in-flight state and maps
+  every fixed error code to a stable operator message. It never renders, logs
+  or stores the token in the browser, and clears the inputs after any outcome.
+- The server validates the envelope before writing, replaces the file
+  atomically with mode `0640` and group `a8m` (or `CONTROL_LICENSE_GROUP`),
+  preserving an existing file's uid/gid, audits `license.uploaded` without the
+  token and reports `restartRequired: true`. The success panel tells the
+  operator to **restart the Alt8Mail webmail service to activate this
+  license**. Control re-reads the file on every status request, and seat usage
+  updates without a restart.
 - A failed upload leaves the previous file byte-for-byte unchanged, and a
   missing file/key keeps the deployment in OSS mode without breaking startup.
+  The webmail treats a configured-but-missing file as `unlicensed`, so the
+  installer can provision the shared path before the first upload.
+- `install.sh` seeds `CONTROL_LICENSE_FILE`/`CONTROL_LICENSE_PUBLIC_KEY` from
+  existing `ALT8MAIL_LICENSE_*` values, preserves every configured value on
+  reinstall, provisions `ALT8MAIL_LICENSE_FILE` unconditionally and normalizes
+  an existing token to root:`a8m` `0640`. `scripts/alt8mail-update.sh` applies
+  the same fallback seeding and normalization when that updater version runs;
+  an installation updating from an older release should re-run `install.sh` or
+  set the values manually for an immediate post-update upload.
   See `docs/LICENSING.md` for the token format, status error categories and
   seat rules.
 
@@ -426,6 +452,12 @@ The installer:
 
 The environment file is parsed by systemd, not by a shell. Do not put spaces or
 unquoted `#` characters in values. Keep the file root-owned and mode 0600.
+`CONTROL_LICENSE_FILE` must be the same path as the webmail's
+`ALT8MAIL_LICENSE_FILE`; `CONTROL_LICENSE_PUBLIC_KEY` must be the same key as
+the webmail's `ALT8MAIL_LICENSE_PUBLIC_KEY`. `install.sh` and
+`scripts/alt8mail-update.sh` seed the missing side from the other file and
+preserve explicit values, so only a manual deployment needs to set both by
+hand.
 
 ### 4. Systemd
 
@@ -443,7 +475,7 @@ ExecStart=/opt/alt8mail/bin/alt8mail-control serve
 Restart=on-failure
 RestartSec=3
 ProtectSystem=full
-ReadWritePaths=/etc/postfix /etc/dovecot /etc/nginx /etc/letsencrypt /etc/ssl/alt8mail /etc/cron.d /etc/ufw /etc/hostname /etc/hosts /etc/localtime /etc/timezone /usr/local/bin /var/backups/alt8mail /var/vmail /var/lib/rspamd/dkim /var/lib/letsencrypt /var/log /var/spool/postfix
+ReadWritePaths=/etc/postfix /etc/dovecot /etc/nginx /etc/letsencrypt /etc/ssl/alt8mail /etc/cron.d /etc/ufw /etc/hostname /etc/hosts /etc/localtime /etc/timezone /etc/a8m /etc/rspamd /usr/local/bin /var/backups/alt8mail /var/vmail /var/lib/rspamd /var/lib/letsencrypt /var/log /var/spool/postfix /opt/a8m /opt/alt8mail
 PrivateTmp=true
 ProtectHome=true
 ProtectKernelTunables=true
@@ -674,8 +706,8 @@ contains the token or signature. `byTenant` (`tenantId`, `name`,
 `activeSeats`) is populated only for a global license and is `[]` for a
 tenant-scoped license or an OSS/unlicensed deployment. Status fields:
 `configured`, `filePath`, `state`, `edition`, `inGrace`, `expired`, `seats`,
-`usedSeats`, `remainingSeats`, `warning`, `features`, `expiresAt`, `tenant`,
-`licenseId`, `lastModified`, `error`.
+`usedSeats`, `remainingSeats`, `warning`, `warningPercent`, `features`,
+`expiresAt`, `tenant`, `licenseId`, `lastModified`, `error`.
 
 `POST` accepts JSON up to 64 KiB with no trailing data and returns
 `{"ok":true,"restartRequired":true,"license":{...}}`. Rejections use fixed

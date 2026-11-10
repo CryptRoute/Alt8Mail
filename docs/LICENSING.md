@@ -19,18 +19,26 @@ on the license.
 `CONTROL_LICENSE_FILE` and `ALT8MAIL_LICENSE_FILE` must point at the same
 file. The Control Plane upload writes that shared file; the **webmail server**
 reads it at startup, while Control re-reads it on every status request. A
-missing file or public key is a valid OSS configuration and never stops System
-Control from starting.
+missing token file is a valid OSS configuration: both processes treat a
+configured-but-absent file as `unlicensed`, so a fresh install with the shared
+path already provisioned never reports `invalid` and never fails startup. A
+missing or unusable public key only matters once a token file exists.
 
 The installed file is `0640` (root-owned, group `a8m`) so the unprivileged
 webmail can read it. When replacing an existing token, Control preserves that
 file's uid/gid, applies `0640`, and fails the upload with `LICENSE_WRITE` if it
-runs as root but cannot set the ownership. `install.sh` provisions and
-preserves `CONTROL_LICENSE_FILE`, `CONTROL_LICENSE_PUBLIC_KEY`,
-`CONTROL_LICENSE_GROUP`, `CONTROL_LICENSE_WARNING_PERCENT` and, when a license
-file already exists, `ALT8MAIL_LICENSE_FILE`; re-running the installer does not
-drop manually added values and normalizes an existing token to root:`a8m`
-`0640`.
+runs as root but cannot set the ownership. `install.sh` provisions
+`CONTROL_LICENSE_FILE`, `CONTROL_LICENSE_PUBLIC_KEY`,
+`CONTROL_LICENSE_GROUP`, `CONTROL_LICENSE_WARNING_PERCENT` and
+`ALT8MAIL_LICENSE_FILE` unconditionally; it seeds Control values from existing
+`ALT8MAIL_*` values when Control has none (and the webmail values from Control),
+preserves every manually configured value across reinstalls, and normalizes an
+existing token to root:`a8m` `0640`. `scripts/alt8mail-update.sh` applies the
+same fallback seeding and permission normalization when that updater version
+runs. Because the running updater installs the bundled script only at the end
+of an update, an installation updating from an older release should re-run
+`install.sh` (idempotent) or add the missing values manually if a Control
+upload must load immediately after the first restart.
 
 The webmail server reads and verifies the token once, at startup; Control
 re-reads the configured file on every status request. An unreadable or invalid
@@ -73,12 +81,14 @@ Required claims: `version`, `id`, `edition`, `seats` (positive),
 - `expired`: outside expiry and grace; paid entitlements are disabled while
   core mail continues. The redacted snapshot reports `expired: true` and an
   empty `features` list so clients do not treat expired features as usable.
-- `unlicensed`: no `ALT8MAIL_LICENSE_FILE` is configured; the product runs as
-  `edition: "oss"` with no paid features.
-- `invalid`: a license file is configured but could not be read or verified;
-  the product also runs as `edition: "oss"` with no paid features. The Control
-  Plane treats a configured-but-missing file as `unlicensed` so a fresh OSS
-  deployment shows an empty state rather than an error.
+- `unlicensed`: no `ALT8MAIL_LICENSE_FILE` is configured, or the configured
+  file does not exist. The product runs as `edition: "oss"` with no paid
+  features. This is the normal state of a fresh install whose shared path is
+  provisioned before the first token is uploaded.
+- `invalid`: a license file exists but could not be read or verified; the
+  product also runs as `edition: "oss"` with no paid features. The Control
+  Plane and the webmail use the same rule, so a configured-but-missing file is
+  `unlicensed` and shows an empty state rather than an error.
 
 The state, grace and expiry fields are computed from the current clock every
 time the snapshot or an entitlement check runs, so lifecycle changes do not
@@ -86,15 +96,42 @@ require a restart. Loading a new license file does require a restart.
 
 ## Control Plane status and upload
 
-System Control manages the shared file under **License**; both endpoints
-require `settings.write`:
+System Control manages the shared file under **Infrastructure → License**; the
+menu item and both endpoints require `settings.write`, so read-only roles never
+see the view or its data.
+
+The view shows:
+
+- a status card with the edition, a text label and tone for `valid`, `grace`,
+  `expired`, `unlicensed` and `invalid` (never color alone), the expiry date,
+  days remaining, feature entitlements, tenant scope, license ID, file
+  modification time and the configured path;
+- an OSS empty state when no path is configured or the file is missing, and a
+  fixed explanation per `not_configured`/`unreadable`/`malformed`/`signature`
+  category when the license is invalid (parser text is never shown);
+- a live seat meter with used, licensed and remaining counts, the configured
+  warning percentage (shown in the legend and as a track marker) and whether it
+  is reached, `role="meter"` with `aria-valuenow`/`aria-valuemin`/
+  `aria-valuemax`/`aria-valuetext`, and a visible text fallback;
+- a per-tenant table (tenant, tenant ID, active seats and a total row) for a
+  global license, or an empty state explaining the tenant scope for a
+  tenant-scoped license;
+- an upload form that accepts a token file or pasted token, enforces the
+  64 KiB limit client-side, sends `POST /control/api/license` as
+  `{"token":"…"}`, shows an in-flight state, maps every fixed error code to an
+  operator-facing message, and clears the file/paste inputs after any outcome;
+- on success, the exact instruction **“Restart the Alt8Mail webmail service to
+  activate this license”** together with the API's `restartRequired` flag. The
+  token is never rendered back, logged, or written to browser storage.
+
+Both endpoints require `settings.write` and the CSRF header for the upload:
 
 - `GET /control/api/license` returns `{"license": {...}, "byTenant": [...]}`.
   `license` contains `configured`, `filePath`, `state`, `edition`, `inGrace`,
-  `expired`, `seats`, `usedSeats`, `remainingSeats`, `warning`, `features`,
-  `expiresAt`, `tenant`, `licenseId`, `lastModified` and `error`. The token and
-  signature are never returned. `byTenant` is populated only for a global
-  license.
+  `expired`, `seats`, `usedSeats`, `remainingSeats`, `warning`,
+  `warningPercent`, `features`, `expiresAt`, `tenant`, `licenseId`,
+  `lastModified` and `error`. The token and signature are never returned.
+  `byTenant` is populated only for a global license.
 - `POST /control/api/license` accepts
   `{"token":"A8M1.<payload>.<signature>"}` with
   `Content-Type: application/json` (parameters such as `charset=utf-8` are
@@ -116,9 +153,14 @@ audit record `license.uploaded` contains only `licenseId`, `edition`, `seats`
 and `expiresAt`.
 
 A successful upload sets `restartRequired: true`: the webmail verifies the
-token at startup, so restart the Alt8Mail webmail service to activate it. The
+token at startup, so restart the Alt8Mail webmail service
+(`systemctl restart a8m-server`) to activate it. The Control Plane reads the
+new file immediately, so the status card and seat meter update without a
+restart; the webmail keeps its previously loaded token until it restarts. The
 uploaded token is not rendered back to the operator. Seat usage is live and
-does not require a restart.
+does not require a restart. If the file is not readable by the `a8m` user
+because of ownership/permissions, the webmail starts in OSS mode; keep the file
+root-owned with group `a8m` (or `CONTROL_LICENSE_GROUP`) and mode `0640`.
 
 ### Seat metering
 
@@ -132,8 +174,10 @@ administrators do not consume a seat, matching webmail enforcement):
   `byTenant` rows `{tenantId, name, activeSeats}` ordered by tenant name.
 
 `warning` is true when `seats > 0` and
-`usedSeats * 100 >= seats * CONTROL_LICENSE_WARNING_PERCENT`. `remainingSeats`
-never drops below zero, and `usedSeats` may exceed `seats` to show overage.
+`usedSeats * 100 >= seats * CONTROL_LICENSE_WARNING_PERCENT`; the effective
+threshold is returned as `warningPercent` (default 80) so the UI can show it
+and mark it on the meter. `remainingSeats` never drops below zero, and
+`usedSeats` may exceed `seats` to show overage.
 
 ### Seat enforcement
 
@@ -234,7 +278,7 @@ payload="$(printf '%s' "$json" | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
 ## Development
 
 `internal/licensing` contains verifier tests that generate ephemeral test keys.
-Do not commit a production private key. System Control provides the status and
-upload API plus live seat metering; the webmail enforces the limit on user
-activation as described above. Per-tenant license records, online activation
+Do not commit a production private key. System Control provides the
+**Infrastructure → License** view, the status and upload API, and live seat
+metering; the webmail enforces the limit on user activation as described above. Per-tenant license records, online activation
 and hot reloading remain out of scope.
