@@ -97,6 +97,7 @@ Behavior:
 - Create: `backend/internal/control/web/views-license.js`
 - Modify: `backend/internal/control/web/app.js` (import, nav item, route map)
 - Modify: `backend/internal/control/web/styles.css` only if the meter needs it
+- Modify: `install.sh`, `scripts/build-release.sh` (license env provisioning/preservation)
 - Modify: `docs/SYSTEM_CONTROL.md`
 - Modify: `docs/LICENSING.md`
 
@@ -114,7 +115,8 @@ UI:
 
 - [ ] Add the view, nav and route; verify the permission gate hides it for read-only roles.
 - [ ] Write a handler-level UI/API test if the control test harness supports it, and extend `tools/control-api-smoke.mjs` to cover GET status and a rejected invalid upload (no real license required).
-- [ ] Update docs: config variables, shared file path with webmail, upload flow, restart requirement, seat counting rules, warning threshold, failure preservation, no network call.
+- [ ] Update docs: config variables, shared file path with webmail, upload flow, restart requirement, seat counting rules, warning threshold, failure preservation, no network call, and the `0640`/`a8m` readability requirement.
+- [ ] Provision and preserve license settings in `install.sh` and the release template: `CONTROL_LICENSE_FILE`, `CONTROL_LICENSE_PUBLIC_KEY` and (when a license file exists) `ALT8MAIL_LICENSE_FILE`; do not drop manually added values on reinstall. Ensure the license file is root-owned with group `a8m` and mode `0640` after install/upload.
 - [ ] Run `node --check backend/internal/control/web/app.js` and the view if it is a separate module, then `npm run test:all`; run a manual or scripted Control UI smoke if the environment exposes 8808.
 
 ### Task 4: Security and UX gate
