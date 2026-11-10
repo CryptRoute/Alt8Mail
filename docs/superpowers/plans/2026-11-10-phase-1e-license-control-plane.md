@@ -128,4 +128,4 @@ UI:
 
 ## Out of scope
 
-- Per-tenant license records or multiple license files, online activation, hot-reloading the webmail process, license deletion/downgrade, seat enforcement (this plan meters and warns; gating remains in the entitlement layer), payment/billing integration.
+- Per-tenant license records or multiple license files, online activation, hot-reloading the webmail process, license deletion/downgrade, payment/billing integration.
