@@ -70,13 +70,23 @@ func licenseTestWriteFile(t *testing.T, path, content string, mode os.FileMode) 
 
 func licenseTestServer(t *testing.T, cfg Config) *Server {
 	t.Helper()
+	return licenseTestServerWithLogger(t, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func licenseTestServerWithLogger(t *testing.T, cfg Config, logger *slog.Logger) *Server {
+	t.Helper()
 	if cfg.SecretKey == "" {
 		cfg.SecretKey = licenseTestSecret
 	}
 	if cfg.LicenseWarningPercent == 0 {
 		cfg.LicenseWarningPercent = 80
 	}
-	srv, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if cfg.LicenseGroup == "" {
+		// Group 0 exists in every root environment, so tests do not depend on
+		// the production a8m group being installed. Non-root tests skip chown.
+		cfg.LicenseGroup = "0"
+	}
+	srv, err := New(Options{Config: cfg, Logger: logger})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +110,7 @@ func TestConfigLicenseDefaults(t *testing.T) {
 	licenseTestEnvironment(t)
 	t.Setenv("CONTROL_LICENSE_FILE", "")
 	t.Setenv("CONTROL_LICENSE_PUBLIC_KEY", "")
+	t.Setenv("CONTROL_LICENSE_GROUP", "")
 	t.Setenv("CONTROL_LICENSE_WARNING_PERCENT", "")
 
 	cfg, err := LoadConfig()
@@ -112,6 +123,9 @@ func TestConfigLicenseDefaults(t *testing.T) {
 	if cfg.LicensePublicKey != "" {
 		t.Fatalf("LicensePublicKey = %q, want empty", cfg.LicensePublicKey)
 	}
+	if cfg.LicenseGroup != "a8m" {
+		t.Fatalf("LicenseGroup = %q, want a8m", cfg.LicenseGroup)
+	}
 	if cfg.LicenseWarningPercent != 80 {
 		t.Fatalf("LicenseWarningPercent = %d, want 80", cfg.LicenseWarningPercent)
 	}
@@ -121,19 +135,21 @@ func TestConfigLicenseValues(t *testing.T) {
 	licenseTestEnvironment(t)
 	t.Setenv("CONTROL_LICENSE_FILE", "/srv/a8m/license.token")
 	t.Setenv("CONTROL_LICENSE_PUBLIC_KEY", "unvalidated-at-load")
+	t.Setenv("CONTROL_LICENSE_GROUP", "mailadmins")
 	t.Setenv("CONTROL_LICENSE_WARNING_PERCENT", "90")
 
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LicenseFile != "/srv/a8m/license.token" || cfg.LicensePublicKey != "unvalidated-at-load" || cfg.LicenseWarningPercent != 90 {
+	if cfg.LicenseFile != "/srv/a8m/license.token" || cfg.LicensePublicKey != "unvalidated-at-load" ||
+		cfg.LicenseGroup != "mailadmins" || cfg.LicenseWarningPercent != 90 {
 		t.Fatalf("unexpected license config: %#v", cfg)
 	}
 }
 
 func TestConfigLicenseWarningPercentValidation(t *testing.T) {
-	for _, value := range []string{"-5", "101", "1000"} {
+	for _, value := range []string{"-5", "0", "101", "1000", "eighty"} {
 		t.Run(value, func(t *testing.T) {
 			licenseTestEnvironment(t)
 			t.Setenv("CONTROL_LICENSE_WARNING_PERCENT", value)
@@ -523,8 +539,8 @@ func TestWriteLicenseTokenWritesAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %o, want 0600", info.Mode().Perm())
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
+		t.Fatalf("mode = %o, want 0640", info.Mode().Perm())
 	}
 
 	// Grace tokens are accepted and replace the previous file.

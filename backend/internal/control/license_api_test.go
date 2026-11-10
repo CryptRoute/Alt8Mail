@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -226,8 +227,8 @@ func TestLicenseAPIUploadValidToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %o, want 0600", info.Mode().Perm())
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
+		t.Fatalf("mode = %o, want 0640", info.Mode().Perm())
 	}
 	licenseTestAssertNoTempFiles(t, dir)
 
@@ -301,6 +302,10 @@ func TestLicenseAPIUploadRejectedPreservesFile(t *testing.T) {
 		{"missing file path", licenseTestPublicKey(publicKey), false, licenseAPIUploadBody(t, oldToken), "application/json", 503, "LICENSE_NOT_CONFIGURED"},
 		{"empty token", licenseTestPublicKey(publicKey), true, licenseAPIUploadBody(t, "   "), "application/json", 400, "LICENSE_TOKEN"},
 		{"oversized body", licenseTestPublicKey(publicKey), true, oversizedBody, "application/json", 413, "LICENSE_TOO_LARGE"},
+		{"malformed JSON", licenseTestPublicKey(publicKey), true, []byte("{not-json"), "application/json", 400, "BAD_JSON"},
+		{"trailing data", licenseTestPublicKey(publicKey), true, append(licenseAPIUploadBody(t, oldToken), []byte("trailing")...), "application/json", 400, "BAD_JSON"},
+		{"trailing JSON object", licenseTestPublicKey(publicKey), true, append(licenseAPIUploadBody(t, oldToken), licenseAPIUploadBody(t, oldToken)...), "application/json", 400, "BAD_JSON"},
+		{"trailing oversized data", licenseTestPublicKey(publicKey), true, append(licenseAPIUploadBody(t, oldToken), []byte(strings.Repeat("A", licenseTokenMaxBytes))...), "application/json", 400, "BAD_JSON"},
 		{"wrong content type", licenseTestPublicKey(publicKey), true, licenseAPIUploadBody(t, oldToken), "text/plain", 415, "CONTENT_TYPE"},
 	}
 
@@ -356,6 +361,111 @@ func TestLicenseAPIUploadRejectedPreservesFile(t *testing.T) {
 				t.Fatalf("rejected upload must not be audited: %#v", *audits)
 			}
 		})
+	}
+}
+
+func TestLicenseAPIUploadAcceptsJSONContentTypeParameters(t *testing.T) {
+	publicKey, privateKey := licenseTestKey(t)
+	token := licenseTestToken(t, privateKey, licenseTestLicense(time.Now()))
+	path := filepath.Join(t.TempDir(), "license.token")
+	sess := licenseAPISession("settings.write")
+	srv, _ := licenseAPIServer(t, Config{
+		LicenseFile: path, LicensePublicKey: licenseTestPublicKey(publicKey), LicenseWarningPercent: 80,
+	}, sess)
+
+	recorder := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recorder, licenseAPIRequest(t, srv, sess, http.MethodPost, "/control/api/license",
+		licenseAPIUploadBody(t, token), "application/json; charset=utf-8", true))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("license was not written: %v", err)
+	}
+}
+
+func TestLicenseAPIGetRereadsTheFile(t *testing.T) {
+	publicKey, privateKey := licenseTestKey(t)
+	now := time.Now()
+	first := licenseTestLicense(now)
+	second := licenseTestLicense(now)
+	second.ID = "lic_second"
+	second.Edition = "starter"
+	second.Seats = 10
+	path := filepath.Join(t.TempDir(), "license.token")
+	licenseTestWriteFile(t, path, licenseTestToken(t, privateKey, first), 0o640)
+
+	srv, _ := licenseAPIServer(t, Config{
+		LicenseFile: path, LicensePublicKey: licenseTestPublicKey(publicKey), LicenseWarningPercent: 80,
+	}, licenseAPISession("settings.write"))
+
+	getStatus := func() licenseStatus {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recorder, licenseAPIRequest(t, srv, nil, http.MethodGet, "/control/api/license", nil, "", false))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+		}
+		var response struct {
+			License licenseStatus `json:"license"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.License
+	}
+
+	if status := getStatus(); status.LicenseID != "lic_control_test" || status.Seats != 50 || status.Edition != "enterprise" {
+		t.Fatalf("unexpected first status: %#v", status)
+	}
+	licenseTestWriteFile(t, path, licenseTestToken(t, privateKey, second), 0o640)
+	if status := getStatus(); status.LicenseID != "lic_second" || status.Seats != 10 || status.Edition != "starter" {
+		t.Fatalf("GET did not re-read the replaced license file: %#v", status)
+	}
+}
+
+func TestLicenseAPILogsNeverContainToken(t *testing.T) {
+	publicKey, privateKey := licenseTestKey(t)
+	token := licenseTestToken(t, privateKey, licenseTestLicense(time.Now()))
+	path := filepath.Join(t.TempDir(), "license.token")
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	sess := licenseAPISession("settings.write")
+	srv := licenseTestServerWithLogger(t, Config{
+		LicenseFile: path, LicensePublicKey: licenseTestPublicKey(publicKey), LicenseWarningPercent: 80,
+	}, logger)
+	srv.sessionLoader = func(*http.Request) (*sessionRecord, error) { return sess, nil }
+	srv.auditSink = func(context.Context, *adminUser, string, string, string, net.IP, string, any) {}
+	srv.seatCounter = func(context.Context, string) (int, []map[string]any, error) {
+		return 0, []map[string]any{}, nil
+	}
+
+	tamperedParts := strings.Split(token, ".")
+	tamperedParts[1] = base64.RawURLEncoding.EncodeToString([]byte(`{"version":1}`))
+	tampered := strings.Join(tamperedParts, ".")
+	failure := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(failure, licenseAPIRequest(t, srv, sess, http.MethodPost, "/control/api/license",
+		licenseAPIUploadBody(t, tampered), "application/json", true))
+	if failure.Code != http.StatusBadRequest {
+		t.Fatalf("tampered upload status = %d, want 400", failure.Code)
+	}
+
+	success := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(success, licenseAPIRequest(t, srv, sess, http.MethodPost, "/control/api/license",
+		licenseAPIUploadBody(t, token), "application/json", true))
+	if success.Code != http.StatusOK {
+		t.Fatalf("valid upload status = %d, want 200: %s", success.Code, success.Body.String())
+	}
+
+	output := logs.String()
+	signature := strings.Split(token, ".")[2]
+	for _, secret := range []string{token, signature} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("logger leaked license material: %s", output)
+		}
+	}
+	if !strings.Contains(output, "license upload rejected") || !strings.Contains(output, "license uploaded") {
+		t.Fatalf("expected fixed license log messages, got: %s", output)
 	}
 }
 
