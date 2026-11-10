@@ -243,18 +243,6 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		if selectedClassification != "" && !validDLPClassification(selectedClassification) {
 			return fail(http.StatusBadRequest, "CLASSIFICATION", "Choose a valid classification")
 		}
-		classification, dlpWarnings, dlpMatches, dlpBlocked := evaluateOutboundDLP(policy, subject, bodyText, dlpAttachmentNames(attachments), selectedClassification)
-		if dlpBlocked {
-			return failDetails(http.StatusUnprocessableEntity, "DLP_BLOCKED",
-				"This message is blocked by your organization's data protection policy.",
-				map[string]any{"matches": dlpMatches, "warnings": dlpWarnings, "classification": classification})
-		}
-		bodyText, bodyHTML = applyBrandingFooter(policy, bodyText, bodyHTML)
-		sendAt := now.Add(time.Duration(holdMs) * time.Millisecond)
-		if !scheduledAt.IsZero() {
-			sendAt = scheduledAt
-			holdMs = 0
-		}
 		composeKind := body.ComposeKind
 		if composeKind != "reply" && composeKind != "replyAll" && composeKind != "forward" {
 			composeKind = ""
@@ -265,6 +253,30 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		sourceMessageID := body.SourceMessageID
 		if sourceMessageID == "" && draft != nil {
 			sourceMessageID = stateString(draft, "sourceMessageId")
+		}
+		if blockedClass, blocked := s.forwardBlocked(r.Context(), sess.User, composeKind, sourceMessageID, policy); blocked {
+			s.recordWorkspaceAudit(r.Context(), sess, "mail.forward_blocked", sourceMessageID,
+				"Forwarding blocked by classification policy")
+			return failDetails(http.StatusUnprocessableEntity, "DLP_PREVENT_FORWARD",
+				"This message is classified "+blockedClass+" and cannot be forwarded by organization policy.",
+				map[string]any{"classification": blockedClass})
+		}
+		classification, dlpWarnings, dlpMatches, dlpBlocked := evaluateOutboundDLP(policy, subject, bodyText, dlpAttachmentNames(attachments), selectedClassification)
+		if dlpBlocked {
+			return failDetails(http.StatusUnprocessableEntity, "DLP_BLOCKED",
+				"This message is blocked by your organization's data protection policy.",
+				map[string]any{"matches": dlpMatches, "warnings": dlpWarnings, "classification": classification})
+		}
+		if policy.Mail.WatermarkExternal && dlpClassificationRank(classification) >= dlpClassificationRank("Confidential") {
+			stamp := classification + " · " + sess.User.Email + " · " + now.Format(time.RFC3339) + " · Alt8Mail"
+			bodyText += "\n\n— " + stamp + " —"
+			bodyHTML += textToHTML("— " + stamp + " —")
+		}
+		bodyText, bodyHTML = applyBrandingFooter(policy, bodyText, bodyHTML)
+		sendAt := now.Add(time.Duration(holdMs) * time.Millisecond)
+		if !scheduledAt.IsZero() {
+			sendAt = scheduledAt
+			holdMs = 0
 		}
 		item := map[string]any{
 			"id": newID("send"), "draftId": body.DraftID, "accountId": account.ID, "from": fromPerson,
@@ -831,6 +843,26 @@ func (s *Server) dispatchDueSends(ctx context.Context) {
 		s.logger.Info("outbound send committed", "user", item.userID, "item", item.id,
 			"subject", result["subject"], "message", result["sentMessageId"])
 	}
+}
+
+// forwardBlocked reports whether forwarding a source message is denied by the
+// tenant's classification policy. It intentionally does not block replies.
+func (s *Server) forwardBlocked(ctx context.Context, user userRecord, composeKind, sourceMessageID string, policy adminTenantPolicy) (string, bool) {
+	if !policy.Mail.PreventForward || composeKind != "forward" || sourceMessageID == "" {
+		return "", false
+	}
+	var sourceClassification string
+	if err := s.store.DB.QueryRow(ctx, `
+		SELECT classification FROM public.mail_messages
+		WHERE id=$1 AND user_id=$2
+	`, sourceMessageID, user.ID).Scan(&sourceClassification); err != nil {
+		return "", false
+	}
+	canonical := canonicalDLPClassification(sourceClassification)
+	if dlpClassificationRank(canonical) >= dlpClassificationRank("Confidential") {
+		return canonical, true
+	}
+	return "", false
 }
 
 func (s *Server) enforceOutboundPolicy(ctx context.Context, tenantID string, recipients []any, attachments []any, policy adminTenantPolicy) error {

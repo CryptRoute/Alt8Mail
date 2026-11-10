@@ -10,6 +10,7 @@ import (
 type dlpMatch struct {
 	RuleID         string `json:"ruleId"`
 	RuleName       string `json:"ruleName"`
+	Detector       string `json:"detector"`
 	Term           string `json:"term"`
 	Field          string `json:"field"`
 	Action         string `json:"action"`
@@ -68,36 +69,33 @@ func evaluateOutboundDLP(policy adminTenantPolicy, subject, bodyText string, att
 		if len(fields) == 0 {
 			fields = []string{"subject", "body"}
 		}
-		for _, rawTerm := range rule.Terms {
-			term := strings.TrimSpace(rawTerm)
-			if term == "" {
+		detector := strings.ToLower(strings.TrimSpace(rule.Detector))
+		if detector == "" {
+			detector = "terms"
+		}
+		for _, field := range fields {
+			haystack := ""
+			switch strings.ToLower(field) {
+			case "subject":
+				haystack = subjectLower
+			case "body":
+				haystack = bodyLower
+			case "attachment":
+				haystack = attachmentLower
+			default:
 				continue
 			}
-			needle := strings.ToLower(term)
-			for _, field := range fields {
-				haystack := ""
-				switch strings.ToLower(field) {
-				case "subject":
-					haystack = subjectLower
-				case "body":
-					haystack = bodyLower
-				case "attachment":
-					haystack = attachmentLower
-				default:
-					continue
-				}
-				if !strings.Contains(haystack, needle) {
-					continue
-				}
-				key := rule.ID + "\x00" + strings.ToLower(term) + "\x00" + field
+			for _, hit := range dlpDetectorMatches(detector, rule, haystack) {
+				key := rule.ID + "\x00" + strings.ToLower(hit.Display) + "\x00" + field
 				if seen[key] {
 					continue
 				}
 				seen[key] = true
 				action := strings.ToLower(strings.TrimSpace(rule.Action))
 				match := dlpMatch{
-					RuleID: rule.ID, RuleName: rule.Name, Term: term, Field: field,
-					Action: action, Classification: canonicalDLPClassification(rule.Classification),
+					RuleID: rule.ID, RuleName: rule.Name, Term: hit.Display, Field: field,
+					Detector: hit.Detector, Action: action,
+					Classification: canonicalDLPClassification(rule.Classification),
 				}
 				matches = append(matches, match)
 				if rank := dlpClassificationRank(match.Classification); rank > dlpClassificationRank(classification) {
@@ -105,9 +103,9 @@ func evaluateOutboundDLP(policy adminTenantPolicy, subject, bodyText string, att
 				}
 				if action == "block" {
 					blocked = true
-					warnings = append(warnings, "Blocked by \""+rule.Name+"\": \""+term+"\" appears in the "+field+".")
+					warnings = append(warnings, "Blocked by \""+rule.Name+"\": \""+hit.Display+"\" appears in the "+field+".")
 				} else if action == "warn" {
-					warnings = append(warnings, "Policy \""+rule.Name+"\" matched \""+term+"\" in the "+field+".")
+					warnings = append(warnings, "Policy \""+rule.Name+"\" matched \""+hit.Display+"\" in the "+field+".")
 				}
 			}
 		}

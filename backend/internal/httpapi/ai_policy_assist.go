@@ -10,6 +10,7 @@ import (
 type aiPolicyMatch struct {
 	RuleID         string `json:"ruleId"`
 	RuleName       string `json:"ruleName"`
+	Detector       string `json:"detector"`
 	Field          string `json:"field"`
 	Action         string `json:"action"`
 	Classification string `json:"classification"`
@@ -93,8 +94,8 @@ func (s *Server) aiPolicyAssist(w http.ResponseWriter, r *http.Request) {
 	safeMatches := []aiPolicyMatch{}
 	for _, match := range matches {
 		safeMatches = append(safeMatches, aiPolicyMatch{
-			RuleID: match.RuleID, RuleName: match.RuleName, Field: match.Field,
-			Action: match.Action, Classification: match.Classification,
+			RuleID: match.RuleID, RuleName: match.RuleName, Detector: match.Detector,
+			Field: match.Field, Action: match.Action, Classification: match.Classification,
 		})
 	}
 	explanation := aiPolicyExplanation(policy, classification, matches)
@@ -103,7 +104,7 @@ func (s *Server) aiPolicyAssist(w http.ResponseWriter, r *http.Request) {
 	aiError := ""
 	settings, _ := s.aiSettingsFor(r.Context(), sess.User.TenantID)
 	if settings.Enabled && settings.Model != "" {
-		redacted := redactAIPolicyTerms(body.Subject+"\n\n"+body.BodyText, terms)
+		redacted := redactDLPDetectors(redactAIPolicyTerms(body.Subject+"\n\n"+body.BodyText, terms), policy)
 		system := `You suggest a data-loss-prevention classification for an already-redacted message.
 Choose exactly one: Public, Internal, Confidential or Restricted.
 Return strict JSON only: {"classification":"...","explanation":"one short sentence"}.
@@ -131,7 +132,7 @@ Do not include message details, secrets or personal data in the explanation. The
 				if candidate := canonicalDLPClassification(parsed.Classification); candidate != "" {
 					suggested = candidate
 					aiUsed = true
-					safeExplanation := redactAIPolicyTerms(truncate(strings.TrimSpace(parsed.Explanation), 300), terms)
+					safeExplanation := redactDLPDetectors(redactAIPolicyTerms(truncate(strings.TrimSpace(parsed.Explanation), 300), terms), policy)
 					if safeExplanation != "" {
 						explanation = safeExplanation
 					}
@@ -161,7 +162,7 @@ Do not include message details, secrets or personal data in the explanation. The
 		"effectiveClassification": effective, "overridden": overridden,
 		"explanation": explanation, "warnings": safeWarnings, "matches": safeMatches,
 		"blocked": blocked, "aiUsed": aiUsed, "aiError": aiError,
-		"redactedPreview": truncate(redactAIPolicyTerms(body.BodyText, terms), 500),
+		"redactedPreview": truncate(redactDLPDetectors(redactAIPolicyTerms(body.BodyText, terms), policy), 500),
 	})
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -135,28 +136,41 @@ type adminSecurityPolicy struct {
 	MaxSessions            int      `json:"maxSessions"`
 	AllowedIPRanges        []string `json:"allowedIPRanges"`
 	LoginAlerts            bool     `json:"loginAlerts"`
+	DataResidencyRegion    string   `json:"dataResidencyRegion"`
 }
 
 type adminMailPolicy struct {
-	ExternalForwarding        bool     `json:"externalForwarding"`
-	AutoForwarding            bool     `json:"autoForwarding"`
-	IMAPAccess                bool     `json:"imapAccess"`
-	POPAccess                 bool     `json:"popAccess"`
-	SMTPAccess                bool     `json:"smtpAccess"`
-	ExternalAccounts          bool     `json:"externalAccounts"`
-	MaxAttachmentMB           int      `json:"maxAttachmentMB"`
-	BlockedExtensions         []string `json:"blockedExtensions"`
-	AllowedExternalRecipients []string `json:"allowedExternalRecipients"`
-	SpamSensitivity           string   `json:"spamSensitivity"`
-	RetentionDays             int      `json:"retentionDays"`
-	Quarantine                bool     `json:"quarantine"`
-	ExternalTag               bool     `json:"externalTag"`
-	UndoSendSeconds           int      `json:"undoSendSeconds"`
-	RecipientWindowStartHour  int      `json:"recipientWindowStartHour"`
-	RecipientWindowEndHour    int      `json:"recipientWindowEndHour"`
-	PaymentLinksEnabled       bool     `json:"paymentLinksEnabled"`
-	PaymentLinkDomains        []string `json:"paymentLinkDomains"`
-	CampaignTrackingEnabled   bool     `json:"campaignTrackingEnabled"`
+	ExternalForwarding        bool           `json:"externalForwarding"`
+	AutoForwarding            bool           `json:"autoForwarding"`
+	IMAPAccess                bool           `json:"imapAccess"`
+	POPAccess                 bool           `json:"popAccess"`
+	SMTPAccess                bool           `json:"smtpAccess"`
+	ExternalAccounts          bool           `json:"externalAccounts"`
+	MaxAttachmentMB           int            `json:"maxAttachmentMB"`
+	BlockedExtensions         []string       `json:"blockedExtensions"`
+	AllowedExternalRecipients []string       `json:"allowedExternalRecipients"`
+	SpamSensitivity           string         `json:"spamSensitivity"`
+	RetentionDays             int            `json:"retentionDays"`
+	Quarantine                bool           `json:"quarantine"`
+	ExternalTag               bool           `json:"externalTag"`
+	UndoSendSeconds           int            `json:"undoSendSeconds"`
+	RecipientWindowStartHour  int            `json:"recipientWindowStartHour"`
+	RecipientWindowEndHour    int            `json:"recipientWindowEndHour"`
+	PaymentLinksEnabled       bool           `json:"paymentLinksEnabled"`
+	PaymentLinkDomains        []string       `json:"paymentLinkDomains"`
+	CampaignTrackingEnabled   bool           `json:"campaignTrackingEnabled"`
+	PreventForward            bool           `json:"preventForward"`
+	WatermarkExternal         bool           `json:"watermarkExternal"`
+	RetentionByClassification map[string]int `json:"retentionByClassification"`
+}
+
+type adminFilesPolicy struct {
+	RetentionDays         int  `json:"retentionDays"`
+	VersionRetentionDays  int  `json:"versionRetentionDays"`
+	ShareApprovalRequired bool `json:"shareApprovalRequired"`
+	DLPOnShare            bool `json:"dlpOnShare"`
+	WatermarkDownloads    bool `json:"watermarkDownloads"`
+	LegalHoldDefault      bool `json:"legalHoldDefault"`
 }
 
 type adminSharingPolicy struct {
@@ -188,7 +202,9 @@ type adminBrandingPolicy struct {
 type adminDLPRule struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
+	Detector       string   `json:"detector"`
 	Terms          []string `json:"terms"`
+	Pattern        string   `json:"pattern"`
 	Fields         []string `json:"fields"`
 	Classification string   `json:"classification"`
 	Action         string   `json:"action"`
@@ -234,6 +250,7 @@ type adminTenantPolicy struct {
 	DLP       adminDLPPolicy       `json:"dlp"`
 	Features  adminFeaturePolicy   `json:"features"`
 	Office    adminOfficePolicy    `json:"office"`
+	Files     adminFilesPolicy     `json:"files"`
 	MCP       adminMCPPolicy       `json:"mcp"`
 }
 
@@ -256,7 +273,8 @@ func defaultTenantPolicy() adminTenantPolicy {
 			RetentionDays: 0, Quarantine: false, ExternalTag: true,
 			UndoSendSeconds: 8, RecipientWindowStartHour: 9, RecipientWindowEndHour: 17,
 			PaymentLinksEnabled: false, PaymentLinkDomains: []string{"buy.stripe.com", "checkout.stripe.com", "paypal.me"},
-			CampaignTrackingEnabled: false,
+			CampaignTrackingEnabled: false, PreventForward: false, WatermarkExternal: false,
+			RetentionByClassification: map[string]int{},
 		},
 		Sharing:   adminSharingPolicy{ExternalSharing: true, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
 		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: true},
@@ -269,6 +287,10 @@ func defaultTenantPolicy() adminTenantPolicy {
 		Office: adminOfficePolicy{
 			Enabled: true, InternalSharing: true, ExternalEditing: true, AI: true, DLPOnSave: true,
 			VersionRetention: 0, AllowedGroups: []string{}, AllowedDomains: []string{},
+		},
+		Files: adminFilesPolicy{
+			RetentionDays: 0, VersionRetentionDays: 0, ShareApprovalRequired: false,
+			DLPOnShare: true, WatermarkDownloads: false, LegalHoldDefault: false,
 		},
 		MCP: adminMCPPolicy{
 			AllowedScopes: append([]string{}, mcpSupportedScopes...), WriteApprovalRequired: true,
@@ -290,6 +312,9 @@ func tenantPolicyFromSettings(raw json.RawMessage) adminTenantPolicy {
 	}
 	if policy.Mail.AllowedExternalRecipients == nil {
 		policy.Mail.AllowedExternalRecipients = []string{}
+	}
+	if policy.Mail.RetentionByClassification == nil {
+		policy.Mail.RetentionByClassification = map[string]int{}
 	}
 	if policy.Sharing.AllowedDomains == nil {
 		policy.Sharing.AllowedDomains = []string{}
@@ -321,6 +346,9 @@ func tenantPolicyFromSettings(raw json.RawMessage) adminTenantPolicy {
 		}
 		if policy.DLP.Rules[index].Action == "" {
 			policy.DLP.Rules[index].Action = "warn"
+		}
+		if policy.DLP.Rules[index].Detector == "" {
+			policy.DLP.Rules[index].Detector = "terms"
 		}
 		if policy.DLP.Rules[index].Classification == "" {
 			policy.DLP.Rules[index].Classification = policy.DLP.DefaultClassification
@@ -412,6 +440,39 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 	if policy.Mail.RetentionDays < 0 || policy.Mail.RetentionDays > 3650 {
 		errors = append(errors, "Retention must be between 0 and 3650 days")
 	}
+	retentionByClass := map[string]int{}
+	for rawClass, days := range policy.Mail.RetentionByClassification {
+		class := canonicalDLPClassification(rawClass)
+		if class == "" {
+			errors = append(errors, "Retention classification "+rawClass+" is not valid")
+			continue
+		}
+		if days < 0 || days > 3650 {
+			errors = append(errors, "Classification retention must be between 0 and 3650 days")
+			continue
+		}
+		retentionByClass[class] = days
+	}
+	policy.Mail.RetentionByClassification = retentionByClass
+	if policy.Files.RetentionDays < 0 || policy.Files.RetentionDays > 3650 {
+		errors = append(errors, "File retention must be between 0 and 3650 days")
+	}
+	if policy.Files.VersionRetentionDays < 0 || policy.Files.VersionRetentionDays > 3650 {
+		errors = append(errors, "File version retention must be between 0 and 3650 days")
+	}
+	policy.Security.DataResidencyRegion = strings.ToUpper(strings.TrimSpace(policy.Security.DataResidencyRegion))
+	if policy.Security.DataResidencyRegion != "" {
+		validRegion := len(policy.Security.DataResidencyRegion) <= 40
+		for _, char := range policy.Security.DataResidencyRegion {
+			if !(char >= 'A' && char <= 'Z') && !(char >= '0' && char <= '9') && char != '-' && char != '_' {
+				validRegion = false
+				break
+			}
+		}
+		if !validRegion {
+			errors = append(errors, "Data residency region must be an uppercase region code")
+		}
+	}
 	blocked := []string{}
 	seen := map[string]bool{}
 	for _, extension := range policy.Mail.BlockedExtensions {
@@ -496,6 +557,24 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 		default:
 			errors = append(errors, fmt.Sprintf("DLP rule %q direction must be outbound or both", rule.Name))
 		}
+		rule.Detector = strings.ToLower(strings.TrimSpace(rule.Detector))
+		if rule.Detector == "" {
+			rule.Detector = "terms"
+		}
+		switch rule.Detector {
+		case "terms", "dictionary", "regex", "credit_card", "iban", "national_id":
+		default:
+			errors = append(errors, fmt.Sprintf("DLP rule %q detector must be terms, dictionary, regex, credit_card, iban or national_id", rule.Name))
+			rule.Detector = "terms"
+		}
+		rule.Pattern = truncate(strings.TrimSpace(rule.Pattern), 500)
+		if rule.Detector == "regex" {
+			if rule.Pattern == "" {
+				errors = append(errors, fmt.Sprintf("DLP rule %q needs a regular expression", rule.Name))
+			} else if _, err := regexp.Compile(rule.Pattern); err != nil {
+				errors = append(errors, fmt.Sprintf("DLP rule %q regular expression is invalid", rule.Name))
+			}
+		}
 		terms := []string{}
 		seenTerms := map[string]bool{}
 		for _, raw := range rule.Terms {
@@ -507,7 +586,7 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 			seenTerms[key] = true
 			terms = append(terms, term)
 		}
-		if len(terms) == 0 {
+		if (rule.Detector == "terms" || rule.Detector == "dictionary") && len(terms) == 0 {
 			errors = append(errors, fmt.Sprintf("DLP rule %q needs at least one term", rule.Name))
 		}
 		if len(terms) > 20 {

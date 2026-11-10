@@ -200,6 +200,10 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /ai", s.adminRequirePermission("policies.manage", s.adminUpdateAI))
 	mux.HandleFunc("POST /ai/test", s.adminRequirePermission("policies.manage", s.adminTestAI))
 	mux.HandleFunc("POST /maintenance/retention", s.adminRequirePermission("policies.manage", s.adminRunRetention))
+	mux.HandleFunc("POST /dlp/simulate", s.adminRequirePermission("policies.read", s.adminSimulateDLP))
+	mux.HandleFunc("GET /dlp/reviews", s.adminRequirePermission("policies.read", s.adminListDLPReviews))
+	mux.HandleFunc("POST /dlp/reviews", s.adminRequirePermission("policies.manage", s.adminCreateDLPReview))
+	mux.HandleFunc("PATCH /dlp/reviews/{id}", s.adminRequirePermission("policies.manage", s.adminUpdateDLPReview))
 
 	mux.HandleFunc("GET /domains", s.adminRequirePermission("domains.read", s.adminListDomains))
 	mux.HandleFunc("POST /domains", s.adminRequirePermission("domains.manage", s.adminCreateDomain))
