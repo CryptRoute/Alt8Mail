@@ -51,8 +51,7 @@ jobs:
       - name: Install govulncheck and scan
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          cd backend
-          "$(go env GOPATH)/bin/govulncheck" ./...
+          GOVULNCHECK_BIN="$(go env GOPATH)/bin/govulncheck" bash tools/govulncheck-gate.sh
       - name: Upgrade/rollback smoke
         run: bash tools/migration-upgrade-smoke.sh
 
@@ -66,5 +65,11 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm audit --omit=dev
+      - uses: browser-actions/setup-chrome@v1
+        id: setup-chrome
       - run: npm run test:all
+        env:
+          CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
       - run: npm run test:a11y
+        env:
+          CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}

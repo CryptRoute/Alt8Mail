@@ -1,6 +1,6 @@
 module github.com/CryptRoute/Alt8Mail/backend
 
-go 1.26.0
+go 1.26.10
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0

@@ -1,0 +1,4 @@
+# Upstream advisories with no fixed release yet. Each entry is reviewed and
+# documented in docs/RELEASE_GAP_AUDIT.md. Remove an entry as soon as upstream
+# publishes a fixed version.
+GO-2026-6909  # crewjam/saml v0.6.3: nil-pointer/namespace handling in SAML assertions; no fixed release

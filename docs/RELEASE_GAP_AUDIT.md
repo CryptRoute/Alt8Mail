@@ -90,6 +90,10 @@ The ten Phase 2–6 follow-ups were implemented and covered by
   Cabinet-share fallback, 7-day default expiry, public/private links and
   recipient-email confirmation for private links.
 
+Security advisory exception: `GO-2026-6909` (crewjam/saml v0.6.3) has no
+fixed release. ACS panics are contained and audited; the gate allowlists only
+this ID. Go is pinned to `1.26.10` so all standard-library findings are fixed.
+
 Still open before publication: storage-layer encryption for mail rows, live
 provider/IdP/migration drills, a real OCR sidecar and DLP corpus, campaign
 tracking beyond mail merges, attachment-binary/OCR DLP, PDF/image watermark

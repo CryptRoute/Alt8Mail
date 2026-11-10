@@ -251,6 +251,17 @@ func (s *Server) samlACS(w http.ResponseWriter, r *http.Request) {
 		s.samlErrorRedirect(w, r)
 		return
 	}
+	// The SAML library has an upstream nil-pointer advisory
+	// (GO-2026-6909) with no fixed release. Contain a malformed assertion
+	// panic so it cannot take down the request goroutine or leak a stack.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if s.logger != nil {
+				s.logger.Warn("SAML assertion processing panic contained", "path", r.URL.Path)
+			}
+			s.samlRejectRequest(w, r)
+		}
+	}()
 	middleware.ServeACS(w, r)
 }
 
