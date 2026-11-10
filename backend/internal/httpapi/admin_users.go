@@ -683,18 +683,54 @@ func (s *Server) adminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		position++
 	}
 	ctx := r.Context()
-	// Activating an invited or suspended user consumes a seat; an already-active
-	// user (or a platform administrator, who never consumes one) does not.
-	activation := body.Status != nil && *body.Status == "active" && user.Status != "active" && !user.IsSystemAdmin
+	// A status update to active may consume a seat. Whether it really does is
+	// decided from the row locked inside the transaction, not from this
+	// pre-read: a concurrent suspend can free a seat that another create takes
+	// before this activation executes.
+	activationCandidate := body.Status != nil && *body.Status == "active"
+	if activationCandidate && s.seatAppliesToTenant(sess.ActiveTenantID) && s.adminSeatRaceHook != nil {
+		s.adminSeatRaceHook()
+	}
 	tx, err := s.store.DB.Begin(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "USER", "Could not update user")
 		return
 	}
 	defer tx.Rollback(ctx)
-	if activation {
-		if !s.enforceAdminSeatTx(ctx, w, tx, sess, sess.ActiveTenantID, user.Email, 1) {
+	if activationCandidate && s.seatAppliesToTenant(sess.ActiveTenantID) {
+		if err := s.lockSeatScopeTx(ctx, tx, sess.ActiveTenantID); err != nil {
+			_ = tx.Rollback(ctx)
+			if s.logger != nil {
+				s.logger.Warn("license seat lock failed", "err", err)
+			}
+			writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
 			return
+		}
+		var lockedStatus string
+		var lockedDeletedAt *time.Time
+		var lockedSystemAdmin bool
+		if err := tx.QueryRow(ctx, `
+			SELECT status, deleted_at, is_system_admin FROM users
+			WHERE id = $1 AND tenant_id = $2 FOR UPDATE
+		`, user.ID, sess.ActiveTenantID).Scan(&lockedStatus, &lockedDeletedAt, &lockedSystemAdmin); err != nil {
+			writeError(w, http.StatusInternalServerError, "USER", "Could not update user")
+			return
+		}
+		activation := lockedStatus != "active" && lockedDeletedAt == nil && !lockedSystemAdmin
+		if activation {
+			used, seatErr := s.ensureSeatCapacityTx(ctx, tx, sess.ActiveTenantID, 1)
+			if errors.Is(seatErr, errSeatLimit) {
+				s.rejectSeatLimit(ctx, w, tx, sess, sess.ActiveTenantID, user.Email, used)
+				return
+			}
+			if seatErr != nil {
+				_ = tx.Rollback(ctx)
+				if s.logger != nil {
+					s.logger.Warn("license seat count failed", "err", seatErr)
+				}
+				writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
+				return
+			}
 		}
 	}
 	if _, err := tx.Exec(ctx, "UPDATE users SET "+strings.Join(setParts, ", ")+" WHERE id = $1", args...); err != nil {
@@ -1130,13 +1166,7 @@ func (s *Server) adminBulkUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ctx := r.Context()
-	type bulkTarget struct {
-		user     adminUser
-		consumes bool
-	}
-	targets := make([]bulkTarget, 0, len(body.IDs))
-	activationIDs := map[string]bool{}
-	activations := 0
+	targets := make([]adminUser, 0, len(body.IDs))
 	for _, id := range body.IDs {
 		user, err := s.adminUserByID(ctx, id)
 		if err != nil || user.TenantID != sess.ActiveTenantID || user.ID == sess.User.ID {
@@ -1145,23 +1175,20 @@ func (s *Server) adminBulkUsers(w http.ResponseWriter, r *http.Request) {
 		if !s.adminCanManageTarget(sess, user) {
 			continue
 		}
-		target := bulkTarget{user: user}
 		switch body.Action {
 		case "activate":
 			if user.DeletedAt != nil {
 				continue
-			}
-			if user.Status != "active" && !user.IsSystemAdmin && !activationIDs[user.ID] {
-				activationIDs[user.ID] = true
-				target.consumes = true
-				activations++
 			}
 		case "delete":
 			if user.IsSystemAdmin {
 				continue
 			}
 		}
-		targets = append(targets, target)
+		targets = append(targets, user)
+	}
+	if body.Action == "activate" && s.seatAppliesToTenant(sess.ActiveTenantID) && s.adminSeatRaceHook != nil {
+		s.adminSeatRaceHook()
 	}
 	tx, err := s.store.DB.Begin(ctx)
 	if err != nil {
@@ -1169,16 +1196,83 @@ func (s *Server) adminBulkUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	if activations > 0 {
-		// Reject the whole batch before any status change so a partially applied
-		// bulk activation can never cross the seat limit.
-		if !s.enforceAdminSeatTx(ctx, w, tx, sess, sess.ActiveTenantID, "bulk activate", activations) {
+	if body.Action == "activate" && s.seatAppliesToTenant(sess.ActiveTenantID) {
+		if err := s.lockSeatScopeTx(ctx, tx, sess.ActiveTenantID); err != nil {
+			_ = tx.Rollback(ctx)
+			if s.logger != nil {
+				s.logger.Warn("license seat lock failed", "err", err)
+			}
+			writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
 			return
+		}
+		// Derive the real activation count from rows locked inside the
+		// transaction. Pre-read statuses are stale: a concurrent suspend can
+		// free seats that another create takes before this batch runs.
+		ids := make([]string, 0, len(targets))
+		for _, target := range targets {
+			ids = append(ids, target.ID)
+		}
+		additional := 0
+		if len(ids) > 0 {
+			rows, err := tx.Query(ctx, `
+				SELECT id::text, status, deleted_at, is_system_admin
+				FROM users
+				WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+				ORDER BY id
+				FOR UPDATE
+			`, sess.ActiveTenantID, ids)
+			if err != nil {
+				_ = tx.Rollback(ctx)
+				writeError(w, http.StatusInternalServerError, "USER", "Could not update users")
+				return
+			}
+			seen := map[string]bool{}
+			for rows.Next() {
+				var id, status string
+				var deletedAt *time.Time
+				var isSystemAdmin bool
+				if err := rows.Scan(&id, &status, &deletedAt, &isSystemAdmin); err != nil {
+					rows.Close()
+					_ = tx.Rollback(ctx)
+					writeError(w, http.StatusInternalServerError, "USER", "Could not update users")
+					return
+				}
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				if status != "active" && deletedAt == nil && !isSystemAdmin {
+					additional++
+				}
+			}
+			rowsErr := rows.Err()
+			rows.Close()
+			if rowsErr != nil {
+				_ = tx.Rollback(ctx)
+				writeError(w, http.StatusInternalServerError, "USER", "Could not update users")
+				return
+			}
+		}
+		if additional > 0 {
+			// Reject the whole batch before any status change so a partially
+			// applied bulk activation can never cross the seat limit.
+			used, seatErr := s.ensureSeatCapacityTx(ctx, tx, sess.ActiveTenantID, additional)
+			if errors.Is(seatErr, errSeatLimit) {
+				s.rejectSeatLimit(ctx, w, tx, sess, sess.ActiveTenantID, "bulk activate", used)
+				return
+			}
+			if seatErr != nil {
+				_ = tx.Rollback(ctx)
+				if s.logger != nil {
+					s.logger.Warn("license seat count failed", "err", seatErr)
+				}
+				writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
+				return
+			}
 		}
 	}
 	affected := 0
-	for _, target := range targets {
-		user := target.user
+	for _, user := range targets {
 		switch body.Action {
 		case "activate":
 			_, _ = tx.Exec(ctx, `UPDATE users SET status='active', updated_at=now() WHERE id=$1`, user.ID)

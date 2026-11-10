@@ -83,6 +83,10 @@ type Server struct {
 	// samlFailureAudit is a test seam for the sanitized failure audit written
 	// by samlOnError; production uses s.audit.
 	samlFailureAudit func(*http.Request, userRecord, string, string, string)
+	// adminSeatRaceHook is a test seam invoked after an admin activation has
+	// pre-read its target(s) and before the seat-locked transaction. It is nil
+	// in production.
+	adminSeatRaceHook func()
 }
 
 type Options struct {
@@ -122,6 +126,12 @@ func New(opts Options) *Server {
 		}
 	} else if license != nil {
 		server.license = license
+		if tenant := strings.TrimSpace(license.Tenant); tenant != "" && opts.Store != nil && opts.Logger != nil {
+			// A tenant claim that names no tenant would silently enforce
+			// nothing. The lookup runs off the startup path so a slow database
+			// never delays construction.
+			go warnMissingLicenseTenant(opts.Store, opts.Logger, tenant)
+		}
 	}
 	server.licenseConfigured = strings.TrimSpace(opts.Config.LicenseFile) != ""
 	wa, err := webauthn.New(&webauthn.Config{
@@ -135,6 +145,25 @@ func New(opts Options) *Server {
 		server.webAuthn = wa
 	}
 	return server
+}
+
+// warnMissingLicenseTenant logs at startup when a tenant-scoped license names a
+// tenant that does not exist. The claim still scopes counting, so enforcement
+// counts zero users (and therefore limits nobody) until that tenant is created.
+func warnMissingLicenseTenant(st *store.Store, logger *slog.Logger, tenant string) {
+	if st == nil || st.DB == nil || logger == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var exists bool
+	if err := st.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)`, tenant).Scan(&exists); err != nil {
+		logger.Warn("license tenant lookup failed", "err", err)
+		return
+	}
+	if !exists {
+		logger.Warn("license tenant claim matches no tenant; seat enforcement counts zero users", "tenant", tenant)
+	}
 }
 
 func (s *Server) Handler() http.Handler {

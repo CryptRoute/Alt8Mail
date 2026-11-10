@@ -275,6 +275,15 @@ func writeSeatLimit(w http.ResponseWriter) {
 	writeError(w, http.StatusConflict, "SEAT_LIMIT", seatLimitMessage)
 }
 
+// rejectSeatLimit rolls back the provisioning transaction before writing the
+// audit (the audit's tenant foreign key would otherwise wait on the tenant row
+// lock still held here) and then returns the fixed admin 409.
+func (s *Server) rejectSeatLimit(ctx context.Context, w http.ResponseWriter, tx pgx.Tx, sess *adminSessionRecord, auditTenantID, target string, used int) {
+	_ = tx.Rollback(ctx)
+	s.recordSeatLimitBlocked(ctx, sess, auditTenantID, target, used)
+	writeSeatLimit(w)
+}
+
 // enforceAdminSeatTx locks the seat scope and verifies capacity for an admin
 // activation. It writes the response and returns false when the request must
 // stop (limit reached or the count could not be verified).
@@ -292,12 +301,39 @@ func (s *Server) enforceAdminSeatTx(ctx context.Context, w http.ResponseWriter, 
 	}
 	used, err := s.ensureSeatCapacityTx(ctx, tx, tenantID, additional)
 	if errors.Is(err, errSeatLimit) {
-		// Release the tenant row lock before writing the audit: admin_audit_log
-		// has a foreign key to tenants, whose FK check would otherwise wait on
-		// the lock this transaction still holds.
+		s.rejectSeatLimit(ctx, w, tx, sess, tenantID, target, used)
+		return false
+	}
+	if err != nil {
 		_ = tx.Rollback(ctx)
-		s.recordSeatLimitBlocked(ctx, sess, tenantID, target, used)
-		writeSeatLimit(w)
+		if s.logger != nil {
+			s.logger.Warn("license seat count failed", "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
+		return false
+	}
+	return true
+}
+
+// enforceNewTenantSeatTx gates the active owner created for a brand-new tenant.
+// Only a global license counts that owner; a tenant-scoped license does not
+// count a new, unrelated tenant. The audit is attributed to the operator's
+// tenant because the new tenant is rolled back on rejection.
+func (s *Server) enforceNewTenantSeatTx(ctx context.Context, w http.ResponseWriter, tx pgx.Tx, sess *adminSessionRecord, newTenantID, ownerEmail string) bool {
+	if !s.seatAppliesToTenant(newTenantID) {
+		return true
+	}
+	if err := s.lockSeatScopeTx(ctx, tx, newTenantID); err != nil {
+		_ = tx.Rollback(ctx)
+		if s.logger != nil {
+			s.logger.Warn("license seat lock failed", "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
+		return false
+	}
+	used, err := s.ensureSeatCapacityTx(ctx, tx, newTenantID, 1)
+	if errors.Is(err, errSeatLimit) {
+		s.rejectSeatLimit(ctx, w, tx, sess, sess.ActiveTenantID, ownerEmail, used)
 		return false
 	}
 	if err != nil {

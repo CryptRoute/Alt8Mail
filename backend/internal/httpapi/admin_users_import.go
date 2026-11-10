@@ -356,7 +356,11 @@ func (s *Server) provisionImportedUser(ctx context.Context, job userImportJobRec
 		// End the transaction before the audit insert; its tenant foreign key
 		// would otherwise wait on the tenant lock held here.
 		_ = tx.Rollback(ctx)
-		s.recordSeatLimitBlocked(ctx, nil, job.TenantID, email, used)
+		auditSession := &adminSessionRecord{
+			ActiveTenantID: job.TenantID,
+			User:           adminUser{ID: job.CreatedByID, Name: job.CreatedBy},
+		}
+		s.recordSeatLimitBlocked(ctx, auditSession, job.TenantID, email, used)
 		return "", "", "", errSeatLimit
 	}
 	if err != nil {
