@@ -15,8 +15,8 @@ external system/credential and is documented for the operator run).
 | 1B OIDC SSO | done | `backend/internal/httpapi/oidc*.go`, `docs/SSO.md`; mock-IdP, negative-token, state/PKCE, domain/IP/MFA and license-gate tests |
 | 1C SAML SSO | done | `backend/internal/httpapi/saml*.go`, `docs/SAML.md`; mock-IdP suite, security gate with artifact/body-bound/rogue-key tests |
 | 1D SCIM 2.0 | done | `backend/internal/httpapi/scim*.go`, migrations `0061`, `docs/SCIM.md`; final gate adds system-administrator protection and the exact `/scim/v2` nginx route; DSN token/Users/Groups suites pass |
-| 1E License seat/tenant enforcement | planned | `docs/superpowers/plans/2026-11-10-phase-1e-license-control-plane.md` Task 2 |
-| 1E Control Plane license UI and seat metering | planned | same plan, Tasks 1/3 |
+| 1E License seat/tenant enforcement | in progress | `docs/superpowers/plans/2026-11-10-phase-1e-license-control-plane.md` Task 2; Control status/upload/seat API landed in Task 1 |
+| 1E Control Plane license UI and seat metering | in progress | same plan, Tasks 1/3; Control API landed, web view pending |
 | 1F White-label and custom webmail domains | planned | `docs/superpowers/plans/2026-11-10-phase-1f-white-label.md` |
 | 1G Per-mailbox/per-folder restore and DR | planned | `docs/superpowers/plans/2026-11-10-phase-1g-restore-dr.md`, `docs/DR.md` once written |
 | 1H Accessibility baseline and keyboard gate | planned | `docs/superpowers/plans/2026-11-10-phase-1h-accessibility.md`, `tools/a11y-audit.mjs` once written |
