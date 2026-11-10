@@ -87,6 +87,9 @@ type Server struct {
 	// pre-read its target(s) and before the seat-locked transaction. It is nil
 	// in production.
 	adminSeatRaceHook func()
+	// automationPost is a test seam for webhook delivery; production uses the
+	// bounded public-network POST in automation.go.
+	automationPost func(context.Context, string, []byte) error
 }
 
 type Options struct {
@@ -433,6 +436,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerTeamInboxRoutes(mux)
 	s.registerSharedDraftRoutes(mux)
 	s.registerTeamTemplateRoutes(mux)
+	s.registerAutomationRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)

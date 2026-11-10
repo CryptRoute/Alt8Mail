@@ -6223,6 +6223,151 @@ function startTeamPresence(threadId) {
   }, 60000);
 }
 
+function ensureAutomationOverlay() {
+  let overlay = document.getElementById("automationOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="automationOverlay" hidden>
+    <div class="dialog shared-drafts-dialog automation-dialog" role="dialog" aria-modal="true" aria-labelledby="automationTitle">
+      <div class="dialog-head"><div><p class="eyebrow">Team automation</p><h2 id="automationTitle">Automation rules</h2><p class="dialog-note" id="automationNote"></p></div><button class="icon-btn" id="automationClose" type="button" aria-label="Close automation"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body"><div id="automationRuleList" class="automation-rule-list"></div><form id="automationForm" class="automation-form"><input type="hidden" id="automationRuleId"><label class="field"><span>Rule name</span><input id="automationName" required placeholder="Route urgent renewals"></label><div class="field-row"><label class="field"><span>From contains</span><input id="automationFrom" placeholder="customer@example.com"></label><label class="field"><span>From domain</span><input id="automationFromDomain" placeholder="example.com"></label></div><div class="field-row"><label class="field"><span>Subject contains</span><input id="automationSubject" placeholder="urgent"></label><label class="field"><span>Category</span><input id="automationCategory" placeholder="Billing"></label></div><label class="check-field"><input id="automationHasAttachment" type="checkbox"> Only messages with attachments</label><div class="field-row"><label class="field"><span>Label</span><input id="automationLabel" placeholder="urgent"></label><label class="field"><span>Move to folder</span><input id="automationMove" placeholder="Archive"></label></div><div class="field-row"><label class="field"><span>Create task</span><input id="automationTask" placeholder="Handle urgent renewal"></label><label class="field"><span>Notify title</span><input id="automationNotify" placeholder="Urgent renewal needs an owner"></label></div><div class="field-row"><label class="field"><span>Webhook URL</span><input id="automationWebhook" type="url" placeholder="https://hooks.example.com/a8m"></label><label class="field"><span>Auto-reply draft body</span><textarea id="automationReply" rows="2" placeholder="Thanks — we are on it."></textarea></label></div><label class="check-field"><input id="automationEnabled" type="checkbox" checked> Rule is enabled</label><p class="settings-note">Auto-replies are staged as drafts for an agent to review. Delivery-time folder moves also produce a Sieve preview.</p><pre class="automation-sieve" id="automationSieve" hidden></pre><div class="dialog-foot"><button class="btn-secondary" type="button" id="automationReset">Clear</button><button class="btn-primary" type="submit" id="automationSave">Save rule</button></div></form></div>
+    </div>
+  </div>`);
+  overlay = document.getElementById("automationOverlay");
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
+  document.getElementById("automationClose").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("automationReset").addEventListener("click", () => resetAutomationForm());
+  document.getElementById("automationForm").addEventListener("submit", (event) => { event.preventDefault(); saveAutomationRule().catch(showError); });
+  return overlay;
+}
+
+function resetAutomationForm() {
+  const form = document.getElementById("automationForm");
+  form.reset();
+  document.getElementById("automationRuleId").value = "";
+  document.getElementById("automationEnabled").checked = true;
+  document.getElementById("automationSieve").hidden = true;
+  document.getElementById("automationSave").textContent = "Save rule";
+}
+
+async function openAutomationBuilder(team) {
+  if (!team) return;
+  state.automationTeam = team;
+  const overlay = ensureAutomationOverlay();
+  document.getElementById("automationNote").textContent = `${team.name} · ${team.address}`;
+  overlay.hidden = false;
+  await refreshAutomationRules(team);
+}
+
+async function refreshAutomationRules(team) {
+  const host = document.getElementById("automationRuleList");
+  host.innerHTML = '<div class="settings-note">Loading rules…</div>';
+  try {
+    const data = await api(`/api/automation/rules?teamId=${encodeURIComponent(team.id)}`);
+    state.automationRules = data.rules || [];
+    host.innerHTML = state.automationRules.length ? state.automationRules.map((rule) => `<div class="automation-rule-row">
+      <div class="shared-draft-copy"><strong>${esc(rule.name)}</strong><span>Priority ${rule.priority} · v${rule.version} · ${rule.enabled ? "enabled" : "disabled"} · ${(rule.actions || []).length} action${(rule.actions || []).length === 1 ? "" : "s"}</span></div>
+      <button class="btn-secondary small" type="button" data-auto-edit="${esc(rule.id)}">Edit</button>
+      <button class="btn-secondary small" type="button" data-auto-toggle="${esc(rule.id)}">${rule.enabled ? "Disable" : "Enable"}</button>
+      <button class="btn danger small" type="button" data-auto-delete="${esc(rule.id)}">Delete</button>
+    </div>`).join("") : '<div class="empty-mini">No automation rules yet. Build one below.</div>';
+    $$("[data-auto-edit]", host).forEach((button) => button.addEventListener("click", () => {
+      const rule = state.automationRules.find((item) => item.id === button.dataset.autoEdit);
+      if (rule) hydrateAutomationForm(rule);
+    }));
+    $$("[data-auto-toggle]", host).forEach((button) => button.addEventListener("click", async () => {
+      const rule = state.automationRules.find((item) => item.id === button.dataset.autoToggle);
+      if (!rule) return;
+      try {
+        await api(`/api/automation/rules/${encodeURIComponent(rule.id)}`, { method: "PATCH", body: { enabled: !rule.enabled } });
+        showToast(rule.enabled ? "Rule disabled" : "Rule enabled");
+        await refreshAutomationRules(team);
+      } catch (error) { showError(error); }
+    }));
+    $$("[data-auto-delete]", host).forEach((button) => button.addEventListener("click", async () => {
+      const rule = state.automationRules.find((item) => item.id === button.dataset.autoDelete);
+      if (!rule) return;
+      if (!(await appConfirm({ title: "Delete automation rule", message: `“${rule.name}” will stop running immediately.`, confirmLabel: "Delete rule", tone: "danger" }))) return;
+      try {
+        await api(`/api/automation/rules/${encodeURIComponent(rule.id)}`, { method: "DELETE" });
+        showToast("Rule deleted");
+        await refreshAutomationRules(team);
+      } catch (error) { showError(error); }
+    }));
+    if (!data.canManage) {
+      document.getElementById("automationForm").querySelectorAll("input, textarea, button[type=submit]").forEach((input) => { input.disabled = true; });
+    }
+  } catch (error) {
+    host.innerHTML = `<div class="settings-note">${esc(error.message || "Automation rules could not be loaded.")}</div>`;
+  }
+}
+
+function hydrateAutomationForm(rule) {
+  resetAutomationForm();
+  document.getElementById("automationRuleId").value = rule.id;
+  document.getElementById("automationName").value = rule.name || "";
+  const conditions = rule.conditions || {};
+  document.getElementById("automationFrom").value = conditions.from || "";
+  document.getElementById("automationFromDomain").value = conditions.fromDomain || "";
+  document.getElementById("automationSubject").value = conditions.subjectContains || "";
+  document.getElementById("automationCategory").value = conditions.category || "";
+  document.getElementById("automationHasAttachment").checked = conditions.hasAttachment === true;
+  for (const action of rule.actions || []) {
+    if (action.type === "label") document.getElementById("automationLabel").value = action.value || "";
+    else if (action.type === "move") document.getElementById("automationMove").value = action.folder || "";
+    else if (action.type === "createTask") document.getElementById("automationTask").value = action.title || "";
+    else if (action.type === "notify") document.getElementById("automationNotify").value = action.title || "";
+    else if (action.type === "webhook") document.getElementById("automationWebhook").value = action.url || "";
+    else if (action.type === "autoReply") document.getElementById("automationReply").value = action.body || "";
+  }
+  document.getElementById("automationEnabled").checked = rule.enabled !== false;
+  document.getElementById("automationSave").textContent = "Update rule";
+  document.getElementById("automationSieve").hidden = !rule.sieveText;
+  document.getElementById("automationSieve").textContent = rule.sieveText || "";
+}
+
+async function saveAutomationRule() {
+  const team = state.automationTeam;
+  if (!team) return;
+  const ruleId = document.getElementById("automationRuleId").value;
+  const conditions = {};
+  const from = document.getElementById("automationFrom").value.trim();
+  const fromDomain = document.getElementById("automationFromDomain").value.trim();
+  const subject = document.getElementById("automationSubject").value.trim();
+  const category = document.getElementById("automationCategory").value.trim();
+  if (from) conditions.from = from;
+  if (fromDomain) conditions.fromDomain = fromDomain;
+  if (subject) conditions.subjectContains = subject;
+  if (category) conditions.category = category;
+  if (document.getElementById("automationHasAttachment").checked) conditions.hasAttachment = true;
+  const actions = [];
+  const label = document.getElementById("automationLabel").value.trim();
+  const move = document.getElementById("automationMove").value.trim();
+  const task = document.getElementById("automationTask").value.trim();
+  const notify = document.getElementById("automationNotify").value.trim();
+  const webhook = document.getElementById("automationWebhook").value.trim();
+  const reply = document.getElementById("automationReply").value.trim();
+  if (label) actions.push({ type: "label", value: label });
+  if (move) actions.push({ type: "move", folder: move });
+  if (task) actions.push({ type: "createTask", title: task, priority: "normal" });
+  if (notify) actions.push({ type: "notify", title: notify });
+  if (webhook) actions.push({ type: "webhook", url: webhook });
+  if (reply) actions.push({ type: "autoReply", body: reply });
+  if (!Object.keys(conditions).length) throw new Error("Add at least one condition");
+  if (!actions.length) throw new Error("Add at least one action");
+  const body = {
+    teamId: team.id, name: document.getElementById("automationName").value.trim(),
+    enabled: document.getElementById("automationEnabled").checked, conditions, actions
+  };
+  const data = await api(ruleId ? `/api/automation/rules/${encodeURIComponent(ruleId)}` : "/api/automation/rules", {
+    method: ruleId ? "PATCH" : "POST", body
+  });
+  showToast(ruleId ? "Rule updated" : "Rule created");
+  document.getElementById("automationSieve").hidden = !data.rule?.sieveText;
+  document.getElementById("automationSieve").textContent = data.rule?.sieveText || "";
+  resetAutomationForm();
+  await refreshAutomationRules(team);
+}
+
 function markTeamReply(threadId) {
   if (!threadId || !teamContextForThread(threadId)) return;
   state.teamReplying.add(threadId);
@@ -9636,10 +9781,11 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
   listTitle.textContent = state.query ? "Search results" : def.label;
   let teamBadge = document.getElementById("teamInboxBadge");
   if (!teamBadge) {
-    listTitle.insertAdjacentHTML("afterend", '<span class="team-inbox-badge" id="teamInboxBadge" hidden></span><button class="team-inbox-badge team-drafts-button" id="teamDraftsBtn" type="button" hidden>Team drafts</button>');
+    listTitle.insertAdjacentHTML("afterend", '<span class="team-inbox-badge" id="teamInboxBadge" hidden></span><button class="team-inbox-badge team-drafts-button" id="teamDraftsBtn" type="button" hidden>Team drafts</button><button class="team-inbox-badge team-drafts-button" id="teamAutomationBtn" type="button" hidden>Automation</button>');
     teamBadge = document.getElementById("teamInboxBadge");
   }
   const teamDraftsBtn = document.getElementById("teamDraftsBtn");
+  const teamAutomationBtn = document.getElementById("teamAutomationBtn");
   const teamInbox = teamInboxForFolder(def);
   if (teamInbox) {
     const sla = Number(teamInbox.slaFirstResponseMinutes || 0);
@@ -9653,10 +9799,15 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
       teamDraftsBtn.hidden = false;
       teamDraftsBtn.onclick = () => openTeamDrafts(teamInbox);
     }
+    if (teamAutomationBtn) {
+      teamAutomationBtn.hidden = false;
+      teamAutomationBtn.onclick = () => openAutomationBuilder(teamInbox);
+    }
     refreshTeamQueue(teamInbox);
   } else {
     teamBadge.hidden = true;
     if (teamDraftsBtn) teamDraftsBtn.hidden = true;
+    if (teamAutomationBtn) teamAutomationBtn.hidden = true;
     state.teamQueue = [];
     state.teamQueueTeam = "";
   }

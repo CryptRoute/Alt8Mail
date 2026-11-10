@@ -1655,3 +1655,9 @@
 .shared-draft-copy span { color: var(--text-3); font-size: 0.68rem; }
 .team-drafts-button { background: var(--surface-2); color: var(--text-2); border-color: var(--border); cursor: pointer; }
 .team-drafts-button:hover { color: var(--accent-ink); border-color: var(--accent); }
+
+.automation-dialog { width: min(860px, calc(100vw - 28px)); }
+.automation-rule-list { display: flex; flex-direction: column; gap: 7px; max-height: 190px; overflow: auto; margin-bottom: 14px; }
+.automation-rule-row { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
+.automation-form .field-row { margin-bottom: 8px; }
+.automation-sieve { max-height: 120px; overflow: auto; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-3); color: var(--text-2); font-family: var(--font-mono); font-size: 10px; white-space: pre-wrap; }
