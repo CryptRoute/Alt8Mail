@@ -828,17 +828,52 @@ func (s *Server) adminRestoreUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	// The pre-read can race with a system-administrator revocation: an account
+	// that was exempt when read may be a counted user by the time the restore
+	// activates it. Decide from the row locked inside the transaction instead.
+	if s.seatAppliesToTenant(sess.ActiveTenantID) && s.adminSeatRaceHook != nil {
+		s.adminSeatRaceHook()
+	}
 	tx, err := s.store.DB.Begin(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "USER", "Could not restore user")
 		return
 	}
 	defer tx.Rollback(ctx)
-	if !user.IsSystemAdmin {
-		// Restoring a closed account activates it and consumes a seat. Platform
-		// administrators never consume one, so they are not gated.
-		if !s.enforceAdminSeatTx(ctx, w, tx, sess, sess.ActiveTenantID, user.Email, 1) {
+	if s.seatAppliesToTenant(sess.ActiveTenantID) {
+		if err := s.lockSeatScopeTx(ctx, tx, sess.ActiveTenantID); err != nil {
+			_ = tx.Rollback(ctx)
+			if s.logger != nil {
+				s.logger.Warn("license seat lock failed", "err", err)
+			}
+			writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
 			return
+		}
+		var lockedSystemAdmin bool
+		if err := tx.QueryRow(ctx, `
+			SELECT is_system_admin FROM users
+			WHERE id = $1 AND tenant_id = $2 FOR UPDATE
+		`, user.ID, sess.ActiveTenantID).Scan(&lockedSystemAdmin); err != nil {
+			writeError(w, http.StatusNotFound, "USER_NOT_FOUND", "User not found")
+			return
+		}
+		// Skip only when the locked row is still a platform administrator.
+		// Otherwise charge the seat conservatively, even if a concurrent restore
+		// already activated the row.
+		if !lockedSystemAdmin {
+			used, seatErr := s.ensureSeatCapacityTx(ctx, tx, sess.ActiveTenantID, 1)
+			if errors.Is(seatErr, errSeatLimit) {
+				s.rejectSeatLimit(ctx, w, tx, sess, sess.ActiveTenantID, user.Email, used)
+				return
+			}
+			if seatErr != nil {
+				_ = tx.Rollback(ctx)
+				if s.logger != nil {
+					s.logger.Warn("license seat count failed", "err", seatErr)
+				}
+				writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
+				return
+			}
 		}
 	}
 	_, _ = tx.Exec(ctx, `UPDATE users SET deleted_at = NULL, status = 'active', updated_at = now() WHERE id = $1`, user.ID)

@@ -2004,4 +2004,47 @@ func TestLicenseSeatEnforcementIntegration(t *testing.T) {
 			t.Fatalf("cross-tenant active seats = %d, want 2", total)
 		}
 	})
+
+	t.Run("restore re-reads the locked system-admin flag after a concurrent revoke", func(t *testing.T) {
+		reset(t)
+		adminCreateID(t, "seat-restore-race-active@"+domainA, "active")
+		closedEmail := "seat-restore-race-closed@" + domainA
+		var closedID string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO users (tenant_id, email, name, role, status, is_system_admin, deleted_at)
+			VALUES ($1, $2, 'Closed Seat Admin', 'member', 'suspended', true, now())
+			RETURNING id::text
+		`, tenantA, closedEmail).Scan(&closedID); err != nil {
+			t.Fatalf("create closed system admin: %v", err)
+		}
+		var hookErr error
+		server.adminSeatRaceHook = func() {
+			server.adminSeatRaceHook = nil
+			// A concurrent revocation removes the closed account's seat
+			// exemption, and a create fills the cap before the restore runs.
+			if _, err := pool.Exec(ctx, `UPDATE users SET is_system_admin = false WHERE id = $1`, closedID); err != nil {
+				hookErr = err
+				return
+			}
+			recorder := adminRequest(http.MethodPost, "/admin/api/users",
+				fmt.Sprintf(`{"name":"Restore Race Filler","email":%q,"status":"active"}`, "seat-restore-race-filler@"+domainA))
+			if recorder.Code != http.StatusCreated {
+				hookErr = fmt.Errorf("filler create status %d: %s", recorder.Code, recorder.Body.String())
+			}
+		}
+		defer func() { server.adminSeatRaceHook = nil }()
+		recorder := adminRequest(http.MethodPost, "/admin/api/users/"+closedID+"/restore", "")
+		if hookErr != nil {
+			t.Fatalf("race hook: %v", hookErr)
+		}
+		assertSeatLimit(t, recorder)
+		var deletedAt *time.Time
+		var status string
+		if err := pool.QueryRow(ctx, `SELECT deleted_at, status FROM users WHERE id = $1`, closedID).Scan(&deletedAt, &status); err != nil || deletedAt == nil || status != "suspended" {
+			t.Fatalf("blocked restore changed the row: deletedAt=%v status=%q err=%v", deletedAt, status, err)
+		}
+		if got := activeCount(t, tenantA); got != 2 {
+			t.Fatalf("active seats after blocked restore = %d, want 2", got)
+		}
+	})
 }
