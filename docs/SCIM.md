@@ -432,11 +432,18 @@ the same transaction as the membership, mapping or group change.
 
 These are field-mapping guides, not certified connector configurations. Use the
 IdP's "test connection" and start with a small pilot group before enabling
-production sync. The SCIM endpoint is always:
+production sync. The SCIM endpoint is the authoritative base URL:
+`ALT8MAIL_PUBLIC_URL` (trailing slash trimmed) with `/scim/v2` appended, for
+example:
 
 ```text
 https://<public-host>/scim/v2
+https://<public-host>/<path-prefix>/scim/v2
 ```
+
+If `ALT8MAIL_PUBLIC_URL` includes a path prefix, configure the reverse proxy to
+strip it as described in [nginx reverse proxy](#nginx-reverse-proxy). The
+admin console's Provisioning view shows the exact URL for this deployment.
 
 The secret is a token created in **Governance → Provisioning**. Treat it as a
 credential: it can create users and change mapped-group membership for the
