@@ -324,7 +324,8 @@ func (s *Server) bookSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	end := start.Add(time.Duration(page.Duration) * time.Minute)
-	if end.Hour() > page.EndHour || (end.Hour() == page.EndHour && end.Minute() > 0) {
+	localEnd := end.In(location)
+	if localEnd.Hour() > page.EndHour || (localEnd.Hour() == page.EndHour && localEnd.Minute() > 0) {
 		writeError(w, http.StatusBadRequest, "BOOKING_SLOT", "That time does not fit the booking window")
 		return
 	}

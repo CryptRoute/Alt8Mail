@@ -115,6 +115,14 @@ func (s *Server) adminCreateFileHold(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "FILE_HOLD", "Choose the user whose files must be preserved")
 			return
 		}
+		var belongs bool
+		_ = s.store.DB.QueryRow(r.Context(), `
+			SELECT EXISTS(SELECT 1 FROM public.users WHERE id=$1 AND tenant_id=$2)
+		`, userID, sess.ActiveTenantID).Scan(&belongs)
+		if !belongs {
+			writeError(w, http.StatusBadRequest, "FILE_HOLD", "The selected user does not belong to this organization")
+			return
+		}
 	}
 	if scope == "file" {
 		if fileID == "" {

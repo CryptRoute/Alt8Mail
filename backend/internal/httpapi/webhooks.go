@@ -42,6 +42,15 @@ func (s *Server) validateWebhookURL(raw string) (*url.URL, error) {
 		if literal := net.ParseIP(host); literal != nil && !publicRemoteIP(literal) {
 			return nil, fmt.Errorf("private webhook endpoints are not allowed")
 		}
+		resolved, err := net.LookupIP(host)
+		if err != nil || len(resolved) == 0 {
+			return nil, fmt.Errorf("webhook host could not be resolved")
+		}
+		for _, address := range resolved {
+			if !publicRemoteIP(address) {
+				return nil, fmt.Errorf("private webhook endpoints are not allowed")
+			}
+		}
 	}
 	return parsed, nil
 }

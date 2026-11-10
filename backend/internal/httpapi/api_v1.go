@@ -204,6 +204,18 @@ func (s *Server) apiV1SendMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, payload)
 		return
 	}
+	classification, dlpWarnings, dlpMatches, policyErr := s.validateProgrammaticSend(r.Context(), principal.User, to, cc, bcc, subject, bodyText, "Internal")
+	if policyErr != nil {
+		status := http.StatusForbidden
+		if len(dlpMatches) > 0 || policyErr.Error() == "message blocked by organization data protection policy" {
+			status = http.StatusUnprocessableEntity
+		}
+		writeJSON(w, status, map[string]any{"error": map[string]any{
+			"code": "API_DLP", "message": policyErr.Error(),
+			"details": map[string]any{"matches": dlpMatches, "warnings": dlpWarnings},
+		}})
+		return
+	}
 	var accountID string
 	if err := s.store.DB.QueryRow(r.Context(), `SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1`, principal.UserID).Scan(&accountID); err != nil {
 		writeError(w, http.StatusConflict, "API_MESSAGE", "The mailbox has no native sending account")
@@ -222,9 +234,9 @@ func (s *Server) apiV1SendMessage(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO public.outbox
 		  (id, tenant_id, user_id, from_json, to_json, cc_json, bcc_json, subject, body_text, body_html,
 		   status, scheduled, send_at, account_id, priority, classification)
-		VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8,$9,$10,'queued',true,now(),$11,'normal','Internal')
+		VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8,$9,$10,'queued',true,now(),$11,'normal',$12)
 	`, outboxID, principal.TenantID, principal.UserID, fromJSON, toJSON, ccJSON, bccJSON,
-		subject, bodyText, truncate(html, 200000), accountID)
+		subject, bodyText, truncate(html, 200000), accountID, classification)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "API_MESSAGE", "Could not queue the message")
 		return
@@ -234,7 +246,7 @@ func (s *Server) apiV1SendMessage(w http.ResponseWriter, r *http.Request) {
 		"tenantId": principal.TenantID, "queuedAt": time.Now().UTC().Format(time.RFC3339),
 	}
 	eventID := s.enqueueWebhookEvent(r.Context(), principal.TenantID, "message.queued", payload)
-	response := map[string]any{"id": outboxID, "status": "queued", "eventId": eventID}
+	response := map[string]any{"id": outboxID, "status": "queued", "eventId": eventID, "classification": classification, "dlpWarnings": dlpWarnings}
 	apiIdempotencyStore(r.Context(), s, principal, idempotency, http.MethodPost, r.URL.Path, http.StatusAccepted, response)
 	writeJSON(w, http.StatusAccepted, response)
 }

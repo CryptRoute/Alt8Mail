@@ -187,6 +187,10 @@ func (s *Server) executeMCPAction(ctx context.Context, user userRecord, tool str
 		if len(recipients) == 0 || len(recipients) > 50 {
 			return fmt.Errorf("use between 1 and 50 recipients")
 		}
+		classification, _, _, policyErr := s.validateProgrammaticSend(ctx, user, mcpRecipientList(to), nil, nil, subject, body, "Internal")
+		if policyErr != nil {
+			return policyErr
+		}
 		var accountID string
 		if err := s.store.DB.QueryRow(ctx, `SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1`, user.ID).Scan(&accountID); err != nil {
 			return fmt.Errorf("native mailbox is unavailable")
@@ -195,9 +199,9 @@ func (s *Server) executeMCPAction(ctx context.Context, user userRecord, tool str
 		fromJSON, _ := json.Marshal(map[string]any{"name": user.Name, "email": user.Email})
 		_, err := s.store.DB.Exec(ctx, `
 			INSERT INTO public.outbox
-			  (id, tenant_id, user_id, from_json, to_json, subject, body_text, body_html, status, scheduled, send_at, account_id)
-			VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,'queued',true,now(),$9)
-		`, newID("send"), user.TenantID, user.ID, fromJSON, toJSON, subject, body, textToHTML(body), accountID)
+			  (id, tenant_id, user_id, from_json, to_json, subject, body_text, body_html, status, scheduled, send_at, account_id, classification)
+			VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,'queued',true,now(),$9,$10)
+		`, newID("send"), user.TenantID, user.ID, fromJSON, toJSON, subject, body, textToHTML(body), accountID, classification)
 		return err
 	}
 	return fmt.Errorf("unsupported MCP action")
