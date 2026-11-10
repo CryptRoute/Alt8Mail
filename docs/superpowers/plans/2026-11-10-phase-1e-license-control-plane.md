@@ -61,7 +61,37 @@ Behavior:
 - [ ] Implement config, `license.go`, routes. Use `licensing.ParsePublicKey`/`Verifier.Verify`/`Status(time.Now())`; do not duplicate the envelope logic.
 - [ ] Run `go test ./internal/control -run License -count=1`, `go test ./... -count=1`, `go vet ./...`, `go build ./...`.
 
-### Task 2: Control web view and docs
+### Task 2: Webmail seat and tenant enforcement
+
+**Files:**
+- Modify: `backend/internal/httpapi/license.go`
+- Modify: `backend/internal/httpapi/config.go` (expected license tenant)
+- Modify: `backend/internal/httpapi/admin_users.go`
+- Modify: `backend/internal/httpapi/admin_users_import.go`
+- Modify: `backend/internal/httpapi/scim_users.go`
+- Modify: `backend/internal/httpapi/license_test.go`
+- Modify: `backend/internal/httpapi/scim_users_integration_test.go`
+
+**Interfaces:**
+- Produces config `LicenseTenant string` (`ALT8MAIL_LICENSE_TENANT`, optional). When set, a license whose payload `tenant` differs is `invalid` (wrong-tenant protection).
+- Produces `(s *Server) activeSeatCount(ctx context.Context, tenantID string) (int, error)`, `(s *Server) seatEnforced() bool` (true only for a valid/grace license with seats > 0), `(s *Server) seatAvailable(ctx context.Context, tenantID string) (bool, error)`, and `errSeatLimit`.
+- Produces `licenseSnapshot()` fields `usedSeats` and `seatLimit` (existing `seats` retained) for the webmail UI/tests.
+
+Behavior:
+- Enforcement applies only to a loaded license in `valid` or `grace` state. OSS, unlicensed, invalid and expired deployments keep core user creation available; expired paid features are already gated separately.
+- A license with an empty `tenant` claim counts active users across all tenants; a license with a tenant claim enforces seats only for that tenant and ignores other tenants for this check. `LicenseTenant`, when configured, must equal the payload claim or the license is invalid.
+- Count `users WHERE status='active' AND deleted_at IS NULL`. Serialize seat-consuming changes per tenant by locking the tenant row (`SELECT id FROM tenants WHERE id=$1 FOR UPDATE`) inside the provisioning transaction, then re-count before insert/activation so concurrent creates cannot exceed the limit.
+- Enforce on: admin create (active status), admin restore (deleted → active), admin bulk import, SCIM create with `active=true`, and SCIM reactivation (`active:false → true`). Invited/suspended users do not consume a seat until active.
+- On rejection return a fixed `SEAT_LIMIT` error (HTTP 409 for admin; SCIM 409 `invalidValue`), audit `license.seat_limit_blocked` with the tenant and limit, and create no user/mailbox/session.
+- Do not count system administrators or deleted users; do not silently deactivate anyone when a license shrinks.
+- Update `docs/LICENSING.md` with the enforcement rules and OSS/expired behavior.
+
+- [ ] Write failing unit tests for `seatEnforced` state matrix (OSS/unlicensed/invalid/expired/valid/grace), tenant-scoped vs global counting, `LicenseTenant` mismatch → invalid, and snapshot fields.
+- [ ] Write failing integration tests with a real PostgreSQL: seats=2 blocks the third active create; invited does not count; delete frees a seat; grace still enforces; expired/unlicensed allows core creation; SCIM create/reactivate blocked at limit; concurrent creates never exceed seats; audit action present with no secret.
+- [ ] Implement the helpers and wire the five mutation paths; keep all checks inside the existing provisioning transactions.
+- [ ] Run `go test ./internal/httpapi -run 'SCIM|License|Seat' -count=1`, the DSN integration suite, `go test ./... -count=1`, `go vet ./...`, `go build ./...`.
+
+### Task 3: Control web view and docs
 
 **Files:**
 - Create: `backend/internal/control/web/views-license.js`
@@ -87,7 +117,7 @@ UI:
 - [ ] Update docs: config variables, shared file path with webmail, upload flow, restart requirement, seat counting rules, warning threshold, failure preservation, no network call.
 - [ ] Run `node --check backend/internal/control/web/app.js` and the view if it is a separate module, then `npm run test:all`; run a manual or scripted Control UI smoke if the environment exposes 8808.
 
-### Task 3: Security and UX gate
+### Task 4: Security and UX gate
 
 - [ ] Adversarial review: permission bypass, CSRF on upload, path handling, atomicity/mode, token leakage in logs/audit/UI, seat count cross-tenant leakage, expired/grace gating, oversized body, error enumeration.
 - [ ] Verify no network calls and no private key material; verify OSS mode leaves core Control screens working.
