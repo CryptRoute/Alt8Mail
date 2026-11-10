@@ -447,6 +447,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerGalleryRoutes(mux)
 	s.registerCampaignTrackingRoutes(mux)
 	s.registerMCPRoutes(mux)
+	s.registerAIGovernanceRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)

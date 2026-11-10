@@ -219,6 +219,12 @@ type adminOfficePolicy struct {
 	AllowedDomains   []string `json:"allowedDomains"`
 }
 
+type adminMCPPolicy struct {
+	AllowedScopes         []string `json:"allowedScopes"`
+	WriteApprovalRequired bool     `json:"writeApprovalRequired"`
+	MaxRequestsPerHour    int      `json:"maxRequestsPerHour"`
+}
+
 type adminTenantPolicy struct {
 	Security  adminSecurityPolicy  `json:"security"`
 	Mail      adminMailPolicy      `json:"mail"`
@@ -228,6 +234,7 @@ type adminTenantPolicy struct {
 	DLP       adminDLPPolicy       `json:"dlp"`
 	Features  adminFeaturePolicy   `json:"features"`
 	Office    adminOfficePolicy    `json:"office"`
+	MCP       adminMCPPolicy       `json:"mcp"`
 }
 
 func defaultTenantPolicy() adminTenantPolicy {
@@ -263,6 +270,10 @@ func defaultTenantPolicy() adminTenantPolicy {
 			Enabled: true, InternalSharing: true, ExternalEditing: true, AI: true, DLPOnSave: true,
 			VersionRetention: 0, AllowedGroups: []string{}, AllowedDomains: []string{},
 		},
+		MCP: adminMCPPolicy{
+			AllowedScopes: append([]string{}, mcpSupportedScopes...), WriteApprovalRequired: true,
+			MaxRequestsPerHour: 120,
+		},
 	}
 }
 
@@ -294,6 +305,12 @@ func tenantPolicyFromSettings(raw json.RawMessage) adminTenantPolicy {
 	}
 	if policy.Office.AllowedDomains == nil {
 		policy.Office.AllowedDomains = []string{}
+	}
+	if policy.MCP.AllowedScopes == nil {
+		policy.MCP.AllowedScopes = append([]string{}, mcpSupportedScopes...)
+	}
+	if policy.MCP.MaxRequestsPerHour <= 0 {
+		policy.MCP.MaxRequestsPerHour = 120
 	}
 	for index := range policy.DLP.Rules {
 		if policy.DLP.Rules[index].Fields == nil {
@@ -570,6 +587,32 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 		officeDomains = officeDomains[:100]
 	}
 	policy.Office.AllowedDomains = officeDomains
+	mcpScopes := []string{}
+	seenMCPScopes := map[string]bool{}
+	for _, raw := range policy.MCP.AllowedScopes {
+		scope := strings.TrimSpace(raw)
+		if scope == "" || seenMCPScopes[scope] {
+			continue
+		}
+		if !mcpScopeSupported(scope) {
+			errors = append(errors, fmt.Sprintf("MCP scope %q is not supported", scope))
+			continue
+		}
+		seenMCPScopes[scope] = true
+		mcpScopes = append(mcpScopes, scope)
+	}
+	if len(mcpScopes) == 0 {
+		mcpScopes = append([]string{}, mcpSupportedScopes...)
+	}
+	policy.MCP.AllowedScopes = mcpScopes
+	if policy.MCP.MaxRequestsPerHour < 1 || policy.MCP.MaxRequestsPerHour > 10000 {
+		errors = append(errors, "MCP request rate must be between 1 and 10,000 per hour")
+		if policy.MCP.MaxRequestsPerHour < 1 {
+			policy.MCP.MaxRequestsPerHour = 120
+		} else {
+			policy.MCP.MaxRequestsPerHour = 10000
+		}
+	}
 	return policy, errors
 }
 

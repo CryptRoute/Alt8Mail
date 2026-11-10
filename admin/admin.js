@@ -1852,6 +1852,8 @@ async function renderAI() {
     state.ai = data.ai;
     const ai = data.ai;
     const providers = data.providers || [];
+    let usage = null;
+    try { usage = await api("ai/usage"); } catch { usage = null; }
     $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>AI assistant</h1><p>Let people use your organization's own AI provider inside compose and the reading pane.</p></div><div class="view-actions"><span class="badge ${ai.enabled ? "ok" : "system"}">${ai.enabled ? "Enabled" : "Disabled"}</span></div></div>
       <div class="dashboard-grid">
         <div class="card card-pad">
@@ -1860,6 +1862,10 @@ async function renderAI() {
           <label class="field"><span>API endpoint</span><input class="input" id="aiEndpoint" value="${esc(ai.endpoint || "")}" placeholder="https://api.openai.com/v1 or https://api.anthropic.com"><small class="muted">OpenAI-compatible endpoints are accepted for OpenAI, DeepSeek, Azure gateways and self-hosted models. Claude uses the Anthropic Messages API.</small></label>
           <label class="field"><span>API key ${ai.hasKey ? '<small class="muted">— a key is configured; leave blank to keep it</small>' : ""}</span><input class="input" id="aiKey" type="password" autocomplete="new-password" placeholder="${ai.hasKey ? "••••••••••••••••" : "sk-..."}"><small class="muted">Keys are encrypted with AES-GCM before they reach PostgreSQL and are never returned to the browser.</small></label>
           <div class="field-row"><label class="field"><span>Max tokens</span><input class="input" id="aiMaxTokens" type="number" min="64" max="8192" value="${ai.maxTokens || 1024}"></label><label class="field"><span>Temperature</span><input class="input" id="aiTemperature" type="number" min="0" max="2" step="0.05" value="${ai.temperature ?? 0.7}"></label><label class="field"><span>Timeout (seconds)</span><input class="input" id="aiTimeout" type="number" min="5" max="120" value="${ai.timeoutSeconds || 30}"></label></div>
+          <label class="field"><span>Monthly AI budget (USD) <small class="muted">0 = uncapped</small></span><input class="input" id="aiBudget" type="number" min="0" step="1" value="${((ai.monthlyBudgetCents || 0) / 100).toFixed(2)}"><small class="muted">Estimated from characters sent to and received from the provider. When the cap is reached, AI features return a budget message until the next month or until an administrator raises it.</small></label>
+          <div class="setting-row"><div class="setting-copy"><b>Auto-label triage results</b><small>Apply an <code>AI/…</code> label when confidence meets the threshold. Results below the threshold stay suggestions only.</small></div><div class="setting-control"><button class="switch" type="button" id="aiTriageAutoLabel" aria-checked="${ai.triageAutoLabel ? "true" : "false"}" aria-label="Auto-label triage results"></button></div></div>
+          <label class="field"><span>Auto-label confidence threshold</span><input class="input" id="aiTriageConfidence" type="number" min="0" max="1" step="0.05" value="${ai.triageMinConfidence ?? 0.8}"></label>
+          <div class="setting-row"><div class="setting-copy"><b>Turn obligations into tasks</b><small>When the obligations ledger extracts a promise or deadline above the model's confidence, create a linked task automatically.</small></div><div class="setting-control"><button class="switch" type="button" id="aiObligationsAutoTask" aria-checked="${ai.obligationsAutoTask ? "true" : "false"}" aria-label="Create tasks from obligations automatically"></button></div></div>
           <label class="field"><span>Organization system prompt <small class="muted">optional</small></span><textarea class="input" id="aiSystemPrompt" rows="3" placeholder="Writing rules, tone and compliance guidance for every AI request.">${esc(ai.systemPrompt || "")}</textarea></label>
           <div class="policy-save" style="margin-top:18px"><span>AI requests leave Alt8Mail for the endpoint you configure. The provider's data policy applies.</span><button class="btn secondary" type="button" data-action="test-ai">${icon("sparkles")}Save &amp; test</button><button class="btn primary" type="button" data-action="save-ai">${icon("check")}Save AI settings</button></div>
           <div id="aiTestResult" class="form-error" style="margin-top:12px" hidden></div>
@@ -1873,12 +1879,22 @@ async function renderAI() {
               <div class="detail-row"><span>Data path</span><b>Tenant-scoped · no shared provider key</b></div>
             </div>
           </div>
+          <div class="card card-pad" style="margin-top:14px"><div class="card-head" style="padding:0 0 12px"><div><h2>Usage this month</h2><p>Estimated spend against the organization budget.</p></div><span class="badge ${usage?.budgetExhausted ? "warn" : "ok"}">${usage?.budgetExhausted ? "Budget reached" : "Within budget"}</span></div>
+            <div class="detail-list">
+              <div class="detail-row"><span>AI requests</span><b>${usage ? Number(usage.requests).toLocaleString() : "—"}</b></div>
+              <div class="detail-row"><span>Estimated spend</span><b>${usage ? "$" + (usage.costMicros / 1000000).toFixed(4) : "—"}</b></div>
+              <div class="detail-row"><span>Monthly budget</span><b>${usage && usage.budgetCents > 0 ? "$" + (usage.budgetCents / 100).toFixed(2) : "Uncapped"}</b></div>
+              <div class="detail-row"><span>Month</span><b>${usage ? esc(usage.month) : "—"}</b></div>
+            </div>
+          </div>
           <div class="card card-pad" style="margin-top:14px"><div class="card-head" style="padding:0 0 12px"><div><h2>Security notes</h2><p>Before enabling this in production.</p></div></div><div class="detail-list"><div class="detail-row"><span>Endpoint allowlist</span><b>HTTPS recommended</b></div><div class="detail-row"><span>API key storage</span><b>AES-GCM sealed</b></div><div class="detail-row"><span>Request retention</span><b>Cached summaries stay tenant-scoped</b></div></div><p class="muted" style="font-size:11px;margin:12px 0 0">Use a dedicated provider key with a spending cap. AI output is untrusted text and is rendered as plain text in the webmail.</p></div>
         </div>
       </div>`;
-    $("#aiEnabledToggle")?.addEventListener("click", (event) => {
-      const button = event.currentTarget;
-      button.setAttribute("aria-checked", button.getAttribute("aria-checked") === "true" ? "false" : "true");
+    ["aiEnabledToggle", "aiTriageAutoLabel", "aiObligationsAutoTask"].forEach((id) => {
+      $(`#${id}`)?.addEventListener("click", (event) => {
+        const button = event.currentTarget;
+        button.setAttribute("aria-checked", button.getAttribute("aria-checked") === "true" ? "false" : "true");
+      });
     });
   } catch (error) { viewError(error); }
 }
@@ -1894,6 +1910,10 @@ function collectAIForm() {
     maxTokens: Number($("#aiMaxTokens")?.value || 1024),
     temperature: Number($("#aiTemperature")?.value || 0.7),
     timeoutSeconds: Number($("#aiTimeout")?.value || 30),
+    monthlyBudgetCents: Math.round(Number($("#aiBudget")?.value || 0) * 100),
+    triageAutoLabel: $("#aiTriageAutoLabel")?.getAttribute("aria-checked") === "true",
+    triageMinConfidence: Number($("#aiTriageConfidence")?.value || 0.8),
+    obligationsAutoTask: $("#aiObligationsAutoTask")?.getAttribute("aria-checked") === "true",
     systemPrompt: $("#aiSystemPrompt")?.value || ""
   };
 }

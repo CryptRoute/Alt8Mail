@@ -36,15 +36,20 @@ var aiStyles = map[string]string{
 }
 
 type aiSettings struct {
-	Enabled        bool
-	Provider       string
-	Endpoint       string
-	Model          string
-	APIKey         string
-	MaxTokens      int
-	Temperature    float64
-	SystemPrompt   string
-	TimeoutSeconds int
+	TenantID            string
+	Enabled             bool
+	Provider            string
+	Endpoint            string
+	Model               string
+	APIKey              string
+	MaxTokens           int
+	Temperature         float64
+	SystemPrompt        string
+	TimeoutSeconds      int
+	MonthlyBudgetCents  int
+	TriageAutoLabel     bool
+	TriageMinConfidence float64
+	ObligationsAutoTask bool
 }
 
 func defaultAISettings() aiSettings {
@@ -56,14 +61,17 @@ func defaultAISettings() aiSettings {
 
 func (s *Server) aiSettingsFor(ctx context.Context, tenantID string) (aiSettings, error) {
 	settings := defaultAISettings()
+	settings.TenantID = tenantID
 	var sealed string
 	err := s.store.DB.QueryRow(ctx, `
 		SELECT enabled, provider, endpoint, model, api_key_sealed, max_tokens,
-		       temperature::float8, system_prompt, timeout_seconds
+		       temperature::float8, system_prompt, timeout_seconds, COALESCE(monthly_budget_cents,0),
+		       triage_auto_label, triage_min_confidence::float8, obligations_auto_task
 		FROM tenant_ai_settings WHERE tenant_id=$1
 	`, tenantID).Scan(&settings.Enabled, &settings.Provider, &settings.Endpoint, &settings.Model,
 		&sealed, &settings.MaxTokens, &settings.Temperature, &settings.SystemPrompt,
-		&settings.TimeoutSeconds)
+		&settings.TimeoutSeconds, &settings.MonthlyBudgetCents, &settings.TriageAutoLabel,
+		&settings.TriageMinConfidence, &settings.ObligationsAutoTask)
 	if err != nil {
 		return settings, nil
 	}
@@ -183,6 +191,12 @@ func (s *Server) callAIWithImages(ctx context.Context, settings aiSettings, syst
 	}
 	if temperature > 2 {
 		temperature = 2
+	}
+	inputChars := len(system) + len(user)
+	if settings.TenantID != "" {
+		if err := s.aiBudgetCheck(ctx, settings.TenantID); err != nil {
+			return "", err
+		}
 	}
 	endpoint := strings.TrimSpace(settings.Endpoint)
 	switch settings.Provider {
@@ -332,6 +346,9 @@ func (s *Server) callAIWithImages(ctx context.Context, settings aiSettings, syst
 	if text == "" {
 		return "", fmt.Errorf("AI provider returned an empty response")
 	}
+	if settings.TenantID != "" {
+		s.recordAIUsage(ctx, settings.TenantID, inputChars, len(text))
+	}
 	return text, nil
 }
 
@@ -384,8 +401,12 @@ func (s *Server) adminGetAI(w http.ResponseWriter, r *http.Request) {
 			"endpoint": settings.Endpoint, "model": settings.Model,
 			"hasKey": settings.APIKey != "", "maxTokens": settings.MaxTokens,
 			"temperature": settings.Temperature, "systemPrompt": settings.SystemPrompt,
-			"timeoutSeconds": settings.TimeoutSeconds,
-			"languages":      len(aiLanguages),
+			"timeoutSeconds":      settings.TimeoutSeconds,
+			"monthlyBudgetCents":  settings.MonthlyBudgetCents,
+			"triageAutoLabel":     settings.TriageAutoLabel,
+			"triageMinConfidence": settings.TriageMinConfidence,
+			"obligationsAutoTask": settings.ObligationsAutoTask,
+			"languages":           len(aiLanguages),
 		},
 		"providers": []map[string]string{
 			{"code": "openai", "name": "OpenAI-compatible (OpenAI, DeepSeek, Azure, local)"},
@@ -398,16 +419,20 @@ func (s *Server) adminGetAI(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminUpdateAI(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	var body struct {
-		Enabled        *bool    `json:"enabled"`
-		Provider       *string  `json:"provider"`
-		Endpoint       *string  `json:"endpoint"`
-		Model          *string  `json:"model"`
-		APIKey         *string  `json:"apiKey"`
-		ClearKey       bool     `json:"clearKey"`
-		MaxTokens      *int     `json:"maxTokens"`
-		Temperature    *float64 `json:"temperature"`
-		SystemPrompt   *string  `json:"systemPrompt"`
-		TimeoutSeconds *int     `json:"timeoutSeconds"`
+		Enabled             *bool    `json:"enabled"`
+		Provider            *string  `json:"provider"`
+		Endpoint            *string  `json:"endpoint"`
+		Model               *string  `json:"model"`
+		APIKey              *string  `json:"apiKey"`
+		ClearKey            bool     `json:"clearKey"`
+		MaxTokens           *int     `json:"maxTokens"`
+		Temperature         *float64 `json:"temperature"`
+		SystemPrompt        *string  `json:"systemPrompt"`
+		TimeoutSeconds      *int     `json:"timeoutSeconds"`
+		MonthlyBudgetCents  *int     `json:"monthlyBudgetCents"`
+		TriageAutoLabel     *bool    `json:"triageAutoLabel"`
+		TriageMinConfidence *float64 `json:"triageMinConfidence"`
+		ObligationsAutoTask *bool    `json:"obligationsAutoTask"`
 	}
 	if err := decodeJSON(w, r, &body, 256*1024); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
@@ -425,6 +450,10 @@ func (s *Server) adminUpdateAI(w http.ResponseWriter, r *http.Request) {
 	temperature := current.Temperature
 	systemPrompt := current.SystemPrompt
 	timeoutSeconds := current.TimeoutSeconds
+	monthlyBudgetCents := current.MonthlyBudgetCents
+	triageAutoLabel := current.TriageAutoLabel
+	triageMinConfidence := current.TriageMinConfidence
+	obligationsAutoTask := current.ObligationsAutoTask
 	enabled := current.Enabled
 	if body.Enabled != nil {
 		enabled = *body.Enabled
@@ -450,6 +479,18 @@ func (s *Server) adminUpdateAI(w http.ResponseWriter, r *http.Request) {
 	if body.TimeoutSeconds != nil {
 		timeoutSeconds = *body.TimeoutSeconds
 	}
+	if body.MonthlyBudgetCents != nil {
+		monthlyBudgetCents = *body.MonthlyBudgetCents
+	}
+	if body.TriageAutoLabel != nil {
+		triageAutoLabel = *body.TriageAutoLabel
+	}
+	if body.TriageMinConfidence != nil {
+		triageMinConfidence = *body.TriageMinConfidence
+	}
+	if body.ObligationsAutoTask != nil {
+		obligationsAutoTask = *body.ObligationsAutoTask
+	}
 	if provider != "openai" && provider != "anthropic" {
 		writeError(w, http.StatusBadRequest, "AI_PROVIDER", "Choose openai or anthropic")
 		return
@@ -474,6 +515,14 @@ func (s *Server) adminUpdateAI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "AI_TIMEOUT", "Timeout must be between 5 and 120 seconds")
 		return
 	}
+	if monthlyBudgetCents < 0 || monthlyBudgetCents > 100000000 {
+		writeError(w, http.StatusBadRequest, "AI_BUDGET", "Monthly budget must be between 0 and 100,000,000 cents")
+		return
+	}
+	if triageMinConfidence < 0 || triageMinConfidence > 1 {
+		writeError(w, http.StatusBadRequest, "AI_TRIAGE", "Triage confidence must be between 0 and 1")
+		return
+	}
 	sealed := ""
 	if !body.ClearKey {
 		if body.APIKey != nil && strings.TrimSpace(*body.APIKey) != "" {
@@ -490,16 +539,22 @@ func (s *Server) adminUpdateAI(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = s.store.DB.Exec(r.Context(), `
 		INSERT INTO tenant_ai_settings (tenant_id, enabled, provider, endpoint, model, api_key_sealed,
-			max_tokens, temperature, system_prompt, timeout_seconds, updated_by, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+			max_tokens, temperature, system_prompt, timeout_seconds, monthly_budget_cents,
+			triage_auto_label, triage_min_confidence, obligations_auto_task, updated_by, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
 		ON CONFLICT (tenant_id) DO UPDATE SET
 			enabled=EXCLUDED.enabled, provider=EXCLUDED.provider, endpoint=EXCLUDED.endpoint,
 			model=EXCLUDED.model, api_key_sealed=EXCLUDED.api_key_sealed,
 			max_tokens=EXCLUDED.max_tokens, temperature=EXCLUDED.temperature,
 			system_prompt=EXCLUDED.system_prompt, timeout_seconds=EXCLUDED.timeout_seconds,
+			monthly_budget_cents=EXCLUDED.monthly_budget_cents,
+			triage_auto_label=EXCLUDED.triage_auto_label,
+			triage_min_confidence=EXCLUDED.triage_min_confidence,
+			obligations_auto_task=EXCLUDED.obligations_auto_task,
 			updated_by=EXCLUDED.updated_by, updated_at=now()
 	`, sess.ActiveTenantID, enabled, provider, endpoint, model, sealed, maxTokens,
-		temperature, systemPrompt, timeoutSeconds, sess.User.Email)
+		temperature, systemPrompt, timeoutSeconds, monthlyBudgetCents, triageAutoLabel,
+		triageMinConfidence, obligationsAutoTask, sess.User.Email)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "AI_CONFIG", "Could not save AI settings")
 		return
@@ -511,7 +566,9 @@ func (s *Server) adminUpdateAI(w http.ResponseWriter, r *http.Request) {
 		"enabled": updated.Enabled, "provider": updated.Provider, "endpoint": updated.Endpoint,
 		"model": updated.Model, "hasKey": updated.APIKey != "", "maxTokens": updated.MaxTokens,
 		"temperature": updated.Temperature, "systemPrompt": updated.SystemPrompt,
-		"timeoutSeconds": updated.TimeoutSeconds,
+		"timeoutSeconds": updated.TimeoutSeconds, "monthlyBudgetCents": updated.MonthlyBudgetCents,
+		"triageAutoLabel": updated.TriageAutoLabel, "triageMinConfidence": updated.TriageMinConfidence,
+		"obligationsAutoTask": updated.ObligationsAutoTask,
 	}})
 }
 
