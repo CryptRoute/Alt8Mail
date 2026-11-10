@@ -661,6 +661,12 @@ script first. The 0057 rollback is destructive: it removes connected-account
 metadata and the account id columns, restores the old per-user IMAP UID index,
 and requires a backup.
 
+The Phase 1 SCIM migration `0061_scim` is additive and has a matching rollback.
+`tools/migration-upgrade-smoke.sh` verifies the supported upgrade path on a
+disposable PostgreSQL: it applies the migrations shipped at `v0.27.6`, upgrades
+with the current tree, rolls the new migrations back, reapplies them and checks
+`schema_migrations`. Run it before a release that includes new migrations.
+
 Connected-account create/test/update/delete/sync and OAuth starts are limited to
 30 actions per user per ten minutes. The limit is in memory per webmail process.
 
