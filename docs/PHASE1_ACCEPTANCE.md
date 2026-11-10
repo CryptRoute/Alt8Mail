@@ -14,7 +14,7 @@ external system/credential and is documented for the operator run).
 | 1A Offline license verification and entitlements | done | `backend/internal/licensing`, `backend/internal/httpapi/license.go`, `docs/LICENSING.md`; verifier/lifecycle tests |
 | 1B OIDC SSO | done | `backend/internal/httpapi/oidc*.go`, `docs/SSO.md`; mock-IdP, negative-token, state/PKCE, domain/IP/MFA and license-gate tests |
 | 1C SAML SSO | done | `backend/internal/httpapi/saml*.go`, `docs/SAML.md`; mock-IdP suite, security gate with artifact/body-bound/rogue-key tests |
-| 1D SCIM 2.0 | in progress | `backend/internal/httpapi/scim*.go`, migrations `0061`, DSN conformance tests; Users/Groups gates |
+| 1D SCIM 2.0 | done | `backend/internal/httpapi/scim*.go`, migrations `0061`, `docs/SCIM.md`; final gate adds system-administrator protection and the exact `/scim/v2` nginx route; DSN token/Users/Groups suites pass |
 | 1E License seat/tenant enforcement | planned | `docs/superpowers/plans/2026-11-10-phase-1e-license-control-plane.md` Task 2 |
 | 1E Control Plane license UI and seat metering | planned | same plan, Tasks 1/3 |
 | 1F White-label and custom webmail domains | planned | `docs/superpowers/plans/2026-11-10-phase-1f-white-label.md` |
@@ -27,7 +27,7 @@ external system/credential and is documented for the operator run).
 | Criterion | Status | Evidence / action |
 | --- | --- | --- |
 | External IdP matrix (Entra, Okta, Google, Keycloak) passes | operator | Protocol behavior covered by OIDC/SAML test suites; provider examples in `docs/SSO.md` and `docs/SAML.md`; run a live sign-in per provider before enablement |
-| SCIM conformance tests pass | in progress | `A8M_SCIM_TEST_DSN` suites for Users/Groups; final conformance matrix in Phase 1D Task 5 |
+| SCIM conformance tests pass | done | `A8M_SCIM_TEST_DSN` suites pass for tokens, Users and Groups; system-administrator and exact `/scim/v2` gate tests included |
 | Deprovisioning revokes active sessions | done | SCIM deprovision deletes sessions/auth challenges/admin sessions/trusted devices; integration tests |
 | License valid/expired/grace/tampered/wrong-tenant/seat-exceeded/air-gapped | in progress | 1A covers valid/grace/expired/tampered/wrong key/malformed and no network; seat/tenant enforcement in 1E Task 2 |
 | Mailbox restore to yesterday with audit and no cross-tenant access | planned | 1G preview/apply + DR drill; disposable-PostgreSQL integration test |

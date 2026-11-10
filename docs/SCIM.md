@@ -51,6 +51,17 @@ The bundled site configuration proxies SCIM to the API server instead of the
 static web app:
 
 ```nginx
+# Exact advertised base URL (no trailing slash).
+location = /scim/v2 {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# Every resource below the base URL.
 location ^~ /scim/ {
     proxy_pass http://127.0.0.1:8080;
     proxy_http_version 1.1;
@@ -61,8 +72,12 @@ location ^~ /scim/ {
 }
 ```
 
-`deploy/nginx/a8m-site.conf` contains this block for new installations.
-Existing installations can add the missing public route with:
+Both blocks are required: `location ^~ /scim/` does not match `/scim/v2`
+without the trailing slash, so without the exact block the advertised base
+URL falls through to the static SPA.
+
+`deploy/nginx/a8m-site.conf` contains both blocks for new installations.
+Existing installations can add the missing public routes with:
 
 ```sh
 sudo bash scripts/alt8mail-ensure-nginx-routes.sh
@@ -79,6 +94,15 @@ The bundled block and route script assume a host-only
 forwarding to the API:
 
 ```nginx
+location = /mail/scim/v2 {
+    proxy_pass http://127.0.0.1:8080/scim/v2;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
 location ^~ /mail/scim/ {
     proxy_pass http://127.0.0.1:8080/scim/;
     proxy_http_version 1.1;
@@ -386,6 +410,11 @@ Deprovision (`PUT`/`PATCH` with `active=false`, or `DELETE /Users/{id}`):
   Revoked sessions stay revoked; the user must sign in again.
 - An active `owner` cannot be deactivated or deleted through SCIM
   (`409 mutability`). Owners are managed manually only.
+- Platform system administrators (`users.is_system_admin`) are read-only through
+  SCIM: every `PUT`, `PATCH` or `DELETE` targeting one returns `403 mutability`,
+  and group-role recompute skips them entirely. Create, modify, suspend and
+  remove system administrators only in the platform admin console; SCIM can
+  still list and read them for reconciliation.
 
 Group deletion removes membership rows and recomputes roles for every former
 member; it never deletes users or mail.
@@ -528,7 +557,7 @@ to audit details.
 | --- | --- | --- |
 | `scim.user_created` | SCIM | User provisioned |
 | `scim.user_updated` | SCIM | Name/externalId metadata changed |
-| `scim.user_deactivated` | SCIM | `active=false` / delete |
+| `scim.user_deactivated` | SCIM | `active=false` |
 | `scim.user_reactivated` | SCIM | `active=true` |
 | `scim.user_deleted` | SCIM | Explicit `DELETE` (idempotent; each call audited) |
 | `scim.group_created` | SCIM | Group created |
