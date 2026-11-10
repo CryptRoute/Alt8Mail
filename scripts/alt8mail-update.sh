@@ -16,6 +16,16 @@ LOG=/var/log/alt8mail-update.log
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { printf '[%s] ERROR: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
+env_file_value() { grep -E "^${1}=" "$2" 2>/dev/null | tail -n1 | cut -d= -f2- || true; }
+set_env_if_missing() {
+  local file="$1" key="$2" value="$3"
+  [[ -n "$value" && -f "$file" ]] || return 0
+  if grep -qE "^${key}=" "$file" 2>/dev/null; then
+    return 0
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$file"
+  log "added missing $key to $file"
+}
 
 [[ "$(id -u)" -eq 0 ]] || die "run the updater as root"
 [[ -r "$CONFIG" ]] || die "missing $CONFIG"
@@ -474,6 +484,38 @@ SQL
 runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -f - < "$TARGET_RELEASE/deploy/postgresql/grants.sql"
 
 switch_release "$TARGET_RELEASE"
+
+# Installs that predate the Phase 1E license settings keep working without
+# re-running the installer. Seed missing values in both directions without
+# overwriting explicit configuration, always provision the webmail path (the
+# token file itself may be absent, which is OSS mode), and normalize an
+# existing token so the unprivileged webmail can read the Control-uploaded file
+# after the restart.
+APP_ENV_FILE=/etc/a8m/app.env
+CONTROL_ENV_FILE=/etc/a8m/control.env
+if [[ -f "$APP_ENV_FILE" && -f "$CONTROL_ENV_FILE" ]]; then
+  control_license_file="$(env_file_value CONTROL_LICENSE_FILE "$CONTROL_ENV_FILE")"
+  webmail_license_file="$(env_file_value ALT8MAIL_LICENSE_FILE "$APP_ENV_FILE")"
+  shared_license_file="${control_license_file:-${webmail_license_file:-/etc/a8m/license.token}}"
+  set_env_if_missing "$CONTROL_ENV_FILE" CONTROL_LICENSE_FILE "$shared_license_file"
+  set_env_if_missing "$APP_ENV_FILE" ALT8MAIL_LICENSE_FILE "$shared_license_file"
+
+  control_license_key="$(env_file_value CONTROL_LICENSE_PUBLIC_KEY "$CONTROL_ENV_FILE")"
+  webmail_license_key="$(env_file_value ALT8MAIL_LICENSE_PUBLIC_KEY "$APP_ENV_FILE")"
+  set_env_if_missing "$CONTROL_ENV_FILE" CONTROL_LICENSE_PUBLIC_KEY "$webmail_license_key"
+  set_env_if_missing "$APP_ENV_FILE" ALT8MAIL_LICENSE_PUBLIC_KEY "$control_license_key"
+
+  if [[ -n "$shared_license_file" && -f "$shared_license_file" ]]; then
+    license_group="$(env_file_value CONTROL_LICENSE_GROUP "$CONTROL_ENV_FILE")"
+    license_group="${license_group:-a8m}"
+    if chown root:"$license_group" "$shared_license_file" 2>/dev/null; then
+      chmod 0640 "$shared_license_file"
+    else
+      log "WARNING: could not set group $license_group on $shared_license_file"
+    fi
+  fi
+fi
+
 log "restarting services"
 for svc in $A8M_SERVICES; do
   systemctl restart "$svc"

@@ -120,7 +120,10 @@ func New(opts Options) *Server {
 		licenseNow:      time.Now,
 	}
 	if license, err := loadLicense(opts.Config, opts.Logger); err != nil {
+		// A configured file that exists but cannot be read or verified is
+		// reported as "invalid"; a configured-but-missing file is OSS mode.
 		server.licenseError = err.Error()
+		server.licenseConfigured = true
 		if opts.Logger != nil {
 			opts.Logger.Warn("license not loaded", "err", err)
 		}
@@ -133,7 +136,6 @@ func New(opts Options) *Server {
 			go warnMissingLicenseTenant(opts.Store, opts.Logger, tenant)
 		}
 	}
-	server.licenseConfigured = strings.TrimSpace(opts.Config.LicenseFile) != ""
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          opts.Config.WebAuthnRPID,
 		RPDisplayName: "Alt8Mail",

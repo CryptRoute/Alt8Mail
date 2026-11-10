@@ -37,16 +37,22 @@ type rowQuerier interface {
 }
 
 // loadLicense reads and verifies the optional offline license file. A missing
-// file is a normal OSS deployment; an unreadable or invalid file is reported
-// to the caller so startup can continue with paid features disabled. When
-// ALT8MAIL_LICENSE_TENANT is configured, the payload's tenant claim must match
-// it exactly (an absent claim never matches).
+// file is a normal OSS deployment (the installer provisions the shared path
+// even before a token exists), so it returns no license and no error. An
+// unreadable or invalid file is reported to the caller so startup can continue
+// with paid features disabled. When ALT8MAIL_LICENSE_TENANT is configured, the
+// payload's tenant claim must match it exactly (an absent claim never matches).
 func loadLicense(cfg config.Config, logger *slog.Logger) (*licensing.License, error) {
 	if strings.TrimSpace(cfg.LicenseFile) == "" {
 		return nil, nil
 	}
 	raw, err := os.ReadFile(cfg.LicenseFile)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// A configured-but-absent file is the normal fresh-install path the
+			// Control upload later populates. Treat it as OSS, not a failure.
+			return nil, nil
+		}
 		return nil, fmt.Errorf("read license file: %w", err)
 	}
 	publicKey, err := licensing.ParsePublicKey(cfg.LicensePublicKey)

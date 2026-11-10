@@ -62,6 +62,13 @@ func TestLoadLicense(t *testing.T) {
 	if license, err := loadLicense(config.Config{LicenseFile: "   "}, nil); err != nil || license != nil {
 		t.Fatalf("whitespace license path = %#v %v", license, err)
 	}
+	// The installer now provisions ALT8MAIL_LICENSE_FILE on fresh OSS installs
+	// before any token exists. A configured-but-absent file must be OSS, not a
+	// startup error or an "invalid" state.
+	missing := filepath.Join(t.TempDir(), "missing-license.token")
+	if license, err := loadLicense(config.Config{LicenseFile: missing, LicensePublicKey: "not-used"}, nil); err != nil || license != nil {
+		t.Fatalf("missing license file = %#v %v; want nil, nil", license, err)
+	}
 
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -102,6 +109,49 @@ func TestLoadLicense(t *testing.T) {
 	}
 }
 
+// TestMissingLicenseFileIsUnlicensed covers the installer-provisioned path: a
+// fresh OSS install sets ALT8MAIL_LICENSE_FILE before a token exists, and the
+// webmail must report OSS rather than invalid. An existing unreadable or
+// unverifiable file remains invalid.
+func TestMissingLicenseFileIsUnlicensed(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	missingServer := New(Options{
+		Config: config.Config{
+			LicenseFile:      filepath.Join(t.TempDir(), "license.token"),
+			LicensePublicKey: "bm90LWEta2V5",
+		},
+		Logger: logger,
+	})
+	if missingServer.license != nil || missingServer.licenseConfigured || missingServer.licenseError != "" {
+		t.Fatalf("missing file server = license %#v, configured %v, error %q; want nil, false, empty",
+			missingServer.license, missingServer.licenseConfigured, missingServer.licenseError)
+	}
+	snapshot := missingServer.licenseSnapshot(context.Background())
+	if snapshot["state"] != "unlicensed" || snapshot["edition"] != "oss" {
+		t.Fatalf("missing file snapshot = %#v; want unlicensed/oss", snapshot)
+	}
+
+	invalidFile := filepath.Join(t.TempDir(), "license.token")
+	if err := os.WriteFile(invalidFile, []byte("A8M1.invalid.invalid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	invalidServer := New(Options{
+		Config: config.Config{
+			LicenseFile:      invalidFile,
+			LicensePublicKey: "bm90LWEta2V5",
+		},
+		Logger: logger,
+	})
+	if invalidServer.license != nil || !invalidServer.licenseConfigured || invalidServer.licenseError == "" {
+		t.Fatalf("invalid file server = license %#v, configured %v, error %q; want nil, true, non-empty",
+			invalidServer.license, invalidServer.licenseConfigured, invalidServer.licenseError)
+	}
+	invalid := invalidServer.licenseSnapshot(context.Background())
+	if invalid["state"] != "invalid" || invalid["edition"] != "oss" {
+		t.Fatalf("invalid file snapshot = %#v; want invalid/oss", invalid)
+	}
+}
+
 func TestLicenseSnapshotAndEntitlements(t *testing.T) {
 	ctx := context.Background()
 	server := &Server{}
@@ -113,8 +163,8 @@ func TestLicenseSnapshotAndEntitlements(t *testing.T) {
 		t.Fatalf("unexpected OSS seat fields: %#v", oss)
 	}
 
-	// A configured license file that failed verification is reported as
-	// invalid rather than unlicensed, and still grants no paid features.
+	// A configured license file that exists but failed verification is reported
+	// as invalid rather than unlicensed, and still grants no paid features.
 	invalid := (&Server{licenseConfigured: true}).licenseSnapshot(ctx)
 	if invalid["edition"] != "oss" || invalid["state"] != "invalid" {
 		t.Fatalf("unexpected invalid snapshot: %#v", invalid)
@@ -310,9 +360,8 @@ func TestLicenseSeatEnforcementStateMatrix(t *testing.T) {
 		server   *Server
 		enforced bool
 	}{
-		{name: "oss", server: &Server{}},
-		{name: "configured but unlicensed", server: &Server{licenseConfigured: true}},
-		{name: "invalid", server: &Server{licenseConfigured: true, licenseError: "verify license: signature"}},
+		{name: "oss (missing or unconfigured file)", server: &Server{}},
+		{name: "invalid (configured file failed to load)", server: &Server{licenseConfigured: true, licenseError: "verify license: signature"}},
 		{name: "valid", server: seatTestServer(seatTestLicense(10, "", now.Add(time.Hour), 0), now), enforced: true},
 		{name: "grace", server: seatTestServer(seatTestLicense(10, "", now.Add(-time.Hour), 7), now), enforced: true},
 		{name: "expired", server: seatTestServer(seatTestLicense(10, "", now.Add(-8*24*time.Hour), 7), now)},

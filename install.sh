@@ -525,18 +525,19 @@ if [[ -f "$CONFIG_ROOT/control.env" ]]; then
   PRESERVE_CONTROL_LICENSE_WARNING_PERCENT="$(control_env_value CONTROL_LICENSE_WARNING_PERCENT)"
 fi
 
-# The Control Plane and webmail share one token file. Keep manually configured
-# values across reinstalls; seed the webmail path from the Control path only
-# when a license file already exists so a fresh OSS install stays untouched.
-CONTROL_LICENSE_FILE="${PRESERVE_CONTROL_LICENSE_FILE:-$LICENSE_FILE}"
+# The Control Plane and webmail share one token file. Preserve manually
+# configured values across reinstalls, seed Control from an existing webmail
+# configuration when Control has no value of its own, and fall back to the
+# installer defaults. ALT8MAIL_LICENSE_FILE is provisioned even on a fresh OSS
+# install (the file itself may be absent) so a token uploaded later through
+# Control is loaded after the next webmail restart. A missing file is an OSS
+# deployment, not an invalid license.
+CONTROL_LICENSE_FILE="${PRESERVE_CONTROL_LICENSE_FILE:-${PRESERVE_ALT8MAIL_LICENSE_FILE:-$LICENSE_FILE}}"
 CONTROL_LICENSE_GROUP="${PRESERVE_CONTROL_LICENSE_GROUP:-$LICENSE_GROUP}"
-CONTROL_LICENSE_PUBLIC_KEY="${LICENSE_PUBLIC_KEY:-$PRESERVE_CONTROL_LICENSE_PUBLIC_KEY}"
+CONTROL_LICENSE_PUBLIC_KEY="${LICENSE_PUBLIC_KEY:-${PRESERVE_CONTROL_LICENSE_PUBLIC_KEY:-$PRESERVE_ALT8MAIL_LICENSE_PUBLIC_KEY}}"
 CONTROL_LICENSE_WARNING_PERCENT="${PRESERVE_CONTROL_LICENSE_WARNING_PERCENT:-80}"
-APP_LICENSE_FILE="${PRESERVE_ALT8MAIL_LICENSE_FILE:-}"
-if [[ -z "$APP_LICENSE_FILE" && -f "$CONTROL_LICENSE_FILE" ]]; then
-  APP_LICENSE_FILE="$CONTROL_LICENSE_FILE"
-fi
-APP_LICENSE_PUBLIC_KEY="${LICENSE_PUBLIC_KEY:-${PRESERVE_ALT8MAIL_LICENSE_PUBLIC_KEY:-$PRESERVE_CONTROL_LICENSE_PUBLIC_KEY}}"
+APP_LICENSE_FILE="${PRESERVE_ALT8MAIL_LICENSE_FILE:-$CONTROL_LICENSE_FILE}"
+APP_LICENSE_PUBLIC_KEY="${LICENSE_PUBLIC_KEY:-${PRESERVE_ALT8MAIL_LICENSE_PUBLIC_KEY:-$CONTROL_LICENSE_PUBLIC_KEY}}"
 
 cat > "$CONFIG_ROOT/app.env" <<EOF
 ALT8MAIL_ENV=production

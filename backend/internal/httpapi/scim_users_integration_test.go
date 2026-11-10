@@ -1671,7 +1671,7 @@ func TestLicenseSeatEnforcementIntegration(t *testing.T) {
 
 		server.license = nil // unlicensed
 		adminCreateID(t, "seat-unlicensed@"+domainA, "active")
-		server.licenseConfigured = true // configured but invalid
+		server.licenseConfigured = true // configured file exists but failed to load
 		adminCreateID(t, "seat-invalid@"+domainA, "active")
 
 		reset(t)
