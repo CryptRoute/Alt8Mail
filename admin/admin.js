@@ -1019,8 +1019,8 @@ async function openGroupDrawer(id) {
       }
     });
     $("#scimRoleClearBtn")?.addEventListener("click", async (event) => {
-      if (!(await confirmDialog("Clear legacy role mapping", `The inactive ${scimRoleLabel(scimRole)} mapping will be removed from this non-security group.`, "Clear mapping", true))) return;
       const button = event.currentTarget;
+      if (!(await confirmDialog("Clear legacy role mapping", `The inactive ${scimRoleLabel(scimRole)} mapping will be removed from this non-security group.`, "Clear mapping", true))) return;
       setBusy(button, true, "Clearing…");
       try {
         await api(`groups/${encodeURIComponent(group.id)}`, { method: "PATCH", body: { scimRole: "" } });
