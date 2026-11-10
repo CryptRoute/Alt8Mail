@@ -42,6 +42,7 @@ var adminPermissionCatalog = []permissionDescriptor{
 	{"audit.read", "View audit log", "Audit", "Read and export administrative activity.", "medium"},
 	{"legal.read", "View compliance archive", "Compliance", "Read legal holds and run eDiscovery searches.", "medium"},
 	{"legal.manage", "Manage legal holds", "Compliance", "Place and release holds that preserve mailbox data.", "critical"},
+	{"legal.review", "Review eDiscovery items", "Compliance", "Review, approve or reject queued eDiscovery items.", "high"},
 	{"siem.read", "View SIEM integration", "Integrations", "Read audit webhook configuration and delivery state.", "low"},
 	{"siem.manage", "Manage SIEM integration", "Integrations", "Configure signed audit webhooks and rotate signing secrets.", "critical"},
 	{"sessions.manage", "Manage sessions", "Security", "Revoke user or admin sign-in sessions.", "high"},

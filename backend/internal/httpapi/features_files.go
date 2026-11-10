@@ -485,6 +485,20 @@ func (s *Server) shareFile(w http.ResponseWriter, r *http.Request) {
 	if body.Access == "edit" {
 		access = "edit"
 	}
+	filesPolicy := s.tenantPolicyFor(r.Context(), sess.User.TenantID).Files
+	var fileClassification string
+	if err := s.store.DB.QueryRow(r.Context(), `
+		SELECT COALESCE(metadata->>'dlpClassification','') FROM public.files
+		WHERE id=$1 AND user_id=$2
+	`, id, sess.User.ID).Scan(&fileClassification); err != nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "File not found")
+		return
+	}
+	if filesPolicy.DLPOnShare && dlpClassificationRank(fileClassification) >= dlpClassificationRank("Confidential") {
+		s.recordWorkspaceAudit(r.Context(), sess, "file.share_blocked", id, "Share blocked by DLP classification")
+		writeError(w, http.StatusUnprocessableEntity, "SHARE_DLP_BLOCKED", "This file's classification does not permit external sharing")
+		return
+	}
 	policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID).Sharing
 	if !policy.ExternalSharing {
 		writeError(w, http.StatusForbidden, "SHARING_DISABLED", "External file sharing is disabled by your organization")
@@ -529,6 +543,33 @@ func (s *Server) shareFile(w http.ResponseWriter, r *http.Request) {
 	if expiresDays > 90 {
 		expiresDays = 90
 	}
+	approvalRequestID := ""
+	if filesPolicy.ShareApprovalRequired {
+		_ = s.store.DB.QueryRow(r.Context(), `
+			SELECT id FROM public.file_share_requests
+			WHERE tenant_id=$1 AND file_id=$2 AND requested_by=$3 AND state='approved'
+			  AND share_id IS NULL AND decided_at > now() - interval '1 day'
+			  AND access=$4 AND recipient_email=$5
+			ORDER BY decided_at DESC LIMIT 1
+		`, sess.User.TenantID, id, sess.User.ID, access, recipient).Scan(&approvalRequestID)
+		if approvalRequestID == "" {
+			requestID := newID("sharereq")
+			if _, err := s.store.DB.Exec(r.Context(), `
+				INSERT INTO public.file_share_requests
+				  (id, tenant_id, file_id, requested_by, access, recipient_email, expires_days)
+				VALUES ($1,$2,$3,$4,$5,$6,$7)
+			`, requestID, sess.User.TenantID, id, sess.User.ID, access, recipient, expiresDays); err != nil {
+				writeError(w, http.StatusInternalServerError, "SHARE_REQUEST", "Could not create the share request")
+				return
+			}
+			s.recordWorkspaceAudit(r.Context(), sess, "file.share_requested", id, "External share awaits administrator approval")
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"pendingApproval": true, "requestId": requestID,
+				"message": "An administrator must approve this external share before a link is created.",
+			})
+			return
+		}
+	}
 	token := randomToken(32)
 	shareID := newID("share")
 	expiresAt := time.Now().Add(time.Duration(expiresDays) * 24 * time.Hour).UTC()
@@ -540,6 +581,11 @@ func (s *Server) shareFile(w http.ResponseWriter, r *http.Request) {
 	if err != nil || result.RowsAffected() == 0 {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "File not found")
 		return
+	}
+	if approvalRequestID != "" {
+		_, _ = s.store.DB.Exec(r.Context(), `
+			UPDATE public.file_share_requests SET share_id=$2 WHERE id=$1 AND share_id IS NULL
+		`, approvalRequestID, shareID)
 	}
 	s.recordWorkspaceAudit(r.Context(), sess, "file.shared", id, fmt.Sprintf("External %s link · expires in %d days", access, expiresDays))
 	sharesCount, _ := s.fileShareCount(r.Context(), id)
@@ -587,7 +633,9 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if fileErr == nil {
-		if held, _ := s.userOnLegalHold(r.Context(), sess.User.TenantID, sess.User.ID); held {
+		mailHeld, _ := s.userOnLegalHold(r.Context(), sess.User.TenantID, sess.User.ID)
+		fileHeld, _ := s.fileOnLegalHold(r.Context(), sess.User.TenantID, id, sess.User.ID)
+		if mailHeld || fileHeld {
 			s.recordWorkspaceAudit(r.Context(), sess, "file.delete_blocked", id, "Delete blocked by an active legal hold")
 			writeError(w, http.StatusConflict, "LEGAL_HOLD", "This file is protected by an active legal hold and cannot be deleted")
 			return
