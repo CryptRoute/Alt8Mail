@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -47,14 +48,19 @@ func TestPhase2CollaborationIntegration(t *testing.T) {
 	mustExec(`INSERT INTO public.users (id, tenant_id, email, name, role) VALUES
 		($1,$2,$3,'Owner','owner'), ($4,$2,$5,'Approver','member')`, owner, tenant, email("owner"), approver, email("approver"))
 	fileID := "file_" + suffix
+	uploadDir := t.TempDir()
+	fileStorageKey := "version-src-" + suffix
+	if err := os.WriteFile(uploadDir+string(os.PathSeparator)+fileStorageKey, []byte("versioned file bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	mustExec(`INSERT INTO public.files (id, tenant_id, user_id, provider_id, name, mime, size_bytes, storage_key, version, previewable, checksum)
-		VALUES ($1,$2,$3,'a8m','Plan.pdf','application/pdf',1234,'storage/key.pdf',1,true,'abc')`, fileID, tenant, owner)
+		VALUES ($1,$2,$3,'a8m','Plan.pdf','application/pdf',20,$4,1,true,'abc')`, fileID, tenant, owner, fileStorageKey)
 	taskOne := "task1_" + suffix
 	taskTwo := "task2_" + suffix
 	mustExec(`INSERT INTO public.tasks (id, tenant_id, user_id, title, status) VALUES ($1,$2,$3,'Parent','open'), ($4,$2,$3,'Child','open')`, taskOne, tenant, owner, taskTwo)
 	ownerUser := userRecord{ID: owner, TenantID: tenant, Email: email("owner"), Name: "Owner", Role: "owner", Status: "active"}
 	approverUser := userRecord{ID: approver, TenantID: tenant, Email: email("approver"), Name: "Approver", Role: "member", Status: "active"}
-	server := &Server{store: &store.Store{DB: pool}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), stateLocks: map[string]*sync.Mutex{}, mailLocks: map[string]*sync.Mutex{}}
+	server := &Server{store: &store.Store{DB: pool}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), stateLocks: map[string]*sync.Mutex{}, mailLocks: map[string]*sync.Mutex{}, cfg: config.Config{UploadDir: uploadDir}}
 	withSession := func(request *http.Request, user userRecord) *http.Request {
 		sess := &sessionRecord{UserID: user.ID, TenantID: user.TenantID, User: user}
 		return request.WithContext(context.WithValue(request.Context(), sessionContextKey{}, sess))
@@ -88,6 +94,27 @@ func TestPhase2CollaborationIntegration(t *testing.T) {
 	server.listFileVersions(recorder, jsonRequest(http.MethodGet, "/api/files/"+fileID+"/versions", fileID, ""))
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"version":1`) {
 		t.Fatalf("versions = %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	// The version is an immutable byte copy, so changing the live file does not
+	// change the snapshot and restoring writes the snapshot back.
+	if err := os.WriteFile(uploadDir+string(os.PathSeparator)+fileStorageKey, []byte("changed live bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restoreRequest := httptest.NewRequest(http.MethodPost, "/api/files/"+fileID+"/versions/1/restore", bytes.NewBufferString(`{}`))
+	restoreRequest.SetPathValue("id", fileID)
+	restoreRequest.SetPathValue("version", "1")
+	restoreRequest.Header.Set("Content-Type", "application/json")
+	recorder = httptest.NewRecorder()
+	server.restoreFileVersion(recorder, withSession(restoreRequest, ownerUser))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("restore status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var restoredKey string
+	_ = pool.QueryRow(ctx, `SELECT storage_key FROM public.files WHERE id=$1`, fileID).Scan(&restoredKey)
+	restored, err := os.ReadFile(uploadDir + string(os.PathSeparator) + restoredKey)
+	if err != nil || string(restored) != "versioned file bytes" {
+		t.Fatalf("restored bytes = %q err=%v", restored, err)
 	}
 
 	// File comments and approvals.

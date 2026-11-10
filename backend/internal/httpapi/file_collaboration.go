@@ -2,7 +2,12 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -68,27 +73,58 @@ func (s *Server) snapshotFileVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := stateString(file, "id")
-	name := stateString(file, "name")
-	mime := stateString(file, "mime")
-	checksum := stateString(file, "checksum")
-	size := stateInt(file, "sizeBytes")
-	var version int
-	if err := s.store.DB.QueryRow(r.Context(), `SELECT version FROM public.files WHERE id=$1`, id).Scan(&version); err != nil {
+	content, err := s.loadFileContent(r.Context(), sess.User.ID, id)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "FILE_NOT_FOUND", "File not found")
 		return
 	}
-	var storageKey, attachmentID string
-	_ = s.store.DB.QueryRow(r.Context(), `SELECT storage_key, COALESCE(attachment_id,'') FROM public.files WHERE id=$1`, id).Scan(&storageKey, &attachmentID)
-	_, err = s.store.DB.Exec(r.Context(), `
-		INSERT INTO public.file_versions (id, file_id, tenant_id, version, name, mime, size_bytes, storage_key, attachment_id, checksum, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10,$11)
-		ON CONFLICT (file_id, version) DO NOTHING
-	`, newID("filever"), id, sess.User.TenantID, version, name, mime, size, storageKey, attachmentID, checksum, sess.User.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "FILE_VERSION", "Could not snapshot the file")
+	var version int
+	if err := s.store.DB.QueryRow(r.Context(), `SELECT version FROM public.files WHERE id=$1 AND user_id=$2`, id, sess.User.ID).Scan(&version); err != nil {
+		writeError(w, http.StatusNotFound, "FILE_NOT_FOUND", "File not found")
 		return
 	}
-	s.recordWorkspaceAudit(r.Context(), sess, "file.version_saved", name, "Saved version "+formatAdminTime(time.Now()))
+	var existing bool
+	_ = s.store.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM public.file_versions WHERE file_id=$1 AND version=$2)`, id, version).Scan(&existing)
+	if existing {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version, "replayed": true})
+		return
+	}
+	data, err := s.readFileBytes(r.Context(), content, sess.User.TenantID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "FILE_VERSION", "The file content could not be read for versioning")
+		return
+	}
+	sealed, _, err := s.sealTenantBlob(r.Context(), sess.User.TenantID, data)
+	if err != nil {
+		writeError(w, http.StatusLocked, "FILE_VERSION", "Unlock the organization's encryption key before versioning files")
+		return
+	}
+	storageKey := newID("fileverblob")
+	if err := os.MkdirAll(s.cfg.UploadDir, 0o750); err != nil {
+		writeError(w, http.StatusInternalServerError, "FILE_VERSION", "Could not prepare version storage")
+		return
+	}
+	if err := os.WriteFile(filepath.Join(s.cfg.UploadDir, storageKey), sealed, 0o640); err != nil {
+		writeError(w, http.StatusInternalServerError, "FILE_VERSION", "Could not store the version copy")
+		return
+	}
+	sum := sha256.Sum256(data)
+	checksum := hex.EncodeToString(sum[:])
+	result, err := s.store.DB.Exec(r.Context(), `
+		INSERT INTO public.file_versions (id, file_id, tenant_id, version, name, mime, size_bytes, storage_key, attachment_id, checksum, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,$9,$10)
+		ON CONFLICT (file_id, version) DO NOTHING
+	`, newID("filever"), id, sess.User.TenantID, version, content.Name, content.MIME, len(data), storageKey, checksum, sess.User.ID)
+	if err != nil || result.RowsAffected() == 0 {
+		_ = os.Remove(filepath.Join(s.cfg.UploadDir, storageKey))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "FILE_VERSION", "Could not snapshot the file")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version, "replayed": true})
+		return
+	}
+	s.recordWorkspaceAudit(r.Context(), sess, "file.version_saved", content.Name, "Saved immutable byte copy of version "+fmt.Sprint(version))
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "version": version})
 }
 
@@ -108,20 +144,99 @@ func (s *Server) restoreFileVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "FILE_VERSION", "Choose a valid version")
 		return
 	}
-	var name, mime, storageKey, attachmentID, checksum string
+	id := stateString(file, "id")
+	content, err := s.loadFileContent(r.Context(), sess.User.ID, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "FILE_NOT_FOUND", "File not found")
+		return
+	}
+	var clientEncrypted bool
+	_ = s.store.DB.QueryRow(r.Context(), `SELECT client_encrypted FROM public.files WHERE id=$1 AND user_id=$2`, id, sess.User.ID).Scan(&clientEncrypted)
+	var name, mime, checksum, versionKey string
 	var size int64
 	if err := s.store.DB.QueryRow(r.Context(), `
-		SELECT name, mime, size_bytes, storage_key, COALESCE(attachment_id,''), checksum
+		SELECT name, mime, size_bytes, storage_key, checksum
 		FROM public.file_versions WHERE file_id=$1 AND version=$2
-	`, stateString(file, "id"), version).Scan(&name, &mime, &size, &storageKey, &attachmentID, &checksum); err != nil {
+	`, id, version).Scan(&name, &mime, &size, &versionKey, &checksum); err != nil {
 		writeError(w, http.StatusNotFound, "FILE_VERSION", "That version is not available")
 		return
 	}
+	if versionKey == "" || strings.ContainsAny(versionKey, `/\`) || versionKey == "." || versionKey == ".." {
+		writeError(w, http.StatusNotFound, "FILE_VERSION", "That version copy is no longer available")
+		return
+	}
+	raw, err := os.ReadFile(filepath.Join(s.cfg.UploadDir, versionKey))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "FILE_VERSION", "That version copy is no longer available")
+		return
+	}
+	data, err := s.openTenantBlob(raw)
+	if err != nil {
+		writeError(w, http.StatusLocked, "ENCRYPTION_LOCKED", "Unlock the organization's encryption key before restoring this version")
+		return
+	}
+	var storageKey, externalID, externalURL string
+	encryptionVersion := 0
+	switch content.ProviderID {
+	case "a8m":
+		stored := data
+		if !clientEncrypted {
+			sealed, keyVersion, sealErr := s.sealTenantBlob(r.Context(), sess.User.TenantID, data)
+			if sealErr != nil {
+				writeError(w, http.StatusLocked, "ENCRYPTION_LOCKED", "Unlock the organization's encryption key before restoring this version")
+				return
+			}
+			stored, encryptionVersion = sealed, keyVersion
+		}
+		storageKey = newID("fileblob")
+		if err := os.MkdirAll(s.cfg.UploadDir, 0o750); err != nil {
+			writeError(w, http.StatusInternalServerError, "FILE_VERSION", "Could not prepare file storage")
+			return
+		}
+		if err := os.WriteFile(filepath.Join(s.cfg.UploadDir, storageKey), stored, 0o640); err != nil {
+			writeError(w, http.StatusInternalServerError, "FILE_VERSION", "Could not restore the file bytes")
+			return
+		}
+	case "s3":
+		stored := data
+		if !clientEncrypted {
+			sealed, keyVersion, sealErr := s.sealTenantBlob(r.Context(), sess.User.TenantID, data)
+			if sealErr != nil {
+				writeError(w, http.StatusLocked, "ENCRYPTION_LOCKED", "Unlock the organization's encryption key before restoring this version")
+				return
+			}
+			stored, encryptionVersion = sealed, keyVersion
+		}
+		storageKey = fmt.Sprintf("tenants/%s/users/%s/files/%s/%s", sess.User.TenantID, sess.User.ID, id, safeFileName(name))
+		if err := s.s3PutObject(r.Context(), sess.User.TenantID, storageKey, mime, stored); err != nil {
+			writeError(w, http.StatusBadGateway, "FILE_VERSION", "Could not restore the version to S3")
+			return
+		}
+		externalID = storageKey
+	case "oauth":
+		if !clientEncrypted {
+			if keyVersion, _, _, keyErr := s.activeTenantKey(r.Context(), sess.User.TenantID); keyErr == nil && keyVersion > 0 {
+				writeError(w, http.StatusConflict, "FILE_VERSION", "Connected storage cannot restore BYOK-protected versions; restore to Cabinet storage instead")
+				return
+			}
+		}
+		remoteID, remoteURL, uploadErr := s.uploadToOAuthProvider(r.Context(), sess, content.ProviderID, name, mime, data)
+		if uploadErr != nil {
+			writeError(w, http.StatusBadGateway, "FILE_VERSION", uploadErr.Error())
+			return
+		}
+		externalID, externalURL = remoteID, remoteURL
+	default:
+		writeError(w, http.StatusBadRequest, "FILE_VERSION", "This storage provider cannot restore file versions")
+		return
+	}
+	sum := sha256.Sum256(data)
 	tag, err := s.store.DB.Exec(r.Context(), `
-		UPDATE public.files SET name=$2, mime=$3, size_bytes=$4, storage_key=$5,
-		  attachment_id=NULLIF($6,''), checksum=$7, version=version+1, updated_at=now()
-		WHERE id=$1 AND user_id=$8
-	`, stateString(file, "id"), name, mime, size, storageKey, attachmentID, checksum, sess.User.ID)
+		UPDATE public.files SET name=$2, mime=$3, size_bytes=$4, storage_key=$5, external_id=$6,
+		  external_url=$7, attachment_id=NULL, checksum=$8, encryption_key_version=$9,
+		  client_encrypted=$10, version=version+1, updated_at=now()
+		WHERE id=$1 AND user_id=$11
+	`, id, name, mime, size, storageKey, externalID, externalURL, hex.EncodeToString(sum[:]), encryptionVersion, clientEncrypted, sess.User.ID)
 	if err != nil || tag.RowsAffected() == 0 {
 		writeError(w, http.StatusInternalServerError, "FILE_VERSION", "Could not restore the file version")
 		return

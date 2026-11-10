@@ -1175,7 +1175,9 @@ const state = {
   scheduleChoice: "tomorrow-morning",
   preview: null,
   previewZoom: 1,
-  attachmentMaxBytes: 8 * 1024 * 1024,
+  attachmentMaxBytes: 25 * 1024 * 1024,
+  composeAttachmentTotalBytes: 30 * 1024 * 1024,
+  folderDensity: {},
   selectedThreadId: null,
   selectedIds: new Set(),
   collapsedMailGroups: new Set(),
@@ -3472,6 +3474,52 @@ function setAccent(key, save = true) {
   });
 }
 
+function loadFolderDensity() {
+  try { state.folderDensity = JSON.parse(localStorage.getItem("a8m.folderDensity") || "{}") || {}; }
+  catch { state.folderDensity = {}; }
+}
+
+function saveFolderDensity() {
+  try { localStorage.setItem("a8m.folderDensity", JSON.stringify(state.folderDensity || {})); } catch {}
+}
+
+function applyFolderDensity(folder = state.folder) {
+  const override = state.folderDensity?.[folder];
+  const mode = override === "compact" || override === "comfortable" ? override : state.density;
+  app.setAttribute("data-density", mode);
+  $$("[data-set-density]").forEach((button) => {
+    const active = button.getAttribute("data-set-density") === state.density;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-checked", active ? "true" : "false");
+  });
+}
+
+function renderFolderDensitySettings() {
+  const host = document.getElementById("folderDensitySettings");
+  if (!host) return;
+  const folders = (state.folders || []).filter((folder) => !folder.virtual);
+  host.innerHTML = folders.length ? folders.map((folder) => `<div class="detail-row"><span>${esc(folder.label || folder.id)}</span><select class="pref-select" data-folder-density="${esc(folder.id)}" aria-label="Density for ${esc(folder.label || folder.id)}"><option value="">Default (${esc(state.density)})</option><option value="comfortable" ${state.folderDensity?.[folder.id] === "comfortable" ? "selected" : ""}>Comfortable</option><option value="compact" ${state.folderDensity?.[folder.id] === "compact" ? "selected" : ""}>Compact</option></select></div>`).join("") : '<div class="settings-note">No folders available.</div>';
+  $$("[data-folder-density]", host).forEach((select) => select.addEventListener("change", () => {
+    const folder = select.dataset.folderDensity;
+    if (!select.value) delete state.folderDensity[folder];
+    else state.folderDensity[folder] = select.value;
+    saveFolderDensity();
+    if (folder === state.folder) applyFolderDensity(folder);
+    showToast("Folder density saved");
+  }));
+}
+
+function setHighContrast(enabled, save = true) {
+  state.highContrast = !!enabled;
+  if (state.highContrast) document.documentElement.setAttribute("data-contrast", "high");
+  else document.documentElement.removeAttribute("data-contrast");
+  const toggle = document.getElementById("highContrastToggle");
+  if (toggle) toggle.checked = state.highContrast;
+  if (save) {
+    try { localStorage.setItem("a8m.highContrast", state.highContrast ? "1" : "0"); } catch {}
+  }
+}
+
 function setDensity(mode, save = true) {
   if (mode !== "compact") mode = "comfortable";
   state.density = mode;
@@ -3485,6 +3533,7 @@ function setDensity(mode, save = true) {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-checked", active ? "true" : "false");
   });
+  applyFolderDensity(state.folder);
   const hint = document.getElementById("densityHint");
   if (hint) hint.textContent = mode === "compact"
     ? "Two-line rows without the preview line — more conversations per screen."
@@ -3556,6 +3605,9 @@ function applySavedPreferences() {
   else { state.theme = "system"; syncThemeUI(); }
   setAccent(ACCENTS[prefs.get("accent")] ? prefs.get("accent") : "blue", false);
   setDensity(prefs.get("density") === "compact" ? "compact" : "comfortable", false);
+  loadFolderDensity();
+  applyFolderDensity(state.folder);
+  setHighContrast(prefs.get("highContrast") === "1", false);
   loadPreferences();
 }
 
@@ -3564,6 +3616,7 @@ function applyServerPreferences() {
   setTheme(p.theme || "system", false);
   setAccent(p.accent || "blue", false);
   setDensity(p.density || "comfortable", false);
+  applyFolderDensity(state.folder);
   if (p.language) {
     prefs.set("language", p.language);
     setLocale(p.language).catch(() => {});
@@ -5467,7 +5520,8 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   const stickyNewMenu = document.querySelector('[data-new="sticky"]');
   if (stickyNewMenu) stickyNewMenu.hidden = !tenantFeatureEnabled("stickyNotes");
   if (firstUserLoad) ensureStickyNote(stickyNoteOwnerId());
-  state.attachmentMaxBytes = data.attachmentMaxBytes || 8 * 1024 * 1024;
+  state.attachmentMaxBytes = data.attachmentMaxBytes || 25 * 1024 * 1024;
+  state.composeAttachmentTotalBytes = data.composeAttachmentTotalBytes || 30 * 1024 * 1024;
   state.preferences = { ...DEFAULT_PREFERENCES, ...(data.user && data.user.preferences ? data.user.preferences : {}) };
   state.security = data.user && data.user.security ? data.user.security : null;
   state.csrf = data.csrf || state.csrf;
@@ -6831,7 +6885,8 @@ async function openSharedDraft(draftId) {
     threadId: payload.threadId || detail.draft.threadId || null
   }, { sharedDraft: {
     id: detail.draft.id, teamId: detail.draft.teamId,
-    version: Number(lease.version || detail.draft.version), writerToken: lease.writerToken
+    version: Number(lease.version || detail.draft.version), writerToken: lease.writerToken,
+    comments: detail.comments || []
   }, teamInboxId: detail.draft.teamId });
 }
 
@@ -16195,6 +16250,8 @@ function composeTemplate(session) {
       <button class="btn-primary" data-compose-action="send" type="button"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg>Send</button>
       <button class="btn-secondary compose-send-later" data-compose-action="schedule" type="button"><svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg>Send later</button>
       <div class="compose-actions">
+        ${session.sharedDraft ? `<button class="icon-btn" data-compose-action="draft-comments" type="button" aria-label="Shared draft comments" title="Shared draft comments"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg></button>` : ""}
+        ${session.sharedDraft ? `<button class="icon-btn" data-compose-action="draft-versions" type="button" aria-label="Shared draft versions" title="Shared draft versions"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg></button>` : ""}
         <button class="icon-btn" data-compose-action="template" type="button" aria-label="Insert team template" title="Insert team template"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></button>
         <button class="icon-btn" data-compose-action="meet" type="button" aria-label="Insert Jitsi meeting link" title="Insert Jitsi meeting link"><svg class="icon" aria-hidden="true"><use href="#i-video"/></svg></button>
         <button class="icon-btn" data-compose-action="merge" type="button" aria-label="Send as mail merge" title="Send as mail merge"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg></button>
@@ -16323,7 +16380,7 @@ function openCompose(prefill = {}, options = {}) {
     ensureDraft: options.restoring ? null : null,
     restoring: !!options.restoring
   };
-  if (options.sharedDraft) session.sharedDraft = { ...options.sharedDraft };
+  if (options.sharedDraft) session.sharedDraft = { ...options.sharedDraft, comments: Array.isArray(options.sharedDraft.comments) ? options.sharedDraft.comments : [] };
   if (options.teamInboxId) session.teamInboxId = options.teamInboxId;
   const composeTeam = composeTeamInbox(session);
   if (composeTeam) session.teamInboxId = composeTeam.id;
@@ -16891,7 +16948,10 @@ function openComposeAttach(sessionId) {
   state.composeAttachProvider = storageDefaultId();
   composeAttachOverlay.hidden = false;
   const limit = document.getElementById("composeAttachLimit");
-  if (limit) limit.textContent = formatBytes(state.attachmentMaxBytes || 8 * 1024 * 1024);
+  if (limit) {
+    const limits = composeAttachmentLimits();
+    limit.textContent = `${formatBytes(limits.perFile)} each · ${formatBytes(limits.total)} total`;
+  }
   renderComposeAttachPicker();
 }
 
@@ -17007,21 +17067,307 @@ function uploadAttachmentWithProgress(file, dataBase64, hooks = {}) {
   });
 }
 
+function composeAttachmentLimits() {
+  return {
+    perFile: Math.min(Number(state.attachmentMaxBytes) || 25 * 1024 * 1024, 25 * 1024 * 1024),
+    total: Math.min(Number(state.composeAttachmentTotalBytes) || 30 * 1024 * 1024, 30 * 1024 * 1024)
+  };
+}
+
+function composeAttachmentBytes(session) {
+  return (session?.files || []).reduce((sum, file) => sum + Math.max(0, Number(file.sizeBytes) || 0), 0);
+}
+
+function ensureComposeShareOverlay() {
+  let overlay = document.getElementById("composeShareOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="composeShareOverlay" hidden><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="composeShareTitle"><div class="dialog-head"><div><p class="eyebrow">Attachment limit</p><h2 id="composeShareTitle">Share this file instead</h2><p class="dialog-note" id="composeShareReason">This file exceeds the compose attachment limit. Upload it to the Cabinet and insert a secure link in your message.</p></div><button class="icon-btn" type="button" data-compose-share-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="dialog-body"><div class="detail-list"><div class="detail-row"><span>File</span><b id="composeShareFileName">—</b></div><div class="detail-row"><span>Size</span><b id="composeShareFileSize">—</b></div></div><div class="field-row"><label class="field"><span>Link expires in</span><input id="composeShareExpiry" type="number" min="1" max="90" value="7"></label><label class="field"><span>Confidentiality</span><select id="composeSharePrivacy"><option value="public">Anyone with the link</option><option value="private">Private — exact recipient only</option></select></label></div><label class="field" id="composeShareRecipientWrap" hidden><span>Recipient email</span><input id="composeShareRecipient" type="email" placeholder="customer@example.com"><small class="field-hint">The link asks for this exact address before the file opens.</small></label><label class="field"><span>Note in the message <em>optional</em></span><input id="composeShareNote" placeholder="Large file shared securely"></label><p class="dialog-note" id="composeShareStatus" hidden></p></div><div class="dialog-foot"><button class="btn-secondary" type="button" data-compose-share-close>Cancel</button><button class="btn-primary" type="button" id="composeShareSubmit">Upload and insert link</button></div></div></div>`);
+  overlay = document.getElementById("composeShareOverlay");
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest("[data-compose-share-close]")) closeComposeShareDialog(false);
+  });
+  document.getElementById("composeSharePrivacy")?.addEventListener("change", (event) => {
+    const wrap = document.getElementById("composeShareRecipientWrap");
+    if (wrap) wrap.hidden = event.target.value !== "private";
+  });
+  document.getElementById("composeShareSubmit")?.addEventListener("click", () => submitComposeShareFallback());
+  return overlay;
+}
+
+function openComposeShareDialog(session, file, { existingFile = null, reason = "" } = {}) {
+  const overlay = ensureComposeShareOverlay();
+  state.composeShareFallback = { sessionId: session.id, file, existingFile, resolve: null };
+  const promise = new Promise((resolve) => { state.composeShareFallback.resolve = resolve; });
+  document.getElementById("composeShareReason").textContent = reason || "This file exceeds the compose attachment limit. Upload it to the Cabinet and insert a secure link in your message.";
+  document.getElementById("composeShareFileName").textContent = file.name || existingFile?.name || "File";
+  document.getElementById("composeShareFileSize").textContent = formatBytes(Number(file.size || existingFile?.sizeBytes || 0));
+  document.getElementById("composeShareExpiry").value = "7";
+  document.getElementById("composeSharePrivacy").value = "public";
+  document.getElementById("composeShareRecipientWrap").hidden = true;
+  document.getElementById("composeShareRecipient").value = "";
+  document.getElementById("composeShareNote").value = "";
+  const status = document.getElementById("composeShareStatus");
+  if (status) { status.hidden = true; status.textContent = ""; }
+  overlay.hidden = false;
+  setTimeout(() => document.getElementById("composeShareExpiry")?.focus(), 30);
+  return promise;
+}
+
+function closeComposeShareDialog(result = false) {
+  const fallback = state.composeShareFallback;
+  const overlay = document.getElementById("composeShareOverlay");
+  if (overlay) overlay.hidden = true;
+  state.composeShareFallback = null;
+  if (fallback?.resolve) fallback.resolve(result);
+}
+
+async function submitComposeShareFallback() {
+  const fallback = state.composeShareFallback;
+  const session = sessionById(fallback?.sessionId);
+  if (!fallback || !session) { closeComposeShareDialog(false); return; }
+  const privacy = document.getElementById("composeSharePrivacy").value;
+  const recipientEmail = privacy === "private" ? document.getElementById("composeShareRecipient").value.trim().toLowerCase() : "";
+  const expiresDays = Math.max(1, Math.min(90, Number(document.getElementById("composeShareExpiry").value) || 7));
+  const note = document.getElementById("composeShareNote").value.trim();
+  const status = document.getElementById("composeShareStatus");
+  const button = document.getElementById("composeShareSubmit");
+  if (privacy === "private" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+    if (status) { status.hidden = false; status.textContent = "Enter the exact recipient email for a private link."; }
+    return;
+  }
+  if (button) button.disabled = true;
+  try {
+    let fileRecord = fallback.existingFile;
+    if (!fileRecord) {
+      const dataBase64 = await fileToBase64(fallback.file);
+      const created = await api("/api/files", { method: "POST", body: {
+        providerId: "a8m", name: fallback.file.name, mime: fallback.file.type || "application/octet-stream",
+        dataBase64, path: "Files", description: "Shared from compose after reaching the attachment limit"
+      } });
+      fileRecord = created.file;
+      if (Array.isArray(created.files)) state.files = created.files;
+    }
+    const shared = await api(`/api/files/${encodeURIComponent(fileRecord.id)}/share`, { method: "POST", body: {
+      access: "view", expiresDays, recipientEmail
+    } });
+    if (shared.pendingApproval) {
+      if (status) { status.hidden = false; status.textContent = "The link is waiting for administrator approval. Insert it after approval from the Cabinet."; }
+      return;
+    }
+    const share = shared.share || {};
+    insertComposeShareLink(session, { name: fallback.file?.name || fileRecord.name || "Shared file", url: share.url, expiresAt: share.expiresAt, recipientEmail, note });
+    closeComposeShareDialog(true);
+    showToast("Secure Cabinet link inserted");
+  } catch (error) {
+    if (status) { status.hidden = false; status.textContent = error.message || "The file could not be shared."; }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function insertComposeShareLink(session, { name, url, expiresAt, recipientEmail, note }) {
+  if (!session || !url) return;
+  const expiry = expiresAt ? formatDate(expiresAt) : "";
+  const privacy = recipientEmail ? `Private link for ${recipientEmail}` : "Anyone with the link";
+  const intro = note || "Large file shared securely";
+  const text = `${intro}
+${name}
+${url}
+${privacy}${expiry ? ` · expires ${expiry}` : ""}`;
+  if (session.htmlMode) {
+    const editor = session.el?.querySelector("[data-compose-editor]");
+    if (!editor) return;
+    const html = `<p>${esc(intro)}<br><strong>${esc(name)}</strong><br><a href="${esc(url)}">${esc(url)}</a><br><small>${esc(privacy)}${expiry ? ` · expires ${esc(expiry)}` : ""}</small></p>`;
+    editor.focus();
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount && editor.contains(selection.anchorNode)) document.execCommand("insertHTML", false, html);
+    else editor.insertAdjacentHTML("beforeend", html);
+    updateComposeEditor(session, editor);
+  } else {
+    const textarea = session.el?.querySelector('[data-compose-field="body"]');
+    if (!textarea) return;
+    textarea.value = `${textarea.value}${textarea.value ? "\n\n" : ""}${text}`;
+    session.body = textarea.value;
+    session.bodyHtml = textToEditorHTML(textarea.value);
+    session.dirty = true;
+    scheduleComposeSave(session, 200);
+    updateComposeStatus(session);
+  }
+}
+
+function sharedDraftCommentAnchor(session) {
+  const editor = session.el?.querySelector("[data-compose-editor]");
+  if (!editor) return {};
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount || !editor.contains(selection.anchorNode)) return {};
+  const range = selection.getRangeAt(0);
+  if (range.collapsed) return {};
+  const before = document.createRange();
+  before.selectNodeContents(editor);
+  before.setEnd(range.startContainer, range.startOffset);
+  const start = before.toString().length;
+  const quote = range.toString().slice(0, 500);
+  return { start, end: start + quote.length, quote };
+}
+
+function sharedDraftAnchorRange(editor, anchor) {
+  if (!anchor || !Number.isFinite(Number(anchor.start)) || !Number.isFinite(Number(anchor.end))) return null;
+  const start = Math.max(0, Number(anchor.start));
+  const end = Math.max(start, Number(anchor.end));
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  let startNode = null, startOffset = 0, endNode = null, endOffset = 0;
+  let node;
+  while ((node = walker.nextNode())) {
+    const next = offset + node.nodeValue.length;
+    if (!startNode && start >= offset && start <= next) { startNode = node; startOffset = start - offset; }
+    if (!endNode && end >= offset && end <= next) { endNode = node; endOffset = end - offset; }
+    offset = next;
+  }
+  if (!startNode || !endNode) return null;
+  const range = document.createRange();
+  range.setStart(startNode, startOffset);
+  range.setEnd(endNode, endOffset);
+  return range;
+}
+
+function applySharedDraftHighlights(session) {
+  const editor = session.el?.querySelector("[data-compose-editor]");
+  if (!editor || !window.CSS || !CSS.highlights || !window.Highlight) return;
+  const ranges = (session.sharedDraft?.comments || [])
+    .filter((comment) => !comment.resolvedAt)
+    .map((comment) => sharedDraftAnchorRange(editor, comment.anchor))
+    .filter(Boolean);
+  if (ranges.length) CSS.highlights.set("shared-draft-comments", new Highlight(...ranges));
+  else CSS.highlights.delete("shared-draft-comments");
+}
+
+function ensureSharedDraftPanel() {
+  let overlay = document.getElementById("sharedDraftPanelOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="sharedDraftPanelOverlay" hidden><div class="dialog shared-drafts-dialog" role="dialog" aria-modal="true" aria-labelledby="sharedDraftPanelTitle"><div class="dialog-head"><div><p class="eyebrow">Team draft</p><h2 id="sharedDraftPanelTitle">Collaboration</h2><p class="dialog-note" id="sharedDraftPanelNote"></p></div><button class="icon-btn" type="button" data-shared-panel-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="dialog-body"><div class="compose-attach-tabs" role="tablist"><button class="is-active" data-shared-panel-tab="comments" type="button">Comments</button><button data-shared-panel-tab="versions" type="button">Versions</button></div><div id="sharedDraftPanelBody"></div></div><div class="dialog-foot"><button class="btn-secondary" type="button" data-shared-panel-close>Close</button></div></div></div>`);
+  overlay = document.getElementById("sharedDraftPanelOverlay");
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest("[data-shared-panel-close]")) { overlay.hidden = true; state.sharedDraftPanel = null; }
+    const tab = event.target.closest("[data-shared-panel-tab]");
+    if (tab) { state.sharedDraftPanelTab = tab.dataset.sharedPanelTab; renderSharedDraftPanel(); }
+  });
+  return overlay;
+}
+
+function openSharedDraftPanel(session, tab = "comments") {
+  if (!session?.sharedDraft) return;
+  const overlay = ensureSharedDraftPanel();
+  state.sharedDraftPanel = { sessionId: session.id, tab };
+  state.sharedDraftPanelTab = tab;
+  overlay.hidden = false;
+  renderSharedDraftPanel();
+}
+
+async function renderSharedDraftPanel() {
+  const panel = state.sharedDraftPanel;
+  const session = sessionById(panel?.sessionId);
+  if (!panel || !session) return;
+  const host = document.getElementById("sharedDraftPanelBody");
+  const note = document.getElementById("sharedDraftPanelNote");
+  if (note) note.textContent = `Draft version ${session.sharedDraft.version} · ${session.sharedDraft.teamId || ""}`;
+  if (!host) return;
+  $$("[data-shared-panel-tab]").forEach((button) => button.classList.toggle("is-active", button.dataset.sharedPanelTab === state.sharedDraftPanelTab));
+  if (state.sharedDraftPanelTab === "versions") {
+    host.innerHTML = '<div class="settings-note">Loading versions…</div>';
+    try {
+      const data = await api(`/api/shared-drafts/${encodeURIComponent(session.sharedDraft.id)}/versions`);
+      const versions = data.versions || [];
+      host.innerHTML = versions.length ? versions.map((version) => `<div class="automation-rule-row"><div class="shared-draft-copy"><strong>Version ${version.version}${Number(version.version) === Number(data.currentVersion) ? " · current" : ""}</strong><span>${esc(version.authorName || version.authorEmail || "Unknown")} · ${esc(formatListWhen(version.createdAt))} · ${esc(version.payload?.subject || "Untitled draft")}</span></div>${Number(version.version) === Number(data.currentVersion) ? "" : `<button class="btn-secondary small" type="button" data-shared-restore="${version.version}">Restore</button>`}</div>`).join("") : '<div class="empty-mini">No versions yet.</div>';
+      $$("[data-shared-restore]", host).forEach((button) => button.addEventListener("click", () => restoreSharedDraftVersion(session, Number(button.dataset.sharedRestore)).catch(showError)));
+    } catch (error) {
+      host.innerHTML = `<div class="settings-note">${esc(error.message || "Versions could not be loaded.")}</div>`;
+    }
+    return;
+  }
+  const comments = session.sharedDraft.comments || [];
+  applySharedDraftHighlights(session);
+  host.innerHTML = `<div class="detail-list">${comments.map((comment) => `<div class="detail-row"><span>${esc(comment.authorName || comment.authorEmail || "Teammate")} · ${esc(formatListWhen(comment.createdAt))}<br>${comment.anchor?.quote ? `<blockquote class="draft-comment-quote">${esc(comment.anchor.quote)}</blockquote>` : ""}${esc(comment.body)}</span><span>${comment.resolvedAt ? `<span class="badge neutral">Resolved</span>` : `<button class="btn-secondary small" type="button" data-shared-comment-resolve="${esc(comment.id)}">Resolve</button>`}</span></div>`).join("") || '<div class="empty-mini">No comments yet. Select text in the draft and add a pinned comment.</div>'}</div><div class="field-row" style="margin-top:12px"><label class="field grow"><span>Comment</span><textarea id="sharedDraftCommentBody" rows="3" maxlength="1000" placeholder="Leave a comment on the selected text…"></textarea></label></div><div style="display:flex;justify-content:flex-end"><button class="btn-secondary small" type="button" id="sharedDraftCommentAdd">Comment on selection</button></div>`;
+  document.getElementById("sharedDraftCommentAdd")?.addEventListener("click", () => addSharedDraftComment(session).catch(showError));
+  $$("[data-shared-comment-resolve]").forEach((button) => button.addEventListener("click", () => resolveSharedDraftComment(session, button.dataset.sharedCommentResolve).catch(showError)));
+}
+
+async function addSharedDraftComment(session) {
+  const body = String(document.getElementById("sharedDraftCommentBody")?.value || "").trim();
+  if (!body) { showToast("Write a comment first", "error"); return; }
+  const anchor = sharedDraftCommentAnchor(session);
+  const data = await api(`/api/shared-drafts/${encodeURIComponent(session.sharedDraft.id)}/comments`, { method: "POST", body: { body, anchor } });
+  session.sharedDraft.comments.push(data.comment);
+  applySharedDraftHighlights(session);
+  document.getElementById("sharedDraftCommentBody").value = "";
+  await renderSharedDraftPanel();
+  showToast("Comment added");
+}
+
+async function resolveSharedDraftComment(session, commentId) {
+  await api(`/api/shared-drafts/${encodeURIComponent(session.sharedDraft.id)}/comments/${encodeURIComponent(commentId)}/resolve`, { method: "POST", body: {} });
+  const comment = (session.sharedDraft.comments || []).find((item) => item.id === commentId);
+  if (comment) comment.resolvedAt = new Date().toISOString();
+  applySharedDraftHighlights(session);
+  await renderSharedDraftPanel();
+}
+
+async function restoreSharedDraftVersion(session, version) {
+  if (!(await appConfirm({ title: `Restore version ${version}?`, message: "The current shared draft content becomes a new version. Other writers will see the restored content.", confirmLabel: "Restore version" }))) return;
+  const data = await api(`/api/shared-drafts/${encodeURIComponent(session.sharedDraft.id)}/versions/${version}/restore`, { method: "POST", body: { baseVersion: session.sharedDraft.version, writerToken: session.sharedDraft.writerToken } });
+  applyRestoredSharedDraft(session, data.draft);
+  document.getElementById("sharedDraftPanelOverlay").hidden = true;
+  state.sharedDraftPanel = null;
+  showToast(`Restored shared draft version ${version}`);
+}
+
+function applyRestoredSharedDraft(session, draft) {
+  const payload = draft?.payload || {};
+  session.to = payload.toText || "";
+  session.cc = payload.ccText || "";
+  session.bcc = payload.bccText || "";
+  session.subject = payload.subject || "";
+  session.body = payload.bodyText || "";
+  session.bodyHtml = payload.bodyHtml || "";
+  session.files = Array.isArray(payload.attachments) ? payload.attachments.map((file) => ({ ...file })) : [];
+  ["to", "cc", "bcc"].forEach((field) => updateRecipientField(session, field));
+  const subject = session.el?.querySelector('[data-compose-field="subject"]');
+  if (subject) subject.value = session.subject;
+  if (session.htmlMode) {
+    const editor = session.el?.querySelector("[data-compose-editor]");
+    if (editor) { editor.innerHTML = session.bodyHtml || textToEditorHTML(session.body); updateComposeEditor(session, editor); }
+  } else {
+    const textarea = session.el?.querySelector('[data-compose-field="body"]');
+    if (textarea) { textarea.value = session.body; }
+  }
+  session.sharedDraft.version = Number(draft.version || session.sharedDraft.version);
+  session.dirty = false;
+  updateComposeFiles(session);
+  updateComposeStatus(session);
+}
+
 async function uploadComposeFiles(session, files) {
   const uploaded = [];
   if (!session || !files?.length) return uploaded;
-  const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
+  const limits = composeAttachmentLimits();
+  let usage = composeAttachmentBytes(session);
   const queue = [];
   for (const file of files) {
-    if (file.size > max) {
-      showToast(`${file.name} is larger than ${formatBytes(max)}`);
+    const size = Math.max(0, Number(file.size) || 0);
+    if (size > limits.perFile) {
+      await openComposeShareDialog(session, file, { reason: `${file.name} is larger than ${formatBytes(limits.perFile)}. Use a secure Cabinet link instead.` });
       continue;
     }
-    if (session.files.some((item) => item.name === file.name && item.sizeBytes === file.size)) {
+    if (usage + size > limits.total) {
+      await openComposeShareDialog(session, file, { reason: `This compose already has ${formatBytes(usage)} attached. The total limit is ${formatBytes(limits.total)}; share ${file.name} from the Cabinet instead.` });
+      continue;
+    }
+    if (session.files.some((item) => item.name === file.name && item.sizeBytes === size)) {
       showToast(`${file.name} is already attached`);
       continue;
     }
     queue.push(file);
+    usage += size;
   }
   if (!queue.length) return uploaded;
   const totalBytes = queue.reduce((sum, file) => sum + Math.max(1, file.size || 0), 0);
@@ -17066,9 +17412,13 @@ async function attachWorkspaceFile(fileId, sessionId = attachPickerSessionId) {
   const session = sessionById(sessionId);
   const file = (state.files || []).find((item) => item.id === fileId);
   if (!session || !file) return null;
-  const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
-  if (Number(file.sizeBytes || 0) > max) {
-    showToast(`${file.name} is larger than ${formatBytes(max)}`);
+  const limits = composeAttachmentLimits();
+  const size = Number(file.sizeBytes || 0);
+  if (size > limits.perFile || composeAttachmentBytes(session) + size > limits.total) {
+    await openComposeShareDialog(session, { name: file.name, size }, {
+      existingFile: file,
+      reason: `${file.name} would exceed the compose attachment limit. Share the existing Cabinet file as a secure link instead.`
+    });
     return null;
   }
   try {
@@ -27353,6 +27703,7 @@ function syncChips() {
 function setFolder(folder) {
   if (!state.folders.some((item) => item.id === folder)) return;
   state.folder = folder;
+  applyFolderDensity(folder);
   state.filter = "all";
   state.query = "";
   state.collapsedMailGroups = new Set();
@@ -28660,7 +29011,7 @@ function bindEvents() {
     const taskButton = target.closest("button[data-task]");
     if (taskButton) { event.preventDefault(); setTask(taskButton.getAttribute("data-task")); return; }
     const folderButton = target.closest("button[data-folder]");
-    if (folderButton) { event.preventDefault(); setFolder(folderButton.getAttribute("data-folder")); return; }
+    if (folderButton) { event.preventDefault(); setFolder(folderButton.getAttribute("data-folder")); applyFolderDensity(folderButton.getAttribute("data-folder")); return; }
     if (target.closest("#dateJumpBtn")) { event.preventDefault(); toggleDateJumpMenu(); return; }
     const dateJump = target.closest("[data-date-jump]");
     if (dateJump) { event.preventDefault(); jumpToMailDate(dateJump.getAttribute("data-date-jump")); return; }
@@ -28842,6 +29193,10 @@ function bindEvents() {
     if (accentOption) { event.preventDefault(); setAccent(accentOption.getAttribute("data-set-accent"), true); return; }
     const densityOption = target.closest("[data-set-density]");
     if (densityOption) { event.preventDefault(); setDensity(densityOption.getAttribute("data-set-density"), true); return; }
+    if (target.matches("#highContrastToggle") || target.closest("#highContrastToggle")) {
+      setHighContrast(document.getElementById("highContrastToggle")?.checked);
+      return;
+    }
 
     const ruleToggle = target.closest("[data-rule-toggle]");
     if (ruleToggle) {
@@ -29965,6 +30320,8 @@ function bindEvents() {
         });
       } else if (kind === "attach") { openComposeAttach(session.id); }
       else if (kind === "template") { openTeamTemplatePicker(session); }
+      else if (kind === "draft-comments") { openSharedDraftPanel(session, "comments"); }
+      else if (kind === "draft-versions") { openSharedDraftPanel(session, "versions"); }
       else if (kind === "meet") { insertMeetingLink(session); }
       else if (kind === "merge") { openMailMergeDialog(session); }
       else if (kind === "payment") { insertPaymentLink(session); }

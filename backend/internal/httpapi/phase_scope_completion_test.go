@@ -83,6 +83,21 @@ func TestCalDAVFreeBusyParsing(t *testing.T) {
 	}
 }
 
+func TestEmbeddedWatermarks(t *testing.T) {
+	html := embeddedWatermarkHTML("<p>Body</p>", "CONFIDENTIAL · a@example.test · now", "Confidential")
+	if strings.Count(html, "CONFIDENTIAL") < 2 || !strings.Contains(html, "<p>Body</p>") {
+		t.Fatalf("HTML watermark = %s", html)
+	}
+	text := string(embeddedFileWatermark([]byte("hello"), "text/plain", "CONFIDENTIAL · a@example.test"))
+	if !strings.Contains(text, "hello") || strings.Count(text, "CONFIDENTIAL") != 2 {
+		t.Fatalf("text watermark = %q", text)
+	}
+	raw := []byte("binary")
+	if string(embeddedFileWatermark(raw, "application/pdf", "mark")) != "binary" {
+		t.Fatal("PDF bytes were modified without a PDF watermarker")
+	}
+}
+
 func TestMCPToolApprovalPolicyValidation(t *testing.T) {
 	policy := defaultTenantPolicy()
 	policy.MCP.ToolApprovals["draft_send"] = "deny"

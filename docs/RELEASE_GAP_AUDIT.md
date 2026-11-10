@@ -79,14 +79,22 @@ The ten Phase 2–6 follow-ups were implemented and covered by
 - keyset cursor pagination on `/api/v1` messages, tasks and calendar events;
 - persistent offline archive/move/read/label and task mutation queues;
 - customizable keyboard shortcuts and a live shortcut reference;
-- calendar resource approval workflow; and
-- external CalDAV `free-busy-query` federation.
+- calendar resource approval workflow;
+- external CalDAV `free-busy-query` federation;
+- embedded outbound mail/file watermarking (HTML/text bodies) in addition to
+  the classification banners;
+- immutable byte-copy Cabinet file versions with provider-aware restore;
+- shared-draft anchored comment pins and version restore UI;
+- high-contrast mode and per-folder message density; and
+- compose attachment limits (25 MB per file / 30 MB total) with an interactive
+  Cabinet-share fallback, 7-day default expiry, public/private links and
+  recipient-email confirmation for private links.
 
 Still open before publication: storage-layer encryption for mail rows, live
 provider/IdP/migration drills, a real OCR sidecar and DLP corpus, campaign
-tracking beyond mail merges, attachment-binary/OCR DLP, embedded watermarks,
-file byte-copy versions, shared-draft comment pins/restore UI, and explicit
-release authorization.
+tracking beyond mail merges, attachment-binary/OCR DLP, PDF/image watermark
+embedding (text/HTML and outbound mail are embedded), and explicit release
+authorization.
 
 ## Fixed during this audit
 

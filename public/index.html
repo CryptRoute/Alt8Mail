@@ -1097,6 +1097,24 @@
                       <p class="density-hint" id="densityHint">Three-line rows with a subject and preview line.</p>
                     </div>
                   </div>
+
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Contrast</h3>
+                      <p>Increase separation between text, borders and surfaces.</p>
+                    </div>
+                    <div class="settings-block-body">
+                      <label class="check-field"><input id="highContrastToggle" type="checkbox"> High contrast mode</label>
+                    </div>
+                  </div>
+
+                  <div class="settings-block">
+                    <div class="settings-block-head">
+                      <h3>Per-folder density</h3>
+                      <p>Override the message list density for a specific folder. Default follows the setting above.</p>
+                    </div>
+                    <div class="settings-block-body"><div id="folderDensitySettings" class="detail-list"></div></div>
+                  </div>
                 </section>
 
                 <section class="settings-panel" data-settings-panel="mail" hidden>
@@ -2401,7 +2419,7 @@
       <div class="compose-dropzone" id="composeAttachDrop" tabindex="0" role="button" aria-label="Drop files here or browse">
         <span class="compose-dropzone-art"><svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg></span>
         <strong>Drag &amp; drop files here</strong>
-        <span>Attach multiple documents, images or archives · up to <span id="composeAttachLimit">8 MB</span> each</span>
+        <span>Attach multiple documents, images or archives · up to <span id="composeAttachLimit">25 MB each · 30 MB total</span></span>
         <button class="btn-secondary small" id="composeAttachBrowse" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Browse this device</button>
         <button class="btn-secondary small" id="composeNewOfficeDoc" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New Office document</button>
       </div>

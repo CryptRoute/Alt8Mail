@@ -27,6 +27,11 @@ contents; the tag, push and publication are separate authorized actions.
   fidelity reports; tenant analytics, support bundle, opt-in telemetry,
   phishing-awareness simulation, command palette and offline compose/send
   queue.
+- **Final scope completion:** embedded outbound/file watermarks, immutable
+  byte-copy Cabinet versions, shared-draft anchored comment pins and version
+  restore, high-contrast mode and per-folder density, and a compose attachment
+  fallback that uploads oversized files to the Cabinet and inserts an
+  expiring public or recipient-locked share link.
 - **Phase scope completion:** recurring tasks and reminder notifications,
   policy-checked auto-sent auto-replies, booking edit/disable/cancel with
   booking lists, scheduled DMARC rua polling, per-tool MCP approvals and

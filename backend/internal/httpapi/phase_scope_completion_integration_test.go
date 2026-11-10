@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -47,7 +48,7 @@ func TestPhaseScopeCompletionIntegration(t *testing.T) {
 	mustExec(`INSERT INTO public.mailboxes (tenant_id, user_id, email, domain, local_part, maildir_path) VALUES ($1,$2,$3,'gov.example.test',$4,$5)`,
 		tenant, userID, email, "scope-"+suffix, t.TempDir())
 	server := &Server{store: &store.Store{DB: pool}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		stateLocks: map[string]*sync.Mutex{}, cfg: config.Config{SessionSecret: "scope-completion-secret"},
+		stateLocks: map[string]*sync.Mutex{}, cfg: config.Config{SessionSecret: "scope-completion-secret", UploadDir: t.TempDir()},
 		license: &licensing.License{Version: licensing.Version, ID: "scope-test", Edition: "enterprise", Seats: 10,
 			Features: []string{"all"}, ExpiresAt: time.Now().Add(time.Hour)}}
 	user, err := server.userByID(ctx, userID)
@@ -113,6 +114,35 @@ func TestPhaseScopeCompletionIntegration(t *testing.T) {
 		_ = pool.QueryRow(ctx, `SELECT count(*) FROM public.outbox WHERE user_id=$1 AND source_message_id=$2 AND status='queued'`, userID, messageID).Scan(&queued)
 		if queued != 1 {
 			t.Fatalf("auto-reply outbox rows = %d", queued)
+		}
+	})
+
+	t.Run("direct cabinet upload for share fallback", func(t *testing.T) {
+		raw := []byte("large-file-share-fallback")
+		body, _ := json.Marshal(map[string]any{
+			"providerId": "a8m", "name": "large-share.bin", "mime": "application/octet-stream",
+			"dataBase64": base64.StdEncoding.EncodeToString(raw), "path": "Files",
+			"description": "Shared from compose after reaching the attachment limit",
+		})
+		request := httptest.NewRequest(http.MethodPost, "/api/files", strings.NewReader(string(body)))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		server.createFile(recorder, withSession(request))
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("direct cabinet upload = %d %s", recorder.Code, recorder.Body.String())
+		}
+		var fileID, storageKey string
+		var size int64
+		var payload struct {
+			File map[string]any `json:"file"`
+		}
+		_ = json.Unmarshal(recorder.Body.Bytes(), &payload)
+		fileID = fmt.Sprint(payload.File["id"])
+		if err := pool.QueryRow(ctx, `SELECT storage_key, size_bytes FROM public.files WHERE id=$1 AND user_id=$2`, fileID, userID).Scan(&storageKey, &size); err != nil {
+			t.Fatal(err)
+		}
+		if size != int64(len(raw)) || storageKey == "" {
+			t.Fatalf("direct upload size=%d key=%q", size, storageKey)
 		}
 	})
 

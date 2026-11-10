@@ -98,7 +98,13 @@ encryption metadata from `0081_encrypted_storage.sql` is documented in
   for replayed task creation. MDM packaging is the existing manifest/PWA
   install path; no separate native bundle is produced.
 - Keyboard shortcuts are customizable in Settings → Keyboard shortcuts and the
-  reference dialog reflects the saved bindings.
+  reference dialog reflects the saved bindings. Appearance adds high-contrast
+  mode and per-folder message density overrides.
+- Compose attachments are capped at 25 MB per file and 30 MB total. Oversized
+  selections offer an interactive Cabinet-share fallback: upload, choose an
+  expiry (default 7 days) and public/private access, then insert the generated
+  link into the message. Private links require the exact recipient email before
+  content opens.
 - Tests: `TestPhase6PlatformOpsIntegration` covers analytics, redacted support
   bundle, telemetry delivery and phishing create/launch/click/report.
 

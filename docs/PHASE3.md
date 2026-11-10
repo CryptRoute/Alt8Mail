@@ -108,5 +108,8 @@ Migration `0074_deliverability.sql`, `dmarc.go`, `campaign_tracking.go`.
 ## Known limits
 
 - Campaign tracking applies to mail merges, not every outbound message.
+- Classified outbound HTML carries an embedded body watermark (banner and
+  repeated mark); text and HTML Cabinet downloads carry embedded banners.
+  PDF/image watermarking remains a rendering-library integration.
 - CalDAV federation requires an HTTPS calendar collection URL; provider-specific
   OAuth discovery remains an operator integration detail.

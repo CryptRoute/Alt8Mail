@@ -15,8 +15,8 @@ SIEM export packs. Migrations: `0076_governance.sql`, `0077_legal_review.sql`,
   in warnings, matches, policy simulation, AI policy assist or the provider
   payload. Raw card/IBAN/ID values are never returned.
 - Tenant mail policy can prevent forwarding Confidential or Restricted mail and
-  append a visible classification/sender/timestamp watermark to classified
-  outbound messages.
+  embed a visible classification/sender/timestamp watermark inside classified
+  outbound HTML bodies (with a plain-text banner fallback).
 - System Control exposes a detector editor and `POST /admin/api/dlp/simulate`
   returns the effective classification, warnings, detector names, blocked flag
   and a redacted preview. `dlp_false_positives` stores review items with
@@ -89,7 +89,9 @@ SIEM export packs. Migrations: `0076_governance.sql`, `0077_legal_review.sql`,
 ## 5D Files governance, OCR and file search
 
 - File holds, share approval (`file_share_requests`), DLP-on-share and
-  classified-download watermark headers are enforced in the Cabinet file paths.
+  classified-download watermarks are enforced in the Cabinet file paths. Text
+  and HTML downloads carry embedded watermark banners; PDFs and images retain
+  the watermark response header until a PDF/image renderer is added.
   External shares that require approval return `202` with a pending request;
   after an administrator approves, the owner retries and receives the link.
 - `file_text_index` stores extracted text per file. Text extraction supports

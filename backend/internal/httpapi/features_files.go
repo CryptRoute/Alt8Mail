@@ -18,11 +18,15 @@ import (
 	"unicode/utf8"
 )
 
-const maxAttachmentBytes = 8 * 1024 * 1024
+const (
+	maxAttachmentBytes          = 25 * 1024 * 1024
+	composeAttachmentTotalBytes = 30 * 1024 * 1024
+)
 
 type fileCreateBody struct {
 	ProviderID      string  `json:"providerId"`
 	AttachmentID    string  `json:"attachmentId"`
+	DataBase64      string  `json:"dataBase64"`
 	Name            string  `json:"name"`
 	SizeBytes       float64 `json:"sizeBytes"`
 	MIME            string  `json:"mime"`
@@ -298,7 +302,7 @@ func (s *Server) publicFile(file fileRecord, user userRecord, sharedRaw []byte) 
 func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	var body fileCreateBody
-	if !s.decodeBody(w, r, &body, 256*1024) {
+	if !s.decodeBody(w, r, &body, 140*1024*1024) {
 		return
 	}
 	providerID := body.ProviderID
@@ -315,28 +319,61 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "PROVIDER_OFFLINE", provider.Name+" is not connected")
 		return
 	}
-	if body.AttachmentID == "" {
-		writeError(w, http.StatusBadRequest, "FILE_CONTENT", "Upload a file attachment before adding it to storage")
-		return
-	}
-	if s.attachmentIsQuarantined(r.Context(), sess.User.ID, body.AttachmentID) {
-		writeError(w, http.StatusForbidden, "SPAM_ATTACHMENT_BLOCKED", "Attachments in Junk cannot be saved until the message is moved to Inbox.")
-		return
-	}
+	attachmentID := strings.TrimSpace(body.AttachmentID)
 	var attachmentName, attachmentMIME, storedName string
-	if err := s.store.DB.QueryRow(r.Context(), `
-		SELECT name, mime, stored_path FROM attachments WHERE id=$1 AND user_id=$2
-	`, body.AttachmentID, sess.User.ID).Scan(&attachmentName, &attachmentMIME, &storedName); err != nil {
-		writeError(w, http.StatusNotFound, "ATTACHMENT_NOT_FOUND", "Attachment not found")
-		return
-	}
-	if storedName == "" || strings.ContainsAny(storedName, `/\`) || storedName == "." || storedName == ".." {
-		writeError(w, http.StatusNotFound, "ATTACHMENT_NOT_FOUND", "Attachment content is no longer available")
-		return
-	}
-	data, err := os.ReadFile(filepath.Join(s.cfg.UploadDir, storedName))
-	if err != nil {
-		writeError(w, http.StatusNotFound, "ATTACHMENT_NOT_FOUND", "Attachment content is no longer available")
+	var data []byte
+	switch {
+	case strings.TrimSpace(body.DataBase64) != "":
+		raw := strings.TrimSpace(body.DataBase64)
+		if comma := strings.Index(raw, ","); strings.HasPrefix(raw, "data:") && comma >= 0 {
+			raw = raw[comma+1:]
+		}
+		decoded, decodeErr := base64.StdEncoding.DecodeString(raw)
+		if decodeErr != nil {
+			decoded, decodeErr = base64.RawStdEncoding.DecodeString(raw)
+		}
+		if decodeErr != nil || len(decoded) == 0 {
+			writeError(w, http.StatusBadRequest, "FILE_CONTENT", "Upload a valid file")
+			return
+		}
+		if len(decoded) > 100*1024*1024 {
+			writeError(w, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "Cabinet uploads are limited to 100 MB")
+			return
+		}
+		if err := s.scanUpload(r.Context(), decoded); err != nil {
+			if errors.Is(err, errUploadInfected) {
+				writeError(w, http.StatusUnprocessableEntity, "FILE_INFECTED", "The uploaded file failed the antivirus scan")
+			} else {
+				writeError(w, http.StatusServiceUnavailable, "FILE_SCAN", "The file could not be scanned for malware")
+			}
+			return
+		}
+		data = decoded
+		attachmentName = body.Name
+		attachmentMIME = body.MIME
+	case attachmentID != "":
+		if s.attachmentIsQuarantined(r.Context(), sess.User.ID, attachmentID) {
+			writeError(w, http.StatusForbidden, "SPAM_ATTACHMENT_BLOCKED", "Attachments in Junk cannot be saved until the message is moved to Inbox.")
+			return
+		}
+		if err := s.store.DB.QueryRow(r.Context(), `
+			SELECT name, mime, stored_path FROM attachments WHERE id=$1 AND user_id=$2
+		`, attachmentID, sess.User.ID).Scan(&attachmentName, &attachmentMIME, &storedName); err != nil {
+			writeError(w, http.StatusNotFound, "ATTACHMENT_NOT_FOUND", "Attachment not found")
+			return
+		}
+		if storedName == "" || strings.ContainsAny(storedName, `/\`) || storedName == "." || storedName == ".." {
+			writeError(w, http.StatusNotFound, "ATTACHMENT_NOT_FOUND", "Attachment content is no longer available")
+			return
+		}
+		var readErr error
+		data, readErr = os.ReadFile(filepath.Join(s.cfg.UploadDir, storedName))
+		if readErr != nil {
+			writeError(w, http.StatusNotFound, "ATTACHMENT_NOT_FOUND", "Attachment content is no longer available")
+			return
+		}
+	default:
+		writeError(w, http.StatusBadRequest, "FILE_CONTENT", "Upload a file before adding it to storage")
 		return
 	}
 	name := safeFileName(attachmentName)
@@ -443,7 +480,7 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 		                   encryption_key_version, client_encrypted)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10,$11,$12,$13,$14,$15,$16,$17,$18)
 	`, id, sess.User.TenantID, sess.User.ID, providerID, externalID, name, mime, truncate(path, 160),
-		folderID, truncate(description, 500), len(data), storageKey, body.AttachmentID, externalURL, previewable, `{}`,
+		folderID, truncate(description, 500), len(data), storageKey, attachmentID, externalURL, previewable, `{}`,
 		encryptionVersion, clientEncrypted)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "FILE", "Could not save the file record")
@@ -654,6 +691,7 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	id := r.PathValue("id")
 	officeKeys := map[string]bool{}
+	versionKeys := map[string]bool{}
 	file, fileErr := s.loadFileContent(r.Context(), sess.User.ID, id)
 	if fileErr == nil {
 		if strings.HasPrefix(file.StorageKey, "ofv_") {
@@ -672,6 +710,18 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			rows.Close()
+		}
+		versionRows, versionErr := s.store.DB.Query(r.Context(), `
+			SELECT storage_key FROM public.file_versions WHERE file_id=$1 AND storage_key <> ''
+		`, id)
+		if versionErr == nil {
+			for versionRows.Next() {
+				var key string
+				if versionRows.Scan(&key) == nil && strings.HasPrefix(key, "fileverblob_") {
+					versionKeys[key] = true
+				}
+			}
+			versionRows.Close()
 		}
 	}
 	if fileErr == nil {
@@ -699,6 +749,9 @@ func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 	for key := range officeKeys {
 		s.officeRemoveStorage(key)
+	}
+	for key := range versionKeys {
+		_ = os.Remove(filepath.Join(s.cfg.UploadDir, key))
 	}
 	s.recordWorkspaceAudit(r.Context(), sess, "file.deleted", id, "File removed from the workspace")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -861,7 +914,10 @@ func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file c
 	w.Header().Set("Content-Disposition", disposition+`; filename*=UTF-8''`+url.PathEscape(file.Name))
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if watermark := s.fileWatermark(r, file, tenantID); watermark != "" {
+	watermark := s.fileWatermark(r, file, tenantID)
+	var clientEncrypted bool
+	_ = s.store.DB.QueryRow(r.Context(), `SELECT client_encrypted FROM public.files WHERE id=$1`, file.ID).Scan(&clientEncrypted)
+	if watermark != "" {
 		w.Header().Set("X-A8M-Watermark", watermark)
 	}
 	if file.MIME == "image/svg+xml" {
@@ -887,6 +943,9 @@ func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file c
 			writeError(w, http.StatusLocked, "ENCRYPTION_LOCKED", "The organization's encryption key is locked")
 			return
 		}
+		if !clientEncrypted {
+			data = embeddedFileWatermark(data, file.MIME, watermark)
+		}
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
@@ -901,6 +960,9 @@ func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file c
 			writeError(w, http.StatusLocked, "ENCRYPTION_LOCKED", "The organization's encryption key is locked")
 			return
 		}
+		if !clientEncrypted {
+			data = embeddedFileWatermark(data, file.MIME, watermark)
+		}
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
@@ -912,6 +974,9 @@ func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file c
 		}
 		if mime != "" {
 			w.Header().Set("Content-Type", mime)
+		}
+		if !clientEncrypted {
+			data = embeddedFileWatermark(data, file.MIME, watermark)
 		}
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 		w.WriteHeader(http.StatusOK)
@@ -941,7 +1006,7 @@ func jsonUnmarshal(data []byte, target any) error {
 func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	var body attachmentUploadBody
-	if !s.decodeBody(w, r, &body, 13*1024*1024) {
+	if !s.decodeBody(w, r, &body, 36*1024*1024) {
 		return
 	}
 	raw := body.DataBase64
@@ -957,7 +1022,7 @@ func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(data) > maxAttachmentBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, "ATTACHMENT_TOO_LARGE", "Attachments are limited to 8 MB")
+		writeError(w, http.StatusRequestEntityTooLarge, "ATTACHMENT_TOO_LARGE", "Attachments are limited to 25 MB each")
 		return
 	}
 	if err := s.scanUpload(r.Context(), data); err != nil {
