@@ -195,7 +195,9 @@ function seatMarkup(license) {
     return ui.emptyState('This license has no seats', 'The license does not include a seat allowance. Core mail remains available.', docsLink(), 'users');
   }
   const over = Math.max(0, used - seats);
-  const percent = Math.min(100, Math.round((used / seats) * 100));
+  // Floor the displayed percentage: rounding up would show 80% for 199/250
+  // while the server's exact comparison correctly reports no warning.
+  const percent = Math.min(100, Math.floor((used / seats) * 100));
   const warningPercent = Math.min(100, Math.max(1, Number(license.warningPercent) || 80));
   const tone = seatTone(license, used, seats);
   const enforcing = license.state === 'valid' || license.state === 'grace';
@@ -217,7 +219,7 @@ function seatMarkup(license) {
       <div class="seat-meter-head"><span>Active seats</span><strong>${fmt.num(used)} / ${fmt.num(seats)}</strong></div>
       <div class="seat-meter-track">
         <div class="seat-meter-fill" style="width:${percent}%"></div>
-        <div class="seat-meter-threshold" style="left:${warningPercent}%" title="Warning threshold ${warningPercent}%" aria-hidden="true"></div>
+        <div class="seat-meter-threshold" style="${warningPercent >= 100 ? 'right:0' : `left:${warningPercent}%`}" title="Warning threshold ${warningPercent}%" aria-hidden="true"></div>
       </div>
       <div class="seat-meter-legend">
         <span>${fmt.num(used)} used</span>
@@ -356,14 +358,14 @@ export async function renderLicense(ctx) {
             </form>
             <div class="divider"></div>
             <p class="form-note license-file-note">Configured path: <span class="mono break-all" id="license-upload-path">—</span></p>
-            <p class="form-note">The Control Plane writes the token atomically as <span class="mono">0640 root:a8m</span> (or <span class="mono">CONTROL_LICENSE_GROUP</span>) so the unprivileged webmail can read it. A rejected upload leaves the existing file byte-for-byte unchanged.</p>
+            <p class="form-note">The Control Plane writes the token atomically with mode <span class="mono">0640</span> and normalizes its group to <span class="mono">a8m</span> (or <span class="mono">CONTROL_LICENSE_GROUP</span>). An existing file's owner is preserved, so a legacy root-owned token becomes webmail-readable after the upload. A rejected upload leaves the existing file byte-for-byte unchanged.</p>
           </div>
         </section>
         <section class="card">
           <header class="card-head"><div><h3>How licensing works</h3><p>Shared file, ownership and restart rules</p></div></header>
           <div class="card-body">
             <div class="tile-link"><span>${ui.icon('file-code', 15)} Shared file</span><span class="value mono">CONTROL_LICENSE_FILE = ALT8MAIL_LICENSE_FILE</span></div>
-            <div class="tile-link"><span>${ui.icon('lock', 15)} Ownership</span><span class="value">root:a8m · 0640</span></div>
+            <div class="tile-link"><span>${ui.icon('lock', 15)} Ownership</span><span class="value">group a8m · 0640</span></div>
             <div class="tile-link"><span>${ui.icon('refresh', 15)} Activation</span><span class="value">Webmail restart required</span></div>
             <div class="tile-link"><span>${ui.icon('users', 15)} Seat counting</span><span class="value">Active · non-deleted · non-admin</span></div>
             <div class="tile-link"><span>${ui.icon('activity', 15)} Verification</span><span class="value">Offline Ed25519 · no network</span></div>
@@ -451,6 +453,10 @@ export async function renderLicense(ctx) {
         return;
       }
       const result = await ctx.api('/control/api/license', { method: 'POST', body: { token } });
+      // Clear the secret immediately after the request resolves, before the
+      // follow-up status read or any other work.
+      token = '';
+      clearInputs();
       if (!ctx.isCurrent()) return;
       if (resultHost) resultHost.innerHTML = uploadSuccessMarkup(result);
       ui.toast('License uploaded. Restart the Alt8Mail webmail service to activate it.', 'good', { title: 'License updated' });
