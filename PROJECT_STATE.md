@@ -1,25 +1,23 @@
 # Current Project State
 
-## Active Phase: Phase 4 (AI/MCP Moat)
+## Active Phase: Phase 5 (Compliance and Data Governance)
 
 ### Completed
 - Phase 1 (1A–1H) ✅ See `docs/PHASE1_ACCEPTANCE.md`.
 - Phase 2 (2A–2G) ✅ See `docs/PHASE2_ACCEPTANCE.md`.
 - Phase 3 (3A–3F) ✅ See `docs/PHASE3_ACCEPTANCE.md`.
-- 4A MCP governance and AI budget ✅ Expanded scopes/tools, dry-run, approval-gated writes, organization scope/rate policy, connection revoke, tenant AI budget, usage UI and governance tests.
-- 4B AI triage / priority inbox ✅ Five categories with confidence/explanation, auto-label threshold, feedback loop, webmail AI workspace and isolation tests.
-- 4C Obligations ledger ✅ Promise/request/deadline extraction, dedupe, auto tasks, reply resolution, waiting view and task links.
-- 4D Natural-language search ✅ NL→structured filters with deterministic fallback, FTS/metadata search, message/file citations and injection/isolation tests.
-- 4E Sender intelligence and meeting prep ✅ Sender profiles with company/role/history, first-contact badge, meeting briefs, obligations, attachments and CRM connector names.
-- 4F AI document assistant ✅ Document Q&A, action items, draft replies, permission checks, verbatim citation verification, task creation and DLP classification.
-- 4G AI policy assist ✅ Redacted AI classification suggestion, plain-English DLP flags without terms, admin-only audited overrides.
-- Verification: Phase 4 PostgreSQL integration tests pass; see `docs/PHASE4_ACCEPTANCE.md` for the full gate checklist.
+- Phase 4 (4A–4G) ✅ See `docs/PHASE4_ACCEPTANCE.md`.
+- 5A Advanced DLP ✅ Credit-card/IBAN/national-ID/regex/dictionary detectors with masked findings, prevent-forward, watermarking, policy simulation and false-positive review.
+- 5B eDiscovery and retention ✅ Cross-domain discovery, signed reproducible JSON/MBOX exports with manifests, reviewer queue, classification retention and legal-hold overrides.
+- 5C BYOK and tenant encryption ✅ Versioned customer-managed envelope keys, enable/unlock/lock/rotate, tenant-sealed AI credentials and no-fallback lock behavior.
+- 5D Files governance and OCR ✅ File holds, share approvals, DLP on share, download watermarks, file/version retention and an OCR-backed file text index/search.
+- 5E Audit and SIEM ✅ Signed audit export bundles with content hashes and signatures plus Splunk/Sentinel/Elastic starter packs.
+- Verification: Phase 5 PostgreSQL integration tests pass; see `docs/PHASE5_ACCEPTANCE.md` for the full gate checklist.
 
 ### In Progress
-- None.
+- None in code. Operator gates remain: real OCR runtime, customer DLP accuracy corpus, and infrastructure/application encryption for mailbox and Cabinet blobs.
 
 ### Not Started
-- Phase 5 (Compliance and Data Governance)
 - Phase 6 (Ecosystem and Scale)
 
-Phase 4 implementation is complete. Live AI precision/recall evaluation and staging validation with a real MCP client remain operator acceptance steps. No release, deploy or push has been performed.
+Phase 5 implementation is complete. BYOK currently covers tenant secrets; full mailbox/blob encryption and client-side Cabinet encryption are documented gaps. No release, deploy or push has been performed.

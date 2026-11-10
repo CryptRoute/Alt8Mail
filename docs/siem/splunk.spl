@@ -1,0 +1,12 @@
+index=alt8mail sourcetype=a8m:audit
+| stats count by action, source, actorEmail
+| sort - count
+
+index=alt8mail sourcetype=a8m:audit action IN ("admin.legal_hold_released","admin.encryption_locked","admin.encryption_rotated","mcp.action_approved")
+| table _time, action, actorEmail, target, detail, ip
+
+index=alt8mail sourcetype=a8m:audit action IN ("mail.forward_blocked","file.share_blocked","office.dlp_blocked","admin.dlp_simulated")
+| timechart span=1h count by action
+
+index=alt8mail sourcetype=a8m:audit action="admin.audit_bundle_exported"
+| table _time, actorEmail, target, detail
