@@ -144,7 +144,11 @@ try {
   await page.waitFor(() => !document.getElementById("twoFactorForm").hidden, 8000);
   const otpFocus = await activeInfo(page);
   check(otpFocus.id === "otp0", "two-factor challenge focuses the first code box");
-  for (const digit of "123456") await page.pressKey(digit);
+  for (const digit of "123456") {
+    await page.pressKey(digit);
+    await sleep(40);
+  }
+  await page.waitFor(() => [...document.querySelectorAll("#otpInputs input")].map((input) => input.value).join("") === "123456", 5000);
   check(await page.eval("[...document.querySelectorAll('#otpInputs input')].map((input) => input.value).join('') === '123456'"), "keyboard enters the six-digit code");
   await tabTo(page, `document.activeElement?.id === 'twoFactorSubmit'`, "two-factor submit");
   const otpRing = await focusRing(page);
