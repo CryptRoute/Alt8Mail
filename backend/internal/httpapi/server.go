@@ -457,6 +457,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAIGovernanceRoutes(mux)
 	s.registerAITriageRoutes(mux)
 	s.registerAPIPlatformRoutes(mux)
+	s.registerPhishingPublicRoutes(mux)
 	s.registerAIObligationRoutes(mux)
 	s.registerAISearchRoutes(mux)
 	s.registerAIInsightRoutes(mux)

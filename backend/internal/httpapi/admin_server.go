@@ -115,6 +115,12 @@ func (s *Server) AdminHandler() http.Handler {
 
 func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	s.registerAPIAdminRoutes(mux)
+	s.registerPhishingAdminRoutes(mux)
+	mux.HandleFunc("GET /usage/analytics", s.adminRequirePermission("analytics.read", s.adminUsageAnalytics))
+	mux.HandleFunc("GET /support-bundle", s.adminRequirePermission("system.health", s.adminSupportBundle))
+	mux.HandleFunc("GET /telemetry", s.adminRequirePermission("telemetry.manage", s.adminGetTelemetry))
+	mux.HandleFunc("PUT /telemetry", s.adminRequirePermission("telemetry.manage", s.adminUpdateTelemetry))
+	mux.HandleFunc("POST /telemetry/send", s.adminRequirePermission("telemetry.manage", s.adminSendTelemetry))
 	mux.HandleFunc("GET /health", s.adminHealth)
 	mux.HandleFunc("POST /session", s.adminLogin)
 	mux.HandleFunc("POST /session/2fa", s.adminVerifyTwoFactor)
