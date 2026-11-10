@@ -19,7 +19,7 @@ external system/credential and is documented for the operator run).
 | 1E Control Plane license UI and seat metering | done | License status/upload/seat API and web view, group-readable atomic install, installer/updater provisioning, `docs/SYSTEM_CONTROL.md`; full suite green |
 | 1F White-label and custom webmail domains | done | Paid white_label branding, login logo/links/attribution, custom hostname resolution against Web Net route/cert inventory, migration 0062, `docs/WHITE_LABEL.md`; unit + PostgreSQL integration tests |
 | 1G Per-mailbox/per-folder restore and DR | done | Additive Maildir preview/apply, `control.restore_jobs` (migration 0063), Control UI/audit, `docs/DR.md`; unit path/extraction tests plus disposable-PostgreSQL preview/job/cross-tenant integration twice, including migration rollback/reapply |
-| 1H Accessibility baseline and keyboard gate | planned | `docs/superpowers/plans/2026-11-10-phase-1h-accessibility.md`, `tools/a11y-audit.mjs` once written |
+| 1H Accessibility baseline and keyboard gate | done | `tools/a11y-audit.mjs`, `tests/a11y-baseline.mjs`, `tests/a11y-keyboard.mjs`, `docs/ACCESSIBILITY.md`; 9 surfaces audited at 0 Critical/High, keyboard compose/send and Arabic RTL 360px pass |
 | Upgrade/rollback from v0.27.6 | done | `tools/migration-upgrade-smoke.sh` (apply tag migrations, upgrade, rollback new, reapply) |
 
 ## Release acceptance checklist
@@ -31,13 +31,18 @@ external system/credential and is documented for the operator run).
 | Deprovisioning revokes active sessions | done | SCIM deprovision deletes sessions/auth challenges/admin sessions/trusted devices; integration tests |
 | License valid/expired/grace/tampered/wrong-tenant/seat-exceeded/air-gapped | done | 1A covers valid/grace/expired/tampered/wrong key/malformed and no network; 1E adds tenant and seat enforcement tests |
 | Mailbox restore to yesterday with audit and no cross-tenant access | operator | Preview/apply code, audit and cross-tenant PostgreSQL integration are green; execute the live `doveadm` drill on staging per `docs/DR.md` before release |
-| Automated accessibility scan has no critical violations | planned | 1H audit harness and fixes |
-| Manual keyboard-only compose/send completes | planned | 1H keyboard script |
+| Automated accessibility scan has no critical violations | done | `npm run test:a11y` audits login, 2FA, inbox, reader, compose, settings, RTL 360px, Control login and Control shell: 0 Critical, 0 High |
+| Manual keyboard-only compose/send completes | done | `tests/a11y-keyboard.mjs`: Tab/Enter sign-in, C compose, Ctrl/Cmd+Enter send, spell-check via keyboard, settings return, Arabic RTL send |
 | Upgrade from 0.27.6 applies migrations and rolls back cleanly | done | `tools/migration-upgrade-smoke.sh` passed on disposable PostgreSQL |
 | No release/deploy/push without separate authorization | done | All Phase 1 work remains local; no release, deploy or push performed |
 
 ## Residual risks to revisit
 
+- The live `doveadm` mailbox-restore drill has not run in this Windows
+  environment; execute it on staging per `docs/DR.md` before release.
+- The Control Plane accessibility shell is audited through a static harness.
+  Run `npm run test:a11y` against staging with a real admin session before
+  release; third-party WCAG certification remains out of scope.
 - SAML replay cache is in-process (1024 entries) and tracking-cookie single-use
   depends on relay state; documented, shared-store work is out of scope.
 - SAML per-IP limiter is not a global bound; start remains unthrottled.

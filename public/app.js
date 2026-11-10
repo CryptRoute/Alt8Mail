@@ -18135,6 +18135,9 @@ function showSettingsTab(tab) {
 function openSettings(tab) {
   if (tab) state.settingsTab = tab;
   setTask("settings");
+  requestAnimationFrame(() => {
+    document.querySelector("#settingsView .settings-nav-item.is-active")?.focus();
+  });
 }
 
 function renderSettingsDynamic() {
@@ -27588,7 +27591,10 @@ function bindEvents() {
       if (account) removeConnectedAccount(account);
     }
   });
-  document.getElementById("settingsDone").addEventListener("click", () => setTask("mail"));
+  document.getElementById("settingsDone").addEventListener("click", () => {
+    setTask("mail");
+    requestAnimationFrame(() => document.getElementById("settingsBtn")?.focus());
+  });
   document.getElementById("railLogout").addEventListener("click", logout);
   document.getElementById("signOutOtherSessions")?.addEventListener("click", revokeOtherSessions);
   document.getElementById("signOutSettings")?.addEventListener("click", signOutCurrent);
@@ -28260,6 +28266,11 @@ function bindEvents() {
     }
     const section = event.target.closest(".compose[data-compose-id]");
     const activeSession = section ? sessionById(section.getAttribute("data-compose-id")) : null;
+    if (activeSession && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key === "Enter") {
+      event.preventDefault();
+      sendComposeSession(activeSession.id);
+      return;
+    }
     if (activeSession?.mentionMenu) {
       const options = [...activeSession.mentionMenu.querySelectorAll("[data-mention-email]")];
       let index = options.findIndex((option) => option.classList.contains("is-active"));

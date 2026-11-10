@@ -675,3 +675,12 @@ input[type="checkbox"] { accent-color: var(--brand); width: 14px; height: 14px; 
   .addons-admin-request { grid-template-columns: 30px minmax(0, 1fr); }
   .addons-admin-request-actions { grid-column: 2; }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

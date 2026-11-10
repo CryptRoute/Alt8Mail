@@ -153,7 +153,7 @@ function updateChrome() {
   const admin = state.admin || {};
   const tenant = state.activeTenant || {};
   $("#adminName").textContent = admin.name || "Administrator";
-  $("#adminEmail").textContent = admin.email || "";
+  $("#adminAccountEmail").textContent = admin.email || "";
   $("#adminAvatar").textContent = admin.initials || initials(admin.name);
   $("#tenantNameMini").textContent = tenant.name || "Organization";
   $("#topTenantName").textContent = tenant.name || "Organization";

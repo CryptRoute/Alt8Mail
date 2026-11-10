@@ -12,6 +12,9 @@
     "dev": "node --watch server.js",
     "test": "node --test tests/api.test.mjs",
     "test:e2e": "node tests/e2e.mjs",
+    "test:a11y": "npm run test:a11y:audit && npm run test:a11y:keyboard",
+    "test:a11y:audit": "node tests/a11y-baseline.mjs",
+    "test:a11y:keyboard": "node tests/a11y-keyboard.mjs",
     "test:all": "node tools/check-locales.mjs && node --test tests/api.test.mjs && node tests/e2e.mjs",
     "icons": "node tools/make-icons.mjs",
     "test:i18n": "node tools/check-locales.mjs"

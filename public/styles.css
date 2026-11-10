@@ -3136,6 +3136,8 @@ body[data-compose-pointer="drag"] .compose-head { cursor: grabbing; }
   line-height: 1.65;
 }
 .compose-text::placeholder { color: var(--text-3); }
+.compose-editor:focus-visible,
+.compose-text:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .compose-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 12px; }
 .compose-file {
   display: inline-flex;
