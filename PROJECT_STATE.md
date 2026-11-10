@@ -1,21 +1,22 @@
 # Current Project State
 
-## Active Phase: Phase 1 (Enterprise Entry)
+## Active Phase: Phase 2 (Team Operations and MCP Seed)
 
 ### Completed
-- 1A Licensing ✅
-- 1B OIDC ✅
-- 1C SAML ✅
-- 1D SCIM ✅ Verified 2026-11-10: DSN token 14/14, Users 16/16, Groups 21/21 before and after migration 0061 rollback/reapply; full Go suite, npm test:all (E2E 0 failures), node and nginx static checks pass.
-- 1E License UI, seat metering and enforcement ✅ Verified 2026-11-10: Control license view/API, atomic group-readable upload, installer/updater provisioning; seat enforcement DSN 15/15 plus Control seat SQL; full Go suite, npm test:all (E2E 0 failures), node/bash checks pass.
-- 1F White-label ✅ Verified 2026-11-10: paid white_label branding (logo/support/legal/attribution), custom webmail host validation against Web Net routes/certs, migration 0062 apply/rollback/reapply, cross-tenant host integration, full Go suite and npm test:all (E2E 0 failures).
-- 1G Restore/DR ✅ Verified 2026-11-10: additive per-mailbox/folder preview and apply from completed backups, tenant/path guards, `control.restore_jobs`, Control UI and audit; migration 0063 apply/rollback/reapply, disposable-PostgreSQL preview/job/cross-tenant integration twice, full Go suite and npm test:all (E2E 0 failures). Live `doveadm` restore drill remains an operator staging step in `docs/DR.md`.
-- 1H Accessibility ✅ Verified 2026-11-10: CDP audit across webmail login/2FA/inbox/reader/compose/settings, RTL 360px and Control login/shell — 0 Critical/High; keyboard-only login, compose, Ctrl/Cmd+Enter send, settings return and Arabic RTL send pass; Go suite and npm test:all (E2E 0 failures) green.
+- Phase 1 (1A–1H) ✅ See `docs/PHASE1_ACCEPTANCE.md`.
+- 2A Shared inbox core ✅ Team mailbox schema, admin CRUD, group-scoped access, delegated team folders, round-robin, SLA, presence and watchers; PostgreSQL integration tests.
+- 2B Shared inbox operations ✅ Claim, handoff notes, SLA breach notifications, collision heartbeat, queue/SLA badge and team header.
+- 2C Shared drafts v1 ✅ Lease/version conflict model, version history, comments, team draft UI and stale-write tests.
+- 2D Team templates and alias controls ✅ Versioned templates, variables, alias validation, compose picker and manager.
+- 2E Automation builder v1 ✅ Conditions/actions, Sieve preview, dry-run, idempotent webhook/task/label/notify/auto-reply runs and builder UI.
+- 2F Collaboration extensions ✅ Task subtasks/kanban/recurrence/reminders, file versions/comments/approvals, VIP/mute, Jitsi links; PostgreSQL integration tests.
+- 2G MCP server seed ✅ OAuth 2.1 PKCE, consent, scoped read/search/draft tools, rate limits, audit, untrusted-content labeling and connection revocation.
+- Verification 2026-11-10: full Go suite/vet/build pass; Phase 2 DSN suites pass (12 tests); `npm run test:all` E2E 0 failures; `npm run test:a11y` 0 Critical/High and keyboard/RTL 0 failures; migrations 0064–0069 each rolled back and reapplied on disposable PostgreSQL.
 
 ### In Progress
 - None.
 
 ### Not Started
-- None.
+- Phase 3 (Scheduling, Revenue and Deliverability)
 
-Phase 1 implementation is complete. No release, deploy or push has been performed.
+Phase 2 implementation is complete. No release, deploy or push has been performed.
