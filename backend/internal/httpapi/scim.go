@@ -202,6 +202,7 @@ func (s *Server) registerSCIMRoutes(mux *http.ServeMux) {
 	mux.Handle("/scim/v2/ResourceTypes", s.scimAuth(s.scimAllowMethod(http.MethodGet, s.scimResourceTypes)))
 	mux.Handle("/scim/v2/ResourceTypes/User", s.scimAuth(s.scimAllowMethod(http.MethodGet, s.scimResourceType("User"))))
 	mux.Handle("/scim/v2/ResourceTypes/Group", s.scimAuth(s.scimAllowMethod(http.MethodGet, s.scimResourceType("Group"))))
+	s.registerSCIMUserRoutes(mux)
 	mux.Handle("/scim/v2/", s.scimAuth(http.HandlerFunc(s.scimNotFound)))
 }
 
