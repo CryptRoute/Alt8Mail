@@ -44,8 +44,8 @@ func TestPublicNginxRouteStateMergesWithoutDuplicates(t *testing.T) {
 `
 	snippet := `location ^~ /calendar/rsvp/ { proxy_pass http://127.0.0.1:8080; }`
 	routes, missing := publicNginxRouteState(site, snippet)
-	wantRoutes := []string{"/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/", "/office-editor"}
-	wantMissing := []string{"/calendar/poll/", "/calendar/feed/", "/oauth/", "/office-editor"}
+	wantRoutes := []string{"/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/", "/office-editor", "/scim/", "= /scim/v2"}
+	wantMissing := []string{"/calendar/poll/", "/calendar/feed/", "/oauth/", "/office-editor", "/scim/", "= /scim/v2"}
 	if strings.Join(routes, ",") != strings.Join(wantRoutes, ",") {
 		t.Fatalf("snippet routes = %v, want %v", routes, wantRoutes)
 	}
@@ -60,15 +60,29 @@ func TestPublicNginxRouteStateMergesWithoutDuplicates(t *testing.T) {
 }
 
 func TestPublicNginxRouteStateComplete(t *testing.T) {
-	site := "location ^~ /files/s/ { }\nlocation ^~ /upload/ { }\nlocation ^~ /oauth/ { }\nlocation ^~ /office-editor { }\n"
+	site := "location ^~ /files/s/ { }\nlocation ^~ /upload/ { }\nlocation ^~ /oauth/ { }\nlocation ^~ /office-editor { }\nlocation ^~ /scim/ { }\nlocation = /scim/v2 { }\n"
 	snippet := "location ^~ /calendar/rsvp/ { }\nlocation ^~ /calendar/poll/ { }\nlocation ^~ /calendar/feed/ { }\n"
 	if _, missing := publicNginxRouteState(site, snippet); len(missing) != 0 {
 		t.Fatalf("unexpected missing routes: %v", missing)
 	}
 }
 
+func TestPublicNginxRouteStateRequiresExactSCIMBase(t *testing.T) {
+	site := "server {\n    listen 443 ssl http2;\n    location ^~ /scim/ { }\n}\n"
+	_, missing := publicNginxRouteState(site, "")
+	found := false
+	for _, route := range missing {
+		if route == "= /scim/v2" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("exact /scim/v2 route not reported missing: %v", missing)
+	}
+}
+
 func TestPublicNginxSnippetText(t *testing.T) {
-	text := publicNginxSnippetText([]string{"/upload/", "/oauth/", "/office-editor"}, "127.0.0.1:8080")
+	text := publicNginxSnippetText([]string{"/upload/", "/oauth/", "/office-editor", "/scim/", "= /scim/v2"}, "127.0.0.1:8080")
 	if strings.Count(text, "location ^~ /oauth/ {") != 1 {
 		t.Fatalf("OAuth callback route missing from snippet:\n%s", text)
 	}
@@ -80,6 +94,15 @@ func TestPublicNginxSnippetText(t *testing.T) {
 	}
 	if !strings.Contains(text, "client_max_body_size 12m;") {
 		t.Fatalf("upload body limit missing from snippet:\n%s", text)
+	}
+	if !strings.Contains(text, "location ^~ /scim/ {") {
+		t.Fatalf("SCIM prefix route missing from snippet:\n%s", text)
+	}
+	if !strings.Contains(text, "location = /scim/v2 {") {
+		t.Fatalf("exact SCIM base route missing from snippet:\n%s", text)
+	}
+	if strings.Count(text, "proxy_read_timeout 60s;") != 1 {
+		t.Fatalf("exact SCIM base timeout missing from snippet:\n%s", text)
 	}
 	if !strings.Contains(text, "proxy_pass http://127.0.0.1:8080;") {
 		t.Fatalf("upstream missing from snippet:\n%s", text)

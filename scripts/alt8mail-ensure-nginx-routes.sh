@@ -11,6 +11,8 @@ SITE="${A8M_NGINX_SITE:-/etc/nginx/sites-available/a8m}"
 SNIPPET="${A8M_NGINX_SNIPPET:-/etc/nginx/snippets/a8m-public-routes.conf}"
 UPSTREAM="${A8M_NGINX_UPSTREAM:-127.0.0.1:8080}"
 ROUTES=(/files/s/ /upload/ /calendar/rsvp/ /calendar/poll/ /calendar/feed/ /oauth/ /scim/)
+# Exact locations cover advertised base URLs that have no trailing slash.
+EXACT_ROUTES=(/scim/v2)
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
@@ -23,6 +25,7 @@ snippet_content=""
 
 missing=()
 snippet_routes=()
+snippet_exact_routes=()
 for path in "${ROUTES[@]}"; do
   escaped_path="${path//\//\\/}"
   if grep -Eq "location[[:space:]]+[^\{]*[[:space:]]${escaped_path}" <<< "$site_content"; then
@@ -30,6 +33,17 @@ for path in "${ROUTES[@]}"; do
   fi
   snippet_routes+=("$path")
   if ! grep -Eq "location[[:space:]]+[^\{]*[[:space:]]${escaped_path}" <<< "$snippet_content"; then
+    missing+=("$path")
+  fi
+done
+for path in "${EXACT_ROUTES[@]}"; do
+  escaped_path="${path//\//\\/}"
+  exact_pattern="location[[:space:]]*=[[:space:]]*${escaped_path}[[:space:]]*\{"
+  if grep -Eq "$exact_pattern" <<< "$site_content"; then
+    continue
+  fi
+  snippet_exact_routes+=("$path")
+  if ! grep -Eq "$exact_pattern" <<< "$snippet_content"; then
     missing+=("$path")
   fi
 done
@@ -59,6 +73,9 @@ fi
     body=""
     [[ "$path" == "/upload/" ]] && body='        client_max_body_size 12m;\n'
     printf 'location ^~ %s {\n        proxy_pass http://%s;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $remote_addr;\n        proxy_set_header X-Forwarded-Proto $scheme;\n%b    }\n' "$path" "$UPSTREAM" "$body"
+  done
+  for path in "${snippet_exact_routes[@]}"; do
+    printf 'location = %s {\n        proxy_pass http://%s;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $remote_addr;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_read_timeout 60s;\n        proxy_send_timeout 60s;\n    }\n' "$path" "$UPSTREAM"
   done
 } > "$SNIPPET"
 chmod 0644 "$SNIPPET"

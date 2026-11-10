@@ -9,12 +9,20 @@ import (
 
 const publicNginxSnippet = "/etc/nginx/snippets/a8m-public-routes.conf"
 
-var publicNginxRoutes = []string{"/files/s/", "/upload/", "/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/", "/office-editor"}
+// publicNginxRoutes lists locations that must reach the application server.
+// Entries prefixed with "= " are exact-match locations (nginx "location ="),
+// used for advertised base URLs such as /scim/v2 that have no trailing slash.
+var publicNginxRoutes = []string{"/files/s/", "/upload/", "/calendar/rsvp/", "/calendar/poll/", "/calendar/feed/", "/oauth/", "/office-editor", "/scim/", "= /scim/v2"}
+
+func publicNginxRoutePresent(text, route string) bool {
+	if exact, ok := strings.CutPrefix(route, "= "); ok {
+		return strings.Contains(text, "location = "+exact)
+	}
+	return strings.Contains(text, "location ^~ "+route) || strings.Contains(text, "location "+route)
+}
 
 func publicNginxRouteState(site, snippet string) (snippetRoutes, missing []string) {
-	routePresent := func(text, route string) bool {
-		return strings.Contains(text, "location ^~ "+route) || strings.Contains(text, "location "+route)
-	}
+	routePresent := publicNginxRoutePresent
 	snippetRoutes = make([]string, 0, len(publicNginxRoutes))
 	missing = make([]string, 0, len(publicNginxRoutes))
 	for _, route := range publicNginxRoutes {
@@ -31,13 +39,18 @@ func publicNginxRouteState(site, snippet string) (snippetRoutes, missing []strin
 
 func publicNginxSnippetText(routes []string, upstream string) string {
 	var snippet strings.Builder
-	snippet.WriteString("# Managed by Alt8Mail. Public download, upload, calendar, OAuth and Office editor routes.\n")
+	snippet.WriteString("# Managed by Alt8Mail. Public download, upload, calendar, OAuth, Office editor and SCIM routes.\n")
 	for _, route := range routes {
 		if route == "/office-editor" {
 			snippet.WriteString(publicNginxOfficeEditorLocation(upstream))
 			continue
 		}
-		snippet.WriteString("location ^~ " + route + " {\n")
+		exact, isExact := strings.CutPrefix(route, "= ")
+		if isExact {
+			snippet.WriteString("location = " + exact + " {\n")
+		} else {
+			snippet.WriteString("location ^~ " + route + " {\n")
+		}
 		snippet.WriteString("        proxy_pass http://" + upstream + ";\n")
 		snippet.WriteString("        proxy_http_version 1.1;\n")
 		snippet.WriteString("        proxy_set_header Host $host;\n")
@@ -46,6 +59,9 @@ func publicNginxSnippetText(routes []string, upstream string) string {
 		snippet.WriteString("        proxy_set_header X-Forwarded-Proto $scheme;\n")
 		if route == "/upload/" {
 			snippet.WriteString("        client_max_body_size 12m;\n")
+		}
+		if isExact {
+			snippet.WriteString("        proxy_read_timeout 60s;\n        proxy_send_timeout 60s;\n")
 		}
 		snippet.WriteString("    }\n")
 	}
