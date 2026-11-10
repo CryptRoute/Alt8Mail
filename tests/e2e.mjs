@@ -213,6 +213,10 @@ try {
   check(await page.eval("document.querySelector('.mailbox-success-stage')?.textContent.includes('Connection verified') && document.querySelector('.mailbox-success-stage')?.textContent.includes('person@example.com')"), "successful test unlocks Connect account and shows the verified mailbox");
   await page.screenshot(path.join(artifacts, "01b-add-account-wizard.png"));
   await page.click("[data-account-dialog-close]");
+  await page.waitFor(() => {
+    const overlay = document.getElementById("accountDialogOverlay");
+    return !overlay || overlay.hidden || getComputedStyle(overlay).display === "none";
+  }, 5000);
   await page.click("#settingsBtn");
   await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
   await page.click("[data-settings-tab='accounts']");
