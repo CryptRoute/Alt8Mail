@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -553,6 +554,11 @@ func (s *Server) adminAddGroupMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not add group member")
 		return
 	}
+	// Membership is resource state; keep the SCIM lastModified/version fresh.
+	if _, err := tx.Exec(ctx, `UPDATE groups SET updated_at = now() WHERE id = $1 AND tenant_id = $2`, existing.ID, sess.ActiveTenantID); err != nil {
+		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not add group member")
+		return
+	}
 	roleChanges, err := s.scimRecomputeRolesTx(ctx, tx, sess.ActiveTenantID, []string{body.UserID})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not update group member roles")
@@ -571,6 +577,10 @@ func (s *Server) adminAddGroupMember(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	userID := r.PathValue("userId")
+	if _, err := uuid.Parse(userID); err != nil {
+		writeError(w, http.StatusBadRequest, "USER", "Invalid user id")
+		return
+	}
 	ctx := r.Context()
 	tx, err := s.store.DB.Begin(ctx)
 	if err != nil {
@@ -591,9 +601,17 @@ func (s *Server) adminRemoveGroupMember(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusForbidden, "FORBIDDEN", "Only an administrator with role management permission can change membership of a group with a role mapping")
 		return
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, existing.ID, userID); err != nil {
+	tag, err := tx.Exec(ctx, `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, existing.ID, userID)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not remove group member")
 		return
+	}
+	if tag.RowsAffected() > 0 {
+		// Membership is resource state; keep the SCIM lastModified/version fresh.
+		if _, err := tx.Exec(ctx, `UPDATE groups SET updated_at = now() WHERE id = $1 AND tenant_id = $2`, existing.ID, sess.ActiveTenantID); err != nil {
+			writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not remove group member")
+			return
+		}
 	}
 	roleChanges, err := s.scimRecomputeRolesTx(ctx, tx, sess.ActiveTenantID, []string{userID})
 	if err != nil {

@@ -67,8 +67,11 @@ type scimGroupMemberPayload struct {
 
 // scimGroupChangeSet is the validated, not-yet-persisted mutation produced by
 // PUT and PATCH. MemberIDs is the desired complete membership when MembersSet is
-// true; ReferencedIDs lists every member id mentioned by the request so unknown
-// and cross-tenant ids are rejected even for idempotent removals.
+// true; LiveMemberIDs lists the ids introduced by the write (PUT members, or
+// PATCH add/replace) that must resolve to live users. Unchanged members that are
+// closed accounts stay in MemberIDs but are not re-validated. ReferencedIDs
+// lists every member id mentioned by the request so unknown and cross-tenant ids
+// are rejected even for idempotent removals.
 type scimGroupChangeSet struct {
 	DisplayNameSet bool
 	DisplayName    string
@@ -77,6 +80,7 @@ type scimGroupChangeSet struct {
 	MembersSet     bool
 	MemberIDs      []string
 	ReferencedIDs  []string
+	LiveMemberIDs  []string
 }
 
 // scimRoleChange records one user whose role was recomputed from group
@@ -180,7 +184,9 @@ func normalizeSCIMGroupDisplayName(raw *string) (string, *scimHandlerError) {
 }
 
 // decodeSCIMGroupMemberValues accepts a single member object or an array of
-// member objects and returns the value (user id) of each.
+// member objects and returns the canonical, de-duplicated user id of each.
+// Canonicalizing here is essential: membership is a set operation, so an
+// uppercase spelling must still add/remove the canonical row.
 func decodeSCIMGroupMemberValues(raw json.RawMessage) ([]string, *scimHandlerError) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || string(trimmed) == "null" {
@@ -204,7 +210,7 @@ func decodeSCIMGroupMemberValues(raw json.RawMessage) ([]string, *scimHandlerErr
 		}
 		ids = append(ids, value)
 	}
-	return ids, nil
+	return scimCanonicalMemberIDs(ids)
 }
 
 // scimGroupVersion is a weak ETag derived from the row's last modification
@@ -637,9 +643,14 @@ func scimGroupReplaceChanges(payload scimGroupPayload) (scimGroupChangeSet, *sci
 			}
 			ids = append(ids, value)
 		}
+		canonical, handlerErr := scimCanonicalMemberIDs(ids)
+		if handlerErr != nil {
+			return changes, handlerErr
+		}
 		changes.MembersSet = true
-		changes.MemberIDs = scimUniqueStrings(ids)
-		changes.ReferencedIDs = changes.MemberIDs
+		changes.MemberIDs = canonical
+		changes.ReferencedIDs = canonical
+		changes.LiveMemberIDs = canonical
 	}
 	return changes, nil
 }
@@ -718,6 +729,7 @@ func scimGroupPatchChanges(payload scimPatchRequest, current []string) (scimGrou
 						present[id] = true
 					}
 				}
+				changes.LiveMemberIDs = append(changes.LiveMemberIDs, ids...)
 			case "remove":
 				removed := scimStringSet(ids)
 				remaining := members[:0]
@@ -729,6 +741,7 @@ func scimGroupPatchChanges(payload scimPatchRequest, current []string) (scimGrou
 				members = remaining
 			case "replace":
 				members = scimUniqueStrings(ids)
+				changes.LiveMemberIDs = append(changes.LiveMemberIDs, ids...)
 			}
 			changes.MembersSet = true
 		default:
@@ -737,6 +750,7 @@ func scimGroupPatchChanges(payload scimPatchRequest, current []string) (scimGrou
 	}
 	changes.MemberIDs = scimUniqueStrings(members)
 	changes.ReferencedIDs = scimUniqueStrings(referenced)
+	changes.LiveMemberIDs = scimUniqueStrings(changes.LiveMemberIDs)
 	return changes, nil
 }
 
@@ -782,6 +796,7 @@ func applySCIMGroupPatchObject(changes *scimGroupChangeSet, members *[]string, r
 			}
 			*referenced = append(*referenced, ids...)
 			*members = scimUniqueStrings(ids)
+			changes.LiveMemberIDs = append(changes.LiveMemberIDs, ids...)
 			changes.MembersSet = true
 		case "schemas", "id", "meta":
 			// Read-only resource envelope attributes are ignored when echoed.
@@ -796,17 +811,16 @@ func applySCIMGroupPatchObject(changes *scimGroupChangeSet, members *[]string, r
 // transaction and recomputes every affected member's role. It reports whether
 // any persisted attribute or membership actually changed.
 func (s *Server) scimApplyGroupChanges(ctx context.Context, tx pgx.Tx, tenantID string, existing scimGroupRow, changes scimGroupChangeSet) (scimGroupRow, bool, []scimRoleChange, *scimHandlerError) {
-	// Every id the request mentions must belong to a tenant user. The final
-	// membership is additionally required to be live users, but referenced ids
-	// may include closed accounts so removing a soft-deleted member is
-	// idempotent. A membership-only PATCH never validates unchanged member ids.
+	// Every id the request mentions must belong to a tenant user. Ids
+	// introduced by PUT/add/replace must additionally be live users; unchanged
+	// members that are closed accounts are allowed to remain so an unrelated
+	// membership edit does not fail the whole request. A membership-only PATCH
+	// never validates unchanged member ids.
 	if handlerErr := scimValidateReferencedGroupMemberIDs(ctx, tx, tenantID, changes.ReferencedIDs); handlerErr != nil {
 		return existing, false, nil, handlerErr
 	}
-	if changes.MembersSet {
-		if handlerErr := scimValidateGroupMemberIDs(ctx, tx, tenantID, changes.MemberIDs); handlerErr != nil {
-			return existing, false, nil, handlerErr
-		}
+	if handlerErr := scimValidateGroupMemberIDs(ctx, tx, tenantID, changes.LiveMemberIDs); handlerErr != nil {
+		return existing, false, nil, handlerErr
 	}
 	if changes.ExternalIDSet && changes.ExternalID != nil && !sameSCIMExternalID(changes.ExternalID, existing.ExternalID) {
 		var conflict bool
