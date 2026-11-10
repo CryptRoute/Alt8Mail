@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: a8m
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d a8m"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGPASSWORD: ci-password
+      A8M_SCIM_TEST_DSN: postgres://postgres:ci-password@127.0.0.1:5432/a8m?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Create installer roles and apply migrations
+        run: |
+          psql -h 127.0.0.1 -U postgres -d a8m -v ON_ERROR_STOP=1 -c "CREATE ROLE a8m_app LOGIN PASSWORD 'ci'; CREATE ROLE a8m_mail LOGIN PASSWORD 'ci'; CREATE ROLE alt8mail_control LOGIN PASSWORD 'ci';"
+          for file in $(ls backend/migrations/[0-9][0-9][0-9][0-9]_*.sql | sort); do
+            psql -h 127.0.0.1 -U postgres -d a8m -v ON_ERROR_STOP=1 -q < "$file"
+          done
+      - name: Build, vet and test
+        run: |
+          cd backend
+          go build ./...
+          go vet ./...
+          go test ./...
+      - name: Install govulncheck and scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          cd backend
+          "$(go env GOPATH)/bin/govulncheck" ./...
+      - name: Upgrade/rollback smoke
+        run: bash tools/migration-upgrade-smoke.sh
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit --omit=dev
+      - run: npm run test:all
+      - run: npm run test:a11y

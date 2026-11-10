@@ -33,6 +33,40 @@ following are release blockers or require an explicit product decision:
    `govulncheck` in the gate, and performance budgets in `docs/PERFORMANCE.md`
    are not checked in CI. Staging/soak validation is still operator work.
 
+## Remediation update (2026-11-10, after blocker task)
+
+This section supersedes the blocker statuses above where it is more specific.
+
+1. **Paid entitlements — resolved in code.** Canonical feature keys are in
+   `internal/licensing/features.go`; Phase 3–6 routes/workers are gated through
+   `internal/httpapi/features.go`. `all`/`*` wildcards are supported, license
+   snapshots expose missing keys, and System Control shows the reissue list.
+2. **Encryption — partially resolved; one accepted operator gate.** BYOK now
+   seals Office binaries and Cabinet file blobs with versioned tenant DEKs,
+   decrypts fail-closed when locked, enforces S3 residency against the tenant
+   policy region, and supports client-encrypted Cabinet folders that the server
+   passes through untouched. `mail_messages` rows and their generated
+   `search_vector` remain plaintext in PostgreSQL: encrypting them without a
+   searchable-index design would break search, AI retrieval and deduplication.
+   Production release therefore still requires PostgreSQL TDE or encrypted
+   volumes. This is recorded as an operator gate, not silently claimed.
+3. **Phase 6 integrations — resolved in code.** Salesforce/Zoho/Pipedrive CRM
+   adapters, native Gmail API and Microsoft Graph importers, Slack Block Kit
+   actions, a Microsoft Teams add-on with signed single-use action links,
+   outbound dual-delivery journaling and external iCalendar free/busy
+   federation are implemented with fake-provider/unit coverage.
+4. **Release mechanics — prepared, not published.** `VERSION` is `3.0.0`,
+   `RELEASE_NOTES.md` covers 3.0.0 and migrations through `0082`; the tag, push
+   and publication remain unauthorized actions.
+5. **CI gates — resolved in configuration.** `.github/workflows/ci.yml` runs the
+   Go build/vet/tests with PostgreSQL, `govulncheck`, the migration smoke,
+   `npm ci`/audit, web tests, a11y and coarse performance budgets. Live staging
+   drills remain operator gates.
+
+Still open before publication: storage-layer encryption for mail rows, live
+provider/IdP/migration drills, a real OCR sidecar and DLP corpus, and explicit
+release authorization.
+
 ## Fixed during this audit
 
 - Public API `/api/v1/messages/send` and approved MCP `draft_send` now apply

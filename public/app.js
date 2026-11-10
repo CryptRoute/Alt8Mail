@@ -3266,8 +3266,18 @@ function applyTenantBranding(branding) {
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", color);
   }
   const initials = brandInitials(name);
+  const customName = name !== "Alt8Mail";
   document.querySelectorAll(".brand-name, .login-brand-top strong, .login-heading > .eyebrow").forEach((node) => { node.textContent = name; });
-  document.querySelectorAll(".brand-mark, .login-mark, .login-watermark").forEach((node) => { node.textContent = initials; });
+  document.querySelectorAll(".brand-name").forEach((node) => { node.hidden = !customName; });
+  document.querySelectorAll(".brand-logo, .login-wordmark").forEach((node) => { node.hidden = customName; });
+  document.querySelectorAll(".brand-mark, .login-mark, .login-watermark").forEach((node) => {
+    // Keep the supplied icon artwork; only fill text fallbacks.
+    if (node.querySelector("img")) {
+      node.setAttribute("aria-label", initials);
+      return;
+    }
+    node.textContent = initials;
+  });
   document.querySelectorAll(".login-demo, .login-legal").forEach((node) => {
     if (node.textContent.includes("Alt8Mail")) node.textContent = node.textContent.replaceAll("Alt8Mail", name);
   });

@@ -85,6 +85,8 @@ a { color: inherit; text-decoration: none; }
 .brand-lockup.compact { font-size: 15.5px; }
 .brand-mark { width: 33px; height: 33px; border-radius: 9px; display: grid; place-items: center; background: linear-gradient(145deg, #2f6fed, #4f8dff); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 7px 16px rgba(47,111,237,.3); }
 .brand-mark svg { width: 22px; height: 22px; }
+.brand-mark img { width: 100%; height: 100%; object-fit: contain; border-radius: 9px; display: block; }
+.admin-brand-logo { height: 22px; width: auto; display: block; }
 .brand-mark.light { background: var(--brand-soft); color: var(--brand); box-shadow: none; }
 
 /* Login */

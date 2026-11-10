@@ -22,7 +22,7 @@ import {
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '0.22.0';
+const APP_VERSION = '3.0.0';
 
 const state = {
   csrf: '',
@@ -318,7 +318,7 @@ function loginHTML() {
   return `<div class="login-page">
     <aside class="login-aside">
       <a class="login-brand" href="#/dashboard">
-        <span class="brand-mark">${ui.icon('shield-check', 21)}</span>
+        <span class="brand-mark"><img src="/assets/brand/icon-512.png" alt=""></span>
         <span><strong>Alt8Mail</strong><span>System Control</span></span>
       </a>
       <div class="login-hero">
@@ -342,7 +342,7 @@ function loginHTML() {
     <main class="login-main">
       <div class="login-main-inner">
         <div class="login-mobile-brand">
-          <span class="brand-mark">${ui.icon('shield-check', 21)}</span>
+          <span class="brand-mark"><img src="/assets/brand/icon-512.png" alt=""></span>
           <span class="brand-copy"><strong>Alt8Mail</strong><span>System Control</span></span>
           <span class="env-chip" style="margin-left:auto"><span class="dot"></span>${esc(state.env || 'staging')}</span>
         </div>
@@ -544,7 +544,7 @@ function renderShell() {
   app.innerHTML = `<div class="shell">
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="#/dashboard" aria-label="Alt8Mail System Control dashboard">
-        <span class="brand-mark">${ui.icon('shield-check', 20)}</span>
+        <span class="brand-mark"><img src="/assets/brand/icon-512.png" alt=""></span>
         <span class="brand-copy"><strong>Alt8Mail</strong><span>System Control</span></span>
       </a>
       <nav class="sidebar-nav" id="sidebar-nav" aria-label="System Control sections">${navMarkup()}</nav>
@@ -1700,7 +1700,7 @@ async function boot() {
       renderLogin(session);
     }
   } catch (error) {
-    document.getElementById('app').innerHTML = `<div class="login-page"><div class="login-main"><div class="login-main-inner"><div class="login-mobile-brand"><span class="brand-mark">${ui.icon('shield-check', 21)}</span><span class="brand-copy"><strong>Alt8Mail</strong><span>System Control</span></span></div><div class="login-card"><h2>Control plane unavailable</h2><p>The browser could not reach the System Control service.</p><div class="notice tone-critical" style="margin-top:16px">${ui.icon('alert-circle', 17)}<div><strong>Connection failed</strong><p>${esc(errorDetail(error))}</p></div></div><button class="btn btn-primary" style="margin-top:16px" type="button" id="boot-retry">Try again</button></div></div></div></div>`;
+    document.getElementById('app').innerHTML = `<div class="login-page"><div class="login-main"><div class="login-main-inner"><div class="login-mobile-brand"><span class="brand-mark"><img src="/assets/brand/icon-512.png" alt=""></span><span class="brand-copy"><strong>Alt8Mail</strong><span>System Control</span></span></div><div class="login-card"><h2>Control plane unavailable</h2><p>The browser could not reach the System Control service.</p><div class="notice tone-critical" style="margin-top:16px">${ui.icon('alert-circle', 17)}<div><strong>Connection failed</strong><p>${esc(errorDetail(error))}</p></div></div><button class="btn btn-primary" style="margin-top:16px" type="button" id="boot-retry">Try again</button></div></div></div></div>`;
     document.getElementById('boot-retry')?.addEventListener('click', () => boot());
   }
 }
