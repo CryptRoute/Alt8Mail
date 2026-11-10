@@ -168,12 +168,13 @@ type adminMailPolicy struct {
 }
 
 type adminFilesPolicy struct {
-	RetentionDays         int  `json:"retentionDays"`
-	VersionRetentionDays  int  `json:"versionRetentionDays"`
-	ShareApprovalRequired bool `json:"shareApprovalRequired"`
-	DLPOnShare            bool `json:"dlpOnShare"`
-	WatermarkDownloads    bool `json:"watermarkDownloads"`
-	LegalHoldDefault      bool `json:"legalHoldDefault"`
+	RetentionDays             int            `json:"retentionDays"`
+	VersionRetentionDays      int            `json:"versionRetentionDays"`
+	RetentionByClassification map[string]int `json:"retentionByClassification"`
+	ShareApprovalRequired     bool           `json:"shareApprovalRequired"`
+	DLPOnShare                bool           `json:"dlpOnShare"`
+	WatermarkDownloads        bool           `json:"watermarkDownloads"`
+	LegalHoldDefault          bool           `json:"legalHoldDefault"`
 }
 
 type adminSharingPolicy struct {
@@ -319,6 +320,9 @@ func tenantPolicyFromSettings(raw json.RawMessage) adminTenantPolicy {
 	if policy.Mail.RetentionByClassification == nil {
 		policy.Mail.RetentionByClassification = map[string]int{}
 	}
+	if policy.Files.RetentionByClassification == nil {
+		policy.Files.RetentionByClassification = map[string]int{}
+	}
 	if policy.Sharing.AllowedDomains == nil {
 		policy.Sharing.AllowedDomains = []string{}
 	}
@@ -463,6 +467,16 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 	if policy.Files.VersionRetentionDays < 0 || policy.Files.VersionRetentionDays > 3650 {
 		errors = append(errors, "File version retention must be between 0 and 3650 days")
 	}
+	fileRetentionByClass := map[string]int{}
+	for rawClass, days := range policy.Files.RetentionByClassification {
+		class := canonicalDLPClassification(rawClass)
+		if class == "" || days < 0 || days > 3650 {
+			errors = append(errors, "File classification retention is invalid")
+			continue
+		}
+		fileRetentionByClass[class] = days
+	}
+	policy.Files.RetentionByClassification = fileRetentionByClass
 	policy.Security.DataResidencyRegion = strings.ToUpper(strings.TrimSpace(policy.Security.DataResidencyRegion))
 	if policy.Security.DataResidencyRegion != "" {
 		validRegion := len(policy.Security.DataResidencyRegion) <= 40

@@ -819,6 +819,9 @@ func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file c
 	w.Header().Set("Content-Disposition", disposition+`; filename*=UTF-8''`+url.PathEscape(file.Name))
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if watermark := s.fileWatermark(r, file, tenantID); watermark != "" {
+		w.Header().Set("X-A8M-Watermark", watermark)
+	}
 	if file.MIME == "image/svg+xml" {
 		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'")
 	}

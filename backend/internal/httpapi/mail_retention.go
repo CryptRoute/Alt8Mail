@@ -29,7 +29,8 @@ type retentionStats struct {
 func (s *Server) runTenantRetention(ctx context.Context, tenantID string) (retentionStats, error) {
 	stats := retentionStats{Errors: []string{}}
 	policy := s.tenantPolicyFor(ctx, tenantID)
-	if policy.Mail.RetentionDays <= 0 {
+	minDays := retentionMinDays(policy.Mail)
+	if minDays <= 0 {
 		return stats, nil
 	}
 	if !s.masterMailConfigured() {
@@ -60,7 +61,7 @@ func (s *Server) runTenantRetention(ctx context.Context, tenantID string) (reten
 		return stats, err
 	}
 
-	cutoff := time.Now().UTC().AddDate(0, 0, -policy.Mail.RetentionDays)
+	cutoff := time.Now().UTC().AddDate(0, 0, -minDays)
 	tenantWideHold, heldUsers, err := s.tenantLegalHoldSnapshot(ctx, tenantID)
 	if err != nil {
 		return stats, err
@@ -74,7 +75,7 @@ func (s *Server) runTenantRetention(ctx context.Context, tenantID string) (reten
 			continue
 		}
 		stats.Users++
-		removed, folders, err := s.expungeRetainedMessages(ctx, user, cutoff, policy.Mail.RetentionDays)
+		removed, folders, err := s.expungeRetainedMessages(ctx, user, cutoff, policy.Mail)
 		stats.Folders += folders
 		stats.Messages += removed
 		if err != nil {
@@ -108,7 +109,32 @@ func uidExpunge(conn *imapclient.Client, set *imap.SeqSet) error {
 	return status.Err()
 }
 
-func (s *Server) expungeRetainedMessages(ctx context.Context, user userRecord, cutoff time.Time, retentionDays int) (int, int, error) {
+func retentionMinDays(policy adminMailPolicy) int {
+	minDays := 0
+	if policy.RetentionDays > 0 {
+		minDays = policy.RetentionDays
+	}
+	for class, days := range policy.RetentionByClassification {
+		if canonicalDLPClassification(class) == "" || days <= 0 {
+			continue
+		}
+		if minDays == 0 || days < minDays {
+			minDays = days
+		}
+	}
+	return minDays
+}
+
+func retentionDue(classification string, sentAt time.Time, policy adminMailPolicy, now time.Time) bool {
+	days := policy.RetentionDays
+	if override, ok := policy.RetentionByClassification[canonicalDLPClassification(classification)]; ok {
+		days = override
+	}
+	return days > 0 && sentAt.Before(now.AddDate(0, 0, -days))
+}
+
+func (s *Server) expungeRetainedMessages(ctx context.Context, user userRecord, cutoff time.Time, policy adminMailPolicy) (int, int, error) {
+	retentionDays := policy.RetentionDays
 	lock := s.userMailLock(user.ID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -137,6 +163,27 @@ func (s *Server) expungeRetainedMessages(ctx context.Context, user userRecord, c
 	if err != nil {
 		return 0, 0, err
 	}
+	type retentionMeta struct {
+		classification string
+		sentAt         time.Time
+	}
+	metadata := map[string]retentionMeta{}
+	metaRows, metaErr := s.store.DB.Query(ctx, `
+		SELECT folder, uid, classification, sent_at FROM public.mail_messages
+		WHERE user_id=$1 AND uid > 0
+	`, user.ID)
+	if metaErr == nil {
+		for metaRows.Next() {
+			var folder, classification string
+			var uid int64
+			var sentAt time.Time
+			if metaRows.Scan(&folder, &uid, &classification, &sentAt) == nil {
+				metadata[folder+"\x00"+fmt.Sprint(uid)] = retentionMeta{classification: classification, sentAt: sentAt}
+			}
+		}
+		metaRows.Close()
+	}
+	retentionNow := time.Now().UTC()
 	deletedByFolder := map[string]map[uint32]bool{}
 	validityByFolder := map[string]uint32{}
 	folders := 0
@@ -164,6 +211,25 @@ func (s *Server) expungeRetainedMessages(ctx context.Context, user userRecord, c
 		if len(uids) == 0 {
 			continue
 		}
+		dueUIDs := make([]uint32, 0, len(uids))
+		for _, uid := range uids {
+			meta, known := metadata[appFolder+"\x00"+fmt.Sprint(uid)]
+			if !known {
+				// Without synchronized metadata the safest fallback is the
+				// global retention window; class overrides cannot be applied.
+				if policy.RetentionDays > 0 {
+					dueUIDs = append(dueUIDs, uid)
+				}
+				continue
+			}
+			if retentionDue(meta.classification, meta.sentAt, policy, retentionNow) {
+				dueUIDs = append(dueUIDs, uid)
+			}
+		}
+		if len(dueUIDs) == 0 {
+			continue
+		}
+		uids = dueUIDs
 		folders++
 		if deletedByFolder[appFolder] == nil {
 			deletedByFolder[appFolder] = map[uint32]bool{}

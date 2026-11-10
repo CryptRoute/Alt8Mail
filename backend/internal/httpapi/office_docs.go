@@ -616,14 +616,14 @@ func (s *Server) downloadOfficeVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "File not found")
 		return
 	}
-	var storageKey, format, name string
+	var storageKey, format, name, classification string
 	err = s.store.DB.QueryRow(r.Context(), `
-		SELECT v.storage_key, d.format, f.name
+		SELECT v.storage_key, d.format, f.name, COALESCE(f.metadata->>'dlpClassification','')
 		FROM office_documents d
 		JOIN office_document_versions v ON v.document_id=d.id
 		JOIN files f ON f.id=d.file_id
 		WHERE d.file_id=$1 AND v.version=$2
-	`, r.PathValue("id"), versionNumber).Scan(&storageKey, &format, &name)
+	`, r.PathValue("id"), versionNumber).Scan(&storageKey, &format, &name, &classification)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "OFFICE_VERSION", "Version not found")
 		return
@@ -642,6 +642,9 @@ func (s *Server) downloadOfficeVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if s.tenantPolicyFor(r.Context(), sess.User.TenantID).Files.WatermarkDownloads && dlpClassificationRank(canonicalDLPClassification(classification)) >= dlpClassificationRank("Confidential") {
+		w.Header().Set("X-A8M-Watermark", canonicalDLPClassification(classification)+" · "+sess.User.Email+" · "+time.Now().UTC().Format(time.RFC3339)+" · Alt8Mail")
+	}
 	http.ServeFile(w, r, path)
 }
 

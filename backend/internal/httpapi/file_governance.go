@@ -2,11 +2,32 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 )
+
+func fileClassification(file contentFile) string {
+	var metadata map[string]any
+	if len(file.Metadata) > 0 {
+		_ = json.Unmarshal(file.Metadata, &metadata)
+	}
+	return canonicalDLPClassification(stateString(metadata, "dlpClassification"))
+}
+
+func (s *Server) fileWatermark(r *http.Request, file contentFile, tenantID string) string {
+	policy := s.tenantPolicyFor(r.Context(), tenantID).Files
+	if !policy.WatermarkDownloads || dlpClassificationRank(fileClassification(file)) < dlpClassificationRank("Confidential") {
+		return ""
+	}
+	actor := "shared link"
+	if sess := s.requireSessionFromContext(r); sess != nil {
+		actor = sess.User.Email
+	}
+	return fmt.Sprintf("%s · %s · %s · Alt8Mail", fileClassification(file), actor, time.Now().UTC().Format(time.RFC3339))
+}
 
 func (s *Server) fileOnLegalHold(ctx context.Context, tenantID, fileID, ownerID string) (bool, error) {
 	var held bool
@@ -139,29 +160,47 @@ func (s *Server) adminReleaseFileHold(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runFileRetention(ctx context.Context, tenantID string) (map[string]int, error) {
 	stats := map[string]int{"files": 0, "versions": 0, "skippedHolds": 0, "errors": 0}
 	policy := s.tenantPolicyFor(ctx, tenantID).Files
-	if policy.RetentionDays <= 0 && policy.VersionRetentionDays <= 0 {
+	maxDays := policy.RetentionDays
+	for _, days := range policy.RetentionByClassification {
+		if days > maxDays {
+			maxDays = days
+		}
+	}
+	if maxDays <= 0 && policy.VersionRetentionDays <= 0 {
 		return stats, nil
 	}
-	if policy.RetentionDays > 0 {
-		cutoff := time.Now().UTC().AddDate(0, 0, -policy.RetentionDays)
+	if maxDays > 0 {
+		maxCutoff := time.Now().UTC().AddDate(0, 0, -maxDays)
 		rows, err := s.store.DB.Query(ctx, `
-			SELECT id, user_id::text FROM public.files
+			SELECT id, user_id::text, COALESCE(metadata->>'dlpClassification',''), updated_at
+			FROM public.files
 			WHERE tenant_id=$1 AND updated_at < $2
 			ORDER BY updated_at LIMIT 1000
-		`, tenantID, cutoff)
+		`, tenantID, maxCutoff)
 		if err != nil {
 			return stats, err
 		}
-		type candidate struct{ id, owner string }
+		type candidate struct {
+			id, owner, class string
+			updated          time.Time
+		}
 		candidates := []candidate{}
 		for rows.Next() {
 			var item candidate
-			if rows.Scan(&item.id, &item.owner) == nil {
+			if rows.Scan(&item.id, &item.owner, &item.class, &item.updated) == nil {
 				candidates = append(candidates, item)
 			}
 		}
 		rows.Close()
+		now := time.Now().UTC()
 		for _, item := range candidates {
+			days := policy.RetentionDays
+			if classDays, ok := policy.RetentionByClassification[canonicalDLPClassification(item.class)]; ok {
+				days = classDays
+			}
+			if days <= 0 || item.updated.After(now.AddDate(0, 0, -days)) {
+				continue
+			}
 			held, err := s.fileOnLegalHold(ctx, tenantID, item.id, item.owner)
 			if err != nil || held {
 				stats["skippedHolds"]++

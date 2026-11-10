@@ -1516,7 +1516,7 @@ async function renderPolicies() {
     const data = await api("policies");
     state.policy = data.policy;
     const policy = data.policy;
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Policies</h1><p>Organization-wide guardrails for authentication, mail, sharing and directory.</p></div><div class="view-actions"><span class="badge system">Enforced at sign-in where applicable</span></div></div><div class="policy-layout"><nav class="policy-nav"><button class="active" data-policy-tab="security">Security</button><button data-policy-tab="mail">Mail</button><button data-policy-tab="sharing">Sharing</button><button data-policy-tab="office">Office</button><button data-policy-tab="directory">Directory</button><button data-policy-tab="dlp">Classification &amp; DLP</button><button data-policy-tab="features">Features</button><button data-policy-tab="branding">Branding</button></nav><div><form id="policyForm">${policySections(policy)}</form><div class="policy-save"><span>Changes apply to the whole organization. Sensitive changes are audited.</span><button class="btn secondary" type="button" data-action="run-retention" title="Save the retention policy first">Run retention</button><button class="btn secondary" type="button" data-action="reload-policies">Reset changes</button><button class="btn primary" type="button" data-action="save-policies">${icon("check")}Save policies</button></div></div></div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Policies</h1><p>Organization-wide guardrails for authentication, mail, sharing and directory.</p></div><div class="view-actions"><span class="badge system">Enforced at sign-in where applicable</span></div></div><div class="policy-layout"><nav class="policy-nav"><button class="active" data-policy-tab="security">Security</button><button data-policy-tab="mail">Mail</button><button data-policy-tab="sharing">Sharing</button><button data-policy-tab="office">Office</button><button data-policy-tab="files">Files</button><button data-policy-tab="directory">Directory</button><button data-policy-tab="dlp">Classification &amp; DLP</button><button data-policy-tab="features">Features</button><button data-policy-tab="branding">Branding</button></nav><div><form id="policyForm">${policySections(policy)}</form><div class="policy-save"><span>Changes apply to the whole organization. Sensitive changes are audited.</span><button class="btn secondary" type="button" data-action="run-retention" title="Save the retention policy first">Run retention</button><button class="btn secondary" type="button" data-action="reload-policies">Reset changes</button><button class="btn primary" type="button" data-action="save-policies">${icon("check")}Save policies</button></div></div></div>`;
     bindPolicyForm();
   } catch (error) { viewError(error); }
 }
@@ -1534,6 +1534,7 @@ function policySections(policy) {
   const dlp = policy.dlp || { enabled: true, defaultClassification: "Internal", rules: [] };
   const features = policy.features || { stickyNotes: true, reactions: true };
   const office = policy.office || { enabled: true, internalSharing: true, externalEditing: true, ai: true, dlpOnSave: true, versionRetention: 0, allowedGroups: [], allowedDomains: [] };
+  const files = policy.files || { retentionDays: 0, versionRetentionDays: 0, retentionByClassification: {}, shareApprovalRequired: false, dlpOnShare: true, watermarkDownloads: false };
   return `<section class="card policy-panel active" data-policy-panel="security">
     <div class="policy-section"><h3>Password policy</h3><p>Applied to new users and password resets issued from this console.</p>
       <div class="setting-row"><div class="setting-copy"><b>Minimum length</b><small>Passwords shorter than this are rejected.</small></div><div class="setting-control"><div class="input-group"><input class="input" type="number" min="8" max="64" data-policy-input="security.passwordMinLength" value="${security.passwordMinLength}"><span class="muted">chars</span></div></div></div>
@@ -1550,6 +1551,7 @@ function policySections(policy) {
       <div class="setting-row"><div class="setting-copy"><b>Idle timeout</b><small>Minutes of inactivity before the admin session expires.</small></div><div class="setting-control"><input class="input" type="number" min="5" max="240" data-policy-input="security.idleTimeoutMinutes" value="${security.idleTimeoutMinutes}"></div></div>
       <div class="setting-row"><div class="setting-copy"><b>Maximum sessions</b><small>Maximum concurrent sessions per user.</small></div><div class="setting-control"><input class="input" type="number" min="1" max="20" data-policy-input="security.maxSessions" value="${security.maxSessions}"></div></div>
       <div class="setting-row"><div class="setting-copy"><b>Allowed admin networks</b><small>IP addresses or CIDR ranges. Empty allows any network.</small></div><div class="setting-control"><input class="input" data-policy-input="security.allowedIPRanges" value="${esc((security.allowedIPRanges || []).join(", "))}" placeholder="203.0.113.0/24"></div></div>
+      <div class="setting-row"><div class="setting-copy"><b>Data residency region</b><small>Uppercase deployment region code recorded with the organization policy, for example EU-WEST.</small></div><div class="setting-control"><input class="input" data-policy-input="security.dataResidencyRegion" value="${esc(security.dataResidencyRegion || "")}" placeholder="EU-WEST"></div></div>
       ${toggleRow("Notify on new sign-in", "Send an alert when an admin signs in from a new device.", "security.loginAlerts", security.loginAlerts)}
     </div>
   </section>
@@ -1575,6 +1577,9 @@ function policySections(policy) {
       ${toggleRow("Payment links", "Allow HTTPS payment links from the approved hosts to be inserted from compose.", "mail.paymentLinksEnabled", mail.paymentLinksEnabled)}
       <div class="setting-row"><div class="setting-copy"><b>Payment link hosts</b><small>Comma-separated hostnames. Subdomains are allowed.</small></div><div class="setting-control"><input class="input" data-policy-input="mail.paymentLinkDomains" value="${esc((mail.paymentLinkDomains || []).join(", "))}" placeholder="buy.stripe.com, paypal.me"></div></div>
       ${toggleRow("Campaign tracking", "Opt in to transparent open receipts and link clicks for mail merges. Tracking is disclosed in the message and disabled by default.", "mail.campaignTrackingEnabled", mail.campaignTrackingEnabled)}
+      ${toggleRow("Prevent forwarding classified mail", "Block forwarding of messages classified Confidential or Restricted.", "mail.preventForward", mail.preventForward)}
+      ${toggleRow("Watermark classified mail", "Append a visible classification, sender and timestamp footer to Confidential or Restricted outbound mail.", "mail.watermarkExternal", mail.watermarkExternal)}
+      <div class="setting-row"><div class="setting-copy"><b>Retention by classification</b><small>Optional overrides in days, for example Confidential:30, Restricted:90. Empty uses the global retention.</small></div><div class="setting-control"><input class="input" data-policy-input="mail.retentionByClassification" value="${esc(Object.entries(mail.retentionByClassification || {}).map(([key, value]) => key + ":" + value).join(", "))}" placeholder="Confidential:30"></div></div>
     </div>
   </section>
   <section class="card policy-panel" data-policy-panel="sharing">
@@ -1597,6 +1602,17 @@ function policySections(policy) {
     <div class="policy-section"><h3>Office audience</h3><p>Empty lists allow everyone in the organization. When either list is set, a user must match a domain or belong to one of the listed groups.</p>
       <div class="setting-row"><div class="setting-copy"><b>Allowed groups</b><small>Comma-separated group names, for example Legal, Finance. Group names are matched case-insensitively.</small></div><div class="setting-control"><input class="input" data-policy-input="office.allowedGroups" value="${esc((office.allowedGroups || []).join(", "))}" placeholder="Legal, Finance"></div></div>
       <div class="setting-row"><div class="setting-copy"><b>Allowed domains</b><small>Comma-separated email domains for internal users and verified guest recipients.</small></div><div class="setting-control"><input class="input" data-policy-input="office.allowedDomains" value="${esc((office.allowedDomains || []).join(", "))}" placeholder="company.com"></div></div>
+    </div>
+  </section>
+  <section class="card policy-panel" data-policy-panel="files">
+    <div class="policy-section"><h3>Cabinet file governance</h3><p>Retention, sharing approval and watermark controls for Cabinet files and Office versions.</p>
+      <div class="setting-row"><div class="setting-copy"><b>File retention</b><small>Days to keep files. 0 disables deletion. Active legal holds always win.</small></div><div class="setting-control"><input class="input" type="number" min="0" max="3650" data-policy-input="files.retentionDays" value="${Number(files.retentionDays) || 0}"></div></div>
+      <div class="setting-row"><div class="setting-copy"><b>Office version retention</b><small>Delete non-current Office versions older than this many days.</small></div><div class="setting-control"><input class="input" type="number" min="0" max="3650" data-policy-input="files.versionRetentionDays" value="${Number(files.versionRetentionDays) || 0}"></div></div>
+      <div class="setting-row"><div class="setting-copy"><b>File retention by classification</b><small>Optional overrides in days, for example Confidential:30, Restricted:90.</small></div><div class="setting-control"><input class="input" data-policy-input="files.retentionByClassification" value="${esc(Object.entries(files.retentionByClassification || {}).map(([key, value]) => key + ":" + value).join(", "))}" placeholder="Confidential:30"></div></div>
+      ${toggleRow("Require approval for external shares", "External share links stay pending until an administrator approves them.", "files.shareApprovalRequired", files.shareApprovalRequired)}
+      ${toggleRow("DLP on share", "Block external sharing of files classified Confidential or Restricted.", "files.dlpOnShare", files.dlpOnShare)}
+      ${toggleRow("Watermark classified downloads", "Add a classification and actor watermark header to Confidential or Restricted downloads.", "files.watermarkDownloads", files.watermarkDownloads)}
+      <div class="setting-row"><div class="setting-copy"><b>Run file retention</b><small>Delete files and versions past policy. Held files are skipped and every deletion is audited.</small></div><div class="setting-control"><button class="btn secondary" type="button" data-action="run-file-retention">Run file retention</button></div></div>
     </div>
   </section>
   <section class="card policy-panel" data-policy-panel="directory">
@@ -1653,7 +1669,11 @@ function dlpRuleMarkup(rule = {}) {
       <label class="field"><span>Direction</span><select class="input" data-dlp-field="direction">${[["outbound", "Outbound"], ["both", "Outbound and internal"]].map(([value, label]) => `<option value="${value}" ${(rule.direction || "outbound") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
     </div>
     <div class="field-row">
-      <label class="field"><span>Terms</span><input class="input" data-dlp-field="terms" value="${esc((rule.terms || []).join(", "))}" placeholder="account number, social security"><small class="muted">Comma-separated. Matching is case-insensitive.</small></label>
+      <label class="field"><span>Detector</span><select class="input" data-dlp-field="detector">${[["terms", "Terms"], ["dictionary", "Dictionary (whole words)"], ["regex", "Custom regex"], ["credit_card", "Credit card (Luhn)"], ["iban", "IBAN (mod-97)"], ["national_id", "National ID"]].map(([value, label]) => `<option value="${value}" ${(rule.detector || "terms") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+      <label class="field"><span>Regex pattern</span><input class="input" data-dlp-field="pattern" value="${esc(rule.pattern || "")}" placeholder="AKIA[0-9A-Z]{16}"><small class="muted">Used by the custom regex detector.</small></label>
+    </div>
+    <div class="field-row">
+      <label class="field"><span>Terms</span><input class="input" data-dlp-field="terms" value="${esc((rule.terms || []).join(", "))}" placeholder="account number, social security"><small class="muted">Comma-separated. Used by terms and dictionary detectors.</small></label>
       <div class="field"><span>Search fields</span><div style="display:flex;gap:14px;flex-wrap:wrap;padding-top:6px">${["subject", "body", "attachment"].map((field) => `<label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" data-dlp-field="fields" value="${field}" ${fields.includes(field) ? "checked" : ""}>${field[0].toUpperCase() + field.slice(1)}</label>`).join("")}</div></div>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" data-dlp-field="enabled" ${rule.enabled !== false ? "checked" : ""}>Rule enabled</label><button class="btn small ghost" type="button" data-dlp-remove>Remove rule</button></div>
@@ -1683,12 +1703,22 @@ function collectPolicy() {
   if (!policy.office) {
     policy.office = { enabled: true, internalSharing: true, externalEditing: true, ai: true, dlpOnSave: true, versionRetention: 0, allowedGroups: [], allowedDomains: [] };
   }
+  if (!policy.files) policy.files = { retentionDays: 0, versionRetentionDays: 0, retentionByClassification: {}, shareApprovalRequired: false, dlpOnShare: true, watermarkDownloads: false };
+  const parseRetentionMap = (value) => {
+    const map = {};
+    String(value || "").split(",").forEach((entry) => {
+      const [key, days] = entry.split(":").map((part) => part.trim());
+      if (key && days && Number.isFinite(Number(days))) map[key] = Number(days);
+    });
+    return map;
+  };
   $$("[data-policy-input]").forEach((input) => {
     const path = input.dataset.policyInput.split(".");
     let target = policy;
     for (let index = 0; index < path.length - 1; index++) target = target[path[index]];
     const key = path[path.length - 1];
-    if (input.type === "number") target[key] = Number(input.value);
+    if (key === "retentionByClassification") target[key] = parseRetentionMap(input.value);
+    else if (input.type === "number") target[key] = Number(input.value);
     else if (Array.isArray(target[key])) target[key] = input.value.split(",").map((value) => value.trim()).filter(Boolean);
     else target[key] = input.value;
   });
@@ -1702,6 +1732,8 @@ function collectPolicy() {
     policy.dlp.rules = $$("[data-dlp-rule]").map((row) => ({
       id: row.dataset.ruleId || "",
       name: row.querySelector('[data-dlp-field="name"]')?.value.trim() || "",
+      detector: row.querySelector('[data-dlp-field="detector"]')?.value || "terms",
+      pattern: row.querySelector('[data-dlp-field="pattern"]')?.value.trim() || "",
       terms: String(row.querySelector('[data-dlp-field="terms"]')?.value || "").split(",").map((value) => value.trim()).filter(Boolean),
       fields: $$('[data-dlp-field="fields"]', row).filter((input) => input.checked).map((input) => input.value),
       classification: row.querySelector('[data-dlp-field="classification"]')?.value || "Confidential",
@@ -1854,6 +1886,8 @@ async function renderAI() {
     const providers = data.providers || [];
     let usage = null;
     try { usage = await api("ai/usage"); } catch { usage = null; }
+    let encryption = null;
+    try { encryption = await api("encryption"); } catch { encryption = null; }
     $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>AI assistant</h1><p>Let people use your organization's own AI provider inside compose and the reading pane.</p></div><div class="view-actions"><span class="badge ${ai.enabled ? "ok" : "system"}">${ai.enabled ? "Enabled" : "Disabled"}</span></div></div>
       <div class="dashboard-grid">
         <div class="card card-pad">
@@ -1887,6 +1921,16 @@ async function renderAI() {
               <div class="detail-row"><span>Month</span><b>${usage ? esc(usage.month) : "—"}</b></div>
             </div>
           </div>
+          <div class="card card-pad" style="margin-top:14px"><div class="card-head" style="padding:0 0 12px"><div><h2>Customer-managed encryption</h2><p>Envelope keys for tenant secrets and AI credentials.</p></div><span class="badge ${encryption?.unlocked ? "ok" : encryption?.enabled ? "warn" : "system"}">${encryption?.unlocked ? "Unlocked" : encryption?.enabled ? "Locked" : "Platform key"}</span></div>
+            <div class="detail-list">
+              <div class="detail-row"><span>Active key version</span><b>${encryption?.activeVersion || "—"}</b></div>
+              <div class="detail-row"><span>Versions</span><b>${(encryption?.versions || []).length}</b></div>
+            </div>
+            <label class="field" style="margin-top:12px"><span>Customer key (base64, 32 bytes)</span><input class="input" id="byokKey" type="password" autocomplete="new-password" placeholder="Never stored by Alt8Mail"><small class="muted">${esc(encryption?.warning || "The key is used only to wrap the tenant data key. There is no vendor-key fallback.")}</small></label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+              ${!encryption?.enabled ? `<button class="btn secondary small" type="button" data-encryption-action="enable">Enable BYOK</button>` : `<button class="btn secondary small" type="button" data-encryption-action="unlock">Unlock</button><button class="btn secondary small" type="button" data-encryption-action="lock">Lock</button><button class="btn secondary small" type="button" data-encryption-action="rotate">Rotate data key</button>`}
+            </div>
+          </div>
           <div class="card card-pad" style="margin-top:14px"><div class="card-head" style="padding:0 0 12px"><div><h2>Security notes</h2><p>Before enabling this in production.</p></div></div><div class="detail-list"><div class="detail-row"><span>Endpoint allowlist</span><b>HTTPS recommended</b></div><div class="detail-row"><span>API key storage</span><b>AES-GCM sealed</b></div><div class="detail-row"><span>Request retention</span><b>Cached summaries stay tenant-scoped</b></div></div><p class="muted" style="font-size:11px;margin:12px 0 0">Use a dedicated provider key with a spending cap. AI output is untrusted text and is rendered as plain text in the webmail.</p></div>
         </div>
       </div>`;
@@ -1896,7 +1940,29 @@ async function renderAI() {
         button.setAttribute("aria-checked", button.getAttribute("aria-checked") === "true" ? "false" : "true");
       });
     });
+    $$("[data-encryption-action]").forEach((button) => button.addEventListener("click", () => runEncryptionAction(button.dataset.encryptionAction, button)));
   } catch (error) { viewError(error); }
+}
+
+async function runEncryptionAction(action, button) {
+  const key = $("#byokKey")?.value.trim() || "";
+  if (action !== "lock" && !key) {
+    showError(new Error("Enter the customer key in base64"));
+    $("#byokKey")?.focus();
+    return;
+  }
+  setBusy(button, true, "Working…");
+  try {
+    if (action === "lock") {
+      await api("encryption/lock", { method: "POST", body: {} });
+      toast("Customer-managed keys locked");
+    } else {
+      const endpoint = action === "enable" ? "encryption/keys" : action === "rotate" ? "encryption/rotate" : "encryption/unlock";
+      await api(endpoint, { method: "POST", body: { customerKey: key } });
+      toast(action === "enable" ? "Customer-managed encryption enabled" : action === "rotate" ? "Tenant data key rotated" : "Customer-managed keys unlocked");
+    }
+    await renderAI();
+  } catch (error) { showError(error); } finally { setBusy(button, false); }
 }
 
 function collectAIForm() {
@@ -1951,6 +2017,16 @@ async function runRetention() {
   try {
     const data = await api("maintenance/retention", { method: "POST" });
     toast(`Retention removed ${data.stats.messages} message${data.stats.messages === 1 ? "" : "s"} across ${data.stats.users} mailbox${data.stats.users === 1 ? "" : "es"}`);
+  } catch (error) { showError(error); } finally { setBusy(button, false); }
+}
+
+async function runFileRetention() {
+  if (!(await confirmDialog("Run file retention", "Files and Office versions older than the saved policy will be permanently removed. Files under an active legal hold are skipped.", "Run file retention", true))) return;
+  const button = $('[data-action="run-file-retention"]');
+  setBusy(button, true, "Running…");
+  try {
+    const data = await api("maintenance/file-retention", { method: "POST" });
+    toast(`Removed ${data.stats.files} file${data.stats.files === 1 ? "" : "s"} and ${data.stats.versions} version${data.stats.versions === 1 ? "" : "s"}; skipped ${data.stats.skippedHolds} held item${data.stats.skippedHolds === 1 ? "" : "s"}`);
   } catch (error) { showError(error); } finally { setBusy(button, false); }
 }
 
@@ -2010,7 +2086,7 @@ async function renderAudit() {
     const officeSource = source === "office";
     const exportName = officeSource ? "audit/office.csv" : "audit.csv";
     const exportHref = "./api/" + exportName + (state.auditQuery ? "?q=" + encodeURIComponent(state.auditQuery) : "");
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Audit log</h1><p>${officeSource ? `Office document, sharing and AI activity for ${esc(state.activeTenant.name)}.` : `Immutable administrative activity for ${esc(state.activeTenant.name)}.`}</p></div><div class="view-actions"><a class="btn secondary" href="${exportHref}" download>${icon("download")}Export CSV</a></div></div><div class="toolbar"><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn small ${officeSource ? "secondary" : "primary"}" type="button" data-audit-source="admin">Administrator actions</button><button class="btn small ${officeSource ? "primary" : "secondary"}" type="button" data-audit-source="office">Office activity</button></div><div class="search-box">${icon("search")}<input id="auditSearch" type="search" placeholder="Search actor, target or detail…" value="${esc(state.auditQuery || "")}"></div><span class="muted" style="font-size:11px">${data.total} event${data.total === 1 ? "" : "s"}</span></div><div class="table-wrap"><div class="table-scroll"><table class="data audit-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead><tbody>${entries.map(auditRow).join("") || `<tr><td colspan="6"><div class="empty">${icon("list")}<h3>No audit events</h3><p>${officeSource ? "Office document opens, saves, shares, DLP blocks and reviews will appear here." : "Administrative changes will appear here."}</p></div></td></tr>`}</tbody></table></div></div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Audit log</h1><p>${officeSource ? `Office document, sharing and AI activity for ${esc(state.activeTenant.name)}.` : `Immutable administrative activity for ${esc(state.activeTenant.name)}.`}</p></div><div class="view-actions"><a class="btn secondary" href="./api/audit/export?download=1" download>${icon("download")}Signed bundle</a><a class="btn secondary" href="${exportHref}" download>${icon("download")}Export CSV</a></div></div><div class="toolbar"><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn small ${officeSource ? "secondary" : "primary"}" type="button" data-audit-source="admin">Administrator actions</button><button class="btn small ${officeSource ? "primary" : "secondary"}" type="button" data-audit-source="office">Office activity</button></div><div class="search-box">${icon("search")}<input id="auditSearch" type="search" placeholder="Search actor, target or detail…" value="${esc(state.auditQuery || "")}"></div><span class="muted" style="font-size:11px">${data.total} event${data.total === 1 ? "" : "s"}</span></div><div class="table-wrap"><div class="table-scroll"><table class="data audit-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead><tbody>${entries.map(auditRow).join("") || `<tr><td colspan="6"><div class="empty">${icon("list")}<h3>No audit events</h3><p>${officeSource ? "Office document opens, saves, shares, DLP blocks and reviews will appear here." : "Administrative changes will appear here."}</p></div></td></tr>`}</tbody></table></div></div>`;
     $$("[data-audit-source]").forEach((button) => button.addEventListener("click", () => {
       state.auditSource = button.dataset.auditSource === "office" ? "office" : "admin";
       renderAudit();
@@ -2029,13 +2105,19 @@ function auditRow(entry) {
 async function renderCompliance() {
   loading("Compliance");
   try {
-    const [data, jobsData] = await Promise.all([
+    const [data, jobsData, fileHoldsData, shareRequestsData, reviewsData] = await Promise.all([
       api("legal/holds"),
-      api("offboarding/jobs").catch(() => ({ jobs: [] }))
+      api("offboarding/jobs").catch(() => ({ jobs: [] })),
+      api("files/holds").catch(() => ({ holds: [] })),
+      api("files/share-requests").catch(() => ({ requests: [] })),
+      api("legal/reviews").catch(() => ({ items: [] }))
     ]);
     const holds = data.holds || [];
     const stats = data.stats || {};
     const jobs = jobsData.jobs || [];
+    const fileHolds = fileHoldsData.holds || [];
+    const shareRequests = shareRequestsData.requests || [];
+    const reviews = reviewsData.items || [];
     const canManage = can("legal.manage");
     $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Compliance</h1><p>Preserve mailboxes under legal hold and search the organization archive with eDiscovery.</p></div><div class="view-actions">${canManage ? `<button class="btn primary" id="createHoldBtn">${icon("shield")}Place legal hold</button>` : ""}</div></div>
       <div class="stat-grid">
@@ -2045,9 +2127,17 @@ async function renderCompliance() {
       </div>
       <div class="card"><div class="card-head"><div><h2>Legal holds</h2><p>Held mailboxes cannot be permanently deleted or purged by retention.</p></div><span class="badge ${stats.active ? "system" : "neutral"}">${stats.active || 0} active</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Matter</th><th>Scope</th><th>Mailbox</th><th>Reason</th><th>Placed</th><th>Status</th><th></th></tr></thead><tbody>${holds.map((hold) => `<tr><td><b>${esc(hold.name || "Untitled hold")}</b>${hold.reason ? `<br><small class="muted">${esc(hold.reason)}</small>` : ""}</td><td>${esc(hold.scope === "tenant" ? "Tenant-wide" : "Mailbox")}</td><td>${esc(hold.userEmail || "All mailboxes")}${hold.userName ? `<br><small class="muted">${esc(hold.userName)}</small>` : ""}</td><td class="cell-sub">${esc(hold.createdBy || "—")}</td><td class="cell-sub">${formatDate(hold.createdAt, { time: true })}</td><td>${hold.status === "active" ? badge("active") : `<span class="badge neutral">Released</span>`}</td><td>${canManage && hold.status === "active" ? `<button class="btn small ghost" data-release-hold="${esc(hold.id)}">Release</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="7"><div class="empty">${icon("shield")}<h3>No legal holds</h3><p>Place a hold before an employee leaves or when litigation is reasonably anticipated.</p></div></td></tr>`}</tbody></table></div></div></div>
       <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>eDiscovery search</h2><p>Search subjects, participants and message bodies across every mailbox in this organization.</p></div><span class="badge system">Read-only</span></div><div class="card-pad"><form id="discoveryForm"><div class="field-row"><label class="field"><span>Keywords</span><input id="discoveryQuery" placeholder="contract, account number, project name" autocomplete="off"></label><label class="field"><span>Mailbox email</span><input id="discoveryUserEmail" type="email" placeholder="person@company.com" autocomplete="off"></label></div><div class="field-row"><label class="field"><span>Sent from</span><input id="discoveryFrom" type="date"></label><label class="field"><span>Sent to</span><input id="discoveryTo" type="date"></label></div><div class="field-row"><label class="field"><span>Folder</span><input id="discoveryFolder" placeholder="inbox, sent, archive"></label><label class="field"><span>Classification</span><select id="discoveryClassification"><option value="">Any classification</option>${dlpClassificationOptions("")}</select></label></div><div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap"><a class="btn secondary" id="discoveryExport" href="./api/legal/discovery.csv" download>${icon("download")}Export mail CSV</a><a class="btn secondary" id="officeDiscoveryExport" href="./api/legal/discovery-office.csv" download>${icon("download")}Export Office CSV</a><button class="btn primary" type="submit">${icon("search")}Search archive</button></div></form><div id="discoveryResults" style="margin-top:18px"><div class="empty-mini">Enter a keyword or mailbox to search the archive.</div></div></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Cabinet legal holds</h2><p>Files and Office documents preserved across deletion and retention.</p></div>${canManage ? `<button class="btn secondary" id="createFileHoldBtn">${icon("shield")}Hold files</button>` : ""}</div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Matter</th><th>Scope</th><th>Target</th><th>Placed</th><th>Status</th><th></th></tr></thead><tbody>${fileHolds.map((hold) => `<tr><td><b>${esc(hold.name || "Untitled hold")}</b>${hold.reason ? `<br><small class="muted">${esc(hold.reason)}</small>` : ""}</td><td>${esc(hold.scope)}</td><td>${esc(hold.fileName || hold.userEmail || "All files")}</td><td class="cell-sub">${formatDate(hold.createdAt, { time: true })}</td><td>${hold.status === "active" ? badge("active") : `<span class="badge neutral">Released</span>`}</td><td>${canManage && hold.status === "active" ? `<button class="btn small ghost" data-release-file-hold="${esc(hold.id)}">Release</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6"><div class="empty-mini">No Cabinet holds.</div></td></tr>`}</tbody></table></div></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Share approvals</h2><p>External Cabinet links waiting for an administrator decision.</p></div><span class="badge ${shareRequests.filter((item) => item.state === "pending").length ? "system" : "neutral"}">${shareRequests.filter((item) => item.state === "pending").length} pending</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>File</th><th>Requester</th><th>Recipient</th><th>Access</th><th>State</th><th></th></tr></thead><tbody>${shareRequests.map((item) => `<tr><td><b>${esc(item.fileName || item.fileId)}</b></td><td>${esc(item.requesterEmail || "")}</td><td>${esc(item.recipientEmail || "Anyone with the link")}</td><td>${esc(item.access)}</td><td><span class="badge ${item.state === "approved" ? "active" : item.state === "denied" ? "suspended" : "pending"}">${esc(item.state)}</span></td><td>${item.state === "pending" && can("policies.manage") ? `<button class="btn small ghost" data-share-request="${esc(item.id)}" data-decision="approve">Approve</button> <button class="btn small ghost" data-share-request="${esc(item.id)}" data-decision="deny">Deny</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="6"><div class="empty-mini">No external share requests.</div></td></tr>`}</tbody></table></div></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>eDiscovery review queue</h2><p>Reviewers can mark items responsive or non-responsive before production.</p></div><span class="badge ${reviews.filter((item) => item.status === "pending").length ? "system" : "neutral"}">${reviews.filter((item) => item.status === "pending").length} pending</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Type</th><th>Item</th><th>Status</th><th>Reviewer</th><th></th></tr></thead><tbody>${reviews.map((item) => `<tr><td><span class="badge neutral">${esc(item.itemType)}</span></td><td><b>${esc(item.subject || item.itemId)}</b></td><td><span class="badge ${item.status === "approved" ? "active" : item.status === "rejected" ? "suspended" : "pending"}">${esc(item.status)}</span></td><td>${esc(item.reviewerEmail || "—")}</td><td>${item.status === "pending" && can("legal.review") ? `<button class="btn small ghost" data-review-decide="${esc(item.id)}" data-review-status="approved">Approve</button> <button class="btn small ghost" data-review-decide="${esc(item.id)}" data-review-status="rejected">Reject</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="5"><div class="empty-mini">No review items.</div></td></tr>`}</tbody></table></div></div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Signed exports</h2><p>Reproducible case exports with a SHA-256 manifest and HMAC signature.</p></div><span class="badge system">Chain of custody</span></div><div class="card-pad"><div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn secondary" href="./api/legal/export?format=json&download=1" download>${icon("download")}Export case JSON</a><a class="btn secondary" href="./api/legal/export?format=mbox&download=1" download>${icon("download")}Export case MBOX</a><a class="btn secondary" href="./api/audit/export?download=1" download>${icon("download")}Export signed audit bundle</a></div></div></div>
       <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Recent offboarding</h2><p>Accounts closed through the one-click workflow, including mailbox handoff and preservation choices.</p></div><span class="badge neutral">${jobs.length} recent</span></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Time</th><th>User</th><th>Transfer</th><th>Preservation</th><th>Status</th></tr></thead><tbody>${jobs.slice(0, 10).map((job) => `<tr><td class="cell-sub">${formatDate(job.createdAt, { time: true })}</td><td><b>${esc(job.userEmail || "—")}</b><br><small class="muted">${esc(job.userName || "")}</small></td><td>${esc(job.transferToEmail || "No delegate")}</td><td>${job.createLegalHold ? "Legal hold" : job.retainMailbox ? "Mailbox retained" : "Mailbox deactivated"}${job.autoReply ? " · auto-reply" : ""}</td><td>${job.status === "completed" ? badge("active") : badge("failed")}</td></tr>`).join("") || `<tr><td colspan="5"><div class="empty-mini">No offboarding jobs yet.</div></td></tr>`}</tbody></table></div></div></div>`;
     $("#createHoldBtn")?.addEventListener("click", openHoldModal);
     $$("[data-release-hold]").forEach((button) => button.addEventListener("click", () => releaseLegalHold(button.dataset.releaseHold)));
+    $("#createFileHoldBtn")?.addEventListener("click", openFileHoldModal);
+    $$("[data-release-file-hold]").forEach((button) => button.addEventListener("click", () => releaseFileHold(button.dataset.releaseFileHold)));
+    $$("[data-share-request]").forEach((button) => button.addEventListener("click", () => decideFileShareRequest(button.dataset.shareRequest, button.dataset.decision)));
+    $$("[data-review-decide]").forEach((button) => button.addEventListener("click", () => decideReviewItem(button.dataset.reviewDecide, button.dataset.reviewStatus)));
     $("#discoveryForm")?.addEventListener("submit", (event) => {
       event.preventDefault();
       searchDiscovery(0).catch(showError);
@@ -2127,6 +2217,59 @@ async function releaseLegalHold(id) {
   try {
     await api("legal/holds/" + encodeURIComponent(id) + "/release", { method: "POST", body: {} });
     toast("Legal hold released");
+    await renderCompliance();
+  } catch (error) { showError(error); }
+}
+
+function openFileHoldModal() {
+  openModal({
+    title: "Hold Cabinet files",
+    subtitle: "Files, Office versions and share links under an active hold cannot be deleted or purged.",
+    wide: true,
+    body: `<form id="fileHoldForm"><div class="field-row"><label class="field"><span>Scope</span><select id="fileHoldScope"><option value="user">One user's files</option><option value="tenant">Tenant-wide</option><option value="file">One file</option></select></label><label class="field"><span>User email</span><input id="fileHoldEmail" type="email" placeholder="custodian@company.com"></label></div><label class="field"><span>File ID</span><input id="fileHoldFileId" placeholder="Only for a single-file hold"></label><label class="field"><span>Matter name</span><input id="fileHoldName" placeholder="Litigation hold · Matter 2026-014" required></label><label class="field"><span>Reason or instructions</span><textarea id="fileHoldReason" rows="3"></textarea></label></form>`,
+    footer: `<button class="btn secondary" data-modal-close>Cancel</button><button class="btn primary" data-modal-submit="fileHoldForm">${icon("shield")}Hold files</button>`
+  });
+}
+
+async function submitFileHoldForm() {
+  const scope = $("#fileHoldScope")?.value || "user";
+  const body = {
+    scope,
+    email: $("#fileHoldEmail")?.value.trim() || "",
+    fileId: $("#fileHoldFileId")?.value.trim() || "",
+    name: $("#fileHoldName")?.value.trim() || "",
+    reason: $("#fileHoldReason")?.value.trim() || ""
+  };
+  if (!body.name) throw new Error("Give the hold a matter name");
+  if (scope === "user" && !body.email) throw new Error("Enter the user email");
+  if (scope === "file" && !body.fileId) throw new Error("Enter the file ID");
+  await api("files/holds", { method: "POST", body });
+  closeModal();
+  toast("Cabinet hold placed");
+  await renderCompliance();
+}
+
+async function releaseFileHold(id) {
+  if (!(await confirmDialog("Release Cabinet hold", "Deletion and retention will be allowed again for this file scope. The release is audited.", "Release hold", true))) return;
+  try {
+    await api("files/holds/" + encodeURIComponent(id) + "/release", { method: "POST", body: {} });
+    toast("Cabinet hold released");
+    await renderCompliance();
+  } catch (error) { showError(error); }
+}
+
+async function decideFileShareRequest(id, decision) {
+  try {
+    await api("files/share-requests/" + encodeURIComponent(id) + "/decide", { method: "POST", body: { decision } });
+    toast(decision === "approve" ? "Share approved" : "Share denied");
+    await renderCompliance();
+  } catch (error) { showError(error); }
+}
+
+async function decideReviewItem(id, status) {
+  try {
+    await api("legal/reviews/" + encodeURIComponent(id), { method: "PATCH", body: { status } });
+    toast(status === "approved" ? "Item approved" : "Item rejected");
     await renderCompliance();
   } catch (error) { showError(error); }
 }
@@ -2491,6 +2634,7 @@ document.addEventListener("click", async (event) => {
     if (action === "save-ai") return saveAI();
     if (action === "test-ai") return saveAI({ test: true });
     if (action === "run-retention") return runRetention();
+    if (action === "run-file-retention") return runFileRetention();
     if (action === "release-quarantine") return releaseQuarantine(actionEl);
     if (action === "reload-policies") return renderPolicies();
     if (action === "open-security") return openSecurityModal();
@@ -2531,6 +2675,7 @@ document.addEventListener("click", async (event) => {
       else if (formId === "disableTotpForm") await submitDisableAdminTOTP();
       else if (formId === "adminPasswordForm") await submitAdminPassword();
       else if (formId === "holdForm") await submitHoldForm();
+      else if (formId === "fileHoldForm") await submitFileHoldForm();
     } catch (error) { showError(error); setBusy(submit, false); }
   }
 });

@@ -21440,6 +21440,7 @@ async function createShareForFile(file, options = {}) {
       recipientEmail: options.recipientEmail || ""
     }
   });
+  if (data.pendingApproval) return { pendingApproval: true };
   return data.share;
 }
 
@@ -21449,6 +21450,10 @@ async function copyFileLink(fileId) {
   if (file.shared) { showToast("Only the file owner can create a share link"); return; }
   try {
     const share = await createShareForFile(file);
+    if (share.pendingApproval) {
+      showToast("Share approval requested. An administrator must approve it before a link is created.");
+      return;
+    }
     const copied = await copyTextToClipboard(share.url);
     showToast(copied ? "Share link copied" : share.url);
     if (!(file.sharedWith || []).length) file.sharedWith = ["External link"];
@@ -23274,6 +23279,10 @@ async function createShareLink() {
       expiresDays: Number(document.getElementById("shareExpiry").value),
       recipientEmail: (document.getElementById("shareRecipient")?.value || "").trim()
     });
+    if (share.pendingApproval) {
+      showToast("Share approval requested. An administrator must approve it before a link is created.");
+      return;
+    }
     state.fileShareList = [{ ...share, recipient: share.recipientEmail || "", active: true, accessCount: 0 }, ...(state.fileShareList || [])];
     renderSharePermissions();
     shareUrl.value = share.url;
