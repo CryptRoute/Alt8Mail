@@ -20,15 +20,15 @@ func TestLoginLimiterDefaultEntryCap(t *testing.T) {
 }
 
 func TestLoginLimiterEntryCapEvictsOldest(t *testing.T) {
-	limiter := newLoginLimiter(5, time.Minute)
+	limiter := newLoginLimiter(5, 10*time.Minute)
 	limiter.maxEntries = 3
-	limiter.lastSweep = time.Now()
-	for _, ip := range []string{"a", "b", "c"} {
-		limiter.Fail(ip)
-	}
-	if len(limiter.attempts) != 3 {
-		t.Fatalf("entry count = %d, want 3", len(limiter.attempts))
-	}
+	// Pre-populate with explicit, staggered reset times so "oldest" does not
+	// depend on the resolution of the system clock.
+	now := time.Now()
+	limiter.attempts["a"] = limiterEntry{Count: 1, ResetAt: now.Add(time.Minute)}
+	limiter.attempts["b"] = limiterEntry{Count: 1, ResetAt: now.Add(2 * time.Minute)}
+	limiter.attempts["c"] = limiterEntry{Count: 1, ResetAt: now.Add(3 * time.Minute)}
+	limiter.lastSweep = now // keep the periodic sweep out of the way
 
 	// An existing counter still increments at capacity and must not evict
 	// another address.
@@ -36,8 +36,14 @@ func TestLoginLimiterEntryCapEvictsOldest(t *testing.T) {
 	if len(limiter.attempts) != 3 || limiter.attempts["b"].Count != 2 {
 		t.Fatalf("existing counter was not preserved: %#v", limiter.attempts)
 	}
+	for _, ip := range []string{"a", "b", "c"} {
+		if _, exists := limiter.attempts[ip]; !exists {
+			t.Fatalf("incrementing an existing entry evicted %q: %#v", ip, limiter.attempts)
+		}
+	}
 
-	// A new address evicts the oldest entry (earliest reset).
+	// A new address evicts the entry with the earliest reset, not whichever
+	// entry the map happened to iterate first.
 	limiter.Fail("d")
 	if len(limiter.attempts) != 3 {
 		t.Fatalf("entry count after cap = %d, want 3", len(limiter.attempts))
@@ -49,6 +55,9 @@ func TestLoginLimiterEntryCapEvictsOldest(t *testing.T) {
 		if _, exists := limiter.attempts[ip]; !exists {
 			t.Fatalf("active entry %q was evicted: %#v", ip, limiter.attempts)
 		}
+	}
+	if limiter.attempts["b"].Count != 2 {
+		t.Fatalf("new address eviction changed an existing counter: %#v", limiter.attempts)
 	}
 }
 
