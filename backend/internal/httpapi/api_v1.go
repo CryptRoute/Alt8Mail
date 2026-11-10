@@ -387,5 +387,8 @@ func (s *Server) registerAPIAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /webhooks/{id}", s.adminRequirePermission("webhooks.manage", s.adminDeleteWebhook))
 	mux.HandleFunc("POST /webhooks/{id}/test", s.adminRequirePermission("webhooks.manage", s.adminTestWebhook))
 	mux.HandleFunc("GET /webhooks/deliveries", s.adminRequirePermission("api.read", s.adminListWebhookDeliveries))
+	mux.HandleFunc("GET /crm/state", s.adminRequirePermission("crm.read", s.adminCRMState))
+	mux.HandleFunc("GET /crm/records", s.adminRequirePermission("crm.read", s.adminCRMRecords))
+	mux.HandleFunc("POST /crm/sync", s.adminRequirePermission("crm.manage", s.adminSyncCRM))
 
 }

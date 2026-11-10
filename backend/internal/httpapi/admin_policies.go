@@ -48,6 +48,8 @@ var adminPermissionCatalog = []permissionDescriptor{
 	{"api.read", "View API keys and webhooks", "Developer", "Read tenant API keys and webhook delivery state.", "low"},
 	{"api.manage", "Manage API keys", "Developer", "Create and revoke tenant API keys.", "critical"},
 	{"webhooks.manage", "Manage webhooks", "Developer", "Create, test and delete signed webhook endpoints.", "high"},
+	{"crm.read", "View CRM cache", "Integrations", "Read synchronized CRM contacts and sync state.", "low"},
+	{"crm.manage", "Sync CRM", "Integrations", "Run CRM synchronization from a connected provider.", "high"},
 	{"siem.read", "View SIEM integration", "Integrations", "Read audit webhook configuration and delivery state.", "low"},
 	{"siem.manage", "Manage SIEM integration", "Integrations", "Configure signed audit webhooks and rotate signing secrets.", "critical"},
 	{"sessions.manage", "Manage sessions", "Security", "Revoke user or admin sign-in sessions.", "high"},

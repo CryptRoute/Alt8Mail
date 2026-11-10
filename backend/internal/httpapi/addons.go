@@ -624,7 +624,7 @@ func (s *Server) addonActiveConnection(ctx context.Context, tenantID, addonID, u
 		SELECT id, COALESCE(owner_user_id::text, ''), account_label, credentials_sealed, config
 		FROM addon_connections
 		WHERE tenant_id = $1 AND addon_id = $2 AND connection_scope = $3
-		  AND status = 'active' AND ($3 = 'tenant' OR owner_user_id = $4)
+		  AND status = 'active' AND ($3 = 'tenant' OR owner_user_id = NULLIF($4,'')::uuid)
 		ORDER BY updated_at DESC LIMIT 1
 	`, tenantID, addonID, scope, userID).Scan(&record.ID, &record.OwnerID, &record.AccountLabel, &record.Sealed, &rawConfig)
 	if err != nil {

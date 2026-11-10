@@ -97,6 +97,7 @@ type Server struct {
 	apiKeyLimits        map[string]*loginLimiter
 	webhookPost         func(context.Context, string, map[string]string, []byte) (int, error)
 	webhookAllowPrivate bool
+	hubspotBaseURL      string
 }
 
 type Options struct {

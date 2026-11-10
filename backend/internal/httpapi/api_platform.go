@@ -12,7 +12,7 @@ import (
 
 var apiSupportedScopes = []string{"mail.read", "mail.send", "tasks.read", "tasks.write", "calendar.read"}
 
-var apiSupportedWebhookEvents = []string{"message.queued", "task.created", "calendar.created", "file.shared", "webhook.test"}
+var apiSupportedWebhookEvents = []string{"message.queued", "task.created", "calendar.created", "file.shared", "crm.synced", "webhook.test"}
 
 type apiPrincipal struct {
 	KeyID    string
