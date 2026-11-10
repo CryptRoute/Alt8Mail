@@ -442,6 +442,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerSenderControlRoutes(mux)
 	s.registerFollowUpRoutes(mux)
 	s.registerMailMergeRoutes(mux)
+	s.registerBookingRoutes(mux)
 	s.registerMCPRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
