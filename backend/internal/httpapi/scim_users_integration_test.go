@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -297,6 +299,11 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		if err := pool.QueryRow(ctx, `SELECT count(*) FROM calendars WHERE user_id = $1`, aliceID).Scan(&calendars); err != nil || calendars == 0 {
 			t.Fatalf("calendar not provisioned: count=%d err=%v", calendars, err)
 		}
+		// app_states must exist for an active user so bootstrap/onboarding work.
+		var appStates int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM app_states WHERE user_id = $1`, aliceID).Scan(&appStates); err != nil || appStates != 1 {
+			t.Fatalf("app_states for active SCIM user = %d err=%v", appStates, err)
+		}
 	})
 
 	t.Run("idempotent replay returns the existing resource", func(t *testing.T) {
@@ -363,6 +370,19 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		var mailboxActive bool
 		if err := pool.QueryRow(ctx, `SELECT active FROM mailboxes WHERE user_id = $1`, carolID).Scan(&mailboxActive); err != nil || mailboxActive {
 			t.Fatalf("mailbox active = %v err=%v", mailboxActive, err)
+		}
+		var appStates int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM app_states WHERE user_id = $1`, carolID).Scan(&appStates); err != nil || appStates != 0 {
+			t.Fatalf("suspended SCIM user should have no app_states: count=%d err=%v", appStates, err)
+		}
+
+		// Reactivating initializes app_states so the first sign-in can bootstrap.
+		recorder := scimRequest(tokenA, http.MethodPatch, "/scim/v2/Users/"+carolID, "", `{"Operations":[{"op":"replace","path":"active","value":true}]}`)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("reactivate suspended user status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM app_states WHERE user_id = $1`, carolID).Scan(&appStates); err != nil || appStates != 1 {
+			t.Fatalf("app_states after reactivation = %d err=%v", appStates, err)
 		}
 	})
 
@@ -464,6 +484,67 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		assertSCIMError(t, scimRequest(tokenA, http.MethodGet, "/scim/v2/Users/not-a-uuid", "", ""), http.StatusNotFound, "")
 	})
 
+	t.Run("concurrent creates with the same externalId yield one success and one conflict", func(t *testing.T) {
+		externalID := "ext-race"
+		emails := []string{"race1@" + domainA, "race2@" + domainA}
+		start := make(chan struct{})
+		results := make([]*httptest.ResponseRecorder, len(emails))
+		var wait sync.WaitGroup
+		for index := range emails {
+			wait.Add(1)
+			go func(index int) {
+				defer wait.Done()
+				<-start
+				results[index] = scimRequest(tokenA, http.MethodPost, "/scim/v2/Users", "",
+					createBody(emails[index], externalID, "Race User", "Race", "User", nil, ""))
+			}(index)
+		}
+		close(start)
+		wait.Wait()
+
+		codes := []int{results[0].Code, results[1].Code}
+		sort.Ints(codes)
+		if codes[0] != http.StatusCreated || codes[1] != http.StatusConflict {
+			t.Fatalf("concurrent create statuses = %v: %s | %s", codes, results[0].Body.String(), results[1].Body.String())
+		}
+		for _, recorder := range results {
+			if recorder.Code == http.StatusConflict {
+				assertSCIMError(t, recorder, http.StatusConflict, "uniqueness")
+			}
+		}
+		var winnerID, winnerEmail string
+		if err := pool.QueryRow(ctx, `
+			SELECT id::text, email::text FROM users WHERE tenant_id = $1 AND scim_external_id = $2
+		`, tenantA, externalID).Scan(&winnerID, &winnerEmail); err != nil {
+			t.Fatalf("load race winner: %v", err)
+		}
+		if winnerID == "" || (winnerEmail != emails[0] && winnerEmail != emails[1]) {
+			t.Fatalf("race winner = %q %q", winnerID, winnerEmail)
+		}
+		var users, mailboxes int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM users WHERE tenant_id = $1 AND (email = $2 OR email = $3)
+		`, tenantA, emails[0], emails[1]).Scan(&users); err != nil || users != 1 {
+			t.Fatalf("users after concurrent create = %d err=%v", users, err)
+		}
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM mailboxes mb JOIN users u ON u.id = mb.user_id
+			WHERE u.tenant_id = $1 AND (u.email = $2 OR u.email = $3)
+		`, tenantA, emails[0], emails[1]).Scan(&mailboxes); err != nil || mailboxes != 1 {
+			t.Fatalf("mailboxes after concurrent create = %d err=%v", mailboxes, err)
+		}
+		for _, recorder := range results {
+			if recorder.Code != http.StatusCreated {
+				continue
+			}
+			var created map[string]any
+			decode(t, recorder, &created)
+			if created["id"] != winnerID {
+				t.Fatalf("created response id = %#v, want winner %q", created["id"], winnerID)
+			}
+		}
+	})
+
 	t.Run("cross-tenant reads and writes are invisible", func(t *testing.T) {
 		for _, tc := range []struct {
 			method string
@@ -488,6 +569,14 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		decode(t, recorder, &payload)
 		if payload.TotalResults != 0 {
 			t.Fatalf("cross-tenant filter leaked %d users", payload.TotalResults)
+		}
+		recorder = scimRequest(tokenB, http.MethodGet, "/scim/v2/Users?filter=externalId%20eq%20%22ext-1%22", "", "")
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("cross-tenant externalId filter status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		decode(t, recorder, &payload)
+		if payload.TotalResults != 0 {
+			t.Fatalf("cross-tenant externalId filter leaked %d users", payload.TotalResults)
 		}
 		if recorder := scimRequest(tokenB, http.MethodGet, "/scim/v2/Users", "", ""); strings.Contains(recorder.Body.String(), emailA) {
 			t.Fatalf("cross-tenant list leaked tenant A users: %s", recorder.Body.String())
@@ -546,6 +635,46 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		}
 		assertSCIMError(t, put(fmt.Sprintf(`{"userName":%q,"externalId":"ext-1b-conflict"}`, emailA)), http.StatusConflict, "uniqueness")
 
+		// Explicit JSON null clears externalId; an omitted attribute keeps it.
+		recorder = put(fmt.Sprintf(`{"userName":%q,"externalId":null}`, emailA))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("PUT null externalId status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		nullResource := map[string]any{}
+		decode(t, recorder, &nullResource)
+		if _, exists := nullResource["externalId"]; exists {
+			t.Fatalf("PUT null externalId was not cleared: %#v", nullResource["externalId"])
+		}
+		if user = loadUser(t, aliceID); user.ExternalID != nil {
+			t.Fatalf("PUT null externalId stored %#v", user.ExternalID)
+		}
+
+		// Seed every live-authentication artefact so deprovision can prove it
+		// clears them while retaining the passkey credential.
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO auth_challenges (id, user_id, tenant_id, remember, expires_at)
+			VALUES ($1, $2, $3, true, now() + interval '10 minutes')
+		`, randomToken(16), aliceID, tenantA); err != nil {
+			t.Fatalf("seed auth challenge: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO admin_sessions (id, user_id, tenant_id, active_tenant_id, csrf_token, expires_at)
+			VALUES ($1, $2, $3, $3, $4, now() + interval '1 hour')
+		`, hashToken(randomToken(16)), aliceID, tenantA, randomToken(16)); err != nil {
+			t.Fatalf("seed admin session: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO trusted_devices (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '30 days')
+		`, aliceID, hashToken(randomToken(16))); err != nil {
+			t.Fatalf("seed trusted device: %v", err)
+		}
+		credentialID := []byte("cred-" + randomToken(8))
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO webauthn_credentials (user_id, credential_id, public_key) VALUES ($1, $2, $3)
+		`, aliceID, credentialID, []byte("public-key")); err != nil {
+			t.Fatalf("seed passkey: %v", err)
+		}
+
 		recorder = put(fmt.Sprintf(`{"userName":%q,"active":false}`, emailA))
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("PUT deactivate status = %d: %s", recorder.Code, recorder.Body.String())
@@ -561,6 +690,19 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		var mailboxActive bool
 		if err := pool.QueryRow(ctx, `SELECT active FROM mailboxes WHERE user_id = $1`, aliceID).Scan(&mailboxActive); err != nil || mailboxActive {
 			t.Fatalf("PUT deactivate mailbox active = %v err=%v", mailboxActive, err)
+		}
+		var authChallenges, adminSessions, trustedDevices, passkeys int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM auth_challenges WHERE user_id = $1`, aliceID).Scan(&authChallenges); err != nil || authChallenges != 0 {
+			t.Fatalf("pending auth challenges after deactivate = %d err=%v", authChallenges, err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM admin_sessions WHERE user_id = $1`, aliceID).Scan(&adminSessions); err != nil || adminSessions != 0 {
+			t.Fatalf("admin sessions after deactivate = %d err=%v", adminSessions, err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM trusted_devices WHERE user_id = $1`, aliceID).Scan(&trustedDevices); err != nil || trustedDevices != 0 {
+			t.Fatalf("trusted devices after deactivate = %d err=%v", trustedDevices, err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM webauthn_credentials WHERE user_id = $1`, aliceID).Scan(&passkeys); err != nil || passkeys != 1 {
+			t.Fatalf("passkeys after deactivate = %d err=%v", passkeys, err)
 		}
 		var sessions, messages, attachments, events int
 		if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id = $1`, aliceID).Scan(&sessions); err != nil || sessions != 0 {
@@ -640,6 +782,28 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		seedSession(t, tenantA, bobID)
 		seedSession(t, tenantA, bobID)
 		seedMail(t, tenantA, bobID)
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO auth_challenges (id, user_id, tenant_id, remember, expires_at)
+			VALUES ($1, $2, $3, true, now() + interval '10 minutes')
+		`, randomToken(16), bobID, tenantA); err != nil {
+			t.Fatalf("seed auth challenge: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO admin_sessions (id, user_id, tenant_id, active_tenant_id, csrf_token, expires_at)
+			VALUES ($1, $2, $3, $3, $4, now() + interval '1 hour')
+		`, hashToken(randomToken(16)), bobID, tenantA, randomToken(16)); err != nil {
+			t.Fatalf("seed admin session: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO trusted_devices (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '30 days')
+		`, bobID, hashToken(randomToken(16))); err != nil {
+			t.Fatalf("seed trusted device: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO webauthn_credentials (user_id, credential_id, public_key) VALUES ($1, $2, $3)
+		`, bobID, []byte("cred-"+randomToken(8)), []byte("public-key")); err != nil {
+			t.Fatalf("seed passkey: %v", err)
+		}
 		recorder := scimRequest(tokenA, http.MethodDelete, "/scim/v2/Users/"+bobID, "", "")
 		if recorder.Code != http.StatusNoContent {
 			t.Fatalf("DELETE status = %d: %s", recorder.Code, recorder.Body.String())
@@ -658,6 +822,19 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		var sessions, messages, attachments, events, calendars int
 		if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id = $1`, bobID).Scan(&sessions); err != nil || sessions != 0 {
 			t.Fatalf("DELETE sessions = %d err=%v", sessions, err)
+		}
+		var authChallenges, adminSessions, trustedDevices, passkeys int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM auth_challenges WHERE user_id = $1`, bobID).Scan(&authChallenges); err != nil || authChallenges != 0 {
+			t.Fatalf("DELETE auth challenges = %d err=%v", authChallenges, err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM admin_sessions WHERE user_id = $1`, bobID).Scan(&adminSessions); err != nil || adminSessions != 0 {
+			t.Fatalf("DELETE admin sessions = %d err=%v", adminSessions, err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM trusted_devices WHERE user_id = $1`, bobID).Scan(&trustedDevices); err != nil || trustedDevices != 0 {
+			t.Fatalf("DELETE trusted devices = %d err=%v", trustedDevices, err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM webauthn_credentials WHERE user_id = $1`, bobID).Scan(&passkeys); err != nil || passkeys != 1 {
+			t.Fatalf("DELETE passkeys = %d err=%v", passkeys, err)
 		}
 		if err := pool.QueryRow(ctx, `SELECT count(*) FROM mail_messages WHERE user_id = $1`, bobID).Scan(&messages); err != nil || messages != 1 {
 			t.Fatalf("DELETE mail messages = %d err=%v", messages, err)
@@ -707,15 +884,21 @@ func TestSCIMUsersIntegration(t *testing.T) {
 	})
 
 	t.Run("audit records fixed actions without secrets", func(t *testing.T) {
-		required := []string{
-			"scim.user_created", "scim.user_updated", "scim.user_deactivated",
-			"scim.user_reactivated", "scim.user_deleted",
+		// Audit writes are asynchronous; wait for the full expected set rather
+		// than for the first row of each action.
+		required := map[string]int{
+			"scim.user_created":     3,
+			"scim.user_updated":     1,
+			"scim.user_deactivated": 2,
+			"scim.user_reactivated": 2,
+			"scim.user_deleted":     2,
 		}
 		type auditRow struct {
 			action, actor, target, detail string
 		}
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(10 * time.Second)
 		var rows []auditRow
+		var counts map[string]int
 		for {
 			rows = nil
 			results, err := pool.Query(ctx, `
@@ -739,13 +922,13 @@ func TestSCIMUsersIntegration(t *testing.T) {
 			if err != nil {
 				t.Fatalf("iterate audit rows: %v", err)
 			}
-			found := map[string]bool{}
+			counts = map[string]int{}
 			for _, row := range rows {
-				found[row.action] = true
+				counts[row.action]++
 			}
 			complete := true
-			for _, action := range required {
-				if !found[action] {
+			for action, minimum := range required {
+				if counts[action] < minimum {
 					complete = false
 					break
 				}
@@ -754,7 +937,7 @@ func TestSCIMUsersIntegration(t *testing.T) {
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("audit actions missing; found %#v", found)
+				t.Fatalf("audit actions incomplete; counts %#v", counts)
 			}
 			time.Sleep(50 * time.Millisecond)
 		}

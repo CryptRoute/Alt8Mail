@@ -16,6 +16,9 @@ import (
 
 func scimStringPtr(value string) *string { return &value }
 func scimBoolPtr(value bool) *bool       { return &value }
+func scimNullableText(value *string) scimNullableString {
+	return scimNullableString{Set: true, Value: value}
+}
 
 func scimUserFixture() scimUserRow {
 	created := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
@@ -219,7 +222,7 @@ func TestSCIMReplaceChanges(t *testing.T) {
 	changes, handlerErr = scimReplaceChanges(scimUserPayload{
 		UserName:   scimStringPtr("ALICE@EXAMPLE.TEST"),
 		Emails:     []scimUserEmailPayload{{Value: "Alice@Example.Test", Primary: scimBoolPtr(true)}},
-		ExternalID: scimStringPtr(""),
+		ExternalID: scimNullableText(scimStringPtr("")),
 		Active:     scimBoolPtr(false),
 		Name:       &scimUserNamePayload{Formatted: scimStringPtr("Alice Updated"), GivenName: scimStringPtr("Alicia"), FamilyName: scimStringPtr("Updated")},
 	}, existing)
@@ -247,6 +250,96 @@ func TestSCIMReplaceChanges(t *testing.T) {
 	changes, handlerErr = scimReplaceChanges(scimUserPayload{}, existing)
 	if handlerErr != nil || changes.Name != nil || changes.ExternalIDSet || changes.ActiveSet {
 		t.Fatalf("empty payload should change nothing: %#v %v", changes, handlerErr)
+	}
+}
+
+func TestSCIMExternalIDNullSemantics(t *testing.T) {
+	existing := scimUserFixture()
+	var omitted scimUserPayload
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted payload: %v", err)
+	}
+	if omitted.ExternalID.Set {
+		t.Fatalf("omitted externalId should stay unset: %#v", omitted.ExternalID)
+	}
+	changes, handlerErr := scimReplaceChanges(omitted, existing)
+	if handlerErr != nil || changes.ExternalIDSet {
+		t.Fatalf("omitted externalId changed state: %#v %v", changes, handlerErr)
+	}
+
+	var explicitNull scimUserPayload
+	if err := json.Unmarshal([]byte(`{"externalId":null}`), &explicitNull); err != nil {
+		t.Fatalf("decode null payload: %v", err)
+	}
+	if !explicitNull.ExternalID.Set || explicitNull.ExternalID.Value != nil {
+		t.Fatalf("explicit null not distinguished: %#v", explicitNull.ExternalID)
+	}
+	changes, handlerErr = scimReplaceChanges(explicitNull, existing)
+	if handlerErr != nil || !changes.ExternalIDSet || changes.ExternalID != nil {
+		t.Fatalf("explicit null did not clear externalId: %#v %v", changes, handlerErr)
+	}
+
+	var empty scimUserPayload
+	if err := json.Unmarshal([]byte(`{"externalId":""}`), &empty); err != nil {
+		t.Fatalf("decode empty payload: %v", err)
+	}
+	changes, handlerErr = scimReplaceChanges(empty, existing)
+	if handlerErr != nil || !changes.ExternalIDSet || changes.ExternalID != nil {
+		t.Fatalf("empty externalId did not clear: %#v %v", changes, handlerErr)
+	}
+}
+
+func TestSCIMControlCharacterValidation(t *testing.T) {
+	existing := scimUserFixture()
+	_, handlerErr := scimReplaceChanges(scimUserPayload{Name: &scimUserNamePayload{GivenName: scimStringPtr("Bad\u0000Name")}}, existing)
+	if handlerErr == nil || handlerErr.status != http.StatusBadRequest || handlerErr.scimType != "invalidValue" {
+		t.Fatalf("NUL in name error = %#v", handlerErr)
+	}
+	_, handlerErr = scimReplaceChanges(scimUserPayload{ExternalID: scimNullableText(scimStringPtr("bad\nid"))}, existing)
+	if handlerErr == nil || handlerErr.status != http.StatusBadRequest || handlerErr.scimType != "invalidValue" {
+		t.Fatalf("control in externalId error = %#v", handlerErr)
+	}
+	if _, _, err := scimUserName(scimStringPtr("bad\u0000@example.test")); err == nil {
+		t.Fatal("userName with NUL was accepted")
+	}
+	if !scimHasControlCharacters("a\nb") || !scimHasControlCharacters("a\x7fb") || scimHasControlCharacters("a b") {
+		t.Fatal("control-character detector is wrong")
+	}
+}
+
+func TestSCIMUserTransitionAuditEvents(t *testing.T) {
+	existing := scimUserFixture()
+	if (scimUserChanges{Name: scimStringPtr(existing.Name)}).metadataChanged(existing) {
+		t.Fatal("identical name counted as a change")
+	}
+	if !(scimUserChanges{Name: scimStringPtr("Other")}).metadataChanged(existing) {
+		t.Fatal("different name not counted as a change")
+	}
+	if (scimUserChanges{ExternalIDSet: true, ExternalID: scimStringPtr("ext-1")}).metadataChanged(existing) {
+		t.Fatal("identical externalId counted as a change")
+	}
+	if !(scimUserChanges{ExternalIDSet: true, ExternalID: nil}).metadataChanged(existing) {
+		t.Fatal("cleared externalId not counted as a change")
+	}
+	if (scimUserChanges{ActiveSet: true, Active: false}).metadataChanged(existing) {
+		t.Fatal("active change counted as metadata change")
+	}
+	cases := []struct {
+		name       string
+		transition scimUserTransition
+		want       string
+	}{
+		{name: "no op", transition: scimUserTransition{}, want: ""},
+		{name: "metadata", transition: scimUserTransition{MetadataChanged: true}, want: "scim.user_updated"},
+		{name: "deactivate with metadata", transition: scimUserTransition{MetadataChanged: true, Deactivated: true}, want: "scim.user_updated,scim.user_deactivated"},
+		{name: "reactivate", transition: scimUserTransition{Reactivated: true}, want: "scim.user_reactivated"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := strings.Join(scimUserAuditEvents(tc.transition), ","); got != tc.want {
+				t.Fatalf("events = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -413,6 +506,8 @@ func TestSCIMPatchChanges(t *testing.T) {
 			{name: "deep name path", payload: patch(scimPatchOperation{Op: "replace", Path: "name.foo.bar", Value: value(`"x"`)}), status: 400, scimType: "invalidPath"},
 			{name: "active wrong type", payload: patch(scimPatchOperation{Op: "replace", Path: "active", Value: value(`"yes"`)}), status: 400, scimType: "invalidValue"},
 			{name: "externalId wrong type", payload: patch(scimPatchOperation{Op: "replace", Path: "externalId", Value: value(`42`)}), status: 400, scimType: "invalidValue"},
+			{name: "control character in name", payload: patch(scimPatchOperation{Op: "replace", Path: "name.givenName", Value: value(`"bad\nname"`)}), status: 400, scimType: "invalidValue"},
+			{name: "control character in externalId", payload: patch(scimPatchOperation{Op: "replace", Path: "externalId", Value: value(`"bad\nid"`)}), status: 400, scimType: "invalidValue"},
 			{name: "name wrong type", payload: patch(scimPatchOperation{Op: "replace", Path: "name", Value: value(`"Alice"`)}), status: 400, scimType: "invalidValue"},
 		}
 		for _, tc := range cases {
@@ -442,6 +537,9 @@ func TestSCIMCreateValidationWithoutDatabase(t *testing.T) {
 		{name: "blank userName", body: `{"userName":"   "}`, contentType: "application/json"},
 		{name: "not an email", body: `{"userName":"alice"}`, contentType: "application/json"},
 		{name: "spaces in email", body: `{"userName":"a b@example.test"}`, contentType: "application/json"},
+		{name: "NUL in name", body: `{"userName":"alice@example.test","name":{"formatted":"Bad\u0000Name"}}`, contentType: "application/json"},
+		{name: "control in externalId", body: `{"userName":"alice@example.test","externalId":"bad\u0001id"}`, contentType: "application/json"},
+		{name: "NUL in userName", body: `{"userName":"bad\u0000@example.test"}`, contentType: "application/json"},
 		{name: "oversized body", body: `{"userName":"alice@example.test","pad":"` + strings.Repeat("a", int(scimUserBodyLimit)) + `"}`, contentType: "application/json"},
 	}
 	for _, tc := range cases {
