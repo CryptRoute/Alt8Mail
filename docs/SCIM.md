@@ -180,6 +180,9 @@ Notes:
   password hash and `force_password_change`; no password or role can be set
   through SCIM Users.
 - `active=false` suspends the account. `active=true` reactivates it.
+- The Users list is the tenant's full directory, including accounts created
+  manually in the admin console, so deprovisioning can address any account the
+  IdP knows.
 - `meta.version` is a weak ETag derived from the last modification time. It is
   informational; conditional `If-Match` requests are not implemented.
 
