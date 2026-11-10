@@ -1007,6 +1007,8 @@ const state = {
   threadMeta: new Map(),
   vipSenders: [],
   threadMutes: [],
+  mcpConnections: [],
+  mcpConnectionsLoading: false,
   teamPresence: new Map(),
   teamPresenceTimer: null,
   teamCollisionNotified: new Set(),
@@ -18808,8 +18810,44 @@ async function saveAutomaticReplies() {
   }
 }
 
+function renderMCPConnections(connections) {
+  const host = document.getElementById("mcpConnectionList");
+  if (!host) return;
+  if (!connections.length) {
+    host.innerHTML = '<div class="settings-note">No AI apps are connected. MCP clients appear here after you approve them.</div>';
+    return;
+  }
+  host.innerHTML = connections.map((connection) => `<div class="setting-row">
+    <div class="setting-copy"><strong>${esc(connection.clientName)}</strong><span>${esc((connection.scopes || []).join(" · "))} · ${connection.activeTokens || 0} active token${connection.activeTokens === 1 ? "" : "s"} · ${esc(formatListWhen(connection.createdAt))}</span></div>
+    <button class="link-btn danger-link" type="button" data-mcp-revoke="${esc(connection.id)}" ${connection.status === "revoked" ? "disabled" : ""}>${connection.status === "revoked" ? "Revoked" : "Revoke"}</button>
+  </div>`).join("");
+}
+
+async function loadMCPConnections() {
+  if (!document.getElementById("mcpConnectionList") || state.mcpConnectionsLoading) return;
+  state.mcpConnectionsLoading = true;
+  try {
+    const data = await api("/api/mcp/connections");
+    state.mcpConnections = data.connections || [];
+    renderMCPConnections(state.mcpConnections);
+  } catch {
+    const host = document.getElementById("mcpConnectionList");
+    if (host) host.innerHTML = '<div class="settings-note">Connected apps are unavailable right now.</div>';
+  } finally {
+    state.mcpConnectionsLoading = false;
+  }
+}
+
+async function revokeMCPConnection(id) {
+  await api(`/api/mcp/connections/${encodeURIComponent(id)}`, { method: "DELETE" });
+  state.mcpConnections = (state.mcpConnections || []).map((item) => item.id === id ? { ...item, status: "revoked", activeTokens: 0 } : item);
+  renderMCPConnections(state.mcpConnections);
+  showToast("AI app access revoked");
+}
+
 function renderSecuritySettings() {
   if (!twoFactorCard) return;
+  loadMCPConnections();
   const factor = state.security && state.security.twoFactor;
   const realAuth = state.mailboxMode === "imap";
   const passkeys = (factor && factor.passkeys) || [];
@@ -28202,7 +28240,7 @@ function bindEvents() {
     });
   });
   window.addEventListener("resize", closeReaderAiMenus);
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     if (!event.target.closest(".compose-mention-menu")) {
       composeSessions.forEach(closeComposeMentionMenu);
     }
@@ -28310,6 +28348,13 @@ function bindEvents() {
           renderList({ preserveScroll: true });
           showToast(isMuted ? "Conversation unmuted" : "Conversation muted");
         }).catch(showError);
+      return;
+    }
+    const mcpRevoke = event.target.closest("[data-mcp-revoke]");
+    if (mcpRevoke) {
+      if (await appConfirm({ title: "Revoke AI app access", message: "The MCP client will immediately lose its tokens and cannot read, search or draft again until re-approved.", confirmLabel: "Revoke access", tone: "danger" })) {
+        revokeMCPConnection(mcpRevoke.getAttribute("data-mcp-revoke")).catch(showError);
+      }
       return;
     }
     const claimButton = event.target.closest("[data-thread-claim]");

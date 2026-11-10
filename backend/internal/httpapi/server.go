@@ -90,6 +90,7 @@ type Server struct {
 	// automationPost is a test seam for webhook delivery; production uses the
 	// bounded public-network POST in automation.go.
 	automationPost func(context.Context, string, []byte) error
+	mcpLimit       *loginLimiter
 }
 
 type Options struct {
@@ -439,6 +440,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAutomationRoutes(mux)
 	s.registerFileCollaborationRoutes(mux)
 	s.registerSenderControlRoutes(mux)
+	s.registerMCPRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)
