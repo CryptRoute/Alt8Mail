@@ -624,13 +624,14 @@ func TestSCIMUsersMethodDispatch(t *testing.T) {
 
 func TestSCIMUserPayloadNeverRendersCredentials(t *testing.T) {
 	row := scimUserFixture()
+	row.IsSystemAdmin = true
 	resource := scimUserResource(row, "https://mail.example.test/scim/v2")
 	encoded, err := json.Marshal(resource)
 	if err != nil {
 		t.Fatalf("marshal resource: %v", err)
 	}
 	text := strings.ToLower(string(encoded))
-	for _, forbidden := range []string{"password", "passwordhash", "token", "activation"} {
+	for _, forbidden := range []string{"password", "passwordhash", "token", "activation", "systemadmin", "is_system_admin"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("resource contains %q: %s", forbidden, encoded)
 		}

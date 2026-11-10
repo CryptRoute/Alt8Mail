@@ -27,27 +27,32 @@ const (
 	// scimUserProvisionQuota matches the platform default quota assigned by
 	// the other provisioning paths.
 	scimUserProvisionQuota int64 = 16 * 1024 * 1024 * 1024
+	// scimSystemAdminDetail is returned for any attempted SCIM mutation of a
+	// platform administrator. Their lifecycle belongs to the admin console.
+	scimSystemAdminDetail = "System administrator accounts are managed in the admin console"
 )
 
 // scimUserColumns is the projection shared by every Users query. deleted_at is
-// selected so a soft-deleted account is never exposed through SCIM.
+// selected so a soft-deleted account is never exposed through SCIM, and
+// is_system_admin so platform administrators can never be mutated by SCIM.
 const scimUserColumns = `id::text, email::text, name, given_name, family_name,
-	scim_external_id, role, status, created_at, updated_at, deleted_at`
+	scim_external_id, role, status, created_at, updated_at, deleted_at, is_system_admin`
 
 // scimUserRow is an internal row. It is never marshalled directly; the SCIM
 // resource shape is built by scimUserResource.
 type scimUserRow struct {
-	ID         string
-	Email      string
-	Name       string
-	GivenName  string
-	FamilyName string
-	ExternalID *string
-	Role       string
-	Status     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	DeletedAt  *time.Time
+	ID            string
+	Email         string
+	Name          string
+	GivenName     string
+	FamilyName    string
+	ExternalID    *string
+	Role          string
+	Status        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time
+	IsSystemAdmin bool
 }
 
 // scimHandlerError carries a SCIM error envelope. It lets pure parsing helpers
@@ -327,7 +332,7 @@ func scimUserResource(row scimUserRow, base string) map[string]any {
 func scanSCIMUser(row pgx.Row) (scimUserRow, error) {
 	var user scimUserRow
 	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.GivenName, &user.FamilyName,
-		&user.ExternalID, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt)
+		&user.ExternalID, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.DeletedAt, &user.IsSystemAdmin)
 	return user, err
 }
 
@@ -1154,6 +1159,11 @@ func revokeSCIMUserAccess(ctx context.Context, tx pgx.Tx, tenantID, userID strin
 // PUT and PATCH cannot diverge.
 func (s *Server) scimApplyUserChanges(ctx context.Context, tx pgx.Tx, tenantID string, existing scimUserRow, changes scimUserChanges) (scimUserRow, scimUserTransition, *scimHandlerError) {
 	var transition scimUserTransition
+	// The row is locked by the caller, so a concurrent is_system_admin grant is
+	// either visible here or serialized behind this transaction.
+	if existing.IsSystemAdmin {
+		return existing, transition, newSCIMHandlerError(http.StatusForbidden, "mutability", scimSystemAdminDetail)
+	}
 	if changes.ExternalIDSet && changes.ExternalID != nil {
 		var conflict bool
 		if err := tx.QueryRow(ctx, `
@@ -1272,6 +1282,10 @@ func (s *Server) scimReplaceUser(w http.ResponseWriter, r *http.Request) {
 		writeSCIMError(w, http.StatusNotFound, "", "SCIM user not found")
 		return
 	}
+	if existing.IsSystemAdmin {
+		writeSCIMError(w, http.StatusForbidden, "mutability", scimSystemAdminDetail)
+		return
+	}
 	changes, handlerErr := scimReplaceChanges(payload, existing)
 	if handlerErr != nil {
 		writeSCIMHandlerError(w, handlerErr)
@@ -1326,6 +1340,10 @@ func (s *Server) scimPatchUser(w http.ResponseWriter, r *http.Request) {
 		writeSCIMError(w, http.StatusNotFound, "", "SCIM user not found")
 		return
 	}
+	if existing.IsSystemAdmin {
+		writeSCIMError(w, http.StatusForbidden, "mutability", scimSystemAdminDetail)
+		return
+	}
 	changes, handlerErr := scimPatchChanges(payload, existing)
 	if handlerErr != nil {
 		writeSCIMHandlerError(w, handlerErr)
@@ -1374,6 +1392,10 @@ func (s *Server) scimDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if existing.DeletedAt != nil {
 		writeSCIMError(w, http.StatusNotFound, "", "SCIM user not found")
+		return
+	}
+	if existing.IsSystemAdmin {
+		writeSCIMError(w, http.StatusForbidden, "mutability", scimSystemAdminDetail)
 		return
 	}
 	if existing.Role == "owner" && existing.Status == "active" {

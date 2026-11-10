@@ -91,6 +91,43 @@ func TestSCIMUsersIntegration(t *testing.T) {
 	`, tenantB, ownerBEmail).Scan(&ownerB); err != nil {
 		t.Fatalf("create owner B: %v", err)
 	}
+	adminCookie := randomToken(32)
+	adminCSRF := randomToken(24)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_sessions (id, user_id, tenant_id, active_tenant_id, csrf_token, expires_at)
+		VALUES ($1, $2, $3, $3, $4, now() + interval '1 hour')
+	`, hashToken(adminCookie), ownerB, tenantB, adminCSRF); err != nil {
+		t.Fatalf("create tenant B admin session: %v", err)
+	}
+
+	// A non-owner platform administrator must be untouchable through SCIM.
+	var systemAdminB string
+	systemAdminEmail := "sysadmin@" + domainB
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (tenant_id, email, name, role, is_system_admin, scim_external_id)
+		VALUES ($1, $2, 'System Admin B', 'member', true, 'sys-ext') RETURNING id::text
+	`, tenantB, systemAdminEmail).Scan(&systemAdminB); err != nil {
+		t.Fatalf("create system admin B: %v", err)
+	}
+	systemAdminLocal, _ := splitEmail(systemAdminEmail)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO mailboxes (tenant_id, user_id, email, domain, local_part, maildir_path, active)
+		VALUES ($1, $2, $3, $4, $5, '/tmp/scim-sysadmin/Maildir', true)
+	`, tenantB, systemAdminB, systemAdminEmail, domainB, systemAdminLocal); err != nil {
+		t.Fatalf("create system admin mailbox: %v", err)
+	}
+	var systemAdminGroup string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO groups (tenant_id, name, email, group_type, status, scim_role)
+		VALUES ($1, 'System Admins', $2, 'security', 'active', '') RETURNING id::text
+	`, tenantB, "sysadmins@"+domainB).Scan(&systemAdminGroup); err != nil {
+		t.Fatalf("create system admin group: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO group_members (group_id, user_id) VALUES ($1, $2)
+	`, systemAdminGroup, systemAdminB); err != nil {
+		t.Fatalf("add system admin to group: %v", err)
+	}
 
 	defer func() {
 		cleanup := context.Background()
@@ -120,6 +157,21 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		}
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, request)
+		return recorder
+	}
+	adminRequest := func(cookie, csrf, method, path, body string) *httptest.ResponseRecorder {
+		var reader io.Reader
+		if body != "" {
+			reader = strings.NewReader(body)
+		}
+		request := httptest.NewRequest(method, path, reader)
+		request.Header.Set("Content-Type", "application/json")
+		request.AddCookie(&http.Cookie{Name: adminSessionCookie, Value: cookie})
+		if method != http.MethodGet {
+			request.Header.Set("X-CSRF-Token", csrf)
+		}
+		recorder := httptest.NewRecorder()
+		server.AdminHandler().ServeHTTP(recorder, request)
 		return recorder
 	}
 	decode := func(t *testing.T, recorder *httptest.ResponseRecorder, target any) {
@@ -874,6 +926,52 @@ func TestSCIMUsersIntegration(t *testing.T) {
 		var status string
 		if err := pool.QueryRow(ctx, `SELECT status FROM users WHERE id = $1`, ownerB).Scan(&status); err != nil || status != "active" {
 			t.Fatalf("owner status = %q err=%v", status, err)
+		}
+	})
+
+	t.Run("system administrator accounts are read-only through SCIM", func(t *testing.T) {
+		sessionID := seedSession(t, tenantB, systemAdminB)
+		putBody := fmt.Sprintf(`{"userName":%q,"active":false}`, systemAdminEmail)
+		assertSCIMError(t, scimRequest(tokenB, http.MethodPut, "/scim/v2/Users/"+systemAdminB, "", putBody), http.StatusForbidden, "mutability")
+		assertSCIMError(t, scimRequest(tokenB, http.MethodPatch, "/scim/v2/Users/"+systemAdminB, "", `{"Operations":[{"op":"replace","path":"name.givenName","value":"Hacked"}]}`), http.StatusForbidden, "mutability")
+		assertSCIMError(t, scimRequest(tokenB, http.MethodPatch, "/scim/v2/Users/"+systemAdminB, "", `{"Operations":[{"op":"replace","path":"active","value":true}]}`), http.StatusForbidden, "mutability")
+		assertSCIMError(t, scimRequest(tokenB, http.MethodDelete, "/scim/v2/Users/"+systemAdminB, "", ""), http.StatusForbidden, "mutability")
+
+		var status, name, role, roleSource string
+		var externalID *string
+		var isSystemAdmin bool
+		if err := pool.QueryRow(ctx, `
+			SELECT status, name, role, role_source, scim_external_id, is_system_admin
+			FROM users WHERE id = $1
+		`, systemAdminB).Scan(&status, &name, &role, &roleSource, &externalID, &isSystemAdmin); err != nil {
+			t.Fatalf("load system admin: %v", err)
+		}
+		if status != "active" || name != "System Admin B" || role != "member" || roleSource != "manual" || !isSystemAdmin {
+			t.Fatalf("system admin mutated: status=%q name=%q role=%q source=%q admin=%v", status, name, role, roleSource, isSystemAdmin)
+		}
+		if externalID == nil || *externalID != "sys-ext" {
+			t.Fatalf("system admin externalId changed: %#v", externalID)
+		}
+		var mailboxActive bool
+		if err := pool.QueryRow(ctx, `SELECT active FROM mailboxes WHERE user_id = $1`, systemAdminB).Scan(&mailboxActive); err != nil || !mailboxActive {
+			t.Fatalf("system admin mailbox changed: active=%v err=%v", mailboxActive, err)
+		}
+		var sessions int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id = $1 AND id = $2`, systemAdminB, sessionID).Scan(&sessions); err != nil || sessions != 1 {
+			t.Fatalf("system admin session revoked: count=%d err=%v", sessions, err)
+		}
+
+		// A local group→role mapping is authoritative for mapped users, but it
+		// must still skip platform administrators.
+		recorder := adminRequest(adminCookie, adminCSRF, http.MethodPatch, "/admin/api/groups/"+systemAdminGroup, `{"scimRole":"admin"}`)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("set system admin group mapping status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if err := pool.QueryRow(ctx, `SELECT role, role_source FROM users WHERE id = $1`, systemAdminB).Scan(&role, &roleSource); err != nil {
+			t.Fatalf("reload system admin role: %v", err)
+		}
+		if role != "member" || roleSource != "manual" {
+			t.Fatalf("group mapping changed system admin role: %q/%q", role, roleSource)
 		}
 	})
 

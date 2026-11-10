@@ -445,23 +445,12 @@ func scimGroupInternalEmail(domain string) string {
 	return "scim-" + uuid.NewString() + "@" + strings.ToLower(strings.TrimSpace(domain))
 }
 
-// scimRecomputeUserRoleTx is the interface consumed by the membership writers:
-// it returns the old and new role only when the role actually changed. The
-// richer internal form below also reports the email and whether the change came
-// from a group mapping so callers can pick scim.role_mapped or
-// scim.role_unmapped.
-func (s *Server) scimRecomputeUserRoleTx(ctx context.Context, tx pgx.Tx, tenantID, userID string) (oldRole, newRole string, err error) {
-	change, err := s.scimRecomputeUserRole(ctx, tx, tenantID, userID)
-	if err != nil || !change.RoleChanged {
-		return "", "", err
-	}
-	return change.OldRole, change.NewRole, nil
-}
-
 // scimRecomputeUserRole applies the local group→role mapping to one user inside
 // the caller's transaction.
 //
 //   - Owners are never touched, so SCIM can neither grant nor demote owner.
+//   - Platform system administrators are never touched: their lifecycle and
+//     role are managed only in the admin console.
 //   - The highest mapped scim_role among the user's active groups wins
 //     (admin > member > readonly) and is applied with role_source='scim'.
 //   - With no mapped role, a user previously managed by mapping (role_source=
@@ -474,11 +463,12 @@ func (s *Server) scimRecomputeUserRole(ctx context.Context, tx pgx.Tx, tenantID,
 	}
 	var email, role, roleSource string
 	var deletedAt *time.Time
+	var isSystemAdmin bool
 	err := tx.QueryRow(ctx, `
-		SELECT email::text, role, role_source, deleted_at
+		SELECT email::text, role, role_source, deleted_at, is_system_admin
 		FROM users WHERE id = $1 AND tenant_id = $2
 		FOR UPDATE
-	`, userID, tenantID).Scan(&email, &role, &roleSource, &deletedAt)
+	`, userID, tenantID).Scan(&email, &role, &roleSource, &deletedAt, &isSystemAdmin)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return scimRoleChange{}, nil
 	}
@@ -486,7 +476,7 @@ func (s *Server) scimRecomputeUserRole(ctx context.Context, tx pgx.Tx, tenantID,
 		return scimRoleChange{}, err
 	}
 	change := scimRoleChange{UserID: userID, Email: email, OldRole: role}
-	if deletedAt != nil || role == "owner" {
+	if deletedAt != nil || role == "owner" || isSystemAdmin {
 		return change, nil
 	}
 	rows, err := tx.Query(ctx, `
