@@ -137,7 +137,12 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
   `aria-valuetext` and a visible text fallback. The warning threshold is
   `CONTROL_LICENSE_WARNING_PERCENT` (default 80): `warning` is true when
   `usedSeats * 100 >= seats * percent`, and the view shows a warning banner
-  when it is reached (a critical banner when usage exceeds the limit).
+  when it is reached (a critical banner when usage exceeds the limit). The
+  webmail/admin/SCIM API refuses new activations when the limit is reached.
+  System Control mailbox creation, status/active changes, postmaster and
+  shell-mailbox provisioning/import and sync are an explicit platform-operator
+  override: they are not seat-gated and can exceed the licensed count; the
+  meter shows the overage.
 - Upload accepts a token file or pasted token, enforces the 64 KiB limit in the
   browser, POSTs `{"token":"…"}` as JSON, shows an in-flight state and maps
   every fixed error code to a stable operator message. It never renders, logs
@@ -149,7 +154,10 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
   without the token and reports `restartRequired: true`. The success panel
   tells the operator to **restart the Alt8Mail webmail service to activate
   this license**. Control re-reads the file on every status request, and seat
-  usage updates without a restart.
+  usage updates without a restart. Control does not validate
+  `ALT8MAIL_LICENSE_TENANT`: in a tenant-pinned deployment, a token with a
+  different or absent tenant claim is accepted here but rejected by the
+  webmail after restart.
 - A failed upload leaves the previous file byte-for-byte unchanged, and a
   missing file/key keeps the deployment in OSS mode without breaking startup.
   The webmail treats a configured-but-missing file as `unlicensed`, so the
@@ -449,7 +457,7 @@ The installer:
 | `CONTROL_METRICS_INTERVAL` | `5s` | Host metric sampling |
 | `CONTROL_RETENTION_DAYS` | `365` | Default log retention (1–3650) |
 | `CONTROL_LICENSE_FILE` | `/etc/a8m/license.token` | Shared license token; must match the webmail `ALT8MAIL_LICENSE_FILE` |
-| `CONTROL_LICENSE_PUBLIC_KEY` | empty | Ed25519 license public key; empty keeps OSS mode |
+| `CONTROL_LICENSE_PUBLIC_KEY` | empty | Ed25519 license public key; leave unset for OSS. With a token present, an empty or invalid key makes the license `invalid`. |
 | `CONTROL_LICENSE_GROUP` | `a8m` | Group owning the installed token for webmail readability |
 | `CONTROL_LICENSE_WARNING_PERCENT` | `80` | Seat warning threshold (1–100) |
 | `CONTROL_TRUSTED_PROXY` | `false` | Trust `X-Forwarded-For` from a local proxy |

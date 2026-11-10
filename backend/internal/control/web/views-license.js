@@ -31,7 +31,7 @@ const STATUS_ERROR_TEXT = {
 // Fixed operator-facing messages for the upload error codes. Unknown failures
 // fall back to a generic sentence that never echoes server or parser detail.
 const UPLOAD_ERROR_TEXT = {
-  LICENSE_NOT_CONFIGURED: 'License storage or verification is not configured on this server. Set CONTROL_LICENSE_FILE and CONTROL_LICENSE_PUBLIC_KEY in /etc/a8m/control.env, then restart System Control.',
+  LICENSE_NOT_CONFIGURED: 'License storage or verification is not configured. Set CONTROL_LICENSE_FILE and CONTROL_LICENSE_PUBLIC_KEY in /etc/a8m/control.env, and the same path/key as ALT8MAIL_LICENSE_FILE and ALT8MAIL_LICENSE_PUBLIC_KEY in /etc/a8m/app.env, then restart both services.',
   LICENSE_TOKEN: 'That license token is not valid. Check that the complete token was pasted and that it was issued for this server\'s license public key.',
   LICENSE_EXPIRED: 'That license token has expired. Upload a renewed token instead.',
   LICENSE_TOO_LARGE: 'License tokens must be 64 KiB or smaller.',
@@ -131,7 +131,7 @@ function statusNotice(license) {
       return ui.inlineNotice(
         'good',
         'The license is active',
-        `Paid features are enabled. The license expires on ${fmt.dateOnly(license.expiresAt)} (${expirySummary(license)}).`,
+        `The license is valid. The webmail enables paid features after it loads this file. It expires on ${fmt.dateOnly(license.expiresAt)} (${expirySummary(license)}).`,
         docs,
       );
     default:
@@ -203,10 +203,10 @@ function seatMarkup(license) {
   const enforcing = license.state === 'valid' || license.state === 'grace';
   const valueText = `${used} of ${seats} seats used, ${remaining} remaining${over ? `, ${over} over the licensed limit` : ''}`;
   const warningDetail = enforcing
-    ? `Usage is at or above the configured ${warningPercent}% warning threshold (CONTROL_LICENSE_WARNING_PERCENT). When every seat is in use, new activations are refused until a seat is freed or the license is upgraded.`
+    ? `Usage is at or above the configured ${warningPercent}% warning threshold (CONTROL_LICENSE_WARNING_PERCENT). When every seat is in use, new webmail/admin/SCIM activations are refused until a seat is freed or the license is upgraded. System Control mailbox/provisioning actions are a platform-operator override and can still exceed the limit.`
     : `Usage is at or above the configured ${warningPercent}% warning threshold (CONTROL_LICENSE_WARNING_PERCENT). This license is expired, so seat enforcement is inactive and the count is informational.`;
   const overDetail = enforcing
-    ? `${over} more active seat${over === 1 ? '' : 's'} than the license allows. Existing users are not deactivated automatically; new activations are refused until usage falls below ${seats}.`
+    ? `${over} more active seat${over === 1 ? '' : 's'} than the license allows. Existing users are not deactivated automatically; new webmail/admin/SCIM activations are refused until usage falls below ${seats}. System Control mailbox/provisioning actions are a platform-operator override and can still exceed the limit.`
     : `${over} more active seat${over === 1 ? '' : 's'} than the license allows. This license is expired, so the count is informational and existing users are not deactivated.`;
   const warnings = [
     license.warning ? ui.inlineNotice('warning', 'Seat warning threshold reached', warningDetail) : '',
@@ -278,6 +278,7 @@ function uploadSuccessMarkup(result) {
         <strong>License uploaded and verified</strong>
         <p>${restart ? 'Restart the Alt8Mail webmail service to activate this license.' : 'The new license is ready to use.'}</p>
         <p>Seat usage below updates immediately. The running webmail keeps using the token it loaded at startup until it restarts.</p>
+        <p>Control does not validate <span class="mono">ALT8MAIL_LICENSE_TENANT</span>. In a tenant-pinned deployment, a token whose tenant claim differs from the webmail pin will be rejected by the webmail after restart.</p>
         <p class="mono">${esc(editionLabel(license.edition))} · ${esc(stateMeta(license.state).label)} · ${fmt.num(license.seats || 0)} seats · expires ${esc(license.expiresAt ? fmt.dateOnly(license.expiresAt) : '—')}</p>
       </div>
     </div>`;
@@ -358,6 +359,7 @@ export async function renderLicense(ctx) {
             </form>
             <div class="divider"></div>
             <p class="form-note license-file-note">Configured path: <span class="mono break-all" id="license-upload-path">—</span></p>
+            <p class="form-note">The webmail reads the same token through <span class="mono">ALT8MAIL_LICENSE_FILE</span> and verifies it with <span class="mono">ALT8MAIL_LICENSE_PUBLIC_KEY</span>. Both services must point at the same path/key. Control does not validate <span class="mono">ALT8MAIL_LICENSE_TENANT</span>; a tenant-pinned webmail rejects a token with a different claim after restart.</p>
             <p class="form-note">The Control Plane writes the token atomically with mode <span class="mono">0640</span> and normalizes its group to <span class="mono">a8m</span> (or <span class="mono">CONTROL_LICENSE_GROUP</span>). An existing file's owner is preserved, so a legacy root-owned token becomes webmail-readable after the upload. A rejected upload leaves the existing file byte-for-byte unchanged.</p>
           </div>
         </section>
@@ -368,6 +370,7 @@ export async function renderLicense(ctx) {
             <div class="tile-link"><span>${ui.icon('lock', 15)} Ownership</span><span class="value">group a8m · 0640</span></div>
             <div class="tile-link"><span>${ui.icon('refresh', 15)} Activation</span><span class="value">Webmail restart required</span></div>
             <div class="tile-link"><span>${ui.icon('users', 15)} Seat counting</span><span class="value">Active · non-deleted · non-admin</span></div>
+            <div class="tile-link"><span>${ui.icon('shield', 15)} Control override</span><span class="value">Mailbox/provisioning actions can exceed the limit</span></div>
             <div class="tile-link"><span>${ui.icon('activity', 15)} Verification</span><span class="value">Offline Ed25519 · no network</span></div>
             <div class="note-strip" style="margin-top:11px">${ui.icon('info', 13)} <span>The webmail reads and verifies the token at startup. Control re-reads the same path on every status request, so uploaded state and seat usage appear here immediately. Restarting the webmail does not affect queued mail.</span></div>
             <p class="form-note" style="margin-top:10px"><a href="${DOCS_URL}" target="_blank" rel="noopener noreferrer">Read the full licensing guide ${ui.icon('arrow-up-right', 11)}</a></p>

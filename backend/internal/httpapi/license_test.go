@@ -69,6 +69,13 @@ func TestLoadLicense(t *testing.T) {
 	if license, err := loadLicense(config.Config{LicenseFile: missing, LicensePublicKey: "not-used"}, nil); err != nil || license != nil {
 		t.Fatalf("missing license file = %#v %v; want nil, nil", license, err)
 	}
+	oversized := filepath.Join(t.TempDir(), "oversized-license.token")
+	if err := os.WriteFile(oversized, []byte(strings.Repeat("A", maxLicenseFileBytes+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadLicense(config.Config{LicenseFile: oversized, LicensePublicKey: "not-used"}, nil); err == nil {
+		t.Fatal("oversized license file was accepted")
+	}
 
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

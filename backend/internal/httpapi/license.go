@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,6 +24,9 @@ const (
 	// globalSeatLockClass namespaces the advisory lock that serializes
 	// seat-consuming changes for a global (multi-tenant) license.
 	globalSeatLockClass int32 = 0x41384D31
+	// maxLicenseFileBytes mirrors the Control Plane upload cap. Larger files
+	// are rejected instead of being read into memory at startup.
+	maxLicenseFileBytes = 64 << 10
 )
 
 // errSeatLimit is returned by the seat helpers when an activation would exceed
@@ -46,7 +50,7 @@ func loadLicense(cfg config.Config, logger *slog.Logger) (*licensing.License, er
 	if strings.TrimSpace(cfg.LicenseFile) == "" {
 		return nil, nil
 	}
-	raw, err := os.ReadFile(cfg.LicenseFile)
+	file, err := os.Open(cfg.LicenseFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// A configured-but-absent file is the normal fresh-install path the
@@ -54,6 +58,14 @@ func loadLicense(cfg config.Config, logger *slog.Logger) (*licensing.License, er
 			return nil, nil
 		}
 		return nil, fmt.Errorf("read license file: %w", err)
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, maxLicenseFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read license file: %w", err)
+	}
+	if len(raw) > maxLicenseFileBytes {
+		return nil, fmt.Errorf("license file exceeds %d bytes", maxLicenseFileBytes)
 	}
 	publicKey, err := licensing.ParsePublicKey(cfg.LicensePublicKey)
 	if err != nil {

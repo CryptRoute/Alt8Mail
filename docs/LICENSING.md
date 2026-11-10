@@ -163,7 +163,15 @@ token at startup, so restart the Alt8Mail webmail service
 new file immediately, so the status card and seat meter update without a
 restart; the webmail keeps its previously loaded token until it restarts. The
 uploaded token is not rendered back to the operator. Seat usage is live and
-does not require a restart. If the file is not readable by the `a8m` user
+does not require a restart.
+
+Control verifies only the license envelope; it does not read or validate
+`ALT8MAIL_LICENSE_TENANT`. In a tenant-pinned deployment, a token whose
+`tenant` claim differs from the webmail pin (or is absent) is accepted by
+Control and returns 200, but the webmail rejects it as invalid after restart.
+Verify the tenant claim before uploading to a pinned deployment.
+
+If the file is not readable by the `a8m` user
 because of ownership/permissions, the webmail starts in OSS mode; keep the file
 root-owned with group `a8m` (or `CONTROL_LICENSE_GROUP`) and mode `0640`.
 
@@ -207,8 +215,8 @@ Platform system administrators never consume seats. A license that shrinks
 below current usage remains over-limit: existing users are not silently
 deactivated, and new activations are refused until usage falls below the limit.
 
-The webmail enforces every activation path inside its existing provisioning
-transaction:
+The webmail enforces every activation path in the webmail/admin/SCIM API
+inside its existing provisioning transaction:
 
 - admin create with `status: "active"` (invited/suspended creates are free);
 - admin restore of a closed account;
@@ -240,11 +248,13 @@ reached`. Both write the audit action `license.seat_limit_blocked` with the
 tenant, limit and live usage (admin operations in `admin_audit_log`, SCIM in
 `audit_log`). The raw license token and signature are never logged or audited.
 
-Control Plane mailbox/user status operations, provisioning and sync jobs are
-not gated by this webmail check; whether they should enforce the same limit or
-remain an explicit operator override is a Task 4 decision. A Control Plane
-action that activates users can therefore exceed the webmail limit until that
-decision is made.
+System Control mailbox creation, status/active changes, postmaster and
+shell-mailbox provisioning/import and sync jobs are an explicit
+platform-operator override. System Control runs as root, is documented as
+root-equivalent, and is not gated by this webmail seat check, so those actions
+can exceed the licensed count; the live meter shows the resulting overage.
+Enforcing the limit there would require a shared lock/count across services and
+is not part of this phase.
 
 The webmail bootstrap and `GET /api/entitlements` expose `usedSeats` and
 `seatLimit` (alongside `seats`) so the UI can show live usage without reading

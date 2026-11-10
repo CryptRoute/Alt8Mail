@@ -1986,7 +1986,10 @@ failure.
   `CONTROL_LICENSE_WARNING_PERCENT` (default 80) controls the warning banner.
   Seat usage is live and does not need a restart. An expired license disables
   paid features but not core mail; OSS/unlicensed/invalid/expired deployments
-  do not block user activation.
+  do not block user activation. System Control mailbox creation, status/active
+  changes, postmaster/shell-mailbox provisioning/import and sync are an
+  explicit platform-operator override: they are not seat-gated and can exceed
+  the licensed count, which the meter shows as overage.
 - **Status/debugging.** `GET /control/api/license` requires `settings.write`.
   The view shows the configured path and fixed failure categories. Check
   `journalctl -u alt8mail-control` for `license uploaded` / `license upload

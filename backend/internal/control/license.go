@@ -416,12 +416,13 @@ func writeLicenseFileAtomic(path, token, group string, logger *slog.Logger) erro
 	if _, err := tmp.WriteString(token); err != nil {
 		return fail(http.StatusInternalServerError, "LICENSE_WRITE", "Could not write the license file")
 	}
-	if err := tmp.Sync(); err != nil {
+	// Ownership is applied to the temporary inode before the final sync and
+	// rename so the target never briefly exists with the wrong owner and the
+	// ownership metadata is durable with the contents.
+	if err := owner.applyTo(name); err != nil {
 		return fail(http.StatusInternalServerError, "LICENSE_WRITE", "Could not write the license file")
 	}
-	// Ownership is applied to the temporary inode before rename so the target
-	// never briefly exists with the wrong owner.
-	if err := owner.applyTo(name); err != nil {
+	if err := tmp.Sync(); err != nil {
 		return fail(http.StatusInternalServerError, "LICENSE_WRITE", "Could not write the license file")
 	}
 	if err := tmp.Close(); err != nil {
