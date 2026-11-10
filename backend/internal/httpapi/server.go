@@ -89,10 +89,14 @@ type Server struct {
 	adminSeatRaceHook func()
 	// automationPost is a test seam for webhook delivery; production uses the
 	// bounded public-network POST in automation.go.
-	automationPost func(context.Context, string, []byte) error
-	mcpLimit       *loginLimiter
-	tenantKeyMu    sync.Mutex
-	tenantKeys     map[string]map[int]unlockedTenantKey
+	automationPost      func(context.Context, string, []byte) error
+	mcpLimit            *loginLimiter
+	tenantKeyMu         sync.Mutex
+	tenantKeys          map[string]map[int]unlockedTenantKey
+	apiKeyMu            sync.Mutex
+	apiKeyLimits        map[string]*loginLimiter
+	webhookPost         func(context.Context, string, map[string]string, []byte) (int, error)
+	webhookAllowPrivate bool
 }
 
 type Options struct {
@@ -451,6 +455,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerMCPRoutes(mux)
 	s.registerAIGovernanceRoutes(mux)
 	s.registerAITriageRoutes(mux)
+	s.registerAPIPlatformRoutes(mux)
 	s.registerAIObligationRoutes(mux)
 	s.registerAISearchRoutes(mux)
 	s.registerAIInsightRoutes(mux)

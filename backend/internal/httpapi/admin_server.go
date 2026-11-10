@@ -114,6 +114,7 @@ func (s *Server) AdminHandler() http.Handler {
 }
 
 func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
+	s.registerAPIAdminRoutes(mux)
 	mux.HandleFunc("GET /health", s.adminHealth)
 	mux.HandleFunc("POST /session", s.adminLogin)
 	mux.HandleFunc("POST /session/2fa", s.adminVerifyTwoFactor)

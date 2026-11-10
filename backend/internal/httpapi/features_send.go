@@ -788,6 +788,7 @@ func (s *Server) StartWorkers(ctx context.Context) {
 	go s.calendarInviteWorker(ctx)
 	go s.automationWorker(ctx)
 	go s.followupWorker(ctx)
+	go s.webhookWorker(ctx)
 	if s.mailSyncConfigured() {
 		go func() {
 			ticker := time.NewTicker(15 * time.Second)
