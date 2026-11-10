@@ -68,6 +68,45 @@ async function openSettings(page) {
   }
 }
 
+async function openSettingsTab(page, tab) {
+  const selector = `[data-settings-tab='${tab}']`;
+  const panelVisible = `Boolean(document.querySelector('[data-settings-panel="${tab}"]')) && !document.querySelector('[data-settings-panel="${tab}"]').hidden`;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.click(selector);
+    try {
+      await page.waitFor(panelVisible, 5000);
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      // A settings chrome re-render can replace the nav between the
+      // coordinate lookup and the click; retry through the element itself.
+      await page.eval(`document.querySelector(${JSON.stringify(selector)})?.click()`);
+      await sleep(250);
+    }
+  }
+}
+
+async function openYearReviewOverlay(page) {
+  await page.waitFor(() => {
+    const button = document.getElementById("openYearReview");
+    if (!button) return false;
+    const rect = button.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }, 5000);
+  await page.click("#openYearReview");
+  const ready = () => !document.getElementById("yearReviewOverlay")?.hidden && Boolean(document.querySelector("#yearReviewBody .year-stat"));
+  try {
+    await page.waitFor(ready, 5000);
+  } catch (error) {
+    // Treat a dropped click differently from a failed request: re-dispatch on
+    // the element, and surface the panel's error text if the API failed.
+    const detail = await page.eval("document.getElementById('yearReviewBody')?.textContent || ''");
+    if (/Could not|cannot reach|failed/i.test(detail)) throw new Error(`Year review request failed: ${detail.trim()}`);
+    await page.eval("document.getElementById('openYearReview')?.click()");
+    await page.waitFor(ready, 8000);
+  }
+}
+
 async function waitForApp() {
   await page.waitFor(() => document.readyState === "complete", 10000);
   await page.waitFor(() => !document.getElementById("app").hidden && document.querySelectorAll(".msg").length > 0, 12000);
@@ -1755,18 +1794,17 @@ try {
 
   console.log("\n[9o] Year in review and reaction rules");
   await openSettings(page);
-  await page.click("[data-settings-tab='account']");
-  await sleep(300);
+  await openSettingsTab(page, "account");
+  await page.waitFor(() => Boolean(document.getElementById("yearReviewBlock")), 5000);
   check(await page.eval("Boolean(document.getElementById('yearReviewBlock'))"), "account settings expose year in review");
-  await page.click("#openYearReview");
-  await page.waitFor(() => !document.getElementById("yearReviewOverlay").hidden && Boolean(document.querySelector('#yearReviewBody .year-stat')), 5000);
+  await openYearReviewOverlay(page);
   check(await page.eval("document.querySelectorAll('#yearReviewBody .year-month').length === 12"), "year in review renders a twelve-month chart");
   check(await page.eval("document.querySelectorAll('#yearReviewBody .year-stat').length === 4"), "year in review renders headline statistics");
   check(await page.eval("document.getElementById('yearReviewBody').textContent.includes('People who shaped your year')"), "year in review names key contacts");
   await page.screenshot(path.join(artifacts, "25d-year-review.png"));
   await page.click("[data-year-review-close]");
-  await page.click("[data-settings-tab='rules']");
-  await sleep(300);
+  await openSettingsTab(page, "rules");
+  await page.waitFor(() => Boolean(document.getElementById("reactionRulesBlock")), 5000);
   check(await page.eval("Boolean(document.getElementById('reactionRulesBlock'))"), "rules settings expose reaction rules");
   await page.click("#addReactionRuleBtn");
   await page.waitFor(() => !document.getElementById("reactionRuleOverlay").hidden, 3000);
