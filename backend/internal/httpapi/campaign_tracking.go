@@ -54,7 +54,7 @@ func (s *Server) addCampaignTracking(ctx context.Context, user userRecord, merge
 }
 
 func (s *Server) recordCampaignOpen(w http.ResponseWriter, r *http.Request) {
-	token := strings.TrimSpace(r.PathValue("token"))
+	token := strings.TrimSuffix(strings.TrimSpace(r.PathValue("token")), ".gif")
 	var trackingID string
 	if err := s.store.DB.QueryRow(r.Context(), `SELECT id FROM public.campaign_tracking WHERE token=$1`, token).Scan(&trackingID); err != nil {
 		http.NotFound(w, r)
@@ -129,7 +129,7 @@ func (s *Server) campaignTrackingReport(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) registerCampaignTrackingRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /t/o/{token}.gif", s.recordCampaignOpen)
+	mux.HandleFunc("GET /t/o/{token}", s.recordCampaignOpen)
 	mux.HandleFunc("GET /t/c/{token}", s.recordCampaignClick)
 	mux.HandleFunc("GET /api/campaign-tracking", s.requireUser(s.campaignTrackingReport))
 }

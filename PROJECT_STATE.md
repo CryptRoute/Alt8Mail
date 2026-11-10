@@ -1,22 +1,22 @@
 # Current Project State
 
-## Active Phase: Phase 2 (Team Operations and MCP Seed)
+## Active Phase: Phase 3 (Scheduling, Revenue and Deliverability)
 
 ### Completed
 - Phase 1 (1A–1H) ✅ See `docs/PHASE1_ACCEPTANCE.md`.
-- 2A Shared inbox core ✅ Team mailbox schema, admin CRUD, group-scoped access, delegated team folders, round-robin, SLA, presence and watchers; PostgreSQL integration tests.
-- 2B Shared inbox operations ✅ Claim, handoff notes, SLA breach notifications, collision heartbeat, queue/SLA badge and team header.
-- 2C Shared drafts v1 ✅ Lease/version conflict model, version history, comments, team draft UI and stale-write tests.
-- 2D Team templates and alias controls ✅ Versioned templates, variables, alias validation, compose picker and manager.
-- 2E Automation builder v1 ✅ Conditions/actions, Sieve preview, dry-run, idempotent webhook/task/label/notify/auto-reply runs and builder UI.
-- 2F Collaboration extensions ✅ Task subtasks/kanban/recurrence/reminders, file versions/comments/approvals, VIP/mute, Jitsi links; PostgreSQL integration tests.
-- 2G MCP server seed ✅ OAuth 2.1 PKCE, consent, scoped read/search/draft tools, rate limits, audit, untrusted-content labeling and connection revocation.
-- Verification 2026-11-10: full Go suite/vet/build pass; Phase 2 DSN suites pass (12 tests); `npm run test:all` E2E 0 failures; `npm run test:a11y` 0 Critical/High and keyboard/RTL 0 failures; migrations 0064–0069 each rolled back and reapplied on disposable PostgreSQL.
+- Phase 2 (2A–2G) ✅ See `docs/PHASE2_ACCEPTANCE.md`.
+- 3A Recipient-time scheduling and undo ✅ Tenant undo 5–60s, working-hour suggestions, preference/send enforcement and timezone/rollover tests.
+- 3B Follow-ups and obligations ✅ Awaiting-reply and remind-me follow-ups, reply detection, duplicate suppression, worker and reading-pane controls.
+- 3C Native mail merge ✅ CSV/JSON import, variables, suppression/unsubscribe, throttled outbox scheduling, campaign report and 100-recipient integration test.
+- 3D Booking and availability ✅ Public booking pages, DST-aware slots, buffers, round-robin, race-safe bookings, free/busy and utilization APIs and booking UI.
+- 3E Template gallery and payment links ✅ Packaged templates/install UI, payment-link policy and host allowlist, compose insertion and tests.
+- 3F Deliverability ✅ DMARC XML/gzip ingestion, dedupe/aggregation, Domains dashboard, opt-in merge open/click tracking and policy-gated tests.
+- Verification 2026-11-10: full Go suite/vet/build; Phase 3 PostgreSQL integration tests; `npm run test:all`; `npm run test:a11y`; migrations `0070`–`0074` rollback/reapply cycle.
 
 ### In Progress
 - None.
 
 ### Not Started
-- Phase 3 (Scheduling, Revenue and Deliverability)
+- Phase 4 (AI/MCP Moat)
 
-Phase 2 implementation is complete. No release, deploy or push has been performed.
+Phase 3 implementation is complete. No release, deploy or push has been performed.
