@@ -149,19 +149,60 @@ PRESERVE_ALT8MAIL_LICENSE_TENANT=tenant-old`,
 	}
 }
 
-// TestUpdateScriptReplacesEmptyLicenseValues ensures the updater matches
+// TestUpdateScriptSeedsEmptyLicenseValues ensures the updater matches
 // install.sh: an existing empty KEY= line is treated as unset and replaced by
-// the fallback instead of blocking the seed.
-func TestUpdateScriptReplacesEmptyLicenseValues(t *testing.T) {
+// the fallback, while a non-empty value is never overwritten.
+func TestUpdateScriptSeedsEmptyLicenseValues(t *testing.T) {
 	source := readRepositoryScript(t, filepath.Join("scripts", "alt8mail-update.sh"))
 	for _, want := range []string{
-		`grep -qE "^${key}=.+"`,
-		`sed -i "/^${key}=$/d"`,
 		`set_env_if_missing "$CONTROL_ENV_FILE" CONTROL_LICENSE_FILE "$shared_license_file"`,
 		`set_env_if_missing "$APP_ENV_FILE" ALT8MAIL_LICENSE_FILE "$shared_license_file"`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("alt8mail-update.sh is missing %q", want)
+		}
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("updater fixture requires bash")
+	}
+
+	const marker = "set_env_if_missing() {"
+	start := strings.Index(source, marker)
+	if start < 0 {
+		t.Fatalf("alt8mail-update.sh does not define %s", marker)
+	}
+	rest := source[start:]
+	end := strings.Index(rest, "\n}")
+	if end < 0 {
+		t.Fatalf("could not extract set_env_if_missing")
+	}
+	function := rest[:end+2]
+
+	file := filepath.Join(t.TempDir(), "app.env")
+	if err := os.WriteFile(file, []byte("CONTROL_LICENSE_FILE=\nALT8MAIL_LICENSE_FILE=/keep/this\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "set -euo pipefail\nlog() { :; }\n" + function +
+		"\nset_env_if_missing \"$1\" CONTROL_LICENSE_FILE /etc/a8m/license.token" +
+		"\nset_env_if_missing \"$1\" ALT8MAIL_LICENSE_FILE /ignored/fallback\ncat \"$1\""
+	output, err := exec.Command("bash", "-c", script, "bash", file).CombinedOutput()
+	if err != nil {
+		t.Fatalf("updater fixture failed: %v: %s", err, output)
+	}
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	counts := map[string]int{}
+	for _, line := range lines {
+		counts[line]++
+	}
+	if counts["CONTROL_LICENSE_FILE=/etc/a8m/license.token"] != 1 {
+		t.Fatalf("empty value was not replaced exactly once: %q", output)
+	}
+	if counts["ALT8MAIL_LICENSE_FILE=/keep/this"] != 1 {
+		t.Fatalf("existing non-empty value was overwritten: %q", output)
+	}
+	for line := range counts {
+		if line == "" || line == "CONTROL_LICENSE_FILE=" || line == "ALT8MAIL_LICENSE_FILE=/ignored/fallback" {
+			t.Fatalf("unexpected line %q in %q", line, output)
 		}
 	}
 }
