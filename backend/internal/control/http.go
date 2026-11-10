@@ -112,6 +112,13 @@ func userAgent(r *http.Request) string {
 }
 
 func (s *Server) audit(ctx context.Context, user *adminUser, action, target, detail string, ip net.IP, ua string, metadata any) {
+	if s.auditSink != nil {
+		if metadata == nil {
+			metadata = map[string]any{}
+		}
+		s.auditSink(ctx, user, action, target, detail, ip, ua, metadata)
+		return
+	}
 	if metadata == nil {
 		metadata = map[string]any{}
 	}

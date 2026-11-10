@@ -11,53 +11,56 @@ import (
 // Config is intentionally environment-driven: the control plane is a separate
 // service and must never share the webmail or customer-admin secret material.
 type Config struct {
-	Env               string
-	Listen            string
-	DatabaseURL       string
-	SessionSecret     string
-	CSRFSecret        string
-	SecretKey         string
-	PublicURL         string
-	MailHostname      string
-	WebmailURL        string
-	WebPushKeyFile    string
-	DNSResolver       string
-	MailLogPath       string
-	VmailRoot         string
-	DKIMDir           string
-	PostfixDir        string
-	DovecotDir        string
-	SSLDir            string
-	TLSCertFile       string
-	TLSKeyFile        string
-	BackupDir         string
-	CronFile          string
-	CertbotDir        string
-	CertbotWebroot    string
-	NginxSitePath     string
-	NginxEnabledPath  string
-	NginxLogFormat    string
-	NginxLogDir       string
-	WebRoot           string
-	WebNetRoot        string
-	AppEnvFile        string
-	WebUpstream       string
-	AdminUpstream     string
-	WebHealthURL      string
-	AdminHealthURL    string
-	SMTPAddr          string
-	PolicyListen      string
-	RedisAddr         string
-	RedisPasswordFile string
-	OfficeAgentURL    string
-	OfficeAgentToken  string
-	OfficeImage       string
-	OfficeSecretFile  string
-	IngestInterval    time.Duration
-	HealthInterval    time.Duration
-	MetricsInterval   time.Duration
-	RetentionDays     int
-	TrustedProxy      bool
+	Env                   string
+	Listen                string
+	DatabaseURL           string
+	SessionSecret         string
+	CSRFSecret            string
+	SecretKey             string
+	PublicURL             string
+	MailHostname          string
+	WebmailURL            string
+	WebPushKeyFile        string
+	DNSResolver           string
+	MailLogPath           string
+	VmailRoot             string
+	DKIMDir               string
+	PostfixDir            string
+	DovecotDir            string
+	SSLDir                string
+	TLSCertFile           string
+	TLSKeyFile            string
+	BackupDir             string
+	CronFile              string
+	CertbotDir            string
+	CertbotWebroot        string
+	NginxSitePath         string
+	NginxEnabledPath      string
+	NginxLogFormat        string
+	NginxLogDir           string
+	WebRoot               string
+	WebNetRoot            string
+	AppEnvFile            string
+	WebUpstream           string
+	AdminUpstream         string
+	WebHealthURL          string
+	AdminHealthURL        string
+	SMTPAddr              string
+	PolicyListen          string
+	RedisAddr             string
+	RedisPasswordFile     string
+	OfficeAgentURL        string
+	OfficeAgentToken      string
+	OfficeImage           string
+	OfficeSecretFile      string
+	LicenseFile           string
+	LicensePublicKey      string
+	LicenseWarningPercent int
+	IngestInterval        time.Duration
+	HealthInterval        time.Duration
+	MetricsInterval       time.Duration
+	RetentionDays         int
+	TrustedProxy          bool
 }
 
 func LoadConfig() (Config, error) {
@@ -104,11 +107,16 @@ func LoadConfig() (Config, error) {
 		OfficeAgentToken:  env("CONTROL_OFFICE_AGENT_TOKEN_FILE", "/etc/a8m/office-agent-token"),
 		OfficeImage:       env("CONTROL_OFFICE_IMAGE", "onlyoffice/documentserver:9.4.0.1"),
 		OfficeSecretFile:  env("CONTROL_OFFICE_JWT_SECRET_FILE", "/etc/a8m/office-jwt-secret"),
-		IngestInterval:    envDuration("CONTROL_INGEST_INTERVAL", 8*time.Second),
-		HealthInterval:    envDuration("CONTROL_HEALTH_INTERVAL", 15*time.Second),
-		MetricsInterval:   envDuration("CONTROL_METRICS_INTERVAL", 5*time.Second),
-		RetentionDays:     envInt("CONTROL_RETENTION_DAYS", 365),
-		TrustedProxy:      envBool("CONTROL_TRUSTED_PROXY", false),
+		// The Control Plane and webmail must point at the same license file so
+		// an upload here is the file the webmail loads after its next restart.
+		LicenseFile:           env("CONTROL_LICENSE_FILE", "/etc/a8m/license.token"),
+		LicensePublicKey:      strings.TrimSpace(os.Getenv("CONTROL_LICENSE_PUBLIC_KEY")),
+		LicenseWarningPercent: envInt("CONTROL_LICENSE_WARNING_PERCENT", 80),
+		IngestInterval:        envDuration("CONTROL_INGEST_INTERVAL", 8*time.Second),
+		HealthInterval:        envDuration("CONTROL_HEALTH_INTERVAL", 15*time.Second),
+		MetricsInterval:       envDuration("CONTROL_METRICS_INTERVAL", 5*time.Second),
+		RetentionDays:         envInt("CONTROL_RETENTION_DAYS", 365),
+		TrustedProxy:          envBool("CONTROL_TRUSTED_PROXY", false),
 	}
 	if cfg.DatabaseURL == "" {
 		return cfg, fmt.Errorf("CONTROL_DATABASE_URL is required")
@@ -118,6 +126,12 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.RetentionDays < 1 || cfg.RetentionDays > 3650 {
 		return cfg, fmt.Errorf("CONTROL_RETENTION_DAYS must be between 1 and 3650")
+	}
+	// A missing license file or public key is a valid OSS deployment and must
+	// never stop System Control from starting; only a malformed percentage is
+	// a hard configuration error.
+	if cfg.LicenseWarningPercent < 1 || cfg.LicenseWarningPercent > 100 {
+		return cfg, fmt.Errorf("CONTROL_LICENSE_WARNING_PERCENT must be between 1 and 100")
 	}
 	return cfg, nil
 }

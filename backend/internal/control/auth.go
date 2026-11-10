@@ -88,6 +88,9 @@ func (s *Server) hydratePermissions(ctx context.Context, user *adminUser) error 
 }
 
 func (s *Server) authenticateSession(r *http.Request) (*sessionRecord, error) {
+	if s.sessionLoader != nil {
+		return s.sessionLoader(r)
+	}
 	raw := cookie(r, sessionCookieName)
 	if raw == "" {
 		return nil, errors.New("no session")

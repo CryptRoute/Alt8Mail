@@ -5,6 +5,7 @@ import (
 	"embed"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -36,6 +37,12 @@ type Server struct {
 	termSessions map[string]*terminalSession
 	webNetMu     sync.Mutex
 	threatMu     sync.Mutex
+
+	// Test seams. Production leaves these nil; tests replace the session,
+	// audit sink and seat counter so handlers can run without PostgreSQL.
+	sessionLoader func(*http.Request) (*sessionRecord, error)
+	auditSink     func(ctx context.Context, user *adminUser, action, target, detail string, ip net.IP, ua string, metadata any)
+	seatCounter   func(ctx context.Context, tenant string) (int, []map[string]any, error)
 }
 
 type Options struct {
@@ -115,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerUpdateRoutes(mux)
 	s.registerSystemRoutes(mux)
 	s.registerTerminalRoutes(mux)
+	s.registerLicenseRoutes(mux)
 
 	return s.securityHeaders(s.logRequests(mux))
 }

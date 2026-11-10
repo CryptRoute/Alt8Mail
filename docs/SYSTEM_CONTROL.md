@@ -113,6 +113,26 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
 - Config-sync status banner, drift detail and run history.
 - A 30-route command palette with `Ctrl/Cmd+K`.
 
+### License and seat metering
+
+- The License view reads the shared offline token from `CONTROL_LICENSE_FILE`
+  on every request and shows edition, lifecycle (`valid`, `grace`, `expired`,
+  `unlicensed`, `invalid`), expiry, features, the configured path and a live
+  seat meter.
+- Seats count `public.users` rows with `status='active'` and
+  `deleted_at IS NULL`. A license `tenant` claim scopes the count; a global
+  license also returns per-tenant `activeSeats` ordered by name.
+- The warning threshold is `CONTROL_LICENSE_WARNING_PERCENT` (default 80):
+  `warning` is true when `usedSeats * 100 >= seats * percent`.
+- Upload validates the envelope before writing, replaces the file atomically
+  with mode `0600`, audits `license.uploaded` without the token and reports
+  `restartRequired: true`. Restart the webmail service to activate a new
+  token; seat usage updates without a restart.
+- A failed upload leaves the previous file byte-for-byte unchanged, and a
+  missing file/key keeps the deployment in OSS mode without breaking startup.
+  See `docs/LICENSING.md` for the token format, status error categories and
+  seat rules.
+
 ### Domains and DNS
 
 - Create, rename and delete domains with previews and typed confirmation.
@@ -394,6 +414,9 @@ The installer:
 | `CONTROL_HEALTH_INTERVAL` | `15s` | Service-monitor interval |
 | `CONTROL_METRICS_INTERVAL` | `5s` | Host metric sampling |
 | `CONTROL_RETENTION_DAYS` | `365` | Default log retention (1–3650) |
+| `CONTROL_LICENSE_FILE` | `/etc/a8m/license.token` | Shared license token; must match the webmail `ALT8MAIL_LICENSE_FILE` |
+| `CONTROL_LICENSE_PUBLIC_KEY` | empty | Ed25519 license public key; empty keeps OSS mode |
+| `CONTROL_LICENSE_WARNING_PERCENT` | `80` | Seat warning threshold (1–100) |
 | `CONTROL_TRUSTED_PROXY` | `false` | Trust `X-Forwarded-For` from a local proxy |
 
 The environment file is parsed by systemd, not by a shell. Do not put spaces or
@@ -630,6 +653,31 @@ Errors use an HTTP status and a JSON body shaped like:
 
 Sessions are opaque server-side records. Revoke one or all others from **My
 security**; an administrator can revoke any panel session from **Access**.
+
+### License API
+
+Both endpoints require `settings.write`; the CSRF cookie/header pair is
+required for the upload.
+
+```text
+GET  /control/api/license
+POST /control/api/license  {"token":"A8M1.<payload>.<signature>"}
+```
+
+`GET` returns `{"license": {...}, "byTenant": [...]}`. The license object never
+contains the token or signature. `byTenant` (`tenantId`, `name`,
+`activeSeats`) is populated only for a global license and is `[]` for a
+tenant-scoped license or an OSS/unlicensed deployment. Status fields:
+`configured`, `filePath`, `state`, `edition`, `inGrace`, `expired`, `seats`,
+`usedSeats`, `remainingSeats`, `warning`, `features`, `expiresAt`, `tenant`,
+`licenseId`, `lastModified`, `error`.
+
+`POST` accepts JSON up to 64 KiB and returns
+`{"ok":true,"restartRequired":true,"license":{...}}`. Rejections use fixed
+codes: `LICENSE_NOT_CONFIGURED` (503), `LICENSE_TOKEN` (400),
+`LICENSE_EXPIRED` (400), `LICENSE_TOO_LARGE` (413) and `CONTENT_TYPE` (415).
+A rejected upload leaves the existing file unchanged. After a successful
+upload, restart the webmail service to load the token.
 
 ### Public API v1
 
