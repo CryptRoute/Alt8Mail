@@ -2327,7 +2327,81 @@ async function renderIntegrations() {
         await renderIntegrations();
       } catch (error) { showError(error); }
     });
+    await appendDeveloperCards();
   } catch (error) { viewError(error); }
+}
+
+async function appendDeveloperCards() {
+  const root = $("#viewRoot");
+  if (!root || !can("api.read")) return;
+  const [keysData, hooksData, crmData, telemetry] = await Promise.all([
+    api("api-keys").catch(() => ({ keys: [], scopes: [] })),
+    api("webhooks").catch(() => ({ webhooks: [], events: [] })),
+    api("crm/state").catch(() => ({ states: [], providers: [] })),
+    api("telemetry").catch(() => ({ enabled: false, endpoint: "" }))
+  ]);
+  const keys = keysData.keys || [];
+  const hooks = hooksData.webhooks || [];
+  const states = crmData.states || [];
+  const host = document.createElement("div");
+  host.innerHTML = `
+    <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>API keys</h2><p>Tenant-scoped bearer keys for <code>/api/v1</code>. Scopes limit mail, send, task and calendar access.</p></div><a class="btn secondary small" href="./api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI</a></div>
+      <div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Rate</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>${keys.map((key) => `<tr><td><b>${esc(key.name)}</b></td><td><code>${esc(key.prefix)}</code></td><td class="cell-sub">${esc((key.scopes || []).join(", "))}</td><td>${key.rateLimitPerMinute}/min</td><td class="cell-sub">${key.lastUsedAt ? formatDate(key.lastUsedAt, { time: true }) : "Never"}</td><td>${key.revoked ? `<span class="badge neutral">Revoked</span>` : badge("active")}</td><td>${!key.revoked && can("api.manage") ? `<button class="btn small ghost" data-api-key-revoke="${esc(key.id)}">Revoke</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="7"><div class="empty-mini">No API keys yet.</div></td></tr>`}</tbody></table></div></div>
+      ${can("api.manage") ? `<div class="card-pad" style="border-top:1px solid var(--line)"><form id="apiKeyForm"><div class="field-row"><label class="field"><span>Key name</span><input id="apiKeyName" placeholder="CI automation"></label><label class="field"><span>Rate limit per minute</span><input id="apiKeyRate" type="number" min="1" max="5000" value="120"></label></div><div style="display:flex;gap:14px;flex-wrap:wrap;margin:4px 0 10px">${(keysData.scopes || []).map((scope) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" data-api-scope value="${esc(scope)}" ${scope === "mail.read" ? "checked" : ""}>${esc(scope)}</label>`).join("")}</div><button class="btn primary small" type="submit">Create API key</button></form></div>` : ""}
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Signed webhooks</h2><p>HMAC-SHA256 deliveries with retries and idempotent event ids.</p></div><span class="badge neutral">${hooks.length} endpoint${hooks.length === 1 ? "" : "s"}</span></div>
+      <div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Endpoint</th><th>Events</th><th>Enabled</th><th></th></tr></thead><tbody>${hooks.map((hook) => `<tr><td class="cell-sub">${esc(hook.url)}</td><td>${esc((hook.events || []).join(", "))}</td><td>${hook.enabled ? badge("active") : `<span class="badge neutral">Paused</span>`}</td><td>${can("webhooks.manage") ? `<button class="btn small ghost" data-webhook-test="${esc(hook.id)}">Test</button> <button class="btn small ghost" data-webhook-delete="${esc(hook.id)}">Delete</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="4"><div class="empty-mini">No webhook endpoints.</div></td></tr>`}</tbody></table></div></div>
+      ${can("webhooks.manage") ? `<div class="card-pad" style="border-top:1px solid var(--line)"><form id="webhookForm"><label class="field"><span>HTTPS endpoint</span><input id="webhookUrl" type="url" placeholder="https://hooks.example.com/a8m"></label><div style="display:flex;gap:14px;flex-wrap:wrap;margin:4px 0 10px">${(hooksData.events || []).map((event) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px"><input type="checkbox" data-webhook-event value="${esc(event)}" ${event === "message.queued" ? "checked" : ""}>${esc(event)}</label>`).join("")}</div><button class="btn primary small" type="submit">Create webhook</button></form></div>` : ""}
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>CRM sync</h2><p>Cache HubSpot contacts and deals for lookup and sender intelligence. Credentials come from the HubSpot add-on.</p></div><span class="badge neutral">${states.length} provider${states.length === 1 ? "" : "s"}</span></div><div class="card-pad"><div class="detail-list">${states.map((state) => `<div class="detail-row"><span>${esc(state.provider)}</span><b>${esc(state.status)} · ${state.records || 0} records</b></div>`).join("") || `<div class="empty-mini">No CRM sync has run yet.</div>`}</div>${can("crm.manage") ? `<div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn secondary small" id="crmSyncBtn">Sync HubSpot now</button></div>` : ""}</div></div>
+    <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Support and telemetry</h2><p>Download a redacted support bundle or opt in to a compact operational heartbeat.</p></div><span class="badge ${telemetry.enabled ? "active" : "neutral"}">${telemetry.enabled ? "Telemetry on" : "Telemetry off"}</span></div><div class="card-pad"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><a class="btn secondary small" href="./api/support-bundle" download>${icon("download")}Support bundle</a></div>${can("telemetry.manage") ? `<form id="telemetryForm"><label class="field"><span>Telemetry endpoint (HTTPS)</span><input id="telemetryEndpoint" type="url" value="${esc(telemetry.endpoint || "")}" placeholder="https://telemetry.example.com/a8m"></label><label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:10px"><input id="telemetryEnabled" type="checkbox" ${telemetry.enabled ? "checked" : ""}>Enable optional telemetry</label><div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn secondary small" type="button" id="telemetrySendBtn">Send heartbeat now</button><button class="btn primary small" type="submit">Save telemetry</button></div></form>` : ""}</div></div>`;
+  root.appendChild(host);
+  $("#apiKeyForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const scopes = $$("[data-api-scope]").filter((input) => input.checked).map((input) => input.value);
+    try {
+      const result = await api("api-keys", { method: "POST", body: { name: $("#apiKeyName").value.trim(), scopes, rateLimitPerMinute: Number($("#apiKeyRate").value) || 120 } });
+      openModal({ title: "API key created", subtitle: "Copy this token now. It cannot be shown again.", body: `<div class="copy-box"><span>${esc(result.token)}</span></div>`, footer: `<button class="btn primary" data-modal-close>I have stored it</button>` });
+      await renderIntegrations();
+    } catch (error) { showError(error); }
+  });
+  $$("[data-api-key-revoke]").forEach((button) => button.addEventListener("click", async () => {
+    if (!(await confirmDialog("Revoke API key", "Requests using this key will fail immediately.", "Revoke key", true))) return;
+    try { await api("api-keys/" + encodeURIComponent(button.dataset.apiKeyRevoke), { method: "DELETE" }); toast("API key revoked"); await renderIntegrations(); } catch (error) { showError(error); }
+  }));
+  $("#webhookForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const events = $$("[data-webhook-event]").filter((input) => input.checked).map((input) => input.value);
+    try {
+      const result = await api("webhooks", { method: "POST", body: { url: $("#webhookUrl").value.trim(), events } });
+      openModal({ title: "Webhook signing secret", subtitle: "Store this secret in the receiver. It cannot be shown again.", body: `<div class="copy-box"><span>${esc(result.secret)}</span></div>`, footer: `<button class="btn primary" data-modal-close>I have stored it</button>` });
+      await renderIntegrations();
+    } catch (error) { showError(error); }
+  });
+  $$("[data-webhook-test]").forEach((button) => button.addEventListener("click", async () => {
+    setBusy(button, true, "Sending…");
+    try { const result = await api("webhooks/" + encodeURIComponent(button.dataset.webhookTest) + "/test", { method: "POST", body: {} }); toast(result.ok ? "Test delivery accepted" : "Receiver returned " + result.status); } catch (error) { showError(error); } finally { setBusy(button, false); }
+  }));
+  $$("[data-webhook-delete]").forEach((button) => button.addEventListener("click", async () => {
+    if (!(await confirmDialog("Delete webhook", "Queued deliveries for this endpoint will also be removed.", "Delete webhook", true))) return;
+    try { await api("webhooks/" + encodeURIComponent(button.dataset.webhookDelete), { method: "DELETE" }); toast("Webhook deleted"); await renderIntegrations(); } catch (error) { showError(error); }
+  }));
+  $("#crmSyncBtn")?.addEventListener("click", async (event) => {
+    setBusy(event.currentTarget, true, "Syncing…");
+    try { const result = await api("crm/sync?provider=hubspot", { method: "POST", body: {} }); toast(`Synced ${result.records} CRM records`); await renderIntegrations(); } catch (error) { showError(error); setBusy(event.currentTarget, false); }
+  });
+  $("#telemetryForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api("telemetry", { method: "PUT", body: { enabled: $("#telemetryEnabled").checked, endpoint: $("#telemetryEndpoint").value.trim() } });
+      toast("Telemetry settings saved");
+      await renderIntegrations();
+    } catch (error) { showError(error); }
+  });
+  $("#telemetrySendBtn")?.addEventListener("click", async (event) => {
+    setBusy(event.currentTarget, true, "Sending…");
+    try { await api("telemetry/send", { method: "POST", body: {} }); toast("Telemetry heartbeat sent"); } catch (error) { showError(error); } finally { setBusy(event.currentTarget, false); }
+  });
 }
 
 function showSIEMSecret(secret) {

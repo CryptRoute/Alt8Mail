@@ -58,6 +58,14 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeBody(w, r, &body, 12*1024*1024) {
 		return
 	}
+	idempotencyKey := apiIdempotencyKey(r)
+	if idempotencyKey != "" {
+		principal := apiPrincipal{TenantID: sess.User.TenantID}
+		if status, payload, found := apiIdempotencyLookup(r.Context(), s, principal, idempotencyKey, http.MethodPost, "/api/send"); found {
+			writeJSON(w, status, payload)
+			return
+		}
+	}
 	accountScope := body.AccountID
 	if normalizeMailAccountScope(accountScope) == mailAccountScopeAll {
 		accountScope = ""
@@ -343,6 +351,9 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			}
 			s.maybeAutoAddExternalContacts(r.Context(), sess.User, recipients)
 		}
+	}
+	if idempotencyKey != "" && response != nil {
+		apiIdempotencyStore(r.Context(), s, apiPrincipal{TenantID: sess.User.TenantID}, idempotencyKey, http.MethodPost, "/api/send", http.StatusOK, response)
 	}
 	writeJSON(w, http.StatusOK, response)
 }

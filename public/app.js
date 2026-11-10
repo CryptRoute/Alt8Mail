@@ -5500,6 +5500,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   startDelegatedHeartbeat();
   ensureAddonsSettingsUi();
   ensureAISettingsUi();
+  installCommandPalette();
   if (!state.delegatedMode) loadAddons({ silent: !state.addonsLoaded }).catch(() => {});
   if (!state.delegatedMode) loadOfficeConfig({ silent: true }).catch(() => {});
   if (firstUserLoad && !state.delegatedMode) restoreOfficeDockFromStorage();
@@ -17786,12 +17787,48 @@ function showDataProtectionBlock(error) {
   });
 }
 
+const OFFLINE_SENDS_KEY = "a8mOfflineSends";
+
+function offlineSendKey() {
+  try { return crypto.randomUUID(); } catch { return "offline-" + Date.now() + "-" + Math.random().toString(36).slice(2); }
+}
+
+function queueOfflineSend(payload, key, subject) {
+  try {
+    const queue = JSON.parse(localStorage.getItem(OFFLINE_SENDS_KEY) || "[]");
+    queue.push({ key, body: payload, subject: subject || "", at: new Date().toISOString() });
+    localStorage.setItem(OFFLINE_SENDS_KEY, JSON.stringify(queue.slice(-25)));
+  } catch {}
+}
+
+async function flushOfflineSends() {
+  let queue = [];
+  try { queue = JSON.parse(localStorage.getItem(OFFLINE_SENDS_KEY) || "[]"); } catch { return; }
+  if (!queue.length) return;
+  const remaining = [];
+  for (const item of queue) {
+    try {
+      await api("/api/send", { method: "POST", headers: { "Idempotency-Key": item.key }, body: item.body });
+      showToast(`Offline message sent: ${item.subject || "(no subject)"}`);
+    } catch (error) {
+      if (error.code === "NETWORK") { remaining.push(item); break; }
+      showError(error);
+    }
+  }
+  try {
+    if (remaining.length) localStorage.setItem(OFFLINE_SENDS_KEY, JSON.stringify(remaining));
+    else localStorage.removeItem(OFFLINE_SENDS_KEY);
+  } catch {}
+}
+
 async function sendComposeSession(id) {
   const session = sessionById(id);
   if (!session || !session.el) return;
   if (validateComposeRecipients(session)) return;
   const sendButton = session.el.querySelector('[data-compose-action="send"]');
   if (sendButton) sendButton.disabled = true;
+  const outgoing = composeSendPayload(session, { holdSeconds: state.undoSendSeconds });
+  const outgoingKey = offlineSendKey();
   try {
     const spellingOK = await runSpellCheckBeforeSend(session);
     if (!spellingOK) {
@@ -17809,7 +17846,8 @@ async function sendComposeSession(id) {
     await flushDraft(session);
     const data = await api("/api/send", {
       method: "POST",
-      body: composeSendPayload(session, { holdSeconds: state.undoSendSeconds })
+      headers: { "Idempotency-Key": outgoingKey },
+      body: outgoing
     });
     state.messages = state.messages.filter((message) => message.id !== session.draftId);
     removeComposeSessionUi(id);
@@ -17841,6 +17879,15 @@ async function sendComposeSession(id) {
       });
     }
   } catch (error) {
+    if (error.code === "NETWORK" || !navigator.onLine) {
+      queueOfflineSend(outgoing, outgoingKey, outgoing.subject || session.subject || "");
+      removeComposeSessionUi(id);
+      state.messages = state.messages.filter((message) => message.id !== session.draftId);
+      rebuildIndex();
+      renderList();
+      showToast("Offline — message queued and will send when you reconnect");
+      return;
+    }
     session.error = error.message;
     if (sendButton) sendButton.disabled = false;
     updateComposeStatus(session);
@@ -19136,6 +19183,144 @@ async function loadAISenderProfile() {
   } catch (error) {
     host.innerHTML = `<div class="settings-note">${esc(error.message || "Sender profile unavailable.")}</div>`;
   }
+}
+
+function commandPaletteCommands() {
+  return [
+    { id: "compose", label: "Compose new message", hint: "C", run: () => openCompose() },
+    { id: "search", label: "Search mail", hint: "/", run: () => { setTask("mail"); document.getElementById("searchInput")?.focus(); } },
+    { id: "inbox", label: "Go to Inbox", hint: "G I", run: () => { setTask("mail"); setFolder("inbox"); } },
+    { id: "calendar", label: "Go to Calendar", hint: "G C", run: () => setTask("calendar") },
+    { id: "tasks", label: "Go to Tasks", hint: "G T", run: () => setTask("tasks") },
+    { id: "files", label: "Go to Files", hint: "G F", run: () => setTask("files") },
+    { id: "settings", label: "Open Settings", hint: "G S", run: () => openSettings() },
+    { id: "ai", label: "Open AI workspace", hint: "", run: () => openSettings("ai") },
+    { id: "theme", label: "Toggle light / dark theme", hint: "", run: () => setTheme(effectiveTheme() === "dark" ? "light" : "dark", true) },
+    { id: "density", label: "Toggle compact / comfortable density", hint: "", run: () => setDensity(state.density === "compact" ? "comfortable" : "compact", true) },
+    { id: "ai-triage", label: "Triage my inbox", hint: "", run: () => { openSettings("ai"); setTimeout(() => runAITriage().catch(showError), 200); } }
+  ];
+}
+
+let commandPaletteEl = null;
+let commandPaletteActive = 0;
+let commandPalettePreviousFocus = null;
+
+function installCommandPalette() {
+  if (commandPaletteEl) return;
+  const style = document.createElement("style");
+  style.id = "commandPaletteStyles";
+  style.textContent = `
+    .command-palette[hidden]{display:none}
+    .command-palette{position:fixed;inset:0;z-index:1200;display:grid;place-items:start center;padding:14vh 16px 16px}
+    .command-palette-backdrop{position:absolute;inset:0;background:rgba(8,15,25,.45);backdrop-filter:blur(3px)}
+    .command-palette-dialog{position:relative;width:min(620px,100%);background:var(--surface,#fff);color:var(--text,#172230);border:1px solid var(--line,#dbe3ee);border-radius:14px;box-shadow:0 24px 70px rgba(9,20,36,.28);overflow:hidden}
+    .command-palette-input{width:100%;border:0;border-bottom:1px solid var(--line,#dbe3ee);background:transparent;color:inherit;font:inherit;font-size:16px;padding:16px 18px;outline:none}
+    .command-palette-list{list-style:none;margin:0;padding:6px;max-height:min(52vh,420px);overflow:auto}
+    .command-palette-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:14px}
+    .command-palette-item[aria-selected="true"]{background:var(--accent-soft,#e8f1fb);color:var(--text,#172230)}
+    .command-palette-item small{color:var(--muted,#6b7c93);font-size:11px}
+    .command-palette-empty{padding:16px;color:var(--muted,#6b7c93);font-size:13px}
+    .command-palette-foot{padding:9px 16px;border-top:1px solid var(--line,#dbe3ee);color:var(--muted,#6b7c93);font-size:11px}`;
+  document.head.appendChild(style);
+  const wrap = document.createElement("div");
+  wrap.id = "commandPalette";
+  wrap.className = "command-palette";
+  wrap.hidden = true;
+  wrap.innerHTML = `<div class="command-palette-backdrop" data-command-close></div>
+    <div class="command-palette-dialog" role="dialog" aria-modal="true" aria-label="Command palette">
+      <input class="command-palette-input" id="commandPaletteInput" type="text" role="combobox" aria-expanded="true" aria-controls="commandPaletteList" aria-autocomplete="list" placeholder="Type a command or destination…" autocomplete="off">
+      <ul class="command-palette-list" id="commandPaletteList" role="listbox" aria-label="Commands"></ul>
+      <div class="command-palette-foot">↑ ↓ to move · Enter to run · Esc to close</div>
+    </div>`;
+  document.body.appendChild(wrap);
+  commandPaletteEl = wrap;
+  const input = wrap.querySelector("#commandPaletteInput");
+  input.addEventListener("input", () => renderCommandPalette(input.value));
+  input.addEventListener("keydown", handleCommandPaletteKey);
+  wrap.querySelector("[data-command-close]")?.addEventListener("click", closeCommandPalette);
+  wrap.querySelector("#commandPaletteList")?.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-command-index]");
+    if (row) runCommandPaletteIndex(Number(row.getAttribute("data-command-index")));
+  });
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      if (commandPaletteEl.hidden) openCommandPalette(); else closeCommandPalette();
+    }
+  });
+}
+
+function openCommandPalette() {
+  if (!commandPaletteEl) return;
+  commandPalettePreviousFocus = document.activeElement;
+  commandPaletteEl.hidden = false;
+  const input = commandPaletteEl.querySelector("#commandPaletteInput");
+  input.value = "";
+  commandPaletteActive = 0;
+  renderCommandPalette("");
+  input.focus();
+}
+
+function closeCommandPalette() {
+  if (!commandPaletteEl) return;
+  commandPaletteEl.hidden = true;
+  commandPalettePreviousFocus?.focus?.();
+}
+
+function filteredCommandPalette(value) {
+  const query = String(value || "").trim().toLowerCase();
+  const commands = commandPaletteCommands();
+  if (!query) return commands;
+  return commands.filter((command) => (command.label + " " + command.id).toLowerCase().includes(query));
+}
+
+function renderCommandPalette(value) {
+  const list = commandPaletteEl?.querySelector("#commandPaletteList");
+  if (!list) return;
+  const commands = filteredCommandPalette(value);
+  commandPaletteActive = Math.max(0, Math.min(commandPaletteActive, commands.length - 1));
+  if (!commands.length) {
+    list.innerHTML = `<li class="command-palette-empty">No commands match “${esc(value)}”.</li>`;
+    return;
+  }
+  list.innerHTML = commands.map((command, index) => `<li class="command-palette-item" role="option" data-command-index="${index}" aria-selected="${index === commandPaletteActive}"><span>${esc(command.label)}</span>${command.hint ? `<small>${esc(command.hint)}</small>` : ""}</li>`).join("");
+}
+
+function handleCommandPaletteKey(event) {
+  const commands = filteredCommandPalette(event.currentTarget.value);
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeCommandPalette();
+    return;
+  }
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    commandPaletteActive = commands.length ? (commandPaletteActive + 1) % commands.length : 0;
+    renderCommandPalette(event.currentTarget.value);
+    return;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    commandPaletteActive = commands.length ? (commandPaletteActive - 1 + commands.length) % commands.length : 0;
+    renderCommandPalette(event.currentTarget.value);
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    const command = commands[commandPaletteActive];
+    if (command) {
+      closeCommandPalette();
+      try { command.run(); } catch (error) { showError(error); }
+    }
+  }
+}
+
+function runCommandPaletteIndex(index) {
+  const input = commandPaletteEl?.querySelector("#commandPaletteInput");
+  const command = filteredCommandPalette(input?.value || "")[index];
+  if (!command) return;
+  closeCommandPalette();
+  try { command.run(); } catch (error) { showError(error); }
 }
 
 function showSettingsTab(tab) {
@@ -29962,7 +30147,8 @@ function bindEvents() {
     layoutComposeSessions();
   });
 
-  window.addEventListener("online", () => { setOffline(false); });
+  window.addEventListener("online", () => { setOffline(false); flushOfflineSends().catch(() => {}); });
+  flushOfflineSends().catch(() => {});
   window.addEventListener("offline", () => { setOffline(true); });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && reactionMenu) closeReactionMenu();
