@@ -18,19 +18,28 @@ for the supported subset documented below. Unsupported features are listed in
 
 | Item | Value |
 | --- | --- |
-| SCIM base URL | `https://<public-host>/scim/v2` |
-| Public host source | `ALT8MAIL_PUBLIC_URL` (trailing slash trimmed, then `/scim/v2` appended) |
+| SCIM base URL | `https://<public-host>[/<path-prefix>]/scim/v2` |
+| Public URL source | `ALT8MAIL_PUBLIC_URL` (trailing slash trimmed, then `/scim/v2` appended) |
 | Authentication | `Authorization: Bearer a8m_scim_…` |
 | Request content types | `application/scim+json`, `application/json` |
 | Response content type | `application/scim+json; charset=utf-8` |
 | Request body limit | 1 MiB per SCIM write request |
 | Transport | HTTPS required; plain HTTP is accepted only for loopback development |
 
-`ALT8MAIL_PUBLIC_URL` must be an absolute `http`/`https` origin without
-userinfo, query or fragment. If it is missing, malformed, or uses plain HTTP on
-a non-loopback host, every SCIM request returns a plain `404` (fail closed).
-Use the public hostname that IdPs can reach; bearer tokens must never cross
-plain HTTP.
+`ALT8MAIL_PUBLIC_URL` must be an absolute `http`/`https` URL with a host and
+without userinfo, query or fragment. It may include a path prefix; the SCIM
+base URL is that value with `/scim/v2` appended. Use a host-only value where
+possible. A path prefix is supported only when the reverse proxy strips it
+before forwarding to the API (see below). If the public URL is missing,
+malformed, or uses plain HTTP on a non-loopback host, every SCIM request
+returns a plain `404` (fail closed). Use the public hostname that IdPs can
+reach; bearer tokens must never cross plain HTTP.
+
+The admin console's Provisioning view displays this authoritative base URL
+from the server bootstrap payload, so it is also correct when the admin
+console is served from a different host. If the server cannot derive the URL
+because `ALT8MAIL_PUBLIC_URL` is missing or invalid, the view points operators
+to this document instead of showing a guessed address.
 
 Without a valid `scim` entitlement, every `/scim/v2` request (including
 discovery) returns a plain `404`, not a `401`. Tokens cannot be used until the
@@ -63,12 +72,32 @@ The script edits the active nginx site or its managed
 `/etc/nginx/snippets/a8m-public-routes.conf` include, validates with `nginx -t`
 and restores the previous files if validation fails.
 
+The bundled block and route script assume a host-only
+`ALT8MAIL_PUBLIC_URL`. If you configure a path prefix, for example
+`ALT8MAIL_PUBLIC_URL=https://mail.example.com/mail`, the advertised base is
+`https://mail.example.com/mail/scim/v2`. The proxy must strip `/mail` before
+forwarding to the API:
+
+```nginx
+location ^~ /mail/scim/ {
+    proxy_pass http://127.0.0.1:8080/scim/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+The trailing `/scim/` in `proxy_pass` is required to replace the prefixed
+path; forwarding the prefixed URI unchanged would not match the API routes.
+
 When nginx is managed by Alt8Mail Web Net, the installer detects the
 `Managed by Alt8Mail Web Net` site marker, sets `WEB_NET_MANAGED=1` and
 preserves that site during upgrades. In that mode the external Web Net proxy
-must forward `https://<public-host>/scim/` to `127.0.0.1:8080` with the same
-headers; the local installer will not overwrite the managed proxy
-configuration.
+must forward `https://<public-host>/scim/` (or the configured path prefix,
+rewritten as above) to `127.0.0.1:8080` with the same headers; the local
+installer will not overwrite the managed proxy configuration.
 
 ## Authentication and rate limits
 
@@ -237,8 +266,9 @@ Notes:
 - `externalId` is optional and unique per tenant when present; `""` clears it.
 - Member `value` is an Alt8Mail user UUID (the Users resource `id`), not a
   `userName`. Every referenced user must belong to the same tenant. Adding a
-  soft-closed account is `400 invalidValue`; removing a non-member is an
-  idempotent no-op.
+  soft-closed account is `400 invalidValue`; removing a valid same-tenant user
+  who is not a member is an idempotent no-op. Unknown, malformed or
+  cross-tenant member ids are `400 invalidValue`.
 - The local `scimRole` role mapping is deliberately not exposed in the SCIM
   resource. It is configured only in the Alt8Mail admin console.
 - Groups have no SCIM representation of archive status: `status` is not a SCIM
@@ -282,15 +312,18 @@ Users (`PATCH /Users/{id}`):
   accepted, changing them is `409 mutability`.
 - `password`, `roles`, `displayName`, deep paths, unknown paths and non-replace
   path-less operations return `400 invalidPath`; wrong value types return
-  `400 invalidValue`. Read-only `schemas`/`id`/`meta` echoes are ignored.
+  `400 invalidValue`. In a path-less `replace` object only, read-only
+  `schemas`/`id`/`meta` echoes are ignored; supplying them as explicit paths
+  returns `400 invalidPath`.
 
 Groups (`PATCH /Groups/{id}`):
 
 - Paths: `displayName`, `externalId`, `members`.
 - Path-less `replace` objects containing those same attributes are supported.
 - `members` accepts a single `{ "value": "<user id>" }` object or an array;
-  `add` of an existing member and `remove` of a non-member are idempotent
-  no-ops. Membership operations apply in order.
+  `add` of an existing member and `remove` of a valid same-tenant non-member
+  are idempotent no-ops. Unknown, malformed or cross-tenant member ids return
+  `400 invalidValue`. Membership operations apply in order.
 - Removing `externalId` clears it. `displayName` is required, so
   `remove displayName` returns `400 invalidValue`.
 - Unknown paths, unsupported path-less keys and non-replace path-less
@@ -336,7 +369,7 @@ Idempotency summary:
 | `POST /Users` other conflicts | `409 uniqueness` |
 | `POST /Groups` duplicate `externalId` | `409 uniqueness` (not replay-idempotent) |
 | `PUT` / `PATCH` | Full replacement or targeted mutation; repeating the same write is safe |
-| Group `add` existing member / `remove` non-member | Idempotent no-op |
+| Group `add` existing member / `remove` valid same-tenant non-member | Idempotent no-op; unknown/malformed/cross-tenant ids are `400 invalidValue` |
 | `DELETE /Users/{id}` | Idempotent `204`; each explicit call is audited |
 | `DELETE /Groups/{id}` | First call `204`, second call `404` |
 | Token create/rotate | Never idempotent; each call creates new token material |
@@ -383,14 +416,17 @@ Rules:
   requires `roles.manage` in addition to `groups.manage`.
 - Only security groups can hold a mapping. A mapped group must remain a
   security group; clear the mapping before changing its type. Legacy mappings
-  on non-security groups are inert.
+  on non-security groups are inert. The admin console shows such a stale
+  mapping as read-only and offers an administrator with both permissions a
+  **Clear mapping** action.
 - Mapping and recompute changes are audited. SCIM-origin role changes are
   attributed to the token actor; admin-origin changes to the administrator.
 
-Recompute triggers: SCIM user membership add/remove/replace, SCIM group delete,
-admin group membership add/remove/delete, admin `scimRole` change, and admin
-archive/reactivate (as a safety measure). Role changes are applied in the same
-transaction as the membership change.
+Recompute triggers: SCIM group create with initial members, SCIM user
+membership add/remove/replace, SCIM group delete, admin group membership
+add/remove/delete, admin `scimRole` change, admin group type changes, and
+admin archive/reactivate (as a safety measure). Role changes are applied in
+the same transaction as the membership, mapping or group change.
 
 ## Identity provider setup
 
