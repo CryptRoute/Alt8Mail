@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -76,7 +77,7 @@ func (s *Server) aiSettingsFor(ctx context.Context, tenantID string) (aiSettings
 		return settings, nil
 	}
 	if strings.TrimSpace(sealed) != "" {
-		key, err := s.openWorkspaceToken(strings.TrimSpace(sealed))
+		key, err := s.openTenantSecret(ctx, tenantID, strings.TrimSpace(sealed))
 		if err != nil {
 			return settings, fmt.Errorf("decrypt AI API key: %w", err)
 		}
@@ -526,8 +527,12 @@ func (s *Server) adminUpdateAI(w http.ResponseWriter, r *http.Request) {
 	sealed := ""
 	if !body.ClearKey {
 		if body.APIKey != nil && strings.TrimSpace(*body.APIKey) != "" {
-			sealed, err = s.sealWorkspaceToken(strings.TrimSpace(*body.APIKey))
+			sealed, err = s.sealTenantSecret(r.Context(), sess.ActiveTenantID, strings.TrimSpace(*body.APIKey))
 			if err != nil {
+				if errors.Is(err, errTenantKeyLocked) {
+					writeError(w, http.StatusLocked, "ENCRYPTION_LOCKED", "Unlock the organization's customer-managed encryption key before saving AI credentials")
+					return
+				}
 				writeError(w, http.StatusInternalServerError, "AI_KEY", "Could not protect the API key")
 				return
 			}

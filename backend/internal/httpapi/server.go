@@ -91,6 +91,8 @@ type Server struct {
 	// bounded public-network POST in automation.go.
 	automationPost func(context.Context, string, []byte) error
 	mcpLimit       *loginLimiter
+	tenantKeyMu    sync.Mutex
+	tenantKeys     map[string]map[int]unlockedTenantKey
 }
 
 type Options struct {
