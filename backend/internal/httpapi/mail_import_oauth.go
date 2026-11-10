@@ -241,7 +241,7 @@ func (s *Server) importGmailMailbox(ctx context.Context, job mailImportJobRecord
 		if s.mailImportStatus(ctx, job.ID) == "cancelled" {
 			return imported, total, errMailImportCancelled
 		}
-		query := url.Values{"maxResults": {"100"}}
+		query := url.Values{"maxResults": {"100"}, "includeSpamTrash": {"true"}}
 		if cursor["gmailAfter"] > 0 {
 			query.Set("q", fmt.Sprintf("after:%d", cursor["gmailAfter"]/1000))
 		}
