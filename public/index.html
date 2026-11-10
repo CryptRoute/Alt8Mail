@@ -203,7 +203,7 @@
       <p class="login-error" id="loginError" hidden></p>
       <p class="login-hint" id="loginHint" hidden></p>
       <button class="login-submit" id="loginSubmit" type="submit">Sign in</button>
-      <p class="login-demo">Secure workspace — use your organization credentials. Mail is read live from Dovecot.</p>
+      <p class="login-demo">Secure workspace — use your organization credentials. Mail is read live from Alt8Mail.</p>
       <div class="login-card-foot"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg><span data-i18n="login.legal">Protected by Alt8Mail · TLS 1.3</span></div>
     </form>
 
@@ -1300,7 +1300,7 @@
                   <div class="settings-block">
                     <div class="settings-block-head">
                       <h3>Mail forwarding</h3>
-                      <p>Forward incoming mail to another address. Forwarding is applied by Dovecot Sieve before your other rules.</p>
+                      <p>Forward incoming mail to another address. Forwarding is applied by Alt8Mail iqScan before your other rules.</p>
                     </div>
                     <div class="setting-list">
                       <div class="setting-row">
@@ -1470,7 +1470,7 @@
                   <div class="settings-block">
                     <div class="settings-block-head">
                       <h3>Automatic replies</h3>
-                      <p>Outlook-style out-of-office replies, backed by the Sieve <code>vacation</code> extension.</p>
+                      <p>Out-of-office replies, backed by the A8M <code>vacation</code> extension.</p>
                     </div>
                     <div class="auto-reply-status" id="autoReplyStatus">
                       <span class="auto-reply-dot" aria-hidden="true"></span>
@@ -1522,8 +1522,8 @@
                 <section class="settings-panel" data-settings-panel="rules" hidden>
                   <div class="settings-block">
                     <div class="settings-block-head">
-                      <h3>Server-side Sieve rules</h3>
-                      <p>Rules run in Dovecot’s Sieve interpreter before mail reaches your inbox.</p>
+                      <h3>Message rules</h3>
+                      <p>You can create rules that tell Alt8Mail hot to handle incoming email messages. Rules run in Alt8Mail scan interpreter before mail reaches your inbox.</p>
                     </div>
                     <div class="rules-toolbar">
                       <button class="btn-primary" id="addRuleBtn" type="button">
