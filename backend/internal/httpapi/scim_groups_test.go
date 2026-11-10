@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +122,66 @@ func TestSCIMGroupRoleAuditAction(t *testing.T) {
 	action, detail = scimGroupRoleAuditAction(scimRoleChange{OldRole: "readonly", NewRole: ""})
 	if action != "scim.role_unmapped" || !strings.Contains(detail, "readonly") || !strings.Contains(detail, "member") {
 		t.Fatalf("unmapped action=%q detail=%q", action, detail)
+	}
+	action, detail = adminGroupRoleAuditAction(scimRoleChange{OldRole: "member", NewRole: "admin"})
+	if action != "admin.role_mapped" || !strings.Contains(detail, "admin") {
+		t.Fatalf("admin mapped action=%q detail=%q", action, detail)
+	}
+	action, _ = adminGroupRoleAuditAction(scimRoleChange{OldRole: "readonly", NewRole: ""})
+	if action != "admin.role_unmapped" {
+		t.Fatalf("admin unmapped action=%q", action)
+	}
+}
+
+func TestSCIMCanonicalMemberIDs(t *testing.T) {
+	upper := "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+	lower := strings.ToLower(upper)
+	ids, handlerErr := scimCanonicalMemberIDs([]string{upper, lower, " " + lower + " "})
+	if handlerErr != nil || len(ids) != 1 || ids[0] != lower {
+		t.Fatalf("canonical ids = %#v err=%v", ids, handlerErr)
+	}
+	if _, handlerErr := scimCanonicalMemberIDs([]string{"not-a-uuid"}); handlerErr == nil ||
+		handlerErr.status != http.StatusBadRequest || handlerErr.scimType != "invalidValue" {
+		t.Fatalf("malformed id err = %#v", handlerErr)
+	}
+}
+
+func TestSCIMGroupRoutesAuthAndLicense(t *testing.T) {
+	unlicensed, _ := newSCIMTestServer(t, "https://mail.example.test")
+	for _, path := range []string{"/scim/v2/Groups", "/scim/v2/Groups/22222222-2222-4222-8222-222222222222"} {
+		recorder := httptest.NewRecorder()
+		unlicensed.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("unlicensed %s status = %d", path, recorder.Code)
+		}
+	}
+
+	licensed, _ := newSCIMTestServer(t, "https://mail.example.test", "scim")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		recorder := httptest.NewRecorder()
+		licensed.Handler().ServeHTTP(recorder, httptest.NewRequest(method, "/scim/v2/Groups", nil))
+		assertSCIMError(t, recorder, http.StatusUnauthorized, "")
+	}
+	request := httptest.NewRequest(http.MethodGet, "/scim/v2/Groups", nil)
+	request.Header.Set("Authorization", "Bearer not-a-scim-token")
+	recorder := httptest.NewRecorder()
+	licensed.Handler().ServeHTTP(recorder, request)
+	assertSCIMError(t, recorder, http.StatusUnauthorized, "")
+}
+
+func TestSCIMGroupMethodDispatch(t *testing.T) {
+	server, _ := newSCIMTestServer(t, "https://mail.example.test", "scim")
+	request := scimTenantRequest(httptest.NewRequest(http.MethodDelete, "/scim/v2/Groups", nil))
+	recorder := httptest.NewRecorder()
+	server.scimGroupsCollection(recorder, request)
+	if recorder.Code != http.StatusMethodNotAllowed || recorder.Header().Get("Allow") != "GET, POST" {
+		t.Fatalf("collection dispatch status=%d allow=%q", recorder.Code, recorder.Header().Get("Allow"))
+	}
+	request = scimTenantRequest(httptest.NewRequest(http.MethodPost, "/scim/v2/Groups/x", nil))
+	recorder = httptest.NewRecorder()
+	server.scimGroupsItem(recorder, request)
+	if recorder.Code != http.StatusMethodNotAllowed || recorder.Header().Get("Allow") != "GET, PUT, PATCH, DELETE" {
+		t.Fatalf("item dispatch status=%d allow=%q", recorder.Code, recorder.Header().Get("Allow"))
 	}
 }
 

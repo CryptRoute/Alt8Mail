@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -105,6 +106,15 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 	dave := createUser(tenantA, "dave", "Dave Davis", "member")
 	erin := createUser(tenantA, "erin", "Erin Evans", "member")
 	ownerA := createUser(tenantA, "owner", "Olivia Owner", "owner")
+	frank := createUser(tenantA, "frank", "Frank Foster", "member")
+	grace := createUser(tenantA, "grace", "Grace Green", "member")
+	henry := createUser(tenantA, "henry", "Henry Hughes", "member")
+	ivy := createUser(tenantA, "ivy", "Ivy Irwin", "member")
+	judy := createUser(tenantA, "judy", "Judy Jones", "member")
+	racers := make([]string, 5)
+	for index := range racers {
+		racers[index] = createUser(tenantA, fmt.Sprintf("racer%d", index), fmt.Sprintf("Racer %d", index), "member")
+	}
 	outsider := createUser(tenantB, "outsider", "Oscar Outsider", "member")
 	_ = outsider
 
@@ -134,6 +144,24 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 		return cookie, csrf
 	}
 	adminCookie, adminCSRF := createAdminSession(ownerA, tenantA)
+	createScopedSession := func(label string, permissions []string) (cookie, csrf string) {
+		userID := createUser(tenantA, label, "Scoped "+label, "member")
+		var roleID string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO admin_roles (tenant_id, name, permissions)
+			VALUES ($1, $2, $3) RETURNING id::text
+		`, tenantA, "role-"+label, permissions).Scan(&roleID); err != nil {
+			t.Fatalf("create %s admin role: %v", label, err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO admin_role_assignments (user_id, role_id, tenant_id) VALUES ($1, $2, $3)
+		`, userID, roleID, tenantA); err != nil {
+			t.Fatalf("assign %s admin role: %v", label, err)
+		}
+		return createAdminSession(userID, tenantA)
+	}
+	groupsCookie, groupsCSRF := createScopedSession("groups-only", []string{"groups.manage"})
+	mappingCookie, mappingCSRF := createScopedSession("mapping-admin", []string{"groups.manage", "roles.manage"})
 
 	defer func() {
 		cleanup := context.Background()
@@ -247,9 +275,13 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 		}
 		return values
 	}
+	adminPatchGroup := func(t *testing.T, cookie, csrf, groupID, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		return adminRequest(cookie, csrf, http.MethodPatch, "/admin/api/groups/"+groupID, body)
+	}
 	adminSetMapping := func(t *testing.T, groupID, role string) map[string]any {
 		t.Helper()
-		recorder := adminRequest(adminCookie, adminCSRF, http.MethodPatch, "/admin/api/groups/"+groupID, fmt.Sprintf(`{"scimRole":%q}`, role))
+		recorder := adminPatchGroup(t, adminCookie, adminCSRF, groupID, fmt.Sprintf(`{"scimRole":%q}`, role))
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("set group mapping %q status = %d: %s", role, recorder.Code, recorder.Body.String())
 		}
@@ -258,6 +290,17 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 		}
 		decode(t, recorder, &payload)
 		return payload.Group
+	}
+	adminAddMember := func(t *testing.T, cookie, csrf, groupID, userID string) *httptest.ResponseRecorder {
+		t.Helper()
+		return adminRequest(cookie, csrf, http.MethodPost, "/admin/api/groups/"+groupID+"/members", fmt.Sprintf(`{"userId":%q}`, userID))
+	}
+	adminRemoveMember := func(t *testing.T, cookie, csrf, groupID, userID string) *httptest.ResponseRecorder {
+		t.Helper()
+		return adminRequest(cookie, csrf, http.MethodDelete, "/admin/api/groups/"+groupID+"/members/"+userID, "")
+	}
+	adminDeleteGroupRequest := func(cookie, csrf, groupID string) *httptest.ResponseRecorder {
+		return adminRequest(cookie, csrf, http.MethodDelete, "/admin/api/groups/"+groupID, "")
 	}
 	scimPatch := func(t *testing.T, rawToken, groupID, body string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -688,6 +731,279 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("mapped group mutations require roles.manage", func(t *testing.T) {
+		permissionGroup, _ := createGroup(t, tokenA, "Permission Gate", "grp-perm")
+		expectForbidden := func(recorder *httptest.ResponseRecorder, what string) {
+			t.Helper()
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("%s status = %d: %s", what, recorder.Code, recorder.Body.String())
+			}
+			var payload struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			decode(t, recorder, &payload)
+			if payload.Error.Code != "FORBIDDEN" {
+				t.Fatalf("%s code = %q", what, payload.Error.Code)
+			}
+		}
+		// groups.manage alone cannot create a mapping.
+		expectForbidden(adminPatchGroup(t, groupsCookie, groupsCSRF, permissionGroup, `{"scimRole":"admin"}`), "scimRole change")
+		// roles.manage can.
+		recorder := adminPatchGroup(t, mappingCookie, mappingCSRF, permissionGroup, `{"scimRole":"admin"}`)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("roles.manage mapping status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		// Ordinary attribute edits on a mapped group stay at groups.manage.
+		if recorder := adminPatchGroup(t, groupsCookie, groupsCSRF, permissionGroup, `{"name":"Permission Gate Renamed"}`); recorder.Code != http.StatusOK {
+			t.Fatalf("groups.manage rename status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		// Membership, archive and delete of a mapped group require roles.manage.
+		expectForbidden(adminAddMember(t, groupsCookie, groupsCSRF, permissionGroup, frank), "mapped member add")
+		expectForbidden(adminRemoveMember(t, groupsCookie, groupsCSRF, permissionGroup, frank), "mapped member remove")
+		expectForbidden(adminPatchGroup(t, groupsCookie, groupsCSRF, permissionGroup, `{"status":"archived"}`), "mapped archive")
+		expectForbidden(adminDeleteGroupRequest(groupsCookie, groupsCSRF, permissionGroup), "mapped delete")
+
+		// Re-sending the stored mapping is a no-op: no permission needed and no
+		// admin.group_role_mapping_updated row.
+		var before, after int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM admin_audit_log
+			WHERE tenant_id = $1 AND action = 'admin.group_role_mapping_updated'
+		`, tenantA).Scan(&before); err != nil {
+			t.Fatalf("count mapping audits: %v", err)
+		}
+		if recorder := adminPatchGroup(t, groupsCookie, groupsCSRF, permissionGroup, `{"scimRole":"admin"}`); recorder.Code != http.StatusOK {
+			t.Fatalf("no-op mapping status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM admin_audit_log
+			WHERE tenant_id = $1 AND action = 'admin.group_role_mapping_updated'
+		`, tenantA).Scan(&after); err != nil {
+			t.Fatalf("count mapping audits: %v", err)
+		}
+		if after != before {
+			t.Fatalf("no-op mapping wrote %d audit rows", after-before)
+		}
+
+		// roles.manage succeeds for mapped membership.
+		if recorder := adminAddMember(t, mappingCookie, mappingCSRF, permissionGroup, frank); recorder.Code != http.StatusOK {
+			t.Fatalf("roles.manage member add status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if role, source := loadRole(t, frank); role != "admin" || source != "scim" {
+			t.Fatalf("frank after mapped add = %s/%s", role, source)
+		}
+		// Archiving a mapped group removes the mapping effect; reactivating
+		// re-applies it (both recompute in the same transaction).
+		if recorder := adminPatchGroup(t, mappingCookie, mappingCSRF, permissionGroup, `{"status":"archived"}`); recorder.Code != http.StatusOK {
+			t.Fatalf("roles.manage archive status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if role, source := loadRole(t, frank); role != "member" || source != "manual" {
+			t.Fatalf("frank after archive = %s/%s", role, source)
+		}
+		if recorder := adminPatchGroup(t, mappingCookie, mappingCSRF, permissionGroup, `{"status":"active"}`); recorder.Code != http.StatusOK {
+			t.Fatalf("roles.manage reactivate status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if role, source := loadRole(t, frank); role != "admin" || source != "scim" {
+			t.Fatalf("frank after reactivate = %s/%s", role, source)
+		}
+		if recorder := adminRemoveMember(t, mappingCookie, mappingCSRF, permissionGroup, frank); recorder.Code != http.StatusOK {
+			t.Fatalf("roles.manage member remove status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if role, source := loadRole(t, frank); role != "member" || source != "manual" {
+			t.Fatalf("frank after mapped remove = %s/%s", role, source)
+		}
+
+		// M7: a non-security group cannot hold a mapping.
+		recorder = adminPatchGroup(t, mappingCookie, mappingCSRF, permissionGroup, `{"scimRole":"admin","type":"distribution"}`)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("non-security mapping status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var rolePayload struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		decode(t, recorder, &rolePayload)
+		if rolePayload.Error.Code != "ROLE" {
+			t.Fatalf("non-security mapping code = %q", rolePayload.Error.Code)
+		}
+		// Clearing the mapping and changing the type together is allowed.
+		if recorder := adminPatchGroup(t, mappingCookie, mappingCSRF, permissionGroup, `{"scimRole":"","type":"distribution"}`); recorder.Code != http.StatusOK {
+			t.Fatalf("clear mapping + type status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if group := loadGroup(t, permissionGroup); group.ScimRole != "" || group.GroupType != "distribution" {
+			t.Fatalf("group after clear+type = %q/%q", group.ScimRole, group.GroupType)
+		}
+		// Unmapped-group membership remains available with groups.manage alone.
+		if recorder := adminAddMember(t, groupsCookie, groupsCSRF, permissionGroup, grace); recorder.Code != http.StatusOK {
+			t.Fatalf("groups.manage unmapped add status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if recorder := adminRemoveMember(t, groupsCookie, groupsCSRF, permissionGroup, grace); recorder.Code != http.StatusOK {
+			t.Fatalf("groups.manage unmapped remove status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("soft-deleted members do not block PATCH", func(t *testing.T) {
+		closedGroup, _ := createGroup(t, tokenA, "Closed Member", "grp-closed", henry, ivy)
+		if _, err := pool.Exec(ctx, `UPDATE users SET deleted_at = now(), status = 'suspended' WHERE id = $1`, ivy); err != nil {
+			t.Fatalf("soft-delete ivy: %v", err)
+		}
+		// A displayName-only PATCH must succeed even though the group still has a
+		// closed membership row.
+		recorder := scimPatch(t, tokenA, closedGroup, `{"Operations":[{"op":"replace","path":"displayName","value":"Closed Member Renamed"}]}`)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("displayName PATCH with closed member status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var resource map[string]any
+		decode(t, recorder, &resource)
+		if values := memberValues(t, resource); len(values) != 1 || values[0] != henry {
+			t.Fatalf("members with closed account = %v", values)
+		}
+		// Removing the closed member is allowed and idempotent.
+		recorder = scimPatch(t, tokenA, closedGroup, fmt.Sprintf(`{"Operations":[{"op":"remove","path":"members","value":[{"value":%q}]}]}`, ivy))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("remove closed member status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		recorder = scimPatch(t, tokenA, closedGroup, fmt.Sprintf(`{"Operations":[{"op":"remove","path":"members","value":[{"value":%q}]}]}`, ivy))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("repeat remove closed member status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		// Adding a closed account is still rejected.
+		assertSCIMError(t, scimPatch(t, tokenA, closedGroup, fmt.Sprintf(`{"Operations":[{"op":"add","path":"members","value":[{"value":%q}]}]}`, ivy)), http.StatusBadRequest, "invalidValue")
+		// Replacement with only live members succeeds.
+		recorder = scimPatch(t, tokenA, closedGroup, fmt.Sprintf(`{"Operations":[{"op":"replace","path":"members","value":[{"value":%q}]}]}`, henry))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("replace with live member status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("mapping wins over a manual demotion", func(t *testing.T) {
+		group, _ := createGroup(t, tokenA, "Mapping Wins", "grp-mapping-wins")
+		adminSetMapping(t, group, "admin")
+		recorder := scimPatch(t, tokenA, group, fmt.Sprintf(`{"Operations":[{"op":"add","path":"members","value":[{"value":%q}]}]}`, judy))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("add judy status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if role, source := loadRole(t, judy); role != "admin" || source != "scim" {
+			t.Fatalf("judy mapped = %s/%s", role, source)
+		}
+		recorder = adminRequest(adminCookie, adminCSRF, http.MethodPatch, "/admin/api/users/"+judy, `{"role":"member"}`)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("manual demotion status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if role, source := loadRole(t, judy); role != "member" || source != "manual" {
+			t.Fatalf("judy after manual demotion = %s/%s", role, source)
+		}
+		// The next membership recompute re-applies the active mapping; an explicit
+		// demotion requires removing the user from the group or changing/clearing
+		// the mapping (both roles.manage operations).
+		recorder = scimPatch(t, tokenA, group, fmt.Sprintf(`{"Operations":[{"op":"add","path":"members","value":[{"value":%q}]}]}`, judy))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("duplicate add after demotion status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if role, source := loadRole(t, judy); role != "admin" || source != "scim" {
+			t.Fatalf("judy after recompute = %s/%s", role, source)
+		}
+	})
+
+	t.Run("externalId conflicts, version bump and second delete", func(t *testing.T) {
+		firstGroup, _ := createGroup(t, tokenA, "Conflict One", "grp-conflict-1")
+		secondGroup, secondResource := createGroup(t, tokenA, "Conflict Two", "grp-conflict-2")
+		_ = firstGroup
+		// PUT/PATCH to another group's externalId is 409 uniqueness.
+		body := `{"displayName":"Conflict Two","externalId":"grp-conflict-1"}`
+		assertSCIMError(t, scimRequest(tokenA, http.MethodPut, "/scim/v2/Groups/"+secondGroup, "", body), http.StatusConflict, "uniqueness")
+		assertSCIMError(t, scimPatch(t, tokenA, secondGroup, `{"Operations":[{"op":"replace","path":"externalId","value":"grp-conflict-1"}]}`), http.StatusConflict, "uniqueness")
+		if group := loadGroup(t, secondGroup); group.ExternalID == nil || *group.ExternalID != "grp-conflict-2" {
+			t.Fatalf("failed conflict changed externalId to %#v", group.ExternalID)
+		}
+		// Re-sending the group's own externalId is fine.
+		recorder := scimRequest(tokenA, http.MethodPut, "/scim/v2/Groups/"+secondGroup, "", `{"externalId":"grp-conflict-2"}`)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("same externalId PUT status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+
+		// Membership-only changes bump meta.version.
+		versionGroup, versionResource := createGroup(t, tokenA, "Version Bump", "grp-version", alice)
+		firstVersion, _ := versionResource["meta"].(map[string]any)["version"].(string)
+		recorder = scimPatch(t, tokenA, versionGroup, fmt.Sprintf(`{"Operations":[{"op":"add","path":"members","value":[{"value":%q}]}]}`, bob))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("version bump PATCH status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var bumped map[string]any
+		decode(t, recorder, &bumped)
+		bumpedVersion, _ := bumped["meta"].(map[string]any)["version"].(string)
+		if firstVersion == "" || bumpedVersion == "" || firstVersion == bumpedVersion {
+			t.Fatalf("version did not change on membership update: %q -> %q", firstVersion, bumpedVersion)
+		}
+
+		// A second DELETE is a 404.
+		deleteGroup, _ := createGroup(t, tokenA, "Second Delete", "grp-second-delete")
+		if recorder := scimRequest(tokenA, http.MethodDelete, "/scim/v2/Groups/"+deleteGroup, "", ""); recorder.Code != http.StatusNoContent {
+			t.Fatalf("first delete status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		assertSCIMError(t, scimRequest(tokenA, http.MethodDelete, "/scim/v2/Groups/"+deleteGroup, "", ""), http.StatusNotFound, "")
+		_ = secondResource
+	})
+
+	t.Run("concurrent admin add and delete stay consistent", func(t *testing.T) {
+		for index, userID := range racers {
+			group, _ := createGroup(t, tokenA, fmt.Sprintf("Race Delete %d", index), fmt.Sprintf("grp-race-delete-%d", index))
+			adminSetMapping(t, group, "admin")
+			var wg sync.WaitGroup
+			wg.Add(2)
+			var addStatus, deleteStatus int
+			go func(groupID string) {
+				defer wg.Done()
+				addStatus = adminAddMember(t, mappingCookie, mappingCSRF, groupID, userID).Code
+			}(group)
+			go func(groupID string) {
+				defer wg.Done()
+				deleteStatus = adminDeleteGroupRequest(mappingCookie, mappingCSRF, groupID).Code
+			}(group)
+			wg.Wait()
+			if deleteStatus != http.StatusOK {
+				t.Fatalf("concurrent delete status = %d", deleteStatus)
+			}
+			if addStatus != http.StatusOK && addStatus != http.StatusNotFound {
+				t.Fatalf("concurrent add status = %d", addStatus)
+			}
+			if role, source := loadRole(t, userID); role == "admin" || source == "scim" {
+				t.Fatalf("elevated role survived concurrent delete: %s/%s", role, source)
+			}
+			var remaining int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM groups WHERE id = $1`, group).Scan(&remaining); err != nil || remaining != 0 {
+				t.Fatalf("group still exists after delete: count=%d err=%v", remaining, err)
+			}
+		}
+	})
+
+	t.Run("concurrent admin add and mapping change converge", func(t *testing.T) {
+		for index, userID := range racers {
+			group, _ := createGroup(t, tokenA, fmt.Sprintf("Race Map %d", index), fmt.Sprintf("grp-race-map-%d", index))
+			var wg sync.WaitGroup
+			wg.Add(2)
+			var addStatus, mapStatus int
+			go func(groupID string) {
+				defer wg.Done()
+				addStatus = adminAddMember(t, mappingCookie, mappingCSRF, groupID, userID).Code
+			}(group)
+			go func(groupID string) {
+				defer wg.Done()
+				mapStatus = adminPatchGroup(t, mappingCookie, mappingCSRF, groupID, `{"scimRole":"admin"}`).Code
+			}(group)
+			wg.Wait()
+			if addStatus != http.StatusOK || mapStatus != http.StatusOK {
+				t.Fatalf("concurrent add/map statuses = %d/%d", addStatus, mapStatus)
+			}
+			if role, source := loadRole(t, userID); role != "admin" || source != "scim" {
+				t.Fatalf("mapping lost concurrent add: %s/%s", role, source)
+			}
+		}
+	})
+
 	t.Run("cross-tenant group access is denied", func(t *testing.T) {
 		assertSCIMError(t, scimRequest(tokenB, http.MethodGet, "/scim/v2/Groups/"+engineeringID, "", ""), http.StatusNotFound, "")
 		assertSCIMError(t, scimRequest(tokenB, http.MethodPut, "/scim/v2/Groups/"+engineeringID, "", `{"displayName":"Hijack"}`), http.StatusNotFound, "")
@@ -782,12 +1098,14 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 			}
 		}
 
-		var mappingAudits, adminDeletes int
+		var mappingAudits, adminDeletes, adminMapped, adminUnmapped int
 		if err := pool.QueryRow(ctx, `
 			SELECT count(*) FILTER (WHERE action = 'admin.group_role_mapping_updated'),
-			       count(*) FILTER (WHERE action = 'admin.group_deleted')
+			       count(*) FILTER (WHERE action = 'admin.group_deleted'),
+			       count(*) FILTER (WHERE action = 'admin.role_mapped'),
+			       count(*) FILTER (WHERE action = 'admin.role_unmapped')
 			FROM admin_audit_log WHERE tenant_id = $1
-		`, tenantA).Scan(&mappingAudits, &adminDeletes); err != nil {
+		`, tenantA).Scan(&mappingAudits, &adminDeletes, &adminMapped, &adminUnmapped); err != nil {
 			t.Fatalf("load admin audit rows: %v", err)
 		}
 		if mappingAudits < 4 {
@@ -796,11 +1114,11 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 		if adminDeletes < 1 {
 			t.Fatalf("admin.group_deleted rows = %d", adminDeletes)
 		}
-		var unmappedAdmin int
-		if err := pool.QueryRow(ctx, `
-			SELECT count(*) FROM admin_audit_log WHERE tenant_id = $1 AND action = 'scim.role_unmapped'
-		`, tenantA).Scan(&unmappedAdmin); err != nil || unmappedAdmin < 1 {
-			t.Fatalf("admin scim.role_unmapped rows = %d err=%v", unmappedAdmin, err)
+		if adminMapped < 1 {
+			t.Fatalf("admin.role_mapped rows = %d", adminMapped)
+		}
+		if adminUnmapped < 1 {
+			t.Fatalf("admin.role_unmapped rows = %d", adminUnmapped)
 		}
 	})
 }
