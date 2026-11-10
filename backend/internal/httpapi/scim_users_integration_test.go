@@ -1100,7 +1100,7 @@ func TestLicenseSeatEnforcementIntegration(t *testing.T) {
 		t.Fatalf("users SCIM columns missing; apply migration 0061 first: count=%d err=%v", columns, err)
 	}
 
-	slug := fmt.Sprintf("seat-enforce-%d", time.Now().UnixNano())
+	slug := fmt.Sprintf("seat-%d", time.Now().UnixNano())
 	domainA := slug + "-a.example.test"
 	domainB := slug + "-b.example.test"
 	createTenant := func(label, domain string) string {
@@ -1151,12 +1151,25 @@ func TestLicenseSeatEnforcementIntegration(t *testing.T) {
 	`, hashToken(adminCookie), operatorID, tenantA, adminCSRF); err != nil {
 		t.Fatalf("create admin session: %v", err)
 	}
+	// A second session for the same platform administrator, scoped to tenant B,
+	// proves admin seat checks follow the license tenant claim.
+	adminBCookie := randomToken(32)
+	adminBCSRF := randomToken(24)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_sessions (id, user_id, tenant_id, active_tenant_id, csrf_token, expires_at)
+		VALUES ($1, $2, $3, $4, $5, now() + interval '1 hour')
+	`, hashToken(adminBCookie), operatorID, tenantA, tenantB, adminBCSRF); err != nil {
+		t.Fatalf("create tenant B admin session: %v", err)
+	}
 
 	defer func() {
 		cleanup := context.Background()
-		_, _ = pool.Exec(cleanup, `DELETE FROM audit_log WHERE tenant_id IN ($1, $2)`, tenantA, tenantB)
-		_, _ = pool.Exec(cleanup, `DELETE FROM admin_audit_log WHERE tenant_id IN ($1, $2)`, tenantA, tenantB)
-		_, _ = pool.Exec(cleanup, `DELETE FROM tenants WHERE id IN ($1, $2)`, tenantA, tenantB)
+		// The slug prefix owns every tenant this test creates, including the
+		// organizations provisioned by the tenant-creation subtest.
+		tenantPattern := slug + "%"
+		_, _ = pool.Exec(cleanup, `DELETE FROM audit_log WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE $1)`, tenantPattern)
+		_, _ = pool.Exec(cleanup, `DELETE FROM admin_audit_log WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE $1)`, tenantPattern)
+		_, _ = pool.Exec(cleanup, `DELETE FROM tenants WHERE slug LIKE $1`, tenantPattern)
 	}()
 
 	server, clock := newSCIMTestServer(t, "https://mail.example.test", "scim")
@@ -1169,20 +1182,23 @@ func TestLicenseSeatEnforcementIntegration(t *testing.T) {
 	license.ExpiresAt = start.Add(24 * time.Hour)
 	license.GraceDays = 7
 
-	adminRequest := func(method, path, body string) *httptest.ResponseRecorder {
+	adminRequestAs := func(cookie, csrf, method, path, body string) *httptest.ResponseRecorder {
 		var reader io.Reader
 		if body != "" {
 			reader = strings.NewReader(body)
 		}
 		request := httptest.NewRequest(method, path, reader)
 		request.Header.Set("Content-Type", "application/json")
-		request.AddCookie(&http.Cookie{Name: adminSessionCookie, Value: adminCookie})
+		request.AddCookie(&http.Cookie{Name: adminSessionCookie, Value: cookie})
 		if method != http.MethodGet {
-			request.Header.Set("X-CSRF-Token", adminCSRF)
+			request.Header.Set("X-CSRF-Token", csrf)
 		}
 		recorder := httptest.NewRecorder()
 		server.AdminHandler().ServeHTTP(recorder, request)
 		return recorder
+	}
+	adminRequest := func(method, path, body string) *httptest.ResponseRecorder {
+		return adminRequestAs(adminCookie, adminCSRF, method, path, body)
 	}
 	scimRequest := func(rawToken, method, path, body string) *httptest.ResponseRecorder {
 		var reader io.Reader
@@ -1282,10 +1298,11 @@ func TestLicenseSeatEnforcementIntegration(t *testing.T) {
 	}
 	reset := func(t *testing.T) {
 		t.Helper()
+		server.adminSeatRaceHook = nil
 		if _, err := pool.Exec(ctx, `
 			UPDATE users SET status = 'suspended', deleted_at = NULL
-			WHERE tenant_id IN ($1, $2) AND is_system_admin = false
-		`, tenantA, tenantB); err != nil {
+			WHERE tenant_id IN (SELECT id FROM tenants WHERE slug LIKE $1) AND is_system_admin = false
+		`, slug+"%"); err != nil {
 			t.Fatalf("reset seat users: %v", err)
 		}
 		clock.Set(start)
@@ -1458,28 +1475,37 @@ func TestLicenseSeatEnforcementIntegration(t *testing.T) {
 		adminCreateID(t, "seat-tenant-two@"+domainA, "active")
 		assertSeatLimit(t, adminCreate(t, "seat-tenant-three@"+domainA, "active"))
 
-		// Another tenant is not limited by this tenant's license claim.
+		// Another tenant is not limited by this tenant's license claim, through
+		// either SCIM or the admin API.
 		other := "seat-other-tenant@" + domainB
 		recorder := scimRequest(tokenB, http.MethodPost, "/scim/v2/Users", scimBody(other, true))
 		if recorder.Code != http.StatusCreated {
 			t.Fatalf("other-tenant SCIM create status = %d: %s", recorder.Code, recorder.Body.String())
 		}
+		otherAdmin := "seat-other-admin@" + domainB
+		recorder = adminRequestAs(adminBCookie, adminBCSRF, http.MethodPost, "/admin/api/users",
+			fmt.Sprintf(`{"name":"Other Admin User","email":%q,"status":"active"}`, otherAdmin))
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("other-tenant admin create status = %d: %s", recorder.Code, recorder.Body.String())
+		}
 		snapshot := server.licenseSnapshot(ctx)
 		if snapshot["usedSeats"] != 2 || snapshot["seatLimit"] != 2 || snapshot["seats"] != 2 {
 			t.Fatalf("tenant-scoped snapshot seats = %#v", snapshot)
 		}
-		if got := activeCount(t, tenantB); got != 1 {
-			t.Fatalf("other tenant active seats = %d, want 1", got)
+		if got := activeCount(t, tenantB); got != 2 {
+			t.Fatalf("other tenant active seats = %d, want 2", got)
 		}
 
 		// A global license counts every tenant, so the other tenant is limited
 		// as soon as the global total reaches the cap.
 		license.Tenant = ""
 		snapshot = server.licenseSnapshot(ctx)
-		if snapshot["usedSeats"] != 3 {
-			t.Fatalf("global snapshot usedSeats = %#v, want 3", snapshot["usedSeats"])
+		if snapshot["usedSeats"] != 4 {
+			t.Fatalf("global snapshot usedSeats = %#v, want 4", snapshot["usedSeats"])
 		}
 		assertSCIMSeatLimit(t, scimRequest(tokenB, http.MethodPost, "/scim/v2/Users", scimBody("seat-other-two@"+domainB, true)))
+		assertSeatLimit(t, adminRequestAs(adminBCookie, adminBCSRF, http.MethodPost, "/admin/api/users",
+			fmt.Sprintf(`{"name":"Other Admin Blocked","email":%q,"status":"active"}`, "seat-other-admin-two@"+domainB)))
 	})
 
 	t.Run("SCIM create and reactivation are blocked at the limit", func(t *testing.T) {
@@ -1697,6 +1723,285 @@ func TestLicenseSeatEnforcementIntegration(t *testing.T) {
 		}
 		if _, _, userID, err = server.provisionImportedUser(ctx, job, "uimpi_seat_test_2", "seat-import-allowed@"+domainA, "Import User Two", "member", 16*1024*1024*1024); err != nil || userID == "" {
 			t.Fatalf("import after freeing a seat = %q, %v", userID, err)
+		}
+	})
+
+	t.Run("activation re-reads the locked status after a concurrent suspend and create", func(t *testing.T) {
+		reset(t)
+		target := "seat-update-race@" + domainA
+		targetID := adminCreateID(t, target, "active")
+		adminCreateID(t, "seat-update-race-two@"+domainA, "active")
+		var hookErr error
+		server.adminSeatRaceHook = func() {
+			server.adminSeatRaceHook = nil
+			// The handler has already read the target as active. Suspend it and
+			// let another create take the freed seat before the activation runs.
+			if _, err := pool.Exec(ctx, `UPDATE users SET status = 'suspended' WHERE id = $1`, targetID); err != nil {
+				hookErr = err
+				return
+			}
+			recorder := adminRequest(http.MethodPost, "/admin/api/users",
+				fmt.Sprintf(`{"name":"Seat Race Replacement","email":%q,"status":"active"}`, "seat-update-replacement@"+domainA))
+			if recorder.Code != http.StatusCreated {
+				hookErr = fmt.Errorf("replacement create status %d: %s", recorder.Code, recorder.Body.String())
+			}
+		}
+		defer func() { server.adminSeatRaceHook = nil }()
+		recorder := adminRequest(http.MethodPatch, "/admin/api/users/"+targetID, `{"status":"active"}`)
+		if hookErr != nil {
+			t.Fatalf("race hook: %v", hookErr)
+		}
+		assertSeatLimit(t, recorder)
+		var status string
+		if err := pool.QueryRow(ctx, `SELECT status FROM users WHERE id = $1`, targetID).Scan(&status); err != nil || status != "suspended" {
+			t.Fatalf("target status after blocked activation = %q err=%v", status, err)
+		}
+		if got := activeCount(t, tenantA); got != 2 {
+			t.Fatalf("active seats after blocked activation = %d, want 2", got)
+		}
+	})
+
+	t.Run("bulk activation re-reads locked statuses after concurrent changes", func(t *testing.T) {
+		reset(t)
+		firstID := adminCreateID(t, "seat-bulk-race-one@"+domainA, "active")
+		secondID := adminCreateID(t, "seat-bulk-race-two@"+domainA, "active")
+		var hookErr error
+		server.adminSeatRaceHook = func() {
+			server.adminSeatRaceHook = nil
+			// Both targets were active at pre-read. Suspend them and refill both
+			// freed seats before the bulk activation executes.
+			if _, err := pool.Exec(ctx, `UPDATE users SET status = 'suspended' WHERE id = ANY($1::uuid[])`, []string{firstID, secondID}); err != nil {
+				hookErr = err
+				return
+			}
+			for index, email := range []string{"seat-bulk-race-r1@" + domainA, "seat-bulk-race-r2@" + domainA} {
+				recorder := adminRequest(http.MethodPost, "/admin/api/users",
+					fmt.Sprintf(`{"name":"Bulk Race Replacement %d","email":%q,"status":"active"}`, index, email))
+				if recorder.Code != http.StatusCreated {
+					hookErr = fmt.Errorf("replacement %d create status %d: %s", index, recorder.Code, recorder.Body.String())
+					return
+				}
+			}
+		}
+		defer func() { server.adminSeatRaceHook = nil }()
+		recorder := adminRequest(http.MethodPost, "/admin/api/users/bulk",
+			fmt.Sprintf(`{"action":"activate","ids":[%q,%q]}`, firstID, secondID))
+		if hookErr != nil {
+			t.Fatalf("race hook: %v", hookErr)
+		}
+		assertSeatLimit(t, recorder)
+		for _, id := range []string{firstID, secondID} {
+			var status string
+			if err := pool.QueryRow(ctx, `SELECT status FROM users WHERE id = $1`, id).Scan(&status); err != nil || status != "suspended" {
+				t.Fatalf("bulk target status after block = %q err=%v", status, err)
+			}
+		}
+		if got := activeCount(t, tenantA); got != 2 {
+			t.Fatalf("active seats after blocked bulk = %d, want 2", got)
+		}
+	})
+
+	t.Run("multi-target bulk activation respects remaining seats", func(t *testing.T) {
+		reset(t)
+		ids := make([]string, 0, 3)
+		for index := 0; index < 3; index++ {
+			ids = append(ids, adminCreateID(t, fmt.Sprintf("seat-bulk-%d@%s", index, domainA), "invited"))
+		}
+		all := fmt.Sprintf(`{"action":"activate","ids":[%q,%q,%q]}`, ids[0], ids[1], ids[2])
+		assertSeatLimit(t, adminRequest(http.MethodPost, "/admin/api/users/bulk", all))
+		for _, id := range ids {
+			var status string
+			if err := pool.QueryRow(ctx, `SELECT status FROM users WHERE id = $1`, id).Scan(&status); err != nil || status != "invited" {
+				t.Fatalf("bulk target status after rejected batch = %q err=%v", status, err)
+			}
+		}
+		if got := activeCount(t, tenantA); got != 0 {
+			t.Fatalf("active seats after rejected batch = %d, want 0", got)
+		}
+		recorder := adminRequest(http.MethodPost, "/admin/api/users/bulk",
+			fmt.Sprintf(`{"action":"activate","ids":[%q,%q]}`, ids[0], ids[1]))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("bulk activate two status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if got := activeCount(t, tenantA); got != 2 {
+			t.Fatalf("active seats after activating two = %d, want 2", got)
+		}
+		assertSeatLimit(t, adminRequest(http.MethodPost, "/admin/api/users/bulk",
+			fmt.Sprintf(`{"action":"activate","ids":[%q]}`, ids[2])))
+	})
+
+	t.Run("tenant creation with an active owner is gated only for global licenses", func(t *testing.T) {
+		reset(t)
+		adminCreateID(t, "seat-new-tenant-one@"+domainA, "active")
+		adminCreateID(t, "seat-new-tenant-two@"+domainA, "active")
+		newSlug := slug + "-new"
+		newDomain := newSlug + ".example.test"
+		ownerEmail := "owner@" + newDomain
+		body := fmt.Sprintf(`{"name":"Seat New Organization","slug":%q,"primaryDomain":%q,"ownerEmail":%q}`, newSlug, newDomain, ownerEmail)
+		assertSeatLimit(t, adminRequest(http.MethodPost, "/admin/api/tenants", body))
+		var exists bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tenants WHERE slug = $1)`, newSlug).Scan(&exists); err != nil || exists {
+			t.Fatalf("blocked tenant creation left a row: exists=%v err=%v", exists, err)
+		}
+		var target string
+		var metadata []byte
+		if err := pool.QueryRow(ctx, `
+			SELECT target, metadata FROM admin_audit_log
+			WHERE tenant_id = $1 AND action = 'license.seat_limit_blocked'
+			ORDER BY id DESC LIMIT 1
+		`, tenantA).Scan(&target, &metadata); err != nil {
+			t.Fatalf("load tenant-creation seat audit: %v", err)
+		}
+		var metadataFields map[string]any
+		if err := json.Unmarshal(metadata, &metadataFields); err != nil {
+			t.Fatalf("decode tenant-creation audit metadata %s: %v", metadata, err)
+		}
+		if target != ownerEmail || metadataFields["tenantId"] != tenantA || metadataFields["used"] != float64(2) {
+			t.Fatalf("tenant-creation audit target=%q metadata=%#v", target, metadataFields)
+		}
+
+		// Freeing a seat allows the organization and its active owner.
+		var firstID string
+		if err := pool.QueryRow(ctx, `SELECT id::text FROM users WHERE tenant_id = $1 AND email = $2`, tenantA, "seat-new-tenant-one@"+domainA).Scan(&firstID); err != nil {
+			t.Fatalf("load freed tenant user: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE users SET status = 'suspended' WHERE id = $1`, firstID); err != nil {
+			t.Fatalf("free tenant seat: %v", err)
+		}
+		recorder := adminRequest(http.MethodPost, "/admin/api/tenants", body)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("tenant creation after freeing a seat status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var newTenantID, ownerStatus string
+		if err := pool.QueryRow(ctx, `SELECT id::text FROM tenants WHERE slug = $1`, newSlug).Scan(&newTenantID); err != nil {
+			t.Fatalf("load created tenant: %v", err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT status FROM users WHERE tenant_id = $1 AND email = $2`, newTenantID, ownerEmail).Scan(&ownerStatus); err != nil || ownerStatus != "active" {
+			t.Fatalf("new tenant owner status = %q err=%v", ownerStatus, err)
+		}
+
+		// A tenant-scoped license does not count a new, unrelated tenant.
+		reset(t)
+		license.Tenant = tenantA
+		adminCreateID(t, "seat-new-tenant-three@"+domainA, "active")
+		adminCreateID(t, "seat-new-tenant-four@"+domainA, "active")
+		scopedSlug := slug + "-new2"
+		scopedDomain := scopedSlug + ".example.test"
+		scopedBody := fmt.Sprintf(`{"name":"Seat Scoped Organization","slug":%q,"primaryDomain":%q,"ownerEmail":%q}`,
+			scopedSlug, scopedDomain, "owner@"+scopedDomain)
+		recorder = adminRequest(http.MethodPost, "/admin/api/tenants", scopedBody)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("tenant-scoped license tenant creation status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("system administrator grant and revoke adjust the seat", func(t *testing.T) {
+		reset(t)
+		first := "seat-sys-grant@" + domainA
+		firstID := adminCreateID(t, first, "active")
+		second := "seat-sys-grant-two@" + domainA
+		adminCreateID(t, second, "active")
+
+		// Granting platform-admin access frees a seat without a check.
+		recorder := adminRequest(http.MethodPost, "/admin/api/system/admins", fmt.Sprintf(`{"email":%q}`, first))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("system admin grant status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if got := activeCount(t, tenantA); got != 1 {
+			t.Fatalf("active seats after grant = %d, want 1", got)
+		}
+		adminCreateID(t, "seat-sys-grant-three@"+domainA, "active")
+
+		// Revoking at the cap converts a non-counted administrator into a
+		// counted user; the fixed 409 contract must block it.
+		recorder = adminRequest(http.MethodDelete, "/admin/api/system/admins/"+firstID, "")
+		assertSeatLimit(t, recorder)
+		var isSystemAdmin bool
+		var status string
+		if err := pool.QueryRow(ctx, `SELECT is_system_admin, status FROM users WHERE id = $1`, firstID).Scan(&isSystemAdmin, &status); err != nil || !isSystemAdmin || status != "active" {
+			t.Fatalf("blocked revoke changed the user: admin=%v status=%q err=%v", isSystemAdmin, status, err)
+		}
+		var target string
+		var metadata []byte
+		if err := pool.QueryRow(ctx, `
+			SELECT target, metadata FROM admin_audit_log
+			WHERE tenant_id = $1 AND action = 'license.seat_limit_blocked'
+			ORDER BY id DESC LIMIT 1
+		`, tenantA).Scan(&target, &metadata); err != nil {
+			t.Fatalf("load revoke seat audit: %v", err)
+		}
+		if target != first {
+			t.Fatalf("revoke audit target = %q, want %q", target, first)
+		}
+		var revokeMetadata map[string]any
+		if err := json.Unmarshal(metadata, &revokeMetadata); err != nil {
+			t.Fatalf("decode revoke audit metadata %s: %v", metadata, err)
+		}
+		if revokeMetadata["used"] != float64(2) || revokeMetadata["limit"] != float64(2) {
+			t.Fatalf("revoke audit metadata = %#v", revokeMetadata)
+		}
+
+		// Freeing a seat allows the revocation, which then consumes one.
+		var secondID string
+		if err := pool.QueryRow(ctx, `SELECT id::text FROM users WHERE tenant_id = $1 AND email = $2`, tenantA, second).Scan(&secondID); err != nil {
+			t.Fatalf("load second user: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE users SET status = 'suspended' WHERE id = $1`, secondID); err != nil {
+			t.Fatalf("free revoke seat: %v", err)
+		}
+		recorder = adminRequest(http.MethodDelete, "/admin/api/system/admins/"+firstID, "")
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("system admin revoke after freeing a seat status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if err := pool.QueryRow(ctx, `SELECT is_system_admin FROM users WHERE id = $1`, firstID).Scan(&isSystemAdmin); err != nil || isSystemAdmin {
+			t.Fatalf("revoked user is_system_admin = %v err=%v", isSystemAdmin, err)
+		}
+		if got := activeCount(t, tenantA); got != 2 {
+			t.Fatalf("active seats after revoke = %d, want 2", got)
+		}
+	})
+
+	t.Run("concurrent global-license creates across tenants never exceed", func(t *testing.T) {
+		reset(t)
+		const perTenant = 3
+		startGate := make(chan struct{})
+		results := make([]*httptest.ResponseRecorder, perTenant*2)
+		var wait sync.WaitGroup
+		for index := 0; index < perTenant; index++ {
+			wait.Add(2)
+			go func(index int) {
+				defer wait.Done()
+				<-startGate
+				email := fmt.Sprintf("seat-cross-a-%d@%s", index, domainA)
+				results[index] = scimRequest(tokenA, http.MethodPost, "/scim/v2/Users", scimBody(email, true))
+			}(index)
+			go func(index int) {
+				defer wait.Done()
+				<-startGate
+				email := fmt.Sprintf("seat-cross-b-%d@%s", index, domainB)
+				results[perTenant+index] = scimRequest(tokenB, http.MethodPost, "/scim/v2/Users", scimBody(email, true))
+			}(index)
+		}
+		close(startGate)
+		wait.Wait()
+
+		created, blocked := 0, 0
+		for _, recorder := range results {
+			switch recorder.Code {
+			case http.StatusCreated:
+				created++
+			case http.StatusConflict:
+				blocked++
+				assertSCIMSeatLimit(t, recorder)
+			default:
+				t.Fatalf("cross-tenant concurrent create status = %d: %s", recorder.Code, recorder.Body.String())
+			}
+		}
+		if created != 2 || blocked != perTenant*2-2 {
+			t.Fatalf("cross-tenant concurrent creates: created=%d blocked=%d, want 2 and %d", created, blocked, perTenant*2-2)
+		}
+		if total := activeCount(t, tenantA) + activeCount(t, tenantB); total != 2 {
+			t.Fatalf("cross-tenant active seats = %d, want 2", total)
 		}
 	})
 }
