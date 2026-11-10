@@ -977,6 +977,8 @@ const state = {
   teamQueueTeam: "",
   teamQueueFetchedAt: 0,
   teamDraftsTeam: null,
+  teamTemplateTeam: null,
+  teamTemplateManageList: [],
   delegatedSwitchOpen: false,
   delegatedSwitchQuery: "",
   delegatedHeartbeat: null,
@@ -6520,7 +6522,7 @@ function ensureTeamDraftsOverlay() {
     <div class="dialog shared-drafts-dialog" role="dialog" aria-modal="true" aria-labelledby="teamDraftsTitle">
       <div class="dialog-head"><div><p class="eyebrow">Shared drafts</p><h2 id="teamDraftsTitle">Team drafts</h2><p class="dialog-note" id="teamDraftsNote"></p></div><button class="icon-btn" id="teamDraftsClose" type="button" aria-label="Close team drafts"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
       <div class="dialog-body"><div class="shared-draft-list" id="teamDraftsList"></div></div>
-      <div class="dialog-foot"><span class="dialog-note">A draft is edited by one agent at a time. Version history and comments are preserved.</span><button class="btn-secondary" id="teamDraftsCancel" type="button">Close</button><button class="btn-primary" id="teamDraftsNew" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New draft</button></div>
+      <div class="dialog-foot"><span class="dialog-note">A draft is edited by one agent at a time. Version history and comments are preserved.</span><button class="btn-secondary" id="teamTemplatesManage" type="button">Manage templates</button><button class="btn-secondary" id="teamDraftsCancel" type="button">Close</button><button class="btn-primary" id="teamDraftsNew" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New draft</button></div>
     </div>
   </div>`);
   overlay = document.getElementById("teamDraftsOverlay");
@@ -6528,6 +6530,7 @@ function ensureTeamDraftsOverlay() {
   document.getElementById("teamDraftsClose").addEventListener("click", () => { overlay.hidden = true; });
   document.getElementById("teamDraftsCancel").addEventListener("click", () => { overlay.hidden = true; });
   document.getElementById("teamDraftsNew").addEventListener("click", () => createSharedDraft(state.teamDraftsTeam).catch(showError));
+  document.getElementById("teamTemplatesManage").addEventListener("click", () => openTeamTemplateManager(state.teamDraftsTeam));
   return overlay;
 }
 
@@ -6551,6 +6554,101 @@ async function openTeamDrafts(team) {
   } catch (error) {
     list.innerHTML = `<div class="settings-note">${esc(error.message || "Team drafts could not be loaded.")}</div>`;
   }
+}
+
+function ensureTeamTemplateManageOverlay() {
+  let overlay = document.getElementById("teamTemplateManageOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="teamTemplateManageOverlay" hidden>
+    <div class="dialog shared-drafts-dialog" role="dialog" aria-modal="true" aria-labelledby="teamTemplateManageTitle">
+      <div class="dialog-head"><div><p class="eyebrow">Team templates</p><h2 id="teamTemplateManageTitle">Manage templates</h2><p class="dialog-note" id="teamTemplateManageNote"></p></div><button class="icon-btn" id="teamTemplateManageClose" type="button" aria-label="Close template manager"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body"><div class="automation-rule-list" id="teamTemplateManageList"></div><form id="teamTemplateForm"><input type="hidden" id="teamTemplateId"><div class="field-row"><label class="field"><span>Name</span><input id="teamTemplateName" required placeholder="Refund received"></label><label class="field"><span>Category</span><input id="teamTemplateCategory" placeholder="Billing"></label></div><label class="field"><span>Sending alias (optional)</span><input id="teamTemplateAlias" type="email" placeholder="billing@company.com"><small class="muted">Must be an active alias of the backing mailbox.</small></label><label class="field"><span>Subject</span><input id="teamTemplateSubject" placeholder="Refund for {{order_id}}"></label><label class="field"><span>Body</span><textarea id="teamTemplateBody" rows="5" placeholder="Hi {{name}}, …"></textarea></label><p class="settings-note">Variables use <code>{{name}}</code>. Version history is kept automatically.</p><div class="dialog-foot"><button class="btn-secondary" id="teamTemplateReset" type="button">Clear</button><button class="btn-primary" type="submit" id="teamTemplateSave">Save template</button></div></form></div>
+    </div>
+  </div>`);
+  overlay = document.getElementById("teamTemplateManageOverlay");
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
+  document.getElementById("teamTemplateManageClose").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("teamTemplateReset").addEventListener("click", resetTeamTemplateForm);
+  document.getElementById("teamTemplateForm").addEventListener("submit", (event) => { event.preventDefault(); saveTeamTemplate().catch(showError); });
+  return overlay;
+}
+
+function resetTeamTemplateForm() {
+  document.getElementById("teamTemplateForm").reset();
+  document.getElementById("teamTemplateId").value = "";
+  document.getElementById("teamTemplateSave").textContent = "Save template";
+}
+
+async function openTeamTemplateManager(team) {
+  if (!team) return;
+  state.teamTemplateTeam = team;
+  const overlay = ensureTeamTemplateManageOverlay();
+  document.getElementById("teamTemplateManageNote").textContent = `${team.name} · ${team.address}`;
+  overlay.hidden = false;
+  resetTeamTemplateForm();
+  await refreshTeamTemplateManager();
+}
+
+async function refreshTeamTemplateManager() {
+  const team = state.teamTemplateTeam;
+  const host = document.getElementById("teamTemplateManageList");
+  if (!team || !host) return;
+  host.innerHTML = '<div class="settings-note">Loading templates…</div>';
+  try {
+    const data = await api(`/api/team-templates?teamId=${encodeURIComponent(team.id)}`);
+    state.teamTemplateManageList = data.templates || [];
+    host.innerHTML = state.teamTemplateManageList.length ? state.teamTemplateManageList.map((template) => `<div class="automation-rule-row"><div class="shared-draft-copy"><strong>${esc(template.name)}</strong><span>${esc(template.category || "Uncategorized")} · v${template.version}${template.variables?.length ? ` · ${template.variables.join(", ")}` : ""}</span></div><button class="btn-secondary small" type="button" data-template-edit="${esc(template.id)}">Edit</button><button class="btn danger small" type="button" data-template-archive="${esc(template.id)}">Archive</button></div>`).join("") : '<div class="empty-mini">No templates yet.</div>';
+    $$("[data-template-edit]", host).forEach((button) => button.addEventListener("click", async () => {
+      try {
+        const detail = await api(`/api/team-templates/${encodeURIComponent(button.dataset.templateEdit)}`);
+        const template = detail.template;
+        document.getElementById("teamTemplateId").value = template.id;
+        document.getElementById("teamTemplateName").value = template.name || "";
+        document.getElementById("teamTemplateCategory").value = template.category || "";
+        document.getElementById("teamTemplateAlias").value = template.aliasEmail || "";
+        document.getElementById("teamTemplateSubject").value = template.subject || "";
+        document.getElementById("teamTemplateBody").value = template.bodyText || "";
+        document.getElementById("teamTemplateSave").textContent = "Update template";
+        document.getElementById("teamTemplateName").focus();
+      } catch (error) { showError(error); }
+    }));
+    $$("[data-template-archive]", host).forEach((button) => button.addEventListener("click", async () => {
+      if (!(await appConfirm({ title: "Archive template", message: "Agents will no longer see this template in compose.", confirmLabel: "Archive", tone: "danger" }))) return;
+      try {
+        await api(`/api/team-templates/${encodeURIComponent(button.dataset.templateArchive)}`, { method: "DELETE" });
+        showToast("Template archived");
+        await refreshTeamTemplateManager();
+      } catch (error) { showError(error); }
+    }));
+    if (!data.canManage) {
+      document.getElementById("teamTemplateForm").querySelectorAll("input, textarea, button[type=submit]").forEach((input) => { input.disabled = true; });
+    }
+  } catch (error) {
+    host.innerHTML = `<div class="settings-note">${esc(error.message || "Templates could not be loaded.")}</div>`;
+  }
+}
+
+async function saveTeamTemplate() {
+  const team = state.teamTemplateTeam;
+  if (!team) return;
+  const id = document.getElementById("teamTemplateId").value;
+  const body = {
+    teamId: team.id,
+    name: document.getElementById("teamTemplateName").value.trim(),
+    category: document.getElementById("teamTemplateCategory").value.trim(),
+    aliasEmail: document.getElementById("teamTemplateAlias").value.trim(),
+    subject: document.getElementById("teamTemplateSubject").value.trim(),
+    bodyText: document.getElementById("teamTemplateBody").value,
+    bodyHtml: "",
+    active: true
+  };
+  if (!body.name) throw new Error("Give the template a name");
+  await api(id ? `/api/team-templates/${encodeURIComponent(id)}` : "/api/team-templates", {
+    method: id ? "PATCH" : "POST", body
+  });
+  showToast(id ? "Template updated" : "Template created");
+  resetTeamTemplateForm();
+  await refreshTeamTemplateManager();
 }
 
 async function createSharedDraft(team) {

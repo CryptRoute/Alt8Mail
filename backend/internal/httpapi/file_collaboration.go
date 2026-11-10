@@ -298,11 +298,6 @@ func (s *Server) requestFileApproval(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) decideFileApproval(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
-	_, access, err := s.fileAccessRecord(r.Context(), sess.User, r.PathValue("id"))
-	if err != nil {
-		writeFromError(w, err)
-		return
-	}
 	var body struct {
 		Status string `json:"status"`
 		Note   string `json:"note"`
@@ -315,12 +310,16 @@ func (s *Server) decideFileApproval(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "FILE_APPROVAL", "Status must be approved, changes_requested or rejected")
 		return
 	}
-	var approverID string
-	if err := s.store.DB.QueryRow(r.Context(), `SELECT approver_user_id::text FROM public.file_approvals WHERE id=$1 AND file_id=$2`, r.PathValue("approvalId"), r.PathValue("id")).Scan(&approverID); err != nil {
+	var approverID, fileOwnerID string
+	if err := s.store.DB.QueryRow(r.Context(), `
+		SELECT a.approver_user_id::text, f.user_id::text
+		FROM public.file_approvals a JOIN public.files f ON f.id=a.file_id
+		WHERE a.id=$1 AND a.file_id=$2 AND a.tenant_id=$3
+	`, r.PathValue("approvalId"), r.PathValue("id"), sess.User.TenantID).Scan(&approverID, &fileOwnerID); err != nil {
 		writeError(w, http.StatusNotFound, "FILE_APPROVAL", "Approval request not found")
 		return
 	}
-	if approverID != sess.User.ID && access != "owner" {
+	if approverID != sess.User.ID && fileOwnerID != sess.User.ID {
 		writeError(w, http.StatusForbidden, "FILE_FORBIDDEN", "Only the approver or file owner can decide this request")
 		return
 	}
