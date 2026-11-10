@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const (
@@ -22,21 +23,22 @@ const (
 )
 
 // scimGroupColumns is the projection shared by every Groups query.
-const scimGroupColumns = `id::text, name, email::text, scim_external_id, scim_role,
+const scimGroupColumns = `id::text, name, email::text, description, scim_external_id, scim_role,
 	group_type, status, created_at, updated_at`
 
 // scimGroupRow is an internal row. It is never marshalled directly; the SCIM
 // resource shape is built by scimGroupResource.
 type scimGroupRow struct {
-	ID         string
-	Name       string
-	Email      string
-	ExternalID *string
-	ScimRole   string
-	GroupType  string
-	Status     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID          string
+	Name        string
+	Email       string
+	Description string
+	ExternalID  *string
+	ScimRole    string
+	GroupType   string
+	Status      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // scimGroupMember is the non-secret projection of a group member used when
@@ -244,7 +246,7 @@ func scimGroupResource(group scimGroupRow, members []scimGroupMember, base strin
 
 func scanSCIMGroup(row pgx.Row) (scimGroupRow, error) {
 	var group scimGroupRow
-	err := row.Scan(&group.ID, &group.Name, &group.Email, &group.ExternalID, &group.ScimRole,
+	err := row.Scan(&group.ID, &group.Name, &group.Email, &group.Description, &group.ExternalID, &group.ScimRole,
 		&group.GroupType, &group.Status, &group.CreatedAt, &group.UpdatedAt)
 	return group, err
 }
@@ -273,7 +275,7 @@ func scimGroupMembersFor(ctx context.Context, q scimGroupQueryer, tenantID, grou
 		SELECT u.id::text, CASE WHEN u.name <> '' THEN u.name ELSE u.email::text END
 		FROM group_members gm
 		JOIN groups g ON g.id = gm.group_id
-		JOIN users u ON u.id = gm.user_id
+		JOIN users u ON u.id = gm.user_id AND u.tenant_id = g.tenant_id
 		WHERE gm.group_id = $1 AND g.tenant_id = $2 AND u.deleted_at IS NULL
 		ORDER BY u.name, u.id
 	`, groupID, tenantID)
@@ -310,7 +312,7 @@ func scimGroupMembersByGroup(ctx context.Context, q scimGroupQueryer, tenantID s
 		SELECT gm.group_id::text, u.id::text, CASE WHEN u.name <> '' THEN u.name ELSE u.email::text END
 		FROM group_members gm
 		JOIN groups g ON g.id = gm.group_id
-		JOIN users u ON u.id = gm.user_id
+		JOIN users u ON u.id = gm.user_id AND u.tenant_id = g.tenant_id
 		WHERE g.tenant_id = $1 AND gm.group_id IN (`+strings.Join(placeholders, ", ")+`)
 		  AND u.deleted_at IS NULL
 		ORDER BY gm.group_id, u.name, u.id
@@ -330,30 +332,70 @@ func scimGroupMembersByGroup(ctx context.Context, q scimGroupQueryer, tenantID s
 	return members, rows.Err()
 }
 
-// scimValidateGroupMemberIDs rejects malformed ids and ids that do not belong
-// to a live user in the token's tenant. Cross-tenant ids are indistinguishable
-// from unknown ids on purpose.
-func scimValidateGroupMemberIDs(ctx context.Context, q scimGroupQueryer, tenantID string, ids []string) *scimHandlerError {
-	ids = scimUniqueStrings(ids)
+// scimCanonicalMemberIDs validates UUIDs and returns their canonical lowercase
+// form, dropping duplicates. Malformed values are a SCIM invalidValue.
+func scimCanonicalMemberIDs(ids []string) ([]string, *scimHandlerError) {
+	canonical := make([]string, 0, len(ids))
+	seen := map[string]bool{}
 	for _, id := range ids {
-		if _, err := uuid.Parse(id); err != nil {
-			return newSCIMHandlerError(http.StatusBadRequest, "invalidValue", "members value must be a user id in this organization")
+		parsed, err := uuid.Parse(strings.TrimSpace(id))
+		if err != nil {
+			return nil, newSCIMHandlerError(http.StatusBadRequest, "invalidValue", "members value must be a user id in this organization")
 		}
+		value := parsed.String()
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		canonical = append(canonical, value)
 	}
+	return canonical, nil
+}
+
+func scimUUIDArray(ids []string) []pgtype.UUID {
+	values := make([]pgtype.UUID, 0, len(ids))
+	for _, id := range ids {
+		parsed, err := uuid.Parse(id)
+		if err != nil {
+			continue
+		}
+		values = append(values, pgtype.UUID{Bytes: [16]byte(parsed), Valid: true})
+	}
+	return values
+}
+
+// scimValidateGroupMemberIDs rejects ids that do not belong to a live user in
+// the token's tenant. Cross-tenant ids are indistinguishable from unknown ids on
+// purpose. Used for the final membership of a write.
+func scimValidateGroupMemberIDs(ctx context.Context, q scimGroupQueryer, tenantID string, ids []string) *scimHandlerError {
+	canonical, handlerErr := scimCanonicalMemberIDs(ids)
+	if handlerErr != nil {
+		return handlerErr
+	}
+	return scimValidateMemberIDsExist(ctx, q, tenantID, canonical, true)
+}
+
+// scimValidateReferencedGroupMemberIDs checks every member id mentioned by a
+// request against tenant users, including closed accounts so an idempotent
+// removal of a soft-deleted member still succeeds. Add/replace targets are
+// additionally validated as live users by scimValidateGroupMemberIDs.
+func scimValidateReferencedGroupMemberIDs(ctx context.Context, q scimGroupQueryer, tenantID string, ids []string) *scimHandlerError {
+	canonical, handlerErr := scimCanonicalMemberIDs(ids)
+	if handlerErr != nil {
+		return handlerErr
+	}
+	return scimValidateMemberIDsExist(ctx, q, tenantID, canonical, false)
+}
+
+func scimValidateMemberIDsExist(ctx context.Context, q scimGroupQueryer, tenantID string, ids []string, liveOnly bool) *scimHandlerError {
 	if len(ids) == 0 {
 		return nil
 	}
-	placeholders := make([]string, len(ids))
-	args := make([]any, 0, len(ids)+1)
-	args = append(args, tenantID)
-	for index, id := range ids {
-		args = append(args, id)
-		placeholders[index] = fmt.Sprintf("$%d", index+2)
+	query := `SELECT id::text FROM users WHERE tenant_id = $1 AND id = ANY($2::uuid[])`
+	if liveOnly {
+		query += ` AND deleted_at IS NULL`
 	}
-	rows, err := q.Query(ctx, `
-		SELECT id::text FROM users
-		WHERE tenant_id = $1 AND deleted_at IS NULL AND id::text IN (`+strings.Join(placeholders, ", ")+`)
-	`, args...)
+	rows, err := q.Query(ctx, query, tenantID, scimUUIDArray(ids))
 	if err != nil {
 		return newSCIMHandlerError(http.StatusInternalServerError, "", "Could not validate group members")
 	}
@@ -446,7 +488,7 @@ func (s *Server) scimRecomputeUserRole(ctx context.Context, tx pgx.Tx, tenantID,
 		FROM group_members gm
 		JOIN groups g ON g.id = gm.group_id
 		WHERE gm.user_id = $1 AND g.tenant_id = $2
-		  AND g.status = 'active' AND g.scim_role <> ''
+		  AND g.status = 'active' AND g.group_type = 'security' AND g.scim_role <> ''
 	`, userID, tenantID)
 	if err != nil {
 		return change, err
@@ -514,13 +556,33 @@ func (s *Server) scimRecomputeRolesTx(ctx context.Context, tx pgx.Tx, tenantID s
 	return changes, nil
 }
 
-// scimGroupRoleAuditAction maps one recompute result to the fixed audit action
-// and the old/new role detail.
-func scimGroupRoleAuditAction(change scimRoleChange) (action, detail string) {
+// scimRoleAuditDetail describes one recompute result. mapped is false when the
+// mapping was removed and the role was reset to member.
+func scimRoleAuditDetail(change scimRoleChange) (mapped bool, detail string) {
 	if change.NewRole == "" {
-		return "scim.role_unmapped", fmt.Sprintf("no mapped role; role %s reset to member", change.OldRole)
+		return false, fmt.Sprintf("no mapped role; role %s reset to member", change.OldRole)
 	}
-	return "scim.role_mapped", fmt.Sprintf("role %s mapped to %s", change.OldRole, change.NewRole)
+	return true, fmt.Sprintf("role %s mapped to %s", change.OldRole, change.NewRole)
+}
+
+// scimGroupRoleAuditAction maps one recompute result to the SCIM-origin audit
+// action.
+func scimGroupRoleAuditAction(change scimRoleChange) (action, detail string) {
+	mapped, detail := scimRoleAuditDetail(change)
+	if mapped {
+		return "scim.role_mapped", detail
+	}
+	return "scim.role_unmapped", detail
+}
+
+// adminGroupRoleAuditAction maps one recompute result to the admin-origin audit
+// action so SIEM filters can distinguish IdP-driven changes from console ones.
+func adminGroupRoleAuditAction(change scimRoleChange) (action, detail string) {
+	mapped, detail := scimRoleAuditDetail(change)
+	if mapped {
+		return "admin.role_mapped", detail
+	}
+	return "admin.role_unmapped", detail
 }
 
 // scimAuditRoleChanges records mapped/unmapped transitions for SCIM-originated
@@ -536,7 +598,7 @@ func (s *Server) scimAuditRoleChanges(r *http.Request, tenant scimTenant, change
 // membership writes in the admin audit log.
 func (s *Server) adminAuditRoleChanges(ctx context.Context, sess *adminSessionRecord, changes []scimRoleChange) {
 	for _, change := range changes {
-		action, detail := scimGroupRoleAuditAction(change)
+		action, detail := adminGroupRoleAuditAction(change)
 		newRole := change.NewRole
 		if newRole == "" {
 			newRole = "member"
@@ -734,8 +796,17 @@ func applySCIMGroupPatchObject(changes *scimGroupChangeSet, members *[]string, r
 // transaction and recomputes every affected member's role. It reports whether
 // any persisted attribute or membership actually changed.
 func (s *Server) scimApplyGroupChanges(ctx context.Context, tx pgx.Tx, tenantID string, existing scimGroupRow, changes scimGroupChangeSet) (scimGroupRow, bool, []scimRoleChange, *scimHandlerError) {
-	if handlerErr := scimValidateGroupMemberIDs(ctx, tx, tenantID, append(append([]string{}, changes.ReferencedIDs...), changes.MemberIDs...)); handlerErr != nil {
+	// Every id the request mentions must belong to a tenant user. The final
+	// membership is additionally required to be live users, but referenced ids
+	// may include closed accounts so removing a soft-deleted member is
+	// idempotent. A membership-only PATCH never validates unchanged member ids.
+	if handlerErr := scimValidateReferencedGroupMemberIDs(ctx, tx, tenantID, changes.ReferencedIDs); handlerErr != nil {
 		return existing, false, nil, handlerErr
+	}
+	if changes.MembersSet {
+		if handlerErr := scimValidateGroupMemberIDs(ctx, tx, tenantID, changes.MemberIDs); handlerErr != nil {
+			return existing, false, nil, handlerErr
+		}
 	}
 	if changes.ExternalIDSet && changes.ExternalID != nil && !sameSCIMExternalID(changes.ExternalID, existing.ExternalID) {
 		var conflict bool
@@ -797,6 +868,12 @@ func (s *Server) scimApplyGroupChanges(ctx context.Context, tx pgx.Tx, tenantID 
 		}
 		if len(added) > 0 || len(removed) > 0 {
 			changed = true
+			// Membership is part of the resource; bump lastModified even when no
+			// scalar attribute changed.
+			if _, err := tx.Exec(ctx, `UPDATE groups SET updated_at = now() WHERE id = $1 AND tenant_id = $2`, existing.ID, tenantID); err != nil {
+				s.logger.Warn("SCIM group membership timestamp update failed")
+				return existing, false, nil, newSCIMHandlerError(http.StatusInternalServerError, "", "Could not update the SCIM group")
+			}
 		}
 		affected := append(append([]string{}, currentIDs...), changes.MemberIDs...)
 		roleChanges, err = s.scimRecomputeRolesTx(ctx, tx, tenantID, affected)

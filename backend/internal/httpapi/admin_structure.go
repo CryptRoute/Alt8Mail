@@ -2,9 +2,13 @@ package httpapi
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func (s *Server) adminListOrgUnits(w http.ResponseWriter, r *http.Request) {
@@ -275,11 +279,6 @@ func (s *Server) adminGetGroup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
-	group, err := s.adminGroupDetail(r.Context(), r.PathValue("id"), sess.ActiveTenantID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "GROUP_NOT_FOUND", "Group not found")
-		return
-	}
 	var body struct {
 		Name        *string `json:"name"`
 		Email       *string `json:"email"`
@@ -292,24 +291,41 @@ func (s *Server) adminUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 		return
 	}
-	name := group["name"].(string)
-	email := group["email"].(string)
-	description := group["description"].(string)
-	groupType := group["type"].(string)
-	status := group["status"].(string)
-	scimRole := group["scimRole"].(string)
-	oldScimRole := scimRole
+	ctx := r.Context()
+	tx, err := s.store.DB.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "GROUP", "Could not update group")
+		return
+	}
+	defer tx.Rollback(ctx)
+	// Lock the group before reading its mapping or writing anything: concurrent
+	// membership changes must serialize against mapping/status updates.
+	existing, err := scimGroupByIDTx(ctx, tx, sess.ActiveTenantID, r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "GROUP_NOT_FOUND", "Group not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "GROUP", "Could not update group")
+		return
+	}
+	name := existing.Name
+	email := existing.Email
+	description := existing.Description
+	groupType := existing.GroupType
+	status := existing.Status
+	scimRole := existing.ScimRole
 	if body.Name != nil && strings.TrimSpace(*body.Name) != "" {
 		name = truncate(strings.TrimSpace(*body.Name), 100)
 	}
 	if body.Email != nil {
 		email = strings.ToLower(strings.TrimSpace(*body.Email))
 		_, groupDomain := splitEmail(email)
-		if !s.adminDomainVerified(r.Context(), sess.ActiveTenantID, groupDomain) {
+		if !s.adminDomainVerified(ctx, sess.ActiveTenantID, groupDomain) {
 			writeError(w, http.StatusBadRequest, "EMAIL", "Group email must use a verified organization domain")
 			return
 		}
-		if email != group["email"].(string) && s.adminAddressInUse(r.Context(), email) {
+		if email != existing.Email && s.adminAddressInUse(ctx, email) {
 			writeError(w, http.StatusConflict, "ADDRESS_EXISTS", "That address is already in use")
 			return
 		}
@@ -341,28 +357,63 @@ func (s *Server) adminUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		scimRole = normalized
 	}
-	statusChanged := status != group["status"].(string)
-	ctx := r.Context()
-	tx, err := s.store.DB.Begin(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "GROUP", "Could not update group")
+	// Role mappings are only meaningful on security groups. Clearing a stale
+	// mapping is always allowed so a type change can be completed safely.
+	if scimRole != "" && groupType != "security" {
+		writeError(w, http.StatusBadRequest, "ROLE", "Group role mapping is only available for security groups")
 		return
 	}
-	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `
-		UPDATE groups SET name = $2, email = $3, description = $4, group_type = $5, status = $6,
-		       scim_role = $7, updated_at = now()
-		WHERE id = $1 AND tenant_id = $8
-	`, group["id"], name, email, description, groupType, status, scimRole, sess.ActiveTenantID)
-	if err != nil || tag.RowsAffected() == 0 {
-		writeError(w, http.StatusConflict, "GROUP", "Could not update group; email may already be in use")
+	mappingChanged := body.ScimRole != nil && scimRole != existing.ScimRole
+	statusChanged := status != existing.Status
+	typeChanged := groupType != existing.GroupType
+	// C1: changing a role mapping, or archiving/reactivating a mapped group, can
+	// grant or remove tenant-wide roles. groups.manage alone must not reach that.
+	if (mappingChanged || (existing.ScimRole != "" && (statusChanged || typeChanged))) && !sess.can("roles.manage") {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "Only an administrator with role management permission can change a group role mapping or a mapped group's status")
 		return
+	}
+
+	sets := []string{}
+	args := []any{existing.ID, sess.ActiveTenantID}
+	addSet := func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+	if name != existing.Name {
+		addSet("name", name)
+	}
+	if email != existing.Email {
+		addSet("email", email)
+	}
+	if description != existing.Description {
+		addSet("description", description)
+	}
+	if groupType != existing.GroupType {
+		addSet("group_type", groupType)
+	}
+	if status != existing.Status {
+		addSet("status", status)
+	}
+	if scimRole != existing.ScimRole {
+		addSet("scim_role", scimRole)
+	}
+	if len(sets) > 0 {
+		sets = append(sets, "updated_at = now()")
+		tag, execErr := tx.Exec(ctx, `UPDATE groups SET `+strings.Join(sets, ", ")+` WHERE id = $1 AND tenant_id = $2`, args...)
+		if execErr != nil || tag.RowsAffected() == 0 {
+			if execErr != nil && isUniqueViolation(execErr) {
+				writeError(w, http.StatusConflict, "ADDRESS_EXISTS", "That address is already in use")
+			} else {
+				writeError(w, http.StatusConflict, "GROUP", "Could not update group; email may already be in use")
+			}
+			return
+		}
 	}
 	var roleChanges []scimRoleChange
-	if body.ScimRole != nil || statusChanged {
-		// Setting a mapping (or archiving a mapped group) changes the role every
-		// member should hold; recompute them in the same transaction.
-		memberIDs, memberErr := scimGroupMemberIDsTx(ctx, tx, group["id"].(string))
+	if mappingChanged || statusChanged || typeChanged {
+		// Any of these can change the role every member should hold; recompute
+		// them under the same group lock.
+		memberIDs, memberErr := scimGroupMemberIDsTx(ctx, tx, existing.ID)
 		if memberErr != nil {
 			writeError(w, http.StatusInternalServerError, "GROUP", "Could not update group membership roles")
 			return
@@ -377,18 +428,18 @@ func (s *Server) adminUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "GROUP", "Could not commit group update")
 		return
 	}
-	s.recordAdminAudit(ctx, sess, sess.User, "admin.group_updated", email, "Updated group", map[string]any{"groupId": group["id"]})
-	if body.ScimRole != nil && scimRole != oldScimRole {
+	s.recordAdminAudit(ctx, sess, sess.User, "admin.group_updated", email, "Updated group", map[string]any{"groupId": existing.ID})
+	if mappingChanged {
 		detail := "Cleared group role mapping"
 		if scimRole != "" {
 			detail = "Mapped group to the " + scimRole + " role"
 		}
 		s.recordAdminAudit(ctx, sess, sess.User, "admin.group_role_mapping_updated", email, detail, map[string]any{
-			"groupId": group["id"], "oldScimRole": oldScimRole, "scimRole": scimRole,
+			"groupId": existing.ID, "oldScimRole": existing.ScimRole, "scimRole": scimRole,
 		})
 	}
 	s.adminAuditRoleChanges(ctx, sess, roleChanges)
-	updated, _ := s.adminGroupDetail(ctx, group["id"].(string), sess.ActiveTenantID)
+	updated, _ := s.adminGroupDetail(ctx, existing.ID, sess.ActiveTenantID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "group": updated})
 }
 
@@ -404,11 +455,6 @@ func normalizeAdminSCIMRole(value string) (string, bool) {
 
 func (s *Server) adminDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
-	group, err := s.adminGroupDetail(r.Context(), r.PathValue("id"), sess.ActiveTenantID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "GROUP_NOT_FOUND", "Group not found")
-		return
-	}
 	ctx := r.Context()
 	tx, err := s.store.DB.Begin(ctx)
 	if err != nil {
@@ -416,12 +462,25 @@ func (s *Server) adminDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	formerMembers, err := scimGroupMemberIDsTx(ctx, tx, group["id"].(string))
+	existing, err := scimGroupByIDTx(ctx, tx, sess.ActiveTenantID, r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "GROUP_NOT_FOUND", "Group not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "GROUP", "Could not delete group")
+		return
+	}
+	if existing.ScimRole != "" && !sess.can("roles.manage") {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "Only an administrator with role management permission can delete a group with a role mapping")
+		return
+	}
+	formerMembers, err := scimGroupMemberIDsTx(ctx, tx, existing.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "GROUP", "Could not delete group")
 		return
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM groups WHERE id = $1 AND tenant_id = $2`, group["id"], sess.ActiveTenantID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM groups WHERE id = $1 AND tenant_id = $2`, existing.ID, sess.ActiveTenantID); err != nil {
 		writeError(w, http.StatusInternalServerError, "GROUP", "Could not delete group")
 		return
 	}
@@ -434,29 +493,19 @@ func (s *Server) adminDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "GROUP", "Could not commit group deletion")
 		return
 	}
-	s.recordAdminAudit(ctx, sess, sess.User, "admin.group_deleted", group["email"].(string), "Deleted group", map[string]any{"groupId": group["id"]})
+	s.recordAdminAudit(ctx, sess, sess.User, "admin.group_deleted", existing.Email, "Deleted group", map[string]any{"groupId": existing.ID})
 	s.adminAuditRoleChanges(ctx, sess, roleChanges)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) adminAddGroupMember(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
-	group, err := s.adminGroupDetail(r.Context(), r.PathValue("id"), sess.ActiveTenantID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "GROUP_NOT_FOUND", "Group not found")
-		return
-	}
 	var body struct {
 		UserID     string `json:"userId"`
 		MemberRole string `json:"memberRole"`
 	}
 	if err := decodeJSON(w, r, &body, 32*1024); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
-		return
-	}
-	user, err := s.adminUserByID(r.Context(), body.UserID)
-	if err != nil || user.TenantID != sess.ActiveTenantID || user.DeletedAt != nil {
-		writeError(w, http.StatusBadRequest, "USER", "User does not belong to this organization")
 		return
 	}
 	if body.MemberRole == "" {
@@ -473,16 +522,38 @@ func (s *Server) adminAddGroupMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `
-		INSERT INTO group_members (group_id, user_id, member_role, added_by)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (group_id, user_id) DO UPDATE SET member_role = EXCLUDED.member_role
-	`, group["id"], user.ID, body.MemberRole, sess.User.ID)
+	existing, err := scimGroupByIDTx(ctx, tx, sess.ActiveTenantID, r.PathValue("id"))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "GROUP_NOT_FOUND", "Group not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not add group member")
 		return
 	}
-	roleChanges, err := s.scimRecomputeRolesTx(ctx, tx, sess.ActiveTenantID, []string{user.ID})
+	// C1: membership of a mapped group is a role grant, so groups.manage alone
+	// cannot reach it.
+	if existing.ScimRole != "" && !sess.can("roles.manage") {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "Only an administrator with role management permission can change membership of a group with a role mapping")
+		return
+	}
+	var userEmail string
+	if err := tx.QueryRow(ctx, `
+		SELECT email::text FROM users
+		WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+	`, body.UserID, sess.ActiveTenantID).Scan(&userEmail); err != nil {
+		writeError(w, http.StatusBadRequest, "USER", "User does not belong to this organization")
+		return
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO group_members (group_id, user_id, member_role, added_by)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (group_id, user_id) DO UPDATE SET member_role = EXCLUDED.member_role
+	`, existing.ID, body.UserID, body.MemberRole, sess.User.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not add group member")
+		return
+	}
+	roleChanges, err := s.scimRecomputeRolesTx(ctx, tx, sess.ActiveTenantID, []string{body.UserID})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not update group member roles")
 		return
@@ -491,19 +562,14 @@ func (s *Server) adminAddGroupMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not commit group member")
 		return
 	}
-	s.recordAdminAudit(ctx, sess, sess.User, "admin.group_member_added", group["email"].(string), "Added "+user.Email+" to group", map[string]any{"groupId": group["id"], "userId": user.ID})
+	s.recordAdminAudit(ctx, sess, sess.User, "admin.group_member_added", existing.Email, "Added "+userEmail+" to group", map[string]any{"groupId": existing.ID, "userId": body.UserID})
 	s.adminAuditRoleChanges(ctx, sess, roleChanges)
-	updated, _ := s.adminGroupDetail(ctx, group["id"].(string), sess.ActiveTenantID)
+	updated, _ := s.adminGroupDetail(ctx, existing.ID, sess.ActiveTenantID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "group": updated})
 }
 
 func (s *Server) adminRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
-	group, err := s.adminGroupDetail(r.Context(), r.PathValue("id"), sess.ActiveTenantID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "GROUP_NOT_FOUND", "Group not found")
-		return
-	}
 	userID := r.PathValue("userId")
 	ctx := r.Context()
 	tx, err := s.store.DB.Begin(ctx)
@@ -512,7 +578,20 @@ func (s *Server) adminRemoveGroupMember(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, group["id"], userID); err != nil {
+	existing, err := scimGroupByIDTx(ctx, tx, sess.ActiveTenantID, r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "GROUP_NOT_FOUND", "Group not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not remove group member")
+		return
+	}
+	if existing.ScimRole != "" && !sess.can("roles.manage") {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "Only an administrator with role management permission can change membership of a group with a role mapping")
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, existing.ID, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not remove group member")
 		return
 	}
@@ -525,9 +604,9 @@ func (s *Server) adminRemoveGroupMember(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "GROUP_MEMBER", "Could not commit group member removal")
 		return
 	}
-	s.recordAdminAudit(ctx, sess, sess.User, "admin.group_member_removed", group["email"].(string), "Removed a group member", map[string]any{"groupId": group["id"], "userId": userID})
+	s.recordAdminAudit(ctx, sess, sess.User, "admin.group_member_removed", existing.Email, "Removed a group member", map[string]any{"groupId": existing.ID, "userId": userID})
 	s.adminAuditRoleChanges(ctx, sess, roleChanges)
-	updated, _ := s.adminGroupDetail(ctx, group["id"].(string), sess.ActiveTenantID)
+	updated, _ := s.adminGroupDetail(ctx, existing.ID, sess.ActiveTenantID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "group": updated})
 }
 
@@ -543,9 +622,12 @@ func (s *Server) adminGroupDetail(ctx context.Context, id, tenantID string) (map
 	}
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT u.id::text, u.email::text, u.name, u.initials, u.color, gm.member_role
-		FROM group_members gm JOIN users u ON u.id = gm.user_id
-		WHERE gm.group_id = $1 AND u.deleted_at IS NULL ORDER BY u.name
-	`, groupID)
+		FROM group_members gm
+		JOIN groups g ON g.id = gm.group_id
+		JOIN users u ON u.id = gm.user_id AND u.tenant_id = g.tenant_id
+		WHERE gm.group_id = $1 AND g.tenant_id = $2 AND u.deleted_at IS NULL
+		ORDER BY u.name
+	`, groupID, tenantID)
 	if err != nil {
 		return nil, err
 	}
