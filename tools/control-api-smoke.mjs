@@ -3,7 +3,12 @@ import crypto from 'node:crypto';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const BASE = process.env.CONTROL_BASE || 'https://130.94.46.22:8808';
-const PASSWORD = process.env.CONTROL_PASSWORD || fs.readFileSync(process.env.CONTROL_PASSWORD_FILE, 'utf8').trim();
+const PASSWORD = process.env.CONTROL_PASSWORD
+  || (process.env.CONTROL_PASSWORD_FILE ? fs.readFileSync(process.env.CONTROL_PASSWORD_FILE, 'utf8').trim() : '');
+if (!PASSWORD) {
+  console.log('SKIP control API smoke: set CONTROL_PASSWORD or CONTROL_PASSWORD_FILE to run it');
+  process.exit(0);
+}
 const EMAIL = 'sysadmin@alt8mail.local';
 const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`.toLowerCase();
 const RUN = `control-test-${suffix}`;
@@ -225,6 +230,35 @@ try {
     return 'unsigned mutation rejected';
   });
 
+  await step('license_status_read', async () => {
+    const response = await main.req('/control/api/license');
+    const license = response.data?.license;
+    if (!license || typeof license !== 'object') throw new Error('license payload missing');
+    for (const field of ['configured', 'filePath', 'state', 'edition', 'seats', 'usedSeats', 'remainingSeats', 'warning', 'features']) {
+      if (!(field in license)) throw new Error(`license status missing ${field}`);
+    }
+    if (!Array.isArray(license.features)) throw new Error('license features is not an array');
+    if (!Array.isArray(response.data.byTenant)) throw new Error('license byTenant is not an array');
+    const serialized = JSON.stringify(response.data).toLowerCase();
+    for (const secret of ['"token"', '"signature"', '"publickey"']) {
+      if (serialized.includes(secret)) throw new Error(`license response exposes ${secret}`);
+    }
+    return `state=${license.state} edition=${license.edition} seats=${license.seats} used=${license.usedSeats}`;
+  });
+
+  await step('license_invalid_upload_rejected', async () => {
+    const response = await main.req('/control/api/license', {
+      method: 'POST', body: { token: 'A8M1.invalid.invalid' }, expected: null,
+    });
+    const code = response.data?.error?.code || '';
+    if (response.status === 200) throw new Error('an invalid license token was accepted');
+    if (!['LICENSE_TOKEN', 'LICENSE_NOT_CONFIGURED'].includes(code)) {
+      throw new Error(`unexpected rejection HTTP ${response.status} code ${code || 'none'}`);
+    }
+    const after = await main.req('/control/api/license');
+    return `HTTP ${response.status} ${code}, status still ${after.data?.license?.state || 'unknown'}`;
+  });
+
   const existing = { domainId: '', mailboxId: '' };
   await step('read_only_endpoint_sweep', async () => {
     const domains = await main.req('/control/api/domains');
@@ -249,6 +283,7 @@ try {
       '/control/api/webhooks/deliveries', '/control/api/notifications/handles',
       '/control/api/notifications/deliveries', '/control/api/notifications/events',
       '/control/api/me', '/control/api/me/sessions', '/control/api/access/api-keys',
+      '/control/api/license',
     ];
     if (existing.domainId) paths.push(`/control/api/domains/${existing.domainId}`, `/control/api/domains/${existing.domainId}/dns`, `/control/api/domains/${existing.domainId}/delete-preview`);
     if (existing.mailboxId) paths.push(`/control/api/mailboxes/${existing.mailboxId}`, `/control/api/mailboxes/${existing.mailboxId}/history`, `/control/api/mailboxes/${existing.mailboxId}/sieve`);
