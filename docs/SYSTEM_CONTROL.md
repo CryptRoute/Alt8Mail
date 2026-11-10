@@ -111,7 +111,7 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
 - `/healthz` for load balancers; `/healthz/stacks` for authenticated stack
   detail; `/metrics` for a Prometheus-compatible scrape; `/events` for SSE.
 - Config-sync status banner, drift detail and run history.
-- A 31-route command palette with `Ctrl/Cmd+K`.
+- A command palette (`Ctrl/Cmd+K`) covering every permitted section and action.
 
 ### License and seat metering
 
@@ -144,22 +144,26 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
   or stores the token in the browser, and clears the inputs after any outcome.
 - The server validates the envelope before writing, replaces the file
   atomically with mode `0640` and group `a8m` (or `CONTROL_LICENSE_GROUP`),
-  preserving an existing file's uid/gid, audits `license.uploaded` without the
-  token and reports `restartRequired: true`. The success panel tells the
-  operator to **restart the Alt8Mail webmail service to activate this
-  license**. Control re-reads the file on every status request, and seat usage
-  updates without a restart.
+  preserving an existing file's owner uid and normalizing its group so a legacy
+  root:root token becomes webmail-readable. It audits `license.uploaded`
+  without the token and reports `restartRequired: true`. The success panel
+  tells the operator to **restart the Alt8Mail webmail service to activate
+  this license**. Control re-reads the file on every status request, and seat
+  usage updates without a restart.
 - A failed upload leaves the previous file byte-for-byte unchanged, and a
   missing file/key keeps the deployment in OSS mode without breaking startup.
   The webmail treats a configured-but-missing file as `unlicensed`, so the
   installer can provision the shared path before the first upload.
 - `install.sh` seeds `CONTROL_LICENSE_FILE`/`CONTROL_LICENSE_PUBLIC_KEY` from
   existing `ALT8MAIL_LICENSE_*` values, preserves every configured value on
-  reinstall, provisions `ALT8MAIL_LICENSE_FILE` unconditionally and normalizes
-  an existing token to root:`a8m` `0640`. `scripts/alt8mail-update.sh` applies
-  the same fallback seeding and normalization when that updater version runs;
-  an installation updating from an older release should re-run `install.sh` or
-  set the values manually for an immediate post-update upload.
+  reinstall (including the webmail-only `ALT8MAIL_LICENSE_TENANT` pin or an
+  initial `A8M_LICENSE_TENANT`), provisions `ALT8MAIL_LICENSE_FILE`
+  unconditionally and normalizes an existing token to root:`a8m` `0640`.
+  `scripts/alt8mail-update.sh` applies the same fallback seeding and
+  normalization when that updater version runs and leaves
+  `ALT8MAIL_LICENSE_TENANT` untouched; an installation updating from an older
+  release should re-run `install.sh` or set the values manually for an
+  immediate post-update upload.
   See `docs/LICENSING.md` for the token format, status error categories and
   seat rules.
 
@@ -715,8 +719,9 @@ codes: `LICENSE_NOT_CONFIGURED` (503), `LICENSE_TOKEN` (400),
 `LICENSE_EXPIRED` (400), `BAD_JSON` (400), `LICENSE_TOO_LARGE` (413),
 `CONTENT_TYPE` (415) and `LICENSE_WRITE` (500). A rejected upload leaves the
 existing file unchanged. The token is installed atomically as `0640` with
-group `a8m` (or `CONTROL_LICENSE_GROUP`); an existing file's uid/gid is
-preserved. The webmail server reads the token at startup, so restart it after a
+group `a8m` (or `CONTROL_LICENSE_GROUP`); an existing file's owner uid is
+preserved and its group is normalized to the configured webmail group. The
+webmail server reads the token at startup, so restart it after a
 successful upload; Control re-reads the file on every GET.
 
 ### Public API v1

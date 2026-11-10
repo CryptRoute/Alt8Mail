@@ -1941,8 +1941,10 @@ failure.
   choose **Validate and upload**. A rejected token returns a fixed error
   (`LICENSE_NOT_CONFIGURED`, `LICENSE_TOKEN`, `LICENSE_EXPIRED`,
   `LICENSE_TOO_LARGE`, `CONTENT_TYPE`, `BAD_JSON`, `LICENSE_WRITE`) and leaves
-  the existing file byte-for-byte unchanged. The raw token is never logged,
-  audited or rendered back.
+  the existing file byte-for-byte unchanged. A successful upload preserves the
+  file's owner uid and normalizes its group to `a8m` (or
+  `CONTROL_LICENSE_GROUP`) with mode `0640`, repairing a legacy root:root token.
+  The raw token is never logged, audited or rendered back.
 - **Restart.** The webmail verifies the token only at startup. After a
   successful upload run `systemctl restart a8m-server`. The Control view shows
   the new status and live seat usage immediately; the webmail keeps using its
@@ -1959,21 +1961,25 @@ failure.
   results in OSS mode; re-running `install.sh` or
   `scripts/alt8mail-update.sh` normalizes an existing token.
 - **Installer/updater.** `install.sh` preserves manually configured license
-  values, seeds the Control path/key from existing `ALT8MAIL_LICENSE_*` values
-  (and the webmail values from Control), and provisions
-  `ALT8MAIL_LICENSE_FILE` even before a token exists.
+  values (including the webmail-only `ALT8MAIL_LICENSE_TENANT` tenant pin, or an
+  initial `A8M_LICENSE_TENANT`), seeds the Control path/key from existing
+  `ALT8MAIL_LICENSE_*` values (and the webmail values from Control), and
+  provisions `ALT8MAIL_LICENSE_FILE` even before a token exists.
   `scripts/alt8mail-update.sh` applies the same fallback seeding and permission
-  normalization when that updater version runs. The updater replaces itself at
-  the end of an update, so an installation coming from an older release should
-  re-run `install.sh` (safe and idempotent) or add the two `CONTROL_LICENSE_*`
-  and two `ALT8MAIL_LICENSE_*` values manually before relying on an immediate
+  normalization when that updater version runs and never rewrites an existing
+  `ALT8MAIL_LICENSE_TENANT`. The updater replaces itself at the end of an
+  update, so an installation coming from an older release should re-run
+  `install.sh` (safe and idempotent) or add the two `CONTROL_LICENSE_*` and two
+  `ALT8MAIL_LICENSE_*` values manually before relying on an immediate
   post-update upload.
 - **Existing installs.** Add to `/etc/a8m/control.env`:
   `CONTROL_LICENSE_FILE=/etc/a8m/license.token`,
   `CONTROL_LICENSE_PUBLIC_KEY=<base64 key>` and optionally
   `CONTROL_LICENSE_GROUP=a8m`; add the same path/key as
   `ALT8MAIL_LICENSE_FILE`/`ALT8MAIL_LICENSE_PUBLIC_KEY` to
-  `/etc/a8m/app.env`, then restart `alt8mail-control` and `a8m-server`.
+  `/etc/a8m/app.env` (plus `ALT8MAIL_LICENSE_TENANT=<tenant-id>` when the
+  deployment is tenant-pinned), then restart `alt8mail-control` and
+  `a8m-server`.
 - **Seats.** Active, non-deleted, non-system-administrator users consume a
   seat. A license `tenant` claim scopes counting/enforcement to that tenant; a
   global license counts all tenants and shows a per-tenant table in Control.
@@ -1982,9 +1988,10 @@ failure.
   paid features but not core mail; OSS/unlicensed/invalid/expired deployments
   do not block user activation.
 - **Status/debugging.** `GET /control/api/license` requires `settings.write`.
-  The view shows the configured path and fixed failure categories; check
-  `journalctl -u alt8mail-control` and `journalctl -u a8m-server` for
-  `license loaded` / `license not loaded` lines (never token material).
+  The view shows the configured path and fixed failure categories. Check
+  `journalctl -u alt8mail-control` for `license uploaded` / `license upload
+  rejected`, and `journalctl -u a8m-server` for `license loaded` / `license
+  not loaded` (never token material).
 
 ### Backups (implemented)
 

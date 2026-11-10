@@ -24,21 +24,26 @@ configured-but-absent file as `unlicensed`, so a fresh install with the shared
 path already provisioned never reports `invalid` and never fails startup. A
 missing or unusable public key only matters once a token file exists.
 
-The installed file is `0640` (root-owned, group `a8m`) so the unprivileged
-webmail can read it. When replacing an existing token, Control preserves that
-file's uid/gid, applies `0640`, and fails the upload with `LICENSE_WRITE` if it
-runs as root but cannot set the ownership. `install.sh` provisions
-`CONTROL_LICENSE_FILE`, `CONTROL_LICENSE_PUBLIC_KEY`,
-`CONTROL_LICENSE_GROUP`, `CONTROL_LICENSE_WARNING_PERCENT` and
-`ALT8MAIL_LICENSE_FILE` unconditionally; it seeds Control values from existing
+The installed file is mode `0640` with group `a8m` so the unprivileged
+webmail can read it. When replacing an existing token, Control preserves the
+file's owner uid, normalizes its group to `a8m` (or `CONTROL_LICENSE_GROUP`),
+applies `0640`, and fails the upload with `LICENSE_WRITE` if it runs as root but
+cannot set the ownership. This repairs a legacy root:root token on the next
+upload, so a successful upload is actually readable by the webmail after the
+restart. `install.sh` provisions `CONTROL_LICENSE_FILE`,
+`CONTROL_LICENSE_PUBLIC_KEY`, `CONTROL_LICENSE_GROUP`,
+`CONTROL_LICENSE_WARNING_PERCENT` and `ALT8MAIL_LICENSE_FILE` unconditionally;
+it preserves and restores the webmail-only `ALT8MAIL_LICENSE_TENANT` pin (or
+takes an initial `A8M_LICENSE_TENANT`), seeds Control values from existing
 `ALT8MAIL_*` values when Control has none (and the webmail values from Control),
 preserves every manually configured value across reinstalls, and normalizes an
 existing token to root:`a8m` `0640`. `scripts/alt8mail-update.sh` applies the
 same fallback seeding and permission normalization when that updater version
-runs. Because the running updater installs the bundled script only at the end
-of an update, an installation updating from an older release should re-run
-`install.sh` (idempotent) or add the missing values manually if a Control
-upload must load immediately after the first restart.
+runs, and never rewrites an existing `ALT8MAIL_LICENSE_TENANT`. Because the
+running updater installs the bundled script only at the end of an update, an
+installation updating from an older release should re-run `install.sh`
+(idempotent) or add the missing values manually if a Control upload must load
+immediately after the first restart.
 
 The webmail server reads and verifies the token once, at startup; Control
 re-reads the configured file on every status request. An unreadable or invalid
@@ -138,8 +143,8 @@ Both endpoints require `settings.write` and the CSRF header for the upload:
   allowed), capped at 64 KiB with no trailing data after the JSON object. It
   verifies the token before touching disk, then writes atomically: a temporary
   file in the destination directory, mode `0640`, group `a8m` (or
-  `CONTROL_LICENSE_GROUP`), preserved existing uid/gid, file sync, rename over
-  the target, directory sync. It returns
+  `CONTROL_LICENSE_GROUP`), preserved owner uid, file sync, rename over the
+  target, directory sync. It returns
   `{"ok":true,"restartRequired":true,"license":{...}}`.
 
 Every rejected upload (read error, missing public key or path, malformed,
