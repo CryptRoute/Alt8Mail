@@ -76,6 +76,8 @@ jobs:
             echo "::group::$step"
             if ! bash -c "$step" 2>&1 | tee /tmp/web-step.log; then
               { echo "### Web test failed: $step"; echo '```'; tail -120 /tmp/web-step.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::Web test failed: $step"
+              grep -E "✗|E2E FAILED|AssertionError|Error:|not ok|ℹ fail|timed out|Could not start Chrome" /tmp/web-step.log | tail -40 | while IFS= read -r line; do echo "::error::$line"; done
               exit 1
             fi
             echo "::endgroup::"
@@ -89,6 +91,8 @@ jobs:
             echo "::group::$step"
             if ! bash -c "$step" 2>&1 | tee /tmp/a11y-step.log; then
               { echo "### Accessibility failure: $step"; echo '```'; tail -120 /tmp/a11y-step.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::Accessibility failure: $step"
+              grep -E "✗|Critical|AssertionError|Error:|timed out|Could not start Chrome" /tmp/a11y-step.log | tail -40 | while IFS= read -r line; do echo "::error::$line"; done
               exit 1
             fi
             echo "::endgroup::"
