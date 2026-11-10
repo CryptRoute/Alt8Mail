@@ -1005,6 +1005,8 @@ const state = {
   aiReader: null,
   catchUp: null,
   threadMeta: new Map(),
+  vipSenders: [],
+  threadMutes: [],
   teamPresence: new Map(),
   teamPresenceTimer: null,
   teamCollisionNotified: new Set(),
@@ -5318,6 +5320,8 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.organizationName = data.organizationName || "";
   state.delegatedMailboxes = Array.isArray(data.delegatedMailboxes) ? data.delegatedMailboxes : [];
   state.teamInboxes = Array.isArray(data.teamInboxes) ? data.teamInboxes : [];
+  state.vipSenders = Array.isArray(data.vipSenders) ? data.vipSenders.map(normalizeEmail) : [];
+  state.threadMutes = Array.isArray(data.threadMutes) ? data.threadMutes : [];
   if (data.sessionKind === "delegated" || data.delegated === true) {
     state.delegatedMode = true;
     if (!state.delegatedSession) {
@@ -6442,8 +6446,39 @@ async function openTeamTemplatePicker(session) {
   }
 }
 
-function applyTeamTemplate(session, template) {
-  if (!session?.el || !template) return;
+function insertMeetingLink(session) {
+  if (!session?.el) return;
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  const room = `a8m-${Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")}`;
+  const url = `https://meet.jit.si/${room}`;
+  if (session.htmlMode) {
+    const editor = session.el.querySelector("[data-compose-editor]");
+    if (editor) {
+      editor.focus();
+      document.execCommand("insertHTML", false, `<p><a href="${url}">Join the meeting</a><br>${url}</p>`);
+      updateComposeEditor(session, editor);
+    }
+  } else {
+    const textarea = session.el.querySelector('[data-compose-field="body"]');
+    if (textarea) {
+      const insert = `${session.body ? "\n\n" : ""}Join the meeting: ${url}`;
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? start;
+      textarea.value = textarea.value.slice(0, start) + insert + textarea.value.slice(end);
+      textarea.selectionStart = textarea.selectionEnd = start + insert.length;
+      textarea.focus();
+      session.body = textarea.value;
+      session.bodyHtml = textToEditorHTML(session.body);
+    }
+  }
+  session.dirty = true;
+  updateComposeStatus(session);
+  scheduleComposeSave(session);
+  showToast("Jitsi meeting link inserted");
+}
+
+function applyTeamTemplate(session, template) {  if (!session?.el || !template) return;
   if (template.subject) {
     session.subject = template.subject;
     const subjectInput = session.el.querySelector('[data-compose-field="subject"]');
@@ -10289,6 +10324,9 @@ function threadCollabMarkup(thread) {
   const team = teamInboxForOwner(ownerId);
   const queue = team ? state.teamQueue?.find((entry) => entry.threadId === thread.id) : null;
   const sla = queue?.sla?.state || "";
+  const senderEmail = normalizeEmail(latest?.from?.email || latest?.fromEmail || "");
+  const vip = senderEmail && state.vipSenders.includes(senderEmail);
+  const muted = state.threadMutes.includes(thread.id);
   return `<div class="thread-collab-bar" data-collab-owner="${esc(ownerId)}" data-collab-thread="${esc(thread.id)}"${team ? ` data-collab-team="${esc(team.id)}"` : ""}>
       <div class="collab-field"><span>Handling</span><select data-thread-status aria-label="Conversation handling status">
         ${["new", "in_progress", "done"].map((value) => `<option value="${value}"${status === value ? " selected" : ""}>${esc(collabStatusLabel(value))}</option>`).join("")}
@@ -10297,6 +10335,8 @@ function threadCollabMarkup(thread) {
       ${team ? `<button class="collab-action" data-thread-claim type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Claim</button>` : ""}
       <button class="collab-action${closed ? " is-reopen" : ""}" data-thread-close type="button">${closed ? "Reopen conversation" : "Close conversation"}</button>
       <button class="collab-action" data-thread-notes-toggle type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Team notes</button>
+      ${senderEmail ? `<button class="collab-action${vip ? " is-active" : ""}" data-vip-toggle="${esc(senderEmail)}" type="button" aria-pressed="${vip ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>${vip ? "VIP sender" : "Mark VIP"}</button>` : ""}
+      <button class="collab-action${muted ? " is-active" : ""}" data-thread-mute="${esc(thread.id)}" type="button" aria-pressed="${muted ? "true" : "false"}">${muted ? "Unmute" : "Mute"}</button>
       ${team ? `<span class="collab-chip" title="${esc(team.name)} · ${esc(team.strategy === "round_robin" ? "round-robin" : "manual")} assignment">Shared inbox${sla ? ` · ${esc(sla.replace("_", " "))}` : ""}</span>` : ""}
       ${closed ? '<span class="collab-chip is-closed"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Closed</span>' : ""}
     </div>
@@ -15890,6 +15930,7 @@ function composeTemplate(session) {
       <button class="btn-secondary compose-send-later" data-compose-action="schedule" type="button"><svg class="icon" aria-hidden="true"><use href="#i-calendar-clock"/></svg>Send later</button>
       <div class="compose-actions">
         <button class="icon-btn" data-compose-action="template" type="button" aria-label="Insert team template" title="Insert team template"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></button>
+        <button class="icon-btn" data-compose-action="meet" type="button" aria-label="Insert Jitsi meeting link" title="Insert Jitsi meeting link"><svg class="icon" aria-hidden="true"><use href="#i-video"/></svg></button>
         <button class="icon-btn" data-compose-action="attach" type="button" aria-label="Attach files" title="Attach files"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></button>
         <button class="icon-btn" data-compose-action="discard" type="button" aria-label="Discard draft" title="Discard draft"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>
       </div>
@@ -19975,6 +20016,15 @@ function renderTaskDetail() {
         <label class="form-field"><span>Due time</span><input id="taskDueTimeInput" type="time" value="${esc(task ? task.dueTime : "")}"></label>
         <label class="form-field"><span>Priority</span><select id="taskPriorityInput">${["low", "normal", "high", "urgent"].map((value) => `<option value="${value}"${task && task.priority === value ? " selected" : ""}>${taskPriorityLabel(value)}</option>`).join("")}</select></label>
       </div>
+      <div class="form-row">
+        <label class="form-field"><span>Kanban</span><select id="taskKanbanInput">${["todo", "in_progress", "review", "done"].map((value) => `<option value="${value}"${task && (task.kanbanStatus || "todo") === value ? " selected" : ""}>${value.replace("_", " ")}</option>`).join("")}</select></label>
+        <label class="form-field"><span>Parent task</span><select id="taskParentInput"><option value="">None</option>${state.tasks.filter((item) => !task || item.id !== task.id).map((item) => `<option value="${esc(item.id)}"${task?.parentTaskId === item.id ? " selected" : ""}>${esc(item.title)}</option>`).join("")}</select></label>
+        <label class="form-field"><span>Depends on</span><select id="taskDependsInput"><option value="">None</option>${state.tasks.filter((item) => !task || item.id !== task.id).map((item) => `<option value="${esc(item.id)}"${task?.dependsOnTaskId === item.id ? " selected" : ""}>${esc(item.title)}</option>`).join("")}</select></label>
+      </div>
+      <div class="form-row">
+        <label class="form-field"><span>Reminder</span><input id="taskReminderInput" type="datetime-local" value="${task?.reminderAt ? esc(new Date(task.reminderAt).toISOString().slice(0, 16)) : ""}"></label>
+        <label class="form-field"><span>Recurrence</span><input id="taskRecurrenceInput" value="${esc(task?.recurrenceRule || "")}" placeholder="FREQ=WEEKLY;BYDAY=MO"></label>
+      </div>
       <label class="form-field"><span>Assignee</span><select id="taskAssigneeInput">${assigneeOptions}</select></label>
       <label class="form-field"><span>Tags</span><input id="taskTagsInput" type="text" value="${esc(task ? (task.tags || []).join(", ") : "")}" placeholder="Finance, Board"></label>
       ${task && task.linkedThreadId ? `<div class="task-linked-card"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><div><strong>Linked email</strong><span>${esc(task.linkedSubject || "Open conversation")}</span></div></div>` : ""}
@@ -19995,7 +20045,7 @@ function renderTaskDetail() {
       <div><span class="eyebrow">Task</span><div class="task-title-line"><h2>${esc(task.title)}</h2><span class="task-status ${task.status}">${task.status === "done" ? "Completed" : "Open"}</span></div></div>
       <button class="icon-btn" data-task-edit="${esc(task.id)}" type="button" aria-label="Edit task"><svg class="icon" aria-hidden="true"><use href="#i-compose"/></svg></button>
     </div>
-    <div class="task-detail-badges"><span class="task-priority ${esc(task.priority)}">${esc(taskPriorityLabel(task.priority))}</span><span class="task-due ${dueState}">${esc(taskDueLabel(task))}</span>${(task.tags || []).map((tag) => `<span class="task-tag">${esc(tag)}</span>`).join("")}</div>
+    <div class="task-detail-badges"><span class="task-priority ${esc(task.priority)}">${esc(taskPriorityLabel(task.priority))}</span><span class="task-due ${dueState}">${esc(taskDueLabel(task))}</span>${task.kanbanStatus ? `<span class="task-tag">${esc(String(task.kanbanStatus).replace("_", " "))}</span>` : ""}${task.recurrenceRule ? `<span class="task-tag">${esc(task.recurrenceRule)}</span>` : ""}${(task.tags || []).map((tag) => `<span class="task-tag">${esc(tag)}</span>`).join("")}</div>
     <div class="task-detail-grid">
       <div><span>Assignee</span><strong>${esc(task.assignee ? task.assignee.name : "Unassigned")}</strong></div>
       <div><span>Created</span><strong>${esc(formatDateOnly(task.createdAt))}</strong></div>
@@ -20022,6 +20072,11 @@ async function saveTaskForm(event) {
     dueTime: document.getElementById("taskDueTimeInput").value,
     priority: document.getElementById("taskPriorityInput").value,
     assigneeEmail: document.getElementById("taskAssigneeInput").value,
+    kanbanStatus: document.getElementById("taskKanbanInput").value,
+    parentTaskId: document.getElementById("taskParentInput").value,
+    dependsOnTaskId: document.getElementById("taskDependsInput").value,
+    recurrenceRule: document.getElementById("taskRecurrenceInput").value.trim(),
+    reminderAt: document.getElementById("taskReminderInput").value ? new Date(document.getElementById("taskReminderInput").value).toISOString() : "",
     tags: document.getElementById("taskTagsInput").value.split(",").map((tag) => tag.trim()).filter(Boolean)
   };
   try {
@@ -28231,6 +28286,32 @@ function bindEvents() {
       if (message) requestUnsubscribe(message, unsubscribeButton);
       return;
     }
+    const vipButton = event.target.closest("[data-vip-toggle]");
+    if (vipButton) {
+      const email = normalizeEmail(vipButton.getAttribute("data-vip-toggle"));
+      const isVIP = state.vipSenders.includes(email);
+      api(isVIP ? `/api/vip-senders/${encodeURIComponent(email)}` : "/api/vip-senders", {
+        method: isVIP ? "DELETE" : "POST", body: isVIP ? undefined : { email }
+      }).then(() => {
+        state.vipSenders = isVIP ? state.vipSenders.filter((item) => item !== email) : [...state.vipSenders, email];
+        renderReader({ preserveScroll: true });
+        showToast(isVIP ? "VIP sender removed" : "Sender marked as VIP");
+      }).catch(showError);
+      return;
+    }
+    const muteButton = event.target.closest("[data-thread-mute]");
+    if (muteButton) {
+      const threadId = muteButton.getAttribute("data-thread-mute");
+      const isMuted = state.threadMutes.includes(threadId);
+      api(`/api/threads/${encodeURIComponent(threadId)}/mute`, { method: isMuted ? "DELETE" : "POST" })
+        .then(() => {
+          state.threadMutes = isMuted ? state.threadMutes.filter((id) => id !== threadId) : [...state.threadMutes, threadId];
+          renderReader({ preserveScroll: true });
+          renderList({ preserveScroll: true });
+          showToast(isMuted ? "Conversation unmuted" : "Conversation muted");
+        }).catch(showError);
+      return;
+    }
     const claimButton = event.target.closest("[data-thread-claim]");
     if (claimButton) {
       const bar = claimButton.closest(".thread-collab-bar");
@@ -28732,6 +28813,7 @@ function bindEvents() {
         });
       } else if (kind === "attach") { openComposeAttach(session.id); }
       else if (kind === "template") { openTeamTemplatePicker(session); }
+      else if (kind === "meet") { insertMeetingLink(session); }
       else if (kind === "mention") { openComposeMentionPicker(session); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
       else if (kind === "editor-light") { setEditorLight(session, !session.editorLight); }

@@ -23,6 +23,11 @@ type taskBody struct {
 	Tags           []string `json:"tags"`
 	LinkedThreadID *string  `json:"linkedThreadId"`
 	LinkedSubject  *string  `json:"linkedSubject"`
+	ParentTaskID   *string  `json:"parentTaskId"`
+	DependsOn      *string  `json:"dependsOnTaskId"`
+	KanbanStatus   *string  `json:"kanbanStatus"`
+	RecurrenceRule *string  `json:"recurrenceRule"`
+	ReminderAt     *string  `json:"reminderAt"`
 }
 
 var taskDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -34,6 +39,8 @@ type taskRecord struct {
 	LinkedThreadID, LinkedSubject                                *string
 	LinkedAccountID                                              string
 	Tags                                                         []string
+	ParentTaskID, DependsOnTaskID, KanbanStatus, RecurrenceRule  string
+	ReminderAt                                                   *time.Time
 	CompletedAt, CreatedAt, UpdatedAt                            *time.Time
 }
 
@@ -44,6 +51,8 @@ func (s *Server) loadTasks(ctx context.Context, userID string) ([]map[string]any
 		       COALESCE(to_char(t.due_time, 'HH24:MI'), ''),
 		       COALESCE(a.email::text, ''), COALESCE(a.name, ''), COALESCE(a.initials, ''), COALESCE(a.color, ''),
 		       t.linked_thread_id, t.linked_subject, t.source, t.tags,
+		       COALESCE(t.parent_task_id,''), COALESCE(t.depends_on_task_id,''), t.kanban_status,
+		       t.recurrence_rule, t.reminder_at,
 		       t.completed_at, t.created_at, t.updated_at,
 		       COALESCE((
 		         SELECT m.account_id FROM public.mail_messages m
@@ -65,7 +74,8 @@ func (s *Server) loadTasks(ctx context.Context, userID string) ([]map[string]any
 		if err := rows.Scan(&task.ID, &task.Title, &task.Notes, &task.Status, &task.Priority,
 			&task.Due, &task.DueTime, &task.AssigneeEmail, &task.AssigneeName, &task.AssigneeInitials,
 			&task.AssigneeColor, &task.LinkedThreadID, &task.LinkedSubject, &task.Source, &task.Tags,
-			&task.CompletedAt, &task.CreatedAt, &task.UpdatedAt, &task.LinkedAccountID); err != nil {
+			&task.ParentTaskID, &task.DependsOnTaskID, &task.KanbanStatus, &task.RecurrenceRule,
+			&task.ReminderAt, &task.CompletedAt, &task.CreatedAt, &task.UpdatedAt, &task.LinkedAccountID); err != nil {
 			continue
 		}
 		tasks = append(tasks, publicTask(task))
@@ -95,7 +105,10 @@ func publicTask(task taskRecord) map[string]any {
 		"assignee": assignee, "tags": tags, "source": task.Source,
 		"linkedThreadId": task.LinkedThreadID, "linkedSubject": task.LinkedSubject,
 		"linkedAccountId": task.LinkedAccountID,
-		"completedAt":     completedAt, "createdAt": task.CreatedAt.UTC().Format(time.RFC3339),
+		"parentTaskId":    task.ParentTaskID, "dependsOnTaskId": task.DependsOnTaskID,
+		"kanbanStatus": task.KanbanStatus, "recurrenceRule": task.RecurrenceRule,
+		"reminderAt":  task.ReminderAt,
+		"completedAt": completedAt, "createdAt": task.CreatedAt.UTC().Format(time.RFC3339),
 		"updatedAt": task.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
@@ -121,14 +134,22 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeFromError(w, err)
 		return
 	}
+	extras, err := s.validateTaskExtras(r.Context(), sess, body, nil, "", status)
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
 	id := newID("task")
 	_, err = s.store.DB.Exec(r.Context(), `
 		INSERT INTO tasks (id, tenant_id, user_id, title, notes, status, priority, due_date, due_time,
-		                   assignee_user_id, linked_thread_id, linked_subject, source, tags, completed_at)
+		                   assignee_user_id, linked_thread_id, linked_subject, source, tags, completed_at,
+		                   parent_task_id, depends_on_task_id, kanban_status, recurrence_rule, reminder_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,'')::date, NULLIF($9,'')::time,
-		        $10, $11, $12, 'manual', $13, CASE WHEN $6 = 'done' THEN now() ELSE NULL END)
+		        $10, $11, $12, 'manual', $13, CASE WHEN $6 = 'done' THEN now() ELSE NULL END,
+		        NULLIF($14,''), NULLIF($15,''), $16, $17, $18)
 	`, id, sess.User.TenantID, sess.User.ID, title, notes, status, priority, due, dueTime,
-		assigneeID, linkedThreadID, linkedSubject, tags)
+		assigneeID, linkedThreadID, linkedSubject, tags, extras.ParentID, extras.DependsID,
+		extras.Kanban, extras.Recurrence, extras.ReminderAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "TASK", "Could not create the task")
 		return
@@ -168,6 +189,11 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		writeFromError(w, err)
 		return
 	}
+	extras, err := s.validateTaskExtras(r.Context(), sess, body, existing, id, status)
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
 	var completedAt any
 	if status == "done" {
 		completedAt = time.Now()
@@ -179,9 +205,13 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		UPDATE tasks
 		SET title = $2, notes = $3, status = $4, priority = $5, due_date = NULLIF($6,'')::date,
 		    due_time = NULLIF($7,'')::time, assignee_user_id = $8, tags = $9,
-		    linked_thread_id = $10, linked_subject = $11, completed_at = $12, updated_at = now()
+		    linked_thread_id = $10, linked_subject = $11, completed_at = $12,
+		    parent_task_id = NULLIF($13,''), depends_on_task_id = NULLIF($14,''),
+		    kanban_status = $15, recurrence_rule = $16, reminder_at = $17, updated_at = now()
 		WHERE id = $1
-	`, id, title, notes, status, priority, due, dueTime, assigneeID, tags, linkedThreadID, linkedSubject, completedAt)
+	`, id, title, notes, status, priority, due, dueTime, assigneeID, tags, linkedThreadID,
+		linkedSubject, completedAt, extras.ParentID, extras.DependsID, extras.Kanban,
+		extras.Recurrence, extras.ReminderAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "TASK", "Could not update the task")
 		return
@@ -219,7 +249,9 @@ func (s *Server) loadTask(ctx context.Context, userID, id string) (map[string]an
 		SELECT t.id, t.title, t.notes, t.status, t.priority,
 		       COALESCE(to_char(t.due_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(t.due_time, 'HH24:MI'), ''),
 		       COALESCE(a.email::text, ''), COALESCE(a.name, ''), COALESCE(a.initials, ''), COALESCE(a.color, ''),
-		       t.linked_thread_id, t.linked_subject, t.source, t.tags, t.completed_at, t.created_at, t.updated_at,
+		       t.linked_thread_id, t.linked_subject, t.source, t.tags,
+		       COALESCE(t.parent_task_id,''), COALESCE(t.depends_on_task_id,''), t.kanban_status,
+		       t.recurrence_rule, t.reminder_at, t.completed_at, t.created_at, t.updated_at,
 		       t.user_id::text,
 		       COALESCE((
 		         SELECT m.account_id FROM public.mail_messages m
@@ -240,8 +272,9 @@ func (s *Server) loadTask(ctx context.Context, userID, id string) (map[string]an
 	var ownerID string
 	if err := rows.Scan(&task.ID, &task.Title, &task.Notes, &task.Status, &task.Priority, &task.Due, &task.DueTime,
 		&task.AssigneeEmail, &task.AssigneeName, &task.AssigneeInitials, &task.AssigneeColor,
-		&task.LinkedThreadID, &task.LinkedSubject, &task.Source, &task.Tags, &task.CompletedAt,
-		&task.CreatedAt, &task.UpdatedAt, &ownerID, &task.LinkedAccountID); err != nil {
+		&task.LinkedThreadID, &task.LinkedSubject, &task.Source, &task.Tags,
+		&task.ParentTaskID, &task.DependsOnTaskID, &task.KanbanStatus, &task.RecurrenceRule,
+		&task.ReminderAt, &task.CompletedAt, &task.CreatedAt, &task.UpdatedAt, &ownerID, &task.LinkedAccountID); err != nil {
 		return nil, err
 	}
 	result := publicTask(task)
@@ -347,6 +380,104 @@ func (s *Server) validateTaskBody(ctx context.Context, sess *sessionRecord, body
 		tags = []string{}
 	}
 	return title, notes, due, dueTime, priority, status, assigneeID, tags, linkedThreadID, linkedSubject, nil
+}
+
+type taskExtras struct {
+	ParentID, DependsID, Kanban, Recurrence string
+	ReminderAt                              any
+}
+
+func (s *Server) taskReferenceExists(ctx context.Context, sess *sessionRecord, id string) bool {
+	if id == "" {
+		return false
+	}
+	var exists bool
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM public.tasks WHERE id=$1 AND tenant_id=$2
+		  AND (user_id=$3 OR assignee_user_id=$3))
+	`, id, sess.User.TenantID, sess.User.ID).Scan(&exists)
+	return exists
+}
+
+func (s *Server) taskParentCycle(ctx context.Context, sess *sessionRecord, taskID, parentID string) bool {
+	current := parentID
+	for depth := 0; current != "" && depth < 20; depth++ {
+		if taskID != "" && current == taskID {
+			return true
+		}
+		var next string
+		if err := s.store.DB.QueryRow(ctx, `
+			SELECT COALESCE(parent_task_id,'') FROM public.tasks
+			WHERE id=$1 AND tenant_id=$2 AND (user_id=$3 OR assignee_user_id=$3)
+		`, current, sess.User.TenantID, sess.User.ID).Scan(&next); err != nil {
+			return false
+		}
+		current = next
+	}
+	return false
+}
+
+func (s *Server) validateTaskExtras(ctx context.Context, sess *sessionRecord, body taskBody, existing map[string]any, taskID, status string) (taskExtras, error) {
+	extras := taskExtras{
+		ParentID: stateString(existing, "parentTaskId"), DependsID: stateString(existing, "dependsOnTaskId"),
+		Kanban:     firstNonEmpty(stateString(existing, "kanbanStatus"), "todo"),
+		Recurrence: stateString(existing, "recurrenceRule"),
+	}
+	if reminder := stateString(existing, "reminderAt"); reminder != "" {
+		if parsed, err := time.Parse(time.RFC3339, reminder); err == nil {
+			extras.ReminderAt = parsed
+		}
+	}
+	if body.ParentTaskID != nil {
+		extras.ParentID = strings.TrimSpace(*body.ParentTaskID)
+	}
+	if body.DependsOn != nil {
+		extras.DependsID = strings.TrimSpace(*body.DependsOn)
+	}
+	if extras.ParentID != "" {
+		if !s.taskReferenceExists(ctx, sess, extras.ParentID) {
+			return extras, fail(http.StatusBadRequest, "TASK_PARENT", "Parent task is not available")
+		}
+		if s.taskParentCycle(ctx, sess, taskID, extras.ParentID) {
+			return extras, fail(http.StatusBadRequest, "TASK_PARENT", "That parent would create a task cycle")
+		}
+	}
+	if extras.DependsID != "" {
+		if !s.taskReferenceExists(ctx, sess, extras.DependsID) {
+			return extras, fail(http.StatusBadRequest, "TASK_DEPENDENCY", "Dependency task is not available")
+		}
+		if taskID != "" && extras.DependsID == taskID {
+			return extras, fail(http.StatusBadRequest, "TASK_DEPENDENCY", "A task cannot depend on itself")
+		}
+	}
+	if body.KanbanStatus != nil {
+		extras.Kanban = strings.ToLower(strings.TrimSpace(*body.KanbanStatus))
+	}
+	if status == "done" {
+		extras.Kanban = "done"
+	} else if extras.Kanban == "done" && body.KanbanStatus == nil {
+		extras.Kanban = "todo"
+	}
+	if extras.Kanban != "todo" && extras.Kanban != "in_progress" && extras.Kanban != "review" && extras.Kanban != "done" {
+		return extras, fail(http.StatusBadRequest, "TASK_KANBAN", "Kanban status must be todo, in_progress, review or done")
+	}
+	if body.RecurrenceRule != nil {
+		extras.Recurrence = truncate(strings.TrimSpace(*body.RecurrenceRule), 200)
+		if strings.ContainsAny(extras.Recurrence, "\r\n") {
+			return extras, fail(http.StatusBadRequest, "TASK_RECURRENCE", "Recurrence rule must be a single line")
+		}
+	}
+	if body.ReminderAt != nil {
+		raw := strings.TrimSpace(*body.ReminderAt)
+		if raw == "" {
+			extras.ReminderAt = nil
+		} else if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			extras.ReminderAt = parsed
+		} else {
+			return extras, fail(http.StatusBadRequest, "TASK_REMINDER", "Reminder must be an RFC3339 timestamp")
+		}
+	}
+	return extras, nil
 }
 
 func optionalText(value string, limit int) *string {

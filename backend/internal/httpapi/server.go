@@ -437,6 +437,8 @@ func (s *Server) Handler() http.Handler {
 	s.registerSharedDraftRoutes(mux)
 	s.registerTeamTemplateRoutes(mux)
 	s.registerAutomationRoutes(mux)
+	s.registerFileCollaborationRoutes(mux)
+	s.registerSenderControlRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)
@@ -920,6 +922,8 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		recentAudit = recentAudit[:12]
 	}
 	threadMeta := s.collaborationThreadMeta(ctx, sess.User)
+	vipSenders := s.vipSenderList(ctx, sess.User.ID)
+	threadMutes := s.threadMuteList(ctx, sess.User.ID)
 	teamInboxes := []map[string]any{}
 	if s.entitled("shared_inbox") {
 		teamInboxes = s.teamMailboxesForUser(ctx, sess.User)
@@ -946,6 +950,8 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"labels":           labels,
 		"folders":          folders,
 		"teamInboxes":      teamInboxes,
+		"vipSenders":       vipSenders,
+		"threadMutes":      threadMutes,
 		"people":           people,
 		"messages":         messages,
 		"mailPage": map[string]any{
