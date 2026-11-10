@@ -21,4 +21,4 @@
 ### Not Started
 - Post-roadmap work only.
 
-Phase 6 implementation is complete for the shipped v1 slices. No release, deploy or push has been performed.
+Phase 6 implementation is complete for the shipped v1 slices. Release is not yet certified: see `docs/RELEASE_GAP_AUDIT.md` for release blockers (paid entitlement coverage, Phase 5 encryption gate, Phase 6 integration scope, version bump) and operator gates. No release, deploy or push has been performed.

@@ -91,7 +91,9 @@ following are release blockers or require an explicit product decision:
 - **operator:** real MCP client and prompt-injection corpus against staging.
 - **follow-up:** triage labels directly instead of invoking a Phase 2 automation
   rule; obligations create tasks but do not schedule nudges; document citations
-  verify document text, not the source mail thread.
+  verify document text, not the source mail thread. Auto-labeling and
+  obligation auto-task creation are policy-gated, not per-action approval-gated,
+  despite the Phase 4 acceptance wording.
 - **follow-up:** MCP policy is scope-wide; no per-tool approval matrix or
   per-connection distributed rate limit.
 
