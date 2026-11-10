@@ -221,10 +221,13 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 
 	// SCIM provisioning tokens. The raw token is returned once on create or
 	// rotate; list responses expose only id, name, prefix and timestamps.
-	mux.HandleFunc("GET /scim/tokens", s.adminRequirePermission("users.create", s.adminListSCIMTokens))
-	mux.HandleFunc("POST /scim/tokens", s.adminRequirePermission("users.create", s.adminCreateSCIMToken))
-	mux.HandleFunc("POST /scim/tokens/{id}/rotate", s.adminRequirePermission("users.create", s.adminRotateSCIMToken))
-	mux.HandleFunc("DELETE /scim/tokens/{id}", s.adminRequirePermission("users.create", s.adminRevokeSCIMToken))
+	// Minting a SCIM token grants IdP-driven provisioning (including mapped
+	// group membership), so token lifecycle is a role-management operation:
+	// users.create alone must not be able to obtain one.
+	mux.HandleFunc("GET /scim/tokens", s.adminRequirePermission("roles.manage", s.adminListSCIMTokens))
+	mux.HandleFunc("POST /scim/tokens", s.adminRequirePermission("roles.manage", s.adminCreateSCIMToken))
+	mux.HandleFunc("POST /scim/tokens/{id}/rotate", s.adminRequirePermission("roles.manage", s.adminRotateSCIMToken))
+	mux.HandleFunc("DELETE /scim/tokens/{id}", s.adminRequirePermission("roles.manage", s.adminRevokeSCIMToken))
 
 	mux.HandleFunc("GET /quarantine", s.adminRequirePermission("users.security", s.adminListQuarantine))
 	mux.HandleFunc("POST /quarantine/{userId}/{messageId}/release", s.adminRequirePermission("users.security", s.adminReleaseQuarantine))
