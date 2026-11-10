@@ -67,9 +67,29 @@ jobs:
       - run: npm audit --omit=dev
       - uses: browser-actions/setup-chrome@v1
         id: setup-chrome
-      - run: npm run test:all
+      - name: Web tests
         env:
           CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
-      - run: npm run test:a11y
+        run: |
+          set -o pipefail
+          for step in "node tools/check-locales.mjs" "node --test tests/api.test.mjs" "node tests/e2e.mjs"; do
+            echo "::group::$step"
+            if ! bash -c "$step" 2>&1 | tee /tmp/web-step.log; then
+              { echo "### Web test failed: $step"; echo '```'; tail -120 /tmp/web-step.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+      - name: Accessibility gate
         env:
           CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: |
+          set -o pipefail
+          for step in "npm run test:a11y:audit" "npm run test:a11y:keyboard"; do
+            echo "::group::$step"
+            if ! bash -c "$step" 2>&1 | tee /tmp/a11y-step.log; then
+              { echo "### Accessibility failure: $step"; echo '```'; tail -120 /tmp/a11y-step.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
