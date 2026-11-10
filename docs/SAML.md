@@ -83,6 +83,24 @@ because the matching private key is loaded.
 IdP-initiated SSO is not supported: `AllowIDPInitiated` is false, so an
 unsolicited response is rejected.
 
+## Common identity providers
+
+Use the provider's SAML metadata URL (or upload its metadata file) and set the
+SP metadata URL above as the application's entity ID/audience. The provider
+must sign assertions with a certificate published in its metadata.
+
+| Provider | SAML setup | Email source |
+| --- | --- | --- |
+| Microsoft Entra ID | Enterprise application → Single sign-on → SAML. Use the app's federation metadata URL for `ALT8MAIL_SAML_IDP_METADATA_URL`; set the SP metadata URL as the identifier and the ACS URL as the reply URL. | NameID `emailAddress`, or the `emailaddress` claim configured as an additional claim. |
+| Okta | SAML 2.0 application; copy the IdP metadata URL; set the SP metadata URL as the audience and the ACS as the single sign-on URL. | NameID format `EmailAddress`, or a `mail`/email attribute mapped into the assertion. |
+| Google Workspace | Custom SAML app; download the IdP metadata; set the SP metadata URL as the audience and the ACS as the ACS URL. | NameID `EMAIL` (emailAddress format). Google does not emit a separate MFA class ref, so tenant MFA enforcement may reject users unless the policy is adjusted or an upstream broker supplies one. |
+| Keycloak | SAML client in the realm; use the realm SAML descriptor URL; set the SP metadata URL as the client ID/audience and the ACS as the valid redirect/ACS URL. | NameID `email`/`emailAddress`, or the `email` attribute mapper. |
+
+After registering, run a live sign-in for each provider and verify the email
+mapping, exact domain allowlist, tenant IP policy and MFA class ref before
+enabling the login button. Provider consoles change; the entity ID, ACS URL and
+signed-assertion requirements do not.
+
 ## Attribute mapping and email extraction
 
 The signed assertion is the trust boundary. The email is resolved as follows:

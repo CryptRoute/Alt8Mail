@@ -142,6 +142,26 @@ the limiter itself is the signal for over-limit requests.
 The login page shows a generic error for any `sso_error` value and removes the
 query parameter. Password and passkey sign-in remain available throughout.
 
+## Common identity providers
+
+Use the IdP's discovery issuer exactly as published. Register the Alt8Mail
+callback URL and request the `openid email profile` scopes. The table records
+the values commonly needed for the Phase 1 IdP matrix; the operator must still
+complete a live sign-in for each provider in its own tenant.
+
+| Provider | Issuer form | Notes |
+| --- | --- | --- |
+| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant-id>/v2.0` | Add the callback as a Web redirect URI. Configure the optional `email` claim (or a mapped email claim); Entra does not always emit `email` by default. `email_verified` may be absent, which Alt8Mail accepts. |
+| Okta | `https://<org>.okta.com` or `https://<org>.okta.com/oauth2/<auth-server>` | Use a Web application with the callback URI. Include the `email` scope and map `email` into the ID token. Auth-server `acr`/`amr` values must reflect the second factor when tenant MFA enforcement is on. |
+| Google Workspace | `https://accounts.google.com` | Create a Web client with the callback URI. Google returns `email` and `email_verified`; treat the domain allowlist as mandatory for Workspace tenants. Google ID tokens do not reliably carry `amr`/`acr` MFA evidence, so `mfaEnforcement` may reject users unless the tenant policy is adjusted or an identity broker supplies the claim. |
+| Keycloak | `https://<host>/realms/<realm>` | Confidential client, standard flow, PKCE S256, callback URI. Add the `email` scope and ensure the email mapper is included. Realm authentication flows determine the `acr` values; configure the tenant MFA policy accordingly. |
+
+For each provider, verify discovery, the callback, claim mapping (especially
+`email` and `email_verified`), exact-domain allowlisting, tenant IP policy and
+MFA evidence before enabling the login button in production. Provider-specific
+console labels change; the issuer, redirect URI and claim requirements above do
+not.
+
 ## Operational notes
 
 - The server discovers the IdP lazily on the first start or callback request,
