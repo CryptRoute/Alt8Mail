@@ -156,7 +156,7 @@
       if (theme !== loadedTheme) applyEditorTheme();
       notifyParent("a8m-office-ready", fileId || shareToken);
       if (!shareToken && data.aiEnabled && typeof window.Alt8OfficeAI === "function") {
-        window.Alt8OfficeAI(editor);
+        window.Alt8OfficeAI(editor, data.document && data.document.id);
       }
     } catch (_error) {
       fail("The Office editor rejected the document configuration.");
@@ -164,7 +164,7 @@
   }
 
 
-  window.Alt8OfficeAI = function (docEditor) {
+  window.Alt8OfficeAI = function (docEditor, documentId) {
     var fab = document.getElementById("aiFab");
     var panel = document.getElementById("aiPanel");
     var close = document.getElementById("aiClose");
@@ -256,6 +256,7 @@
         headers: headers,
         body: JSON.stringify({
           action: action,
+          documentId: documentId || "",
           text: text,
           prompt: prompt.value.trim(),
           language: language.value
@@ -264,7 +265,7 @@
         return response.json().catch(function () { return {}; }).then(function (data) {
           if (!response.ok) throw new Error((data.error && data.error.message) || "The AI assistant could not complete the request.");
           if (!data.text) throw new Error("The AI assistant returned an empty response.");
-          return data.text;
+          return data;
         });
       });
     }
@@ -273,16 +274,21 @@
       if (busy) return;
       var action = activeAction;
       var promptValue = prompt.value.trim();
+      var documentAction = ["ask", "action_items", "draft_reply"].indexOf(action) >= 0;
       if (action === "custom" && !promptValue) {
         setStatus("Describe what the assistant should write.", true);
         prompt.focus();
         return;
       }
+      if (action === "ask" && !promptValue) {
+        setStatus("Type a question about this document.", true);
+        prompt.focus();
+        return;
+      }
       busy = true;
       generate.disabled = true;
-      setStatus("Reading the selected text…", false);
       resultWrap.hidden = true;
-      selectedText().then(function (text) {
+      var prepare = documentAction ? Promise.resolve("") : selectedText().then(function (text) {
         text = String(text || "").trim().slice(0, 16000);
         if (!text && action !== "custom" && action !== "continue") {
           throw new Error("Select text in the document first.");
@@ -290,13 +296,34 @@
         if (!text && action === "continue" && !promptValue) {
           throw new Error("Select text or describe what to continue.");
         }
+        return text;
+      });
+      setStatus(documentAction ? "Reading the document…" : "Reading the selected text…", false);
+      prepare.then(function (text) {
         setStatus("Writing…", false);
         return requestAI(action, text);
-      }).then(function (text) {
-        lastResult = text;
-        resultEl.textContent = text;
+      }).then(function (data) {
+        var display = data.text;
+        if (data.items && data.items.length) {
+          display += "\n\n" + data.items.map(function (item) {
+            var suffix = item.owner ? " — " + item.owner : "";
+            if (item.due) suffix += " (due " + item.due + ")";
+            return "• " + item.task + suffix;
+          }).join("\n");
+        }
+        if (data.citations && data.citations.length && !(data.items && data.items.length)) {
+          display += "\n\nSources:\n" + data.citations.map(function (citation) {
+            return "“" + citation.quote + "”";
+          }).join("\n");
+        }
+        lastResult = data.text;
+        resultEl.textContent = display;
         resultWrap.hidden = false;
-        setStatus("Review the result, then insert it into the document.", false);
+        if (data.dlp && data.dlp.warnings && data.dlp.warnings.length) {
+          setStatus(data.dlp.warnings.join(" "), false);
+        } else {
+          setStatus("Review the result, then insert it into the document.", false);
+        }
       }).catch(function (error) {
         setStatus(error.message || "The AI assistant could not complete the request.", true);
       }).then(function () {

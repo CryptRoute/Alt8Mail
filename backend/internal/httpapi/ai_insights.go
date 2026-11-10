@@ -11,6 +11,9 @@ import (
 type senderSnapshot struct {
 	Email          string
 	Name           string
+	ContactName    string
+	Company        string
+	Role           string
 	Total          int
 	Unread         int
 	Last30Days     int
@@ -41,6 +44,10 @@ func (s *Server) senderSnapshotFor(ctx context.Context, tenantID, userID, email 
 		WHERE user_id=$1 AND tenant_id=$2 AND from_email=$3 AND from_name <> ''
 		ORDER BY sent_at DESC LIMIT 1
 	`, userID, tenantID, snapshot.Email).Scan(&snapshot.Name)
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT name, company, title FROM public.contacts
+		WHERE user_id=$1 AND tenant_id=$2 AND email=$3 LIMIT 1
+	`, userID, tenantID, snapshot.Email).Scan(&snapshot.ContactName, &snapshot.Company, &snapshot.Role)
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT id, subject, folder, snippet, sent_at
 		FROM public.mail_messages
@@ -150,7 +157,8 @@ func (s *Server) aiSenderProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := map[string]any{
-		"email": snapshot.Email, "name": snapshot.Name,
+		"email": snapshot.Email, "name": firstNonEmpty(snapshot.ContactName, snapshot.Name),
+		"company": snapshot.Company, "role": snapshot.Role, "firstContact": snapshot.Total <= 1,
 		"counts":         map[string]any{"total": snapshot.Total, "unread": snapshot.Unread, "last30Days": snapshot.Last30Days},
 		"recentMessages": snapshot.RecentMessages, "openObligations": snapshot.Obligations,
 		"attachments": snapshot.Attachments, "crmConnectors": s.activeCRMConnectors(r.Context(), sess.User.TenantID),
@@ -163,7 +171,8 @@ func (s *Server) aiSenderProfile(w http.ResponseWriter, r *http.Request) {
 	settings, _ := s.aiSettingsFor(r.Context(), sess.User.TenantID)
 	if settings.Enabled && settings.Model != "" {
 		encoded, _ := json.Marshal(map[string]any{
-			"email": snapshot.Email, "name": snapshot.Name, "total": snapshot.Total,
+			"email": snapshot.Email, "name": firstNonEmpty(snapshot.ContactName, snapshot.Name),
+			"company": snapshot.Company, "role": snapshot.Role, "total": snapshot.Total,
 			"unread": snapshot.Unread, "last30Days": snapshot.Last30Days,
 			"recentSubjects": snapshot.RecentMessages, "openObligations": snapshot.Obligations,
 			"attachments": snapshot.Attachments,
@@ -251,8 +260,10 @@ func (s *Server) aiMeetingPrep(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		attendees = append(attendees, map[string]any{
-			"email": snapshot.Email, "name": snapshot.Name, "total": snapshot.Total,
-			"unread": snapshot.Unread, "lastSeen": snapshot.LastSeen.UTC().Format(time.RFC3339),
+			"email": snapshot.Email, "name": firstNonEmpty(snapshot.ContactName, snapshot.Name),
+			"company": snapshot.Company, "role": snapshot.Role, "firstContact": snapshot.Total <= 1,
+			"total": snapshot.Total, "unread": snapshot.Unread,
+			"lastSeen":       snapshot.LastSeen.UTC().Format(time.RFC3339),
 			"recentMessages": snapshot.RecentMessages,
 		})
 		for _, message := range snapshot.RecentMessages {

@@ -1012,6 +1012,8 @@ const state = {
   followUps: [],
   mcpConnections: [],
   mcpConnectionsLoading: false,
+  mcpActionRequests: [],
+  mcpActionsLoading: false,
   teamPresence: new Map(),
   teamPresenceTimer: null,
   teamCollisionNotified: new Set(),
@@ -2292,6 +2294,7 @@ function renderAddonNavBadge() {
 
 function renderAddonsSettings() {
   ensureAddonsSettingsUi();
+  ensureAISettingsUi();
   const grid = document.getElementById("addonsGrid");
   if (!grid) return;
   const search = document.getElementById("addonsSearch");
@@ -5496,6 +5499,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   renderDelegatedWindowChrome();
   startDelegatedHeartbeat();
   ensureAddonsSettingsUi();
+  ensureAISettingsUi();
   if (!state.delegatedMode) loadAddons({ silent: !state.addonsLoaded }).catch(() => {});
   if (!state.delegatedMode) loadOfficeConfig({ silent: true }).catch(() => {});
   if (firstUserLoad && !state.delegatedMode) restoreOfficeDockFromStorage();
@@ -18897,11 +18901,242 @@ const SETTINGS_META = {
   autoreply: { title: "Automatic replies", eyebrow: "Out of office" },
   audit: { title: "Audit log", eyebrow: "Account activity" },
   security: { title: "Security & privacy", eyebrow: "Alt8Mail policy" },
+  ai: { title: "AI workspace", eyebrow: "Priority inbox, obligations and search" },
   addons: { title: "Add-ons", eyebrow: "Curated first-party integrations" },
   accounts: { title: "Connected accounts", eyebrow: "Mailboxes and sending identities" },
   account: { title: "Account", eyebrow: "Profile and sessions" },
   about: { title: "About", eyebrow: "Alt8Mail Email System" }
 };
+
+const AI_TRIAGE_LABELS = {
+  action: "Action", fyi: "FYI", newsletter: "Newsletter", spam_like: "Spam-like", needs_reply: "Needs reply"
+};
+
+function ensureAISettingsUi() {
+  if (state.delegatedMode) {
+    document.getElementById("aiSettingsNav")?.remove();
+    document.querySelector('[data-settings-panel="ai"]')?.remove();
+    return;
+  }
+  if (document.getElementById("aiSettingsNav")) return;
+  const nav = document.querySelector(".settings-nav-list");
+  const about = nav?.querySelector('[data-settings-tab="about"]');
+  if (nav) {
+    const button = document.createElement("button");
+    button.className = "settings-nav-item";
+    button.id = "aiSettingsNav";
+    button.type = "button";
+    button.setAttribute("data-settings-tab", "ai");
+    button.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg><span>AI workspace</span><svg class="icon nav-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>`;
+    nav.insertBefore(button, about || null);
+  }
+  const panelHost = document.querySelector(".settings-panels");
+  if (!panelHost) return;
+  const panel = document.createElement("section");
+  panel.className = "settings-panel";
+  panel.setAttribute("data-settings-panel", "ai");
+  panel.hidden = true;
+  panel.innerHTML = `
+    <div class="settings-block">
+      <div class="settings-block-head"><h3>Priority inbox</h3><p>Classify recent inbox mail into action, FYI, newsletter, spam-like and needs-reply. Auto-labelling follows the organization policy.</p></div>
+      <div class="setting-row"><div class="setting-copy"><strong>Recent inbox</strong><span>Triage the newest messages with your organization's AI provider.</span></div><button class="btn-secondary small" id="aiTriageRun" type="button"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Triage inbox</button></div>
+      <div id="aiTriageResults" class="settings-list"><div class="settings-note">Run a triage or open this tab to see saved results.</div></div>
+    </div>
+    <div class="settings-block">
+      <div class="settings-block-head"><h3>Obligations ledger</h3><p>Promises, requests and deadlines extracted from conversations. Requests resolve when you reply.</p></div>
+      <div class="setting-row"><div class="setting-copy"><strong>Open obligations</strong><span>Turn an obligation into a task or dismiss it.</span></div><button class="btn-secondary small" id="aiObligationsRefresh" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh</button></div>
+      <div id="aiObligationList" class="settings-list"><div class="settings-note">No obligations loaded yet.</div></div>
+    </div>
+    <div class="settings-block">
+      <div class="settings-block-head"><h3>Ask your mailbox</h3><p>Natural-language search over your own mail. Results are citations from your mailbox, never generated messages.</p></div>
+      <div class="field-row"><label class="field"><span>Question</span><input class="input" id="aiSearchQuery" placeholder="e.g. unread invoices from Alice last week" autocomplete="off"></label><button class="btn-secondary small" id="aiSearchRun" type="button"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>Search</button></div>
+      <div id="aiSearchResults" class="settings-list"></div>
+    </div>
+    <div class="settings-block">
+      <div class="settings-block-head"><h3>Sender intelligence</h3><p>History, open obligations and attachments for one sender. Only your own mailbox is included.</p></div>
+      <div class="field-row"><label class="field"><span>Sender email</span><input class="input" id="aiSenderEmail" type="email" placeholder="name@example.com" autocomplete="off"></label><button class="btn-secondary small" id="aiSenderRun" type="button"><svg class="icon" aria-hidden="true"><use href="#i-user"/></svg>Profile</button></div>
+      <div id="aiSenderResult" class="settings-list"></div>
+    </div>`;
+  panelHost.appendChild(panel);
+  document.getElementById("aiTriageRun")?.addEventListener("click", () => runAITriage());
+  document.getElementById("aiObligationsRefresh")?.addEventListener("click", () => loadAIObligations());
+  document.getElementById("aiSearchRun")?.addEventListener("click", () => runAIMailboxSearch());
+  document.getElementById("aiSearchQuery")?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); runAIMailboxSearch(); } });
+  document.getElementById("aiSenderRun")?.addEventListener("click", () => loadAISenderProfile());
+  document.getElementById("aiSenderEmail")?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); loadAISenderProfile(); } });
+  document.getElementById("aiTriageResults")?.addEventListener("click", (event) => {
+    const feedback = event.target.closest("[data-ai-triage-feedback]");
+    if (feedback) {
+      const card = feedback.closest("[data-ai-triage-id]");
+      const triageId = card?.getAttribute("data-ai-triage-id");
+      let category = "";
+      if (feedback.getAttribute("data-ai-triage-feedback") === "incorrect") {
+        const answer = window.prompt("Correct category (action, fyi, newsletter, spam_like, needs_reply). Leave blank to just mark it wrong.", card?.getAttribute("data-ai-triage-category") || "");
+        if (answer === null) return;
+        category = answer.trim().toLowerCase();
+      }
+      submitAITriageFeedback(triageId, feedback.getAttribute("data-ai-triage-feedback"), category).catch(showError);
+      return;
+    }
+    const open = event.target.closest("[data-ai-open-thread]");
+    if (open) openAIThread(open.getAttribute("data-ai-open-thread"));
+  });
+  document.getElementById("aiObligationList")?.addEventListener("click", (event) => {
+    const status = event.target.closest("[data-ai-obligation-status]");
+    if (status) {
+      updateAIObligation(status.getAttribute("data-ai-obligation-status-id"), status.getAttribute("data-ai-obligation-status")).catch(showError);
+      return;
+    }
+    const task = event.target.closest("[data-ai-obligation-task]");
+    if (task) {
+      createAIObligationTask(task.getAttribute("data-ai-obligation-task")).catch(showError);
+      return;
+    }
+    const open = event.target.closest("[data-ai-open-thread]");
+    if (open) openAIThread(open.getAttribute("data-ai-open-thread"));
+  });
+  document.getElementById("aiSearchResults")?.addEventListener("click", (event) => {
+    const open = event.target.closest("[data-ai-open-thread]");
+    if (open) openAIThread(open.getAttribute("data-ai-open-thread"));
+  });
+  document.getElementById("aiSenderResult")?.addEventListener("click", (event) => {
+    const open = event.target.closest("[data-ai-open-thread]");
+    if (open) openAIThread(open.getAttribute("data-ai-open-thread"));
+  });
+}
+
+function openAIThread(threadId) {
+  if (!threadId) return;
+  setTask("mail");
+  ensureThreadLoaded(threadId).then((loaded) => { if (loaded) selectThread(threadId); }).catch(showError);
+}
+
+function renderAIWorkspace() {
+  loadAITriageResults();
+  loadAIObligations();
+}
+
+function aiTriageCard(item) {
+  const category = AI_TRIAGE_LABELS[item.category] || item.category || "Unclassified";
+  const confidence = Math.round(Number(item.confidence || 0) * 100);
+  const feedback = item.feedback === "correct" ? "Marked correct" : item.feedback === "incorrect" ? "Marked wrong" : "";
+  return `<div class="setting-row" data-ai-triage-id="${esc(item.id || "")}" data-ai-triage-category="${esc(item.category || "")}">
+    <div class="setting-copy"><strong>${esc(item.subject || "(no subject)")}</strong><span>${esc(category)} · ${confidence}% confidence · ${esc(item.from || "")}</span><span>${esc(item.explanation || "")}</span>${feedback ? `<span class="settings-note">${esc(feedback)}</span>` : ""}</div>
+    <div class="setting-control mcp-action-buttons">
+      ${item.threadId ? `<button class="link-btn" type="button" data-ai-open-thread="${esc(item.threadId)}">Open</button>` : ""}
+      ${!item.feedback ? `<button class="link-btn" type="button" data-ai-triage-feedback="correct">Correct</button><button class="link-btn danger-link" type="button" data-ai-triage-feedback="incorrect">Wrong</button>` : ""}
+    </div>
+  </div>`;
+}
+
+async function loadAITriageResults() {
+  const host = document.getElementById("aiTriageResults");
+  if (!host) return;
+  try {
+    const data = await api("/api/ai/triage?limit=30");
+    const items = data.items || [];
+    host.innerHTML = items.length ? items.map(aiTriageCard).join("") : '<div class="settings-note">No triage results yet.</div>';
+  } catch (error) {
+    host.innerHTML = `<div class="settings-note">${esc(error.message || "Triage results are unavailable.")}</div>`;
+  }
+}
+
+async function runAITriage() {
+  const button = document.getElementById("aiTriageRun");
+  const original = button ? button.innerHTML : "";
+  if (button) { button.disabled = true; button.textContent = "Triaging…"; }
+  try {
+    const data = await api("/api/ai/triage", { method: "POST", body: {} });
+    showToast(`Triaged ${data.count || 0} message${data.count === 1 ? "" : "s"}`);
+    await loadAITriageResults();
+  } finally {
+    if (button) { button.disabled = false; button.innerHTML = original; }
+  }
+}
+
+async function submitAITriageFeedback(id, feedback, category) {
+  if (!id) return;
+  await api(`/api/ai/triage/${encodeURIComponent(id)}/feedback`, { method: "POST", body: { feedback, category } });
+  await loadAITriageResults();
+}
+
+function aiObligationCard(item) {
+  const kind = item.kind ? item.kind[0].toUpperCase() + item.kind.slice(1) : "Obligation";
+  return `<div class="setting-row">
+    <div class="setting-copy"><strong>${esc(item.text || "")}</strong><span>${esc(kind)} · ${esc(item.status || "open")}${item.due ? " · due " + esc(item.due) : ""}${item.subject ? " · " + esc(item.subject) : ""}</span>${item.quote ? `<span class="settings-note">“${esc(item.quote)}”</span>` : ""}</div>
+    <div class="setting-control mcp-action-buttons">
+      ${item.threadId ? `<button class="link-btn" type="button" data-ai-open-thread="${esc(item.threadId)}">Open</button>` : ""}
+      ${item.status === "open" ? `<button class="link-btn" type="button" data-ai-obligation-status="completed" data-ai-obligation-status-id="${esc(item.id)}">Complete</button><button class="link-btn" type="button" data-ai-obligation-status="dismissed" data-ai-obligation-status-id="${esc(item.id)}">Dismiss</button>` : ""}
+      ${!item.taskId ? `<button class="link-btn" type="button" data-ai-obligation-task="${esc(item.id)}">Create task</button>` : `<span class="settings-note">Task linked</span>`}
+    </div>
+  </div>`;
+}
+
+async function loadAIObligations() {
+  const host = document.getElementById("aiObligationList");
+  if (!host) return;
+  try {
+    const data = await api("/api/ai/obligations?status=open");
+    const items = data.items || [];
+    host.innerHTML = items.length ? items.map(aiObligationCard).join("") : '<div class="settings-note">No open obligations.</div>';
+  } catch (error) {
+    host.innerHTML = `<div class="settings-note">${esc(error.message || "Obligations are unavailable.")}</div>`;
+  }
+}
+
+async function updateAIObligation(id, status) {
+  await api(`/api/ai/obligations/${encodeURIComponent(id)}`, { method: "PATCH", body: { status } });
+  showToast(status === "completed" ? "Obligation completed" : "Obligation dismissed");
+  await loadAIObligations();
+}
+
+async function createAIObligationTask(id) {
+  const data = await api(`/api/ai/obligations/${encodeURIComponent(id)}/task`, { method: "POST", body: {} });
+  showToast(data.taskId ? "Task created" : "A task is already linked");
+  await loadAIObligations();
+}
+
+async function runAIMailboxSearch() {
+  const input = document.getElementById("aiSearchQuery");
+  const host = document.getElementById("aiSearchResults");
+  const query = (input?.value || "").trim();
+  if (!host || query.length < 2) { if (input) input.focus(); return; }
+  host.innerHTML = '<div class="settings-note">Searching your mailbox…</div>';
+  try {
+    const data = await api("/api/ai/search", { method: "POST", body: { query } });
+    const items = data.items || [];
+    host.innerHTML = `<div class="settings-note">${esc(data.explanation || "")}</div>` + (items.length ? items.map((item) => `<div class="setting-row">
+      <div class="setting-copy"><strong>${esc(item.subject || "(no subject)")}</strong><span>${esc(item.from || "")} · ${esc(formatListWhen(item.sentAt))} · ${esc(item.folder || "")}</span><span>${esc(item.excerpt || "")}</span></div>
+      <div class="setting-control">${item.threadId ? `<button class="link-btn" type="button" data-ai-open-thread="${esc(item.threadId)}">Open</button>` : ""}</div>
+    </div>`).join("") : '<div class="settings-note">No matching messages.</div>');
+  } catch (error) {
+    host.innerHTML = `<div class="settings-note">${esc(error.message || "Search failed.")}</div>`;
+  }
+}
+
+async function loadAISenderProfile() {
+  const input = document.getElementById("aiSenderEmail");
+  const host = document.getElementById("aiSenderResult");
+  const email = (input?.value || "").trim();
+  if (!host || !email) { if (input) input.focus(); return; }
+  host.innerHTML = '<div class="settings-note">Building sender profile…</div>';
+  try {
+    const data = await api(`/api/ai/sender-profile?email=${encodeURIComponent(email)}`);
+    if (data.missing) {
+      host.innerHTML = '<div class="settings-note">No mailbox history for this sender.</div>';
+      return;
+    }
+    const counts = data.counts || {};
+    const obligations = data.obligations || data.openObligations || [];
+    const recent = data.recentMessages || [];
+    host.innerHTML = `<div class="setting-row"><div class="setting-copy"><strong>${esc(data.name || data.email)}</strong><span>${esc(data.email)} · ${Number(counts.total || 0)} message${Number(counts.total || 0) === 1 ? "" : "s"} · ${Number(counts.unread || 0)} unread · last seen ${esc(formatListWhen(data.lastSeen))}</span></div></div>
+      ${data.summary ? `<div class="settings-note">${esc(data.summary)}</div>` : ""}
+      ${obligations.length ? `<div class="settings-note"><strong>Open obligations</strong></div>` + obligations.map((item) => `<div class="setting-row"><div class="setting-copy"><span>${esc(item.text || "")}</span></div></div>`).join("") : ""}
+      ${recent.map((item) => `<div class="setting-row"><div class="setting-copy"><strong>${esc(item.subject || "(no subject)")}</strong><span>${esc(formatListWhen(item.sentAt))} · ${esc(item.folder || "")}</span></div><div class="setting-control">${item.threadId ? `<button class="link-btn" type="button" data-ai-open-thread="${esc(item.threadId)}">Open</button>` : ""}</div></div>`).join("")}`;
+  } catch (error) {
+    host.innerHTML = `<div class="settings-note">${esc(error.message || "Sender profile unavailable.")}</div>`;
+  }
+}
 
 function showSettingsTab(tab) {
   if (!SETTINGS_META[tab]) tab = "appearance";
@@ -18950,6 +19185,7 @@ function renderSettingsDynamic() {
   else if (state.settingsTab === "account") { renderAliases(); loadProfile(); loadAccountSessions(); }
   else if (state.settingsTab === "accounts") renderConnectedAccounts();
   else if (state.settingsTab === "security") { updateOutboundUi(); renderSecuritySettings(); }
+  else if (state.settingsTab === "ai") renderAIWorkspace();
   else if (state.settingsTab === "addons") renderAddonsSettings();
   else if (state.settingsTab === "about") updateServiceWorkerUi();
 }
@@ -19088,9 +19324,65 @@ async function revokeMCPConnection(id) {
   showToast("AI app access revoked");
 }
 
+function renderMCPActions(requests) {
+  const host = document.getElementById("mcpActionList");
+  if (!host) return;
+  const pending = (requests || []).filter((request) => request.status === "pending");
+  if (!pending.length) {
+    host.innerHTML = '<div class="settings-note">No write actions are waiting for your review.</div>';
+    return;
+  }
+  host.innerHTML = pending.map((request) => {
+    let detail = "";
+    try { detail = JSON.stringify(request.arguments || {}); } catch { detail = ""; }
+    if (detail.length > 220) detail = detail.slice(0, 217) + "…";
+    return `<div class="setting-row">
+      <div class="setting-copy"><strong>${esc(request.tool || "Write action")}</strong><span>${esc(request.clientName || "AI app")} · ${esc(detail)} · ${esc(formatListWhen(request.createdAt))}</span></div>
+      <div class="setting-control mcp-action-buttons">
+        <button class="btn-secondary small" type="button" data-mcp-action-decide="${esc(request.id)}" data-mcp-decision="approve">Approve</button>
+        <button class="link-btn danger-link" type="button" data-mcp-action-decide="${esc(request.id)}" data-mcp-decision="deny">Deny</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function loadMCPActions() {
+  if (!document.getElementById("mcpActionList") || state.mcpActionsLoading) return;
+  state.mcpActionsLoading = true;
+  try {
+    const data = await api("/api/mcp/action-requests");
+    state.mcpActionRequests = data.requests || [];
+    renderMCPActions(state.mcpActionRequests);
+  } catch {
+    const host = document.getElementById("mcpActionList");
+    if (host) host.innerHTML = '<div class="settings-note">Pending AI actions are unavailable right now.</div>';
+  } finally {
+    state.mcpActionsLoading = false;
+  }
+}
+
+async function decideMCPActionRequest(id, decision) {
+  const action = (state.mcpActionRequests || []).find((item) => item.id === id);
+  const tool = action ? String(action.tool || "write action").replace(/_/g, " ") : "write action";
+  if (decision === "approve" && !(await appConfirm({ title: "Approve AI write action", message: `Approve this ${tool}? The AI app will act on your behalf.`, confirmLabel: "Approve" }))) return;
+  await api(`/api/mcp/action-requests/${encodeURIComponent(id)}/decide`, { method: "POST", body: { decision } });
+  state.mcpActionRequests = (state.mcpActionRequests || []).map((item) => item.id === id ? { ...item, status: decision === "approve" ? "approved" : "denied" } : item);
+  renderMCPActions(state.mcpActionRequests);
+  showToast(decision === "approve" ? "AI action approved" : "AI action denied");
+}
+
 function renderSecuritySettings() {
   if (!twoFactorCard) return;
+  const mcpHost = document.getElementById("mcpConnectionList");
+  if (mcpHost && !document.getElementById("mcpActionList")) {
+    const block = document.createElement("div");
+    block.className = "settings-block";
+    block.id = "mcpActionBlock";
+    block.innerHTML = `<div class="settings-block-head"><h3>AI actions waiting for review</h3><p>Write and send tools requested by connected AI apps stay here until you approve or deny them.</p></div><div id="mcpActionList" class="settings-list"></div>`;
+    mcpHost.closest(".settings-block")?.insertAdjacentElement("afterend", block);
+  }
   loadMCPConnections();
+  loadMCPActions();
   const factor = state.security && state.security.twoFactor;
   const realAuth = state.mailboxMode === "imap";
   const passkeys = (factor && factor.passkeys) || [];
@@ -28647,6 +28939,15 @@ function bindEvents() {
       if (await appConfirm({ title: "Revoke AI app access", message: "The MCP client will immediately lose its tokens and cannot read, search or draft again until re-approved.", confirmLabel: "Revoke access", tone: "danger" })) {
         revokeMCPConnection(mcpRevoke.getAttribute("data-mcp-revoke")).catch(showError);
       }
+      return;
+    }
+    const mcpActionDecide = event.target.closest("[data-mcp-action-decide]");
+    if (mcpActionDecide) {
+      mcpActionDecide.disabled = true;
+      decideMCPActionRequest(mcpActionDecide.getAttribute("data-mcp-action-decide"), mcpActionDecide.getAttribute("data-mcp-decision")).catch((error) => {
+        mcpActionDecide.disabled = false;
+        showError(error);
+      });
       return;
     }
     const followCreate = event.target.closest("[data-followup-create]");

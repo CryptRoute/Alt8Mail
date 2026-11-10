@@ -15,11 +15,12 @@ import (
 const officeAIMaxText = 16000
 
 type officeAIRequest struct {
-	Action     string `json:"action"`
-	DocumentID string `json:"documentId"`
-	Text       string `json:"text"`
-	Prompt     string `json:"prompt"`
-	Language   string `json:"language"`
+	Action      string `json:"action"`
+	DocumentID  string `json:"documentId"`
+	Text        string `json:"text"`
+	Prompt      string `json:"prompt"`
+	Language    string `json:"language"`
+	CreateTasks bool   `json:"createTasks"`
 }
 
 func (s *Server) officeAIEnabled(ctx context.Context, user userRecord) bool {
@@ -169,6 +170,23 @@ func (s *Server) officeAI(w http.ResponseWriter, r *http.Request) {
 		response["items"] = items
 		response["citations"] = items
 		response["text"] = strings.Join(tasks, "\n")
+		if body.CreateTasks {
+			taskIDs := []string{}
+			for _, item := range items {
+				taskID := newID("task")
+				due := ""
+				if value := fmt.Sprint(item["due"]); taskDatePattern.MatchString(value) {
+					due = value
+				}
+				if _, err := s.store.DB.Exec(r.Context(), `
+					INSERT INTO public.tasks (id, tenant_id, user_id, title, notes, status, priority, due_date, source)
+					VALUES ($1,$2,$3,$4,$5,'open','normal',NULLIF($6,'')::date,'office_ai')
+				`, taskID, sess.User.TenantID, sess.User.ID, truncate(fmt.Sprint(item["task"]), 200), truncate(fmt.Sprint(item["quote"]), 5000), due); err == nil {
+					taskIDs = append(taskIDs, taskID)
+				}
+			}
+			response["taskIds"] = taskIDs
+		}
 	case "draft_reply":
 		policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
 		classification, warnings, matches, blocked := evaluateOutboundDLP(policy, "Office AI draft reply", result, nil, "")

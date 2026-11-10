@@ -184,9 +184,16 @@ Use empty strings and null when the user did not specify a value. Never invent d
 		writeError(w, http.StatusInternalServerError, "AI_SEARCH", "Could not search the mailbox")
 		return
 	}
+	files, err := s.runAISearchFiles(r.Context(), sess.User.TenantID, sess.User.ID, filters, 10)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "AI_SEARCH", "Could not search files")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"query": query, "filters": filters, "items": items, "citations": items,
-		"count": len(items), "aiUsed": aiUsed, "explanation": describeAISearchFilters(filters),
+		"files": files, "fileCitations": files,
+		"count": len(items), "fileCount": len(files), "aiUsed": aiUsed,
+		"explanation": describeAISearchFilters(filters),
 	})
 }
 
@@ -236,7 +243,7 @@ func (s *Server) runAISearch(ctx context.Context, tenantID, userID string, filte
 	}
 	args = append(args, limit)
 	query := fmt.Sprintf(`
-		SELECT m.id, m.subject, m.from_name, m.from_email::text, m.folder, m.snippet,
+		SELECT m.id, m.thread_id, m.subject, m.from_name, m.from_email::text, m.folder, m.snippet,
 		       COALESCE(NULLIF(m.body_text,''), m.snippet), m.sent_at, m.unread, m.starred
 		FROM public.mail_messages m
 		WHERE %s AND NOT m.draft
@@ -249,18 +256,52 @@ func (s *Server) runAISearch(ctx context.Context, tenantID, userID string, filte
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, subject, fromName, fromEmail, folder, snippet, body string
+		var id, threadID, subject, fromName, fromEmail, folder, snippet, body string
 		var sent time.Time
 		var unread, starred bool
-		if rows.Scan(&id, &subject, &fromName, &fromEmail, &folder, &snippet, &body, &sent, &unread, &starred) == nil {
+		if rows.Scan(&id, &threadID, &subject, &fromName, &fromEmail, &folder, &snippet, &body, &sent, &unread, &starred) == nil {
 			excerpt := strings.TrimSpace(snippet)
 			if excerpt == "" {
 				excerpt = truncate(strings.TrimSpace(body), 240)
 			}
 			items = append(items, map[string]any{
-				"id": id, "messageId": id, "subject": subject, "from": fromEmail,
+				"id": id, "messageId": id, "threadId": threadID, "subject": subject, "from": fromEmail,
 				"fromName": fromName, "folder": folder, "excerpt": truncate(excerpt, 240),
 				"sentAt": sent.UTC().Format(time.RFC3339), "unread": unread, "starred": starred,
+			})
+		}
+	}
+	return items, nil
+}
+
+func (s *Server) runAISearchFiles(ctx context.Context, tenantID, userID string, filters aiSearchFilters, limit int) ([]map[string]any, error) {
+	terms := strings.TrimSpace(filters.Keywords)
+	if terms == "" {
+		terms = strings.TrimSpace(filters.Subject)
+	}
+	if terms == "" {
+		return []map[string]any{}, nil
+	}
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT id, name, mime, path, size_bytes, updated_at
+		FROM public.files
+		WHERE user_id=$1 AND tenant_id=$2
+		  AND (name ILIKE $3 ESCAPE '\' OR description ILIKE $3 ESCAPE '\' OR path ILIKE $3 ESCAPE '\')
+		ORDER BY updated_at DESC LIMIT $4
+	`, userID, tenantID, likePattern(terms), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []map[string]any{}
+	for rows.Next() {
+		var id, name, mime, path string
+		var size int64
+		var updated time.Time
+		if rows.Scan(&id, &name, &mime, &path, &size, &updated) == nil {
+			items = append(items, map[string]any{
+				"id": id, "fileId": id, "name": name, "mime": mime, "path": path,
+				"sizeBytes": size, "updatedAt": updated.UTC().Format(time.RFC3339), "type": "file",
 			})
 		}
 	}

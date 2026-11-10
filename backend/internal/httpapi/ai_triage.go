@@ -213,7 +213,7 @@ func (s *Server) listAITriage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rows, err := s.store.DB.Query(r.Context(), `
-		SELECT t.id, t.message_id, t.category, t.confidence::float8, t.explanation, t.model,
+		SELECT t.id, t.message_id, m.thread_id, t.category, t.confidence::float8, t.explanation, t.model,
 		       t.feedback, t.corrected_category, t.updated_at, m.subject, m.from_email::text, m.sent_at
 		FROM public.ai_triage t JOIN public.mail_messages m ON m.id=t.message_id
 		WHERE t.user_id=$1 AND ($2='' OR t.category=$2)
@@ -226,12 +226,12 @@ func (s *Server) listAITriage(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, messageID, itemCategory, explanation, model, feedback, corrected, subject, from string
+		var id, messageID, threadID, itemCategory, explanation, model, feedback, corrected, subject, from string
 		var confidence float64
 		var updated, sent time.Time
-		if rows.Scan(&id, &messageID, &itemCategory, &confidence, &explanation, &model, &feedback, &corrected, &updated, &subject, &from, &sent) == nil {
+		if rows.Scan(&id, &messageID, &threadID, &itemCategory, &confidence, &explanation, &model, &feedback, &corrected, &updated, &subject, &from, &sent) == nil {
 			items = append(items, map[string]any{
-				"id": id, "messageId": messageID, "category": itemCategory, "confidence": confidence,
+				"id": id, "messageId": messageID, "threadId": threadID, "category": itemCategory, "confidence": confidence,
 				"explanation": explanation, "model": model, "feedback": feedback,
 				"correctedCategory": corrected, "updatedAt": updated.UTC().Format(time.RFC3339),
 				"subject": subject, "from": from, "sentAt": sent.UTC().Format(time.RFC3339),
