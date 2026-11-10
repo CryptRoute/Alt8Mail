@@ -82,6 +82,39 @@ func TestSCIMBaseURL(t *testing.T) {
 	}
 }
 
+func TestAdminBootstrapPayloadIncludesSCIMURL(t *testing.T) {
+	cases := []struct {
+		name     string
+		public   string
+		want     string
+		wantNone bool
+	}{
+		{name: "https origin", public: "https://mail.example.test", want: "https://mail.example.test/scim/v2"},
+		{name: "trailing slash", public: "https://mail.example.test/", want: "https://mail.example.test/scim/v2"},
+		{name: "base path", public: "https://mail.example.test/mail/", want: "https://mail.example.test/mail/scim/v2"},
+		{name: "loopback", public: "http://127.0.0.1:8001", want: "http://127.0.0.1:8001/scim/v2"},
+		{name: "empty", public: "", wantNone: true},
+		{name: "cleartext non-loopback", public: "http://mail.example.test", wantNone: true},
+		{name: "query", public: "https://mail.example.test/?tenant=1", wantNone: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &Server{cfg: config.Config{PublicURL: tc.public}, version: "test"}
+			payload := server.adminServerPayload()
+			got, exists := payload["scimURL"]
+			if tc.wantNone {
+				if exists {
+					t.Fatalf("adminServerPayload().scimURL = %#v, want omitted", got)
+				}
+				return
+			}
+			if !exists || got != tc.want {
+				t.Fatalf("adminServerPayload().scimURL = %#v (present %v), want %q", got, exists, tc.want)
+			}
+		})
+	}
+}
+
 func TestSCIMLicenseGateReturns404BeforeAuth(t *testing.T) {
 	cases := []struct {
 		name       string

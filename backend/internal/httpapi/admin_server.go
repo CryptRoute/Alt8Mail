@@ -560,12 +560,25 @@ func (s *Server) adminBootstrap(w http.ResponseWriter, r *http.Request) {
 		"policy":       policy,
 		"permissions":  sortedPermissionNames(sess.Permissions),
 		"catalog":      adminPermissionCatalog,
-		"server": map[string]any{
-			"version": s.version, "env": s.cfg.Env, "time": time.Now().UTC().Format(time.RFC3339),
-			"adminURL": s.cfg.AdminPublicURL,
-		},
+		"server":       s.adminServerPayload(),
 		"capabilities": adminCapabilities(),
 	})
+}
+
+// adminServerPayload builds the non-secret server details exposed to the admin
+// console. The authoritative SCIM base URL comes from scimBaseURL so a
+// split-origin admin console never advertises the wrong provisioning host; a
+// missing or invalid public URL merely omits the field instead of failing the
+// whole bootstrap.
+func (s *Server) adminServerPayload() map[string]any {
+	payload := map[string]any{
+		"version": s.version, "env": s.cfg.Env, "time": time.Now().UTC().Format(time.RFC3339),
+		"adminURL": s.cfg.AdminPublicURL,
+	}
+	if scimURL, err := s.scimBaseURL(); err == nil {
+		payload["scimURL"] = scimURL
+	}
+	return payload
 }
 
 func (s *Server) adminSwitchTenant(w http.ResponseWriter, r *http.Request) {
