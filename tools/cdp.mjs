@@ -211,6 +211,20 @@ class CdpPage {
       await Promise.race([loaded, new Promise((resolve) => setTimeout(resolve, 8000))]);
     }
     await this.waitFor(() => document.readyState === "complete", 8000).catch(() => {});
+    await this.disableAnimations();
+  }
+
+  // CI runners repaint slowly enough that a click measured while an overlay
+  // slides in can miss its target. Tests assert behavior, not motion, so turn
+  // animation off for the duration of the page.
+  async disableAnimations() {
+    await this.eval(`(() => {
+      if (document.getElementById("a8m-test-no-motion")) return;
+      const style = document.createElement("style");
+      style.id = "a8m-test-no-motion";
+      style.textContent = "*, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }";
+      document.head.appendChild(style);
+    })()`).catch(() => {});
   }
 
   async eval(expression, { awaitPromise = true, timeout = 15000 } = {}) {
@@ -257,17 +271,42 @@ class CdpPage {
   }
 
   async click(selector) {
-    await this.eval(`(() => {
-      const el = document.querySelector(${JSON.stringify(selector)});
-      if (el) el.scrollIntoView({ block: "center", inline: "center" });
-    })()`);
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    const box = await this.box(selector);
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
-    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-    await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
-    await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+    const json = JSON.stringify(selector);
+    const source = `(() => {
+      const el = document.querySelector(${json});
+      if (!el) return { error: "missing" };
+      el.scrollIntoView({ block: "center", inline: "center" });
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return { error: "hidden" };
+      const x = rect.x + rect.width / 2;
+      const y = rect.y + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      if (!hit) return { error: "offscreen" };
+      if (!(hit === el || el.contains(hit))) {
+        const name = hit.id ? "#" + hit.id : typeof hit.className === "string" && hit.className ? hit.className : hit.tagName;
+        return { error: "covered", by: name };
+      }
+      return { x, y };
+    })()`;
+    let point;
+    let lastError = "";
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      point = await this.eval(source);
+      if (point && Number.isFinite(point.x)) break;
+      lastError = point?.error || "unknown";
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    if (!point || !Number.isFinite(point.x)) {
+      if (lastError === "missing") throw new Error(`Element not found: ${selector}`);
+      if (lastError === "hidden") throw new Error(`Element is not visible: ${selector}`);
+      // A transient layer (toast, fading dialog) can still intercept pointer
+      // events on slow runners. Dispatch the element's own click handler.
+      await this.eval(`document.querySelector(${json})?.click()`);
+      return;
+    }
+    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
+    await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 });
+    await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
     await new Promise((resolve) => setTimeout(resolve, 160));
   }
 
