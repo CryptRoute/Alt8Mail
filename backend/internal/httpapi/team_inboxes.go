@@ -421,6 +421,7 @@ func (s *Server) assignTeamThread(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Assignee string `json:"assignee"`
 		Strategy string `json:"strategy"`
+		Note     string `json:"note"`
 	}
 	if !s.decodeBody(w, r, &body, 16*1024) {
 		return
@@ -491,7 +492,19 @@ func (s *Server) assignTeamThread(w http.ResponseWriter, r *http.Request) {
 	if assignee.ID != sess.User.ID {
 		s.createAssignmentNotification(r.Context(), sess.User, userRecord{ID: team.OwnerID, TenantID: team.TenantID, Name: team.OwnerName, Email: team.OwnerEmail}, threadID, assignee.ID, assignee.Name, "new")
 	}
-	s.audit(r, sess.User, "team.thread_assigned", threadID, "Assigned "+assignee.Email+" from "+team.Name)
+	note := truncate(strings.TrimSpace(body.Note), 1000)
+	if note != "" {
+		_, _ = s.store.DB.Exec(r.Context(), `
+			INSERT INTO public.mail_thread_notes
+			  (id, owner_user_id, thread_id, author_user_id, author_name, author_email, body)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`, newID("note"), team.OwnerID, threadID, sess.User.ID, sess.User.Name, sess.User.Email, note)
+	}
+	detail := "Assigned " + assignee.Email + " from " + team.Name
+	if note != "" {
+		detail += " with a handoff note"
+	}
+	s.audit(r, sess.User, "team.thread_assigned", threadID, detail)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "assignedTo": map[string]any{
 		"id": assignee.ID, "name": assignee.Name, "email": assignee.Email,
 	}, "strategy": strategy, "teamInbox": teamPayload(team), "meta": s.loadThreadMeta(r.Context(), team.OwnerID, threadID)})
@@ -566,6 +579,37 @@ func (s *Server) touchTeamThread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (s *Server) teamPresenceSnapshot(ctx context.Context, team teamMailboxRecord, threadID, userID string) ([]map[string]any, bool) {
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT p.user_id::text, u.name, u.email::text, p.state, p.expires_at
+		FROM public.team_thread_presence p
+		JOIN public.users u ON u.id = p.user_id
+		WHERE p.team_mailbox_id=$1 AND p.thread_id=$2 AND p.expires_at > now()
+		ORDER BY p.updated_at DESC
+	`, team.ID, threadID)
+	agents := []map[string]any{}
+	collision := false
+	if err != nil {
+		return agents, collision
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name, email, state string
+		var expires time.Time
+		if rows.Scan(&id, &name, &email, &state, &expires) != nil {
+			continue
+		}
+		agents = append(agents, map[string]any{
+			"id": id, "name": name, "email": email, "state": state,
+			"expiresAt": expires.UTC().Format(time.RFC3339), "self": id == userID,
+		})
+		if id != userID && state == "replying" {
+			collision = true
+		}
+	}
+	return agents, collision
+}
+
 func (s *Server) getTeamPresence(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSharedInboxEntitlement(w) {
 		return
@@ -581,32 +625,7 @@ func (s *Server) getTeamPresence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "THREAD_NOT_FOUND", "Conversation not found")
 		return
 	}
-	rows, err := s.store.DB.Query(r.Context(), `
-		SELECT p.user_id::text, u.name, u.email::text, p.state, p.expires_at
-		FROM public.team_thread_presence p
-		JOIN public.users u ON u.id = p.user_id
-		WHERE p.team_mailbox_id=$1 AND p.thread_id=$2 AND p.expires_at > now()
-		ORDER BY p.updated_at DESC
-	`, team.ID, threadID)
-	agents := []map[string]any{}
-	collision := false
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var id, name, email, state string
-			var expires time.Time
-			if rows.Scan(&id, &name, &email, &state, &expires) != nil {
-				continue
-			}
-			agents = append(agents, map[string]any{
-				"id": id, "name": name, "email": email, "state": state,
-				"expiresAt": expires.UTC().Format(time.RFC3339), "self": id == sess.User.ID,
-			})
-			if id != sess.User.ID && state == "replying" {
-				collision = true
-			}
-		}
-	}
+	agents, collision := s.teamPresenceSnapshot(r.Context(), team, threadID, sess.User.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"agents": agents, "collision": collision})
 }
 

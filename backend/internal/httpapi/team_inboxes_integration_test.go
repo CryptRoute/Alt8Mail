@@ -226,4 +226,39 @@ func TestTeamInboxIntegration(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM public.mail_notifications WHERE kind='sla_breach' AND thread_id='thread-a'`).Scan(&notifications); err != nil || notifications != 1 {
 		t.Fatalf("SLA notification count = %d err=%v", notifications, err)
 	}
+
+	// Presence is advisory, tenant-scoped and expires automatically. A second
+	// agent in "replying" state raises the collision flag for the first agent.
+	if _, err := pool.Exec(ctx, `INSERT INTO public.team_thread_presence
+		(team_mailbox_id, thread_id, user_id, state, expires_at)
+		VALUES ($1,'thread-a',$2,'viewing',now()+interval '2 minutes'),
+		       ($1,'thread-a',$3,'replying',now()+interval '2 minutes'),
+		       ($1,'thread-b',$2,'replying',now()-interval '1 minute')`, teamA, agent1, agent2); err != nil {
+		t.Fatal(err)
+	}
+	agents, collision := server.teamPresenceSnapshot(ctx, team, "thread-a", agent1)
+	if !collision || len(agents) != 2 {
+		t.Fatalf("presence = %#v collision=%v", agents, collision)
+	}
+	if _, selfCollision := server.teamPresenceSnapshot(ctx, team, "thread-a", agent2); selfCollision {
+		t.Fatal("an agent's own reply presence was treated as a collision")
+	}
+	expired, expiredCollision := server.teamPresenceSnapshot(ctx, team, "thread-b", agent1)
+	if len(expired) != 0 || expiredCollision {
+		t.Fatalf("expired presence = %#v collision=%v", expired, expiredCollision)
+	}
+
+	// Watching is team-scoped and idempotent.
+	if _, err := pool.Exec(ctx, `INSERT INTO public.team_thread_watchers (team_mailbox_id, thread_id, user_id)
+		VALUES ($1,'thread-a',$2) ON CONFLICT DO NOTHING`, teamA, agent1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO public.team_thread_watchers (team_mailbox_id, thread_id, user_id)
+		VALUES ($1,'thread-a',$2) ON CONFLICT DO NOTHING`, teamA, agent1); err != nil {
+		t.Fatal(err)
+	}
+	var watchers int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM public.team_thread_watchers WHERE team_mailbox_id=$1 AND thread_id='thread-a'`, teamA).Scan(&watchers); err != nil || watchers != 1 {
+		t.Fatalf("watcher count = %d err=%v", watchers, err)
+	}
 }

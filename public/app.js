@@ -976,6 +976,7 @@ const state = {
   teamQueue: [],
   teamQueueTeam: "",
   teamQueueFetchedAt: 0,
+  teamDraftsTeam: null,
   delegatedSwitchOpen: false,
   delegatedSwitchQuery: "",
   delegatedHeartbeat: null,
@@ -1004,6 +1005,10 @@ const state = {
   aiReader: null,
   catchUp: null,
   threadMeta: new Map(),
+  teamPresence: new Map(),
+  teamPresenceTimer: null,
+  teamCollisionNotified: new Set(),
+  teamReplying: new Set(),
   serverNotifications: [],
   reactionCache: new Map(),
   unsubscribeActions: new Map(),
@@ -6179,6 +6184,175 @@ function refreshTeamQueue(team, force = false) {
     });
 }
 
+function teamContextForThread(threadId) {
+  const thread = threadById(threadId);
+  const latest = thread?.latest || thread?.messages?.[0];
+  if (!latest) return null;
+  const ownerId = messageOwnerId(latest);
+  const team = teamInboxForOwner(ownerId);
+  return team ? { team, ownerId } : null;
+}
+
+function heartbeatTeamPresence(threadId) {
+  const context = teamContextForThread(threadId);
+  if (!context) return;
+  const stateName = state.teamReplying.has(threadId) ? "replying" : "viewing";
+  api(`/api/team-inboxes/${encodeURIComponent(context.team.id)}/threads/${encodeURIComponent(threadId)}/presence`, {
+    method: "POST", body: { state: stateName, ttlSeconds: 120 }
+  }).then(() => api(`/api/team-inboxes/${encodeURIComponent(context.team.id)}/threads/${encodeURIComponent(threadId)}/presence`))
+    .then((data) => {
+      state.teamPresence.set(threadId, data || { agents: [], collision: false });
+      if (data?.collision && !state.teamCollisionNotified.has(threadId)) {
+        state.teamCollisionNotified.add(threadId);
+        const other = (data.agents || []).find((agent) => !agent.self && agent.state === "replying");
+        showToast(`${other?.name || "Another agent"} is replying to this conversation.`, "warning", { title: "Shared inbox collision" });
+      }
+    })
+    .catch(() => {});
+}
+
+function startTeamPresence(threadId) {
+  if (state.teamPresenceTimer) {
+    clearInterval(state.teamPresenceTimer);
+    state.teamPresenceTimer = null;
+  }
+  if (!teamContextForThread(threadId)) return;
+  heartbeatTeamPresence(threadId);
+  state.teamPresenceTimer = setInterval(() => {
+    if (state.selectedThreadId) heartbeatTeamPresence(state.selectedThreadId);
+  }, 60000);
+}
+
+function markTeamReply(threadId) {
+  if (!threadId || !teamContextForThread(threadId)) return;
+  state.teamReplying.add(threadId);
+  heartbeatTeamPresence(threadId);
+}
+
+function ensureTeamDraftsOverlay() {
+  let overlay = document.getElementById("teamDraftsOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="teamDraftsOverlay" hidden>
+    <div class="dialog shared-drafts-dialog" role="dialog" aria-modal="true" aria-labelledby="teamDraftsTitle">
+      <div class="dialog-head"><div><p class="eyebrow">Shared drafts</p><h2 id="teamDraftsTitle">Team drafts</h2><p class="dialog-note" id="teamDraftsNote"></p></div><button class="icon-btn" id="teamDraftsClose" type="button" aria-label="Close team drafts"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body"><div class="shared-draft-list" id="teamDraftsList"></div></div>
+      <div class="dialog-foot"><span class="dialog-note">A draft is edited by one agent at a time. Version history and comments are preserved.</span><button class="btn-secondary" id="teamDraftsCancel" type="button">Close</button><button class="btn-primary" id="teamDraftsNew" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New draft</button></div>
+    </div>
+  </div>`);
+  overlay = document.getElementById("teamDraftsOverlay");
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
+  document.getElementById("teamDraftsClose").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("teamDraftsCancel").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("teamDraftsNew").addEventListener("click", () => createSharedDraft(state.teamDraftsTeam).catch(showError));
+  return overlay;
+}
+
+async function openTeamDrafts(team) {
+  if (!team) return;
+  state.teamDraftsTeam = team;
+  const overlay = ensureTeamDraftsOverlay();
+  document.getElementById("teamDraftsNote").textContent = `${team.name} · ${team.address}`;
+  const list = document.getElementById("teamDraftsList");
+  list.innerHTML = '<div class="settings-note">Loading team drafts…</div>';
+  overlay.hidden = false;
+  try {
+    const data = await api(`/api/shared-drafts?teamId=${encodeURIComponent(team.id)}`);
+    const drafts = data.drafts || [];
+    list.innerHTML = drafts.length ? drafts.map((draft) => `<div class="shared-draft-row">
+      <div class="shared-draft-copy"><strong>${esc(draft.subject || "Untitled draft")}</strong><span>v${draft.version} · ${esc(draft.updatedBy?.name || draft.updatedBy?.email || "Unknown")} · ${esc(formatListWhen(draft.updatedAt))}${draft.unresolvedComments ? ` · ${draft.unresolvedComments} comment${draft.unresolvedComments === 1 ? "" : "s"}` : ""}</span></div>
+      ${draft.lease?.active && !draft.lease.self ? `<span class="collab-chip">${esc(draft.lease.ownerName || "Another agent")} editing</span>` : ""}
+      <button class="btn-secondary small" type="button" data-shared-draft-open="${esc(draft.id)}">Open</button>
+    </div>`).join("") : '<div class="empty-mini">No team drafts yet. Create one to collaborate without sending mail.</div>';
+    $$("[data-shared-draft-open]", list).forEach((button) => button.addEventListener("click", () => openSharedDraft(button.dataset.sharedDraftOpen).catch(showError)));
+  } catch (error) {
+    list.innerHTML = `<div class="settings-note">${esc(error.message || "Team drafts could not be loaded.")}</div>`;
+  }
+}
+
+async function createSharedDraft(team) {
+  const created = await api("/api/shared-drafts", {
+    method: "POST",
+    body: { teamId: team.id, payload: { subject: "", bodyText: "" } }
+  });
+  const draft = created.draft;
+  document.getElementById("teamDraftsOverlay").hidden = true;
+  openCompose({}, { sharedDraft: { id: draft.id, teamId: team.id, version: draft.version, writerToken: created.writerToken } });
+}
+
+async function openSharedDraft(draftId) {
+  const detail = await api(`/api/shared-drafts/${encodeURIComponent(draftId)}`);
+  const lease = await api(`/api/shared-drafts/${encodeURIComponent(draftId)}/lease`, { method: "POST", body: { ttlSeconds: 300 } });
+  const payload = detail.draft.payload || {};
+  document.getElementById("teamDraftsOverlay").hidden = true;
+  openCompose({
+    toText: payload.toText || "", ccText: payload.ccText || "", bccText: payload.bccText || "",
+    subject: payload.subject || "", bodyText: payload.bodyText || "", bodyHtml: payload.bodyHtml || "",
+    htmlMode: payload.htmlMode !== false, fromEmail: payload.fromEmail || undefined,
+    threadId: payload.threadId || detail.draft.threadId || null
+  }, { sharedDraft: {
+    id: detail.draft.id, teamId: detail.draft.teamId,
+    version: Number(lease.version || detail.draft.version), writerToken: lease.writerToken
+  } });
+}
+
+function flushSharedDraft(session, { silent = false } = {}) {
+  if (!session?.sharedDraft || session.sharedDraft.paused) return Promise.resolve(null);
+  clearTimeout(session.saveTimer);
+  if (session.savingPromise) {
+    session.pendingSave = true;
+    return session.savingPromise;
+  }
+  session.dirty = true;
+  session.saveError = null;
+  updateComposeStatus(session);
+  session.savingPromise = (async () => {
+    try {
+      const data = await api(`/api/shared-drafts/${encodeURIComponent(session.sharedDraft.id)}`, {
+        method: "PATCH",
+        body: {
+          baseVersion: session.sharedDraft.version,
+          writerToken: session.sharedDraft.writerToken,
+          payload: composePayload(session)
+        }
+      });
+      session.sharedDraft.version = Number(data.draft.version);
+      session.lastSavedAt = data.draft.updatedAt;
+      session.dirty = false;
+      session.saveError = null;
+      updateComposeStatus(session);
+      return data.draft;
+    } catch (error) {
+      if (error.code === "DRAFT_CONFLICT") {
+        session.sharedDraft.paused = true;
+        session.saveError = "Another agent saved a newer version. Reload team drafts to continue.";
+        updateComposeStatus(session);
+        const team = state.teamInboxes.find((item) => item.id === session.sharedDraft.teamId);
+        showToast("Another agent saved a newer version of this team draft.", "Team drafts", () => openTeamDrafts(team), { title: "Shared draft conflict" });
+        return null;
+      }
+      if (error.code === "DRAFT_LEASED") {
+        session.sharedDraft.paused = true;
+        session.saveError = error.message || "This draft is being edited by another agent.";
+        updateComposeStatus(session);
+        if (!silent) throw error;
+        return null;
+      }
+      session.saveError = error.message || "Shared draft could not be saved";
+      session.dirty = true;
+      updateComposeStatus(session);
+      if (!silent) throw error;
+      return null;
+    } finally {
+      session.savingPromise = null;
+      if (session.pendingSave) {
+        session.pendingSave = false;
+        scheduleComposeSave(session, 350);
+      }
+    }
+  })();
+  return session.savingPromise;
+}
+
 function ensureSubscriptionsFolder() {
   if (!Array.isArray(state.folders)) state.folders = [];
   if (state.activeAccount && state.activeAccount.kind === "external") return;
@@ -9360,9 +9534,10 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
   listTitle.textContent = state.query ? "Search results" : def.label;
   let teamBadge = document.getElementById("teamInboxBadge");
   if (!teamBadge) {
-    listTitle.insertAdjacentHTML("afterend", '<span class="team-inbox-badge" id="teamInboxBadge" hidden></span>');
+    listTitle.insertAdjacentHTML("afterend", '<span class="team-inbox-badge" id="teamInboxBadge" hidden></span><button class="team-inbox-badge team-drafts-button" id="teamDraftsBtn" type="button" hidden>Team drafts</button>');
     teamBadge = document.getElementById("teamInboxBadge");
   }
+  const teamDraftsBtn = document.getElementById("teamDraftsBtn");
   const teamInbox = teamInboxForFolder(def);
   if (teamInbox) {
     const sla = Number(teamInbox.slaFirstResponseMinutes || 0);
@@ -9372,9 +9547,14 @@ function renderList({ preserveScroll = false, appendOnly = false } = {}) {
     teamBadge.textContent = `Shared${unassigned != null ? ` · ${unassigned} unassigned` : ` · ${teamInbox.members || 1} agent${Number(teamInbox.members) === 1 ? "" : "s"}`}${breached ? ` · ${breached} breached` : sla ? ` · ${sla}m first response` : ""}`;
     teamBadge.title = `${teamInbox.name} (${teamInbox.address}) · ${String(teamInbox.strategy || "manual").replace("_", " ")}`;
     teamBadge.hidden = false;
+    if (teamDraftsBtn) {
+      teamDraftsBtn.hidden = false;
+      teamDraftsBtn.onclick = () => openTeamDrafts(teamInbox);
+    }
     refreshTeamQueue(teamInbox);
   } else {
     teamBadge.hidden = true;
+    if (teamDraftsBtn) teamDraftsBtn.hidden = true;
     state.teamQueue = [];
     state.teamQueueTeam = "";
   }
@@ -12464,13 +12644,13 @@ function selectThread(threadId, options = {}) {
     return;
   }
   if (options.keepSelection === false) state.selectedIds.clear();
-  if (thread.latest.draft || thread.messages.every((message) => message.draft)) {
-    openComposeFromDraft(thread.latest, { forceOpen: true });
+  if (thread.latest.draft || thread.messages.every((message) => message.draft)) {    openComposeFromDraft(thread.latest, { forceOpen: true });
     renderList();
     syncSelectionUi();
     return;
   }
   state.selectedThreadId = threadId;
+  startTeamPresence(threadId);
   if (thread.unreadCount && state.markReadOnOpen) {
     const unreadIds = thread.messages.filter((message) => message.unread).map((message) => message.id);
     thread.messages.forEach((message) => {
@@ -12618,6 +12798,7 @@ function replyToMessage(message, all = false) {
   const receivedAlias = state.aliases.find((alias) => alias.canSend && (message.to || []).some((person) => normalizeEmail(person.email) === normalizeEmail(alias.email)));
   const subject = /^re:/i.test(message.subject) ? message.subject : `Re: ${message.subject}`;
   const quote = composeQuoteFor(message, "reply");
+  markTeamReply(message.threadId);
   return openCompose({
     toText: plan.to,
     ccText: all ? plan.cc.join(", ") : "",
@@ -15579,6 +15760,7 @@ function openCompose(prefill = {}, options = {}) {
     ensureDraft: options.restoring ? null : null,
     restoring: !!options.restoring
   };
+  if (options.sharedDraft) session.sharedDraft = { ...options.sharedDraft };
   composeSessions.push(session);
   composeLayer.insertAdjacentHTML("beforeend", composeTemplate(session));
   session.el = composeLayer.querySelector(`[data-compose-id="${CSS.escape(id)}"]`);
@@ -16544,10 +16726,13 @@ function flushComposeSessionsKeepalive() {
   if (!state.user || !state.csrf) return;
   for (const session of composeSessions.slice()) {
     if (!session || session.mode === "closed") continue;
-    const payload = JSON.stringify(composePayload(session));
+    const shared = session.sharedDraft;
+    const payload = JSON.stringify(shared
+      ? { baseVersion: shared.version, writerToken: shared.writerToken, payload: composePayload(session) }
+      : composePayload(session));
     try {
-      fetch(`/api/drafts/${encodeURIComponent(session.draftId)}`, {
-        method: "PUT",
+      fetch(shared ? `/api/shared-drafts/${encodeURIComponent(shared.id)}` : `/api/drafts/${encodeURIComponent(session.draftId)}`, {
+        method: shared ? "PATCH" : "PUT",
         headers: delegatedRequestHeaders({
           "Content-Type": "application/json",
           "X-CSRF-Token": state.csrf,
@@ -16631,18 +16816,24 @@ async function closeComposeSession(id, { discard = false } = {}) {
   if (aiAttachmentPicker?.sessionId === id) settleAiAttachmentPicker([]);
   clearTimeout(session.saveTimer);
   if (discard) {
-    try { await api(`/api/drafts/${encodeURIComponent(session.draftId)}`, { method: "DELETE" }); } catch {}
+    try {
+      if (session.sharedDraft) await api(`/api/shared-drafts/${encodeURIComponent(session.sharedDraft.id)}`, { method: "DELETE" });
+      else await api(`/api/drafts/${encodeURIComponent(session.draftId)}`, { method: "DELETE" });
+    } catch {}
     state.messages = state.messages.filter((message) => message.id !== session.draftId);
     removeComposeSessionUi(id);
     rebuildIndex();
     renderFolders();
     renderList();
-    showToast("Draft discarded");
+    showToast(session.sharedDraft ? "Shared draft deleted" : "Draft discarded");
     return;
   }
   const empty = isComposeEmpty(session);
   if (empty) {
-    try { await api(`/api/drafts/${encodeURIComponent(session.draftId)}`, { method: "DELETE" }); } catch {}
+    try {
+      if (session.sharedDraft) await api(`/api/shared-drafts/${encodeURIComponent(session.sharedDraft.id)}`, { method: "DELETE" });
+      else await api(`/api/drafts/${encodeURIComponent(session.draftId)}`, { method: "DELETE" });
+    } catch {}
     state.messages = state.messages.filter((message) => message.id !== session.draftId);
     removeComposeSessionUi(id);
     rebuildIndex();
@@ -16706,6 +16897,7 @@ function scheduleComposeSave(session, delay = 750) {
 
 function flushDraft(session, { silent = false } = {}) {
   if (!session) return Promise.resolve(null);
+  if (session.sharedDraft) return flushSharedDraft(session, { silent });
   clearTimeout(session.saveTimer);
   if (session.savingPromise) {
     session.pendingSave = true;

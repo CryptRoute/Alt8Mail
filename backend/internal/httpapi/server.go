@@ -431,6 +431,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/messages/{id}/trust-explanation", s.requireUser(s.messageTrustExplanation))
 	s.registerCollaborationRoutes(mux)
 	s.registerTeamInboxRoutes(mux)
+	s.registerSharedDraftRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)
