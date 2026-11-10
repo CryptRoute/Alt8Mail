@@ -1,9 +1,18 @@
-# Alt8Mail 3.0.0
+# Alt8Mail 3.0.1
 
-Release date: pending authorization. This file records the intended release
-contents; the tag, push and publication are separate authorized actions.
+Release date: 2026-11-11. Security and release-gate patch for 3.0.0.
 
-## Highlights
+## 3.0.1 security patch
+
+- Go is pinned to `1.26.10`; all standard-library vulnerabilities reported by
+  `govulncheck` in the 3.0.0 build are fixed.
+- The `crewjam/saml` advisory `GO-2026-6909` has no fixed upstream release.
+  SAML assertion panics are contained and audited, and the CI vulnerability
+  gate allowlists only that reviewed ID.
+- CI now installs Chrome before web E2E tests, pins the vulnerability gate and
+  separates the allowlisted advisory from unapproved findings.
+
+## 3.0.0 highlights
 
 - **Enterprise entry:** OIDC/SAML SSO, SCIM, seat/license enforcement, white-
   label and custom webmail hosts, per-folder restore/DR, accessibility gates.
