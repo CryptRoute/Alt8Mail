@@ -49,7 +49,7 @@ Each focus line has tests in the task that owns the code.
 **Interfaces:**
 - Produces: `type scimTenant struct { TokenID, TenantID, Name string }`; `scimTenantFromContext(context.Context) (scimTenant, bool)`; `(s *Server) scimAuth(http.Handler) http.Handler`; `(s *Server) scimBaseURL() (string, error)`; `writeSCIMJSON`, `writeSCIMError`.
 - Produces env-free config: base URL is `strings.TrimRight(cfg.PublicURL, "/") + "/scim/v2"`; HTTPS required except loopback (reuse `samlLoopbackHost`).
-- Produces admin routes: `GET/POST /scim/tokens`, `POST /scim/tokens/{id}/rotate`, `DELETE /scim/tokens/{id}` with permission `users.create`.
+- Produces admin routes: `GET/POST /scim/tokens`, `POST /scim/tokens/{id}/rotate`, `DELETE /scim/tokens/{id}` with permission `roles.manage`. A token can change role-mapped group membership, so minting/rotating/revoking one is a role-management operation; `users.create` alone must not mint tokens (privilege-escalation boundary).
 
 Migration:
 
@@ -163,7 +163,7 @@ Behavior:
 - Create: `docs/SCIM.md`
 - Modify: `tools/admin-ui-smoke.mjs` or add `tools/scim-admin-smoke.mjs`
 
-- [ ] Add a “Provisioning” view under Governance (`data-view="provisioning"`, permission `users.create`) listing SCIM tokens (name, prefix, created, last used, expiry, status) with create, one-time raw-token display + copy, rotate and revoke. Never fetch or render a hash.
+- [ ] Add a “Provisioning” view under Governance (`data-view="provisioning"`, permission `roles.manage`) listing SCIM tokens (name, prefix, created, last used, expiry, status) with create, one-time raw-token display + copy, rotate and revoke. Never fetch or render a hash. Gate token create/rotate/revoke on `roles.manage`; users.create alone must not mint tokens (token holders can change role-mapped groups).
 - [ ] Add a group role-mapping select (`None|Admin|Member|Readonly`) to the existing group drawer for `security` groups; saving sends `scimRole` and refreshes members’ roles.
 - [ ] Add `docs/SCIM.md`: base URL `/scim/v2`, token creation/rotation, Entra/Okta setup notes, supported resources/filters/PATCH paths, 1 MiB limit, idempotency, deprovision semantics (sessions revoked, mail preserved), local group→role mapping and owner restriction, license gate, HTTPS requirement, audit actions, unsupported features (bulk, sort, password sync, JIT).
 - [ ] Add a handler-level admin token UI test and extend the admin smoke tool to create/rotate/revoke a token against a test instance when available; skip cleanly otherwise.
