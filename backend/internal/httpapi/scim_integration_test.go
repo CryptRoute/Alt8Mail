@@ -123,9 +123,37 @@ func TestSCIMIntegration(t *testing.T) {
 	}
 	limitedCookie, limitedCSRF := createAdminSession(limitedUser, tenantA)
 
+	// Scoped admins used to prove SCIM token lifecycle is a roles.manage
+	// operation: users.create must not be able to mint a token.
+	createScopedAdmin := func(label string, permissions []string) (cookie, csrf, userID string) {
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO users (tenant_id, email, name, role)
+			VALUES ($1, $2, $3, 'member') RETURNING id::text
+		`, tenantA, fmt.Sprintf("scim-%s-%s@example.test", label, slug), "SCIM "+label).Scan(&userID); err != nil {
+			t.Fatalf("create %s admin: %v", label, err)
+		}
+		var roleID string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO admin_roles (tenant_id, name, permissions)
+			VALUES ($1, $2, $3) RETURNING id::text
+		`, tenantA, "SCIM "+label, permissions).Scan(&roleID); err != nil {
+			t.Fatalf("create %s admin role: %v", label, err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO admin_role_assignments (user_id, role_id, tenant_id) VALUES ($1, $2, $3)
+		`, userID, roleID, tenantA); err != nil {
+			t.Fatalf("assign %s admin role: %v", label, err)
+		}
+		cookie, csrf = createAdminSession(userID, tenantA)
+		return cookie, csrf, userID
+	}
+	userCreateCookie, userCreateCSRF, userCreateUser := createScopedAdmin("token-users-create", []string{"users.create", "groups.manage"})
+	rolesManageCookie, rolesManageCSRF, rolesManageUser := createScopedAdmin("token-roles-manage", []string{"roles.manage"})
+
 	defer func() {
 		cleanup := context.Background()
-		_, _ = pool.Exec(cleanup, `DELETE FROM admin_audit_log WHERE actor_id IN ($1, $2, $3)`, userA, userB, limitedUser)
+		_, _ = pool.Exec(cleanup, `DELETE FROM admin_audit_log WHERE actor_id IN ($1, $2, $3, $4, $5)`,
+			userA, userB, limitedUser, userCreateUser, rolesManageUser)
 		_, _ = pool.Exec(cleanup, `DELETE FROM tenants WHERE id IN ($1, $2)`, tenantA, tenantB)
 	}()
 
@@ -427,6 +455,54 @@ func TestSCIMIntegration(t *testing.T) {
 				t.Fatalf("%s %s status = %d, want 403: %s", tc.method, tc.path, recorder.Code, recorder.Body.String())
 			}
 		}
+	})
+
+	t.Run("SCIM token management requires roles.manage", func(t *testing.T) {
+		// users.create (+ groups.manage) must not be able to mint an IdP token:
+		// that would bypass the mapped-group roles.manage boundary.
+		if recorder := adminRequest(userCreateCookie, userCreateCSRF, http.MethodPost, "/admin/api/scim/tokens", `{"name":"Bypass"}`); recorder.Code != http.StatusForbidden {
+			t.Fatalf("users.create token create status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if recorder := adminRequest(userCreateCookie, userCreateCSRF, http.MethodGet, "/admin/api/scim/tokens", ""); recorder.Code != http.StatusForbidden {
+			t.Fatalf("users.create token list status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		// roles.manage can mint a working token.
+		created := createToken(t, rolesManageCookie, rolesManageCSRF, "Roles manage token", "")
+		tokenID, _ := created["id"].(string)
+		rawToken, _ := created["token"].(string)
+		if tokenID == "" || rawToken == "" {
+			t.Fatalf("roles.manage token response = %#v", created)
+		}
+		if recorder := scimRequest(rawToken, "/scim/v2/ServiceProviderConfig"); recorder.Code != http.StatusOK {
+			t.Fatalf("minted token status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		// users.create cannot rotate or revoke.
+		if recorder := adminRequest(userCreateCookie, userCreateCSRF, http.MethodPost, "/admin/api/scim/tokens/"+tokenID+"/rotate", ""); recorder.Code != http.StatusForbidden {
+			t.Fatalf("users.create rotate status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if recorder := adminRequest(userCreateCookie, userCreateCSRF, http.MethodDelete, "/admin/api/scim/tokens/"+tokenID, ""); recorder.Code != http.StatusForbidden {
+			t.Fatalf("users.create revoke status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		// roles.manage can rotate and revoke.
+		recorder := adminRequest(rolesManageCookie, rolesManageCSRF, http.MethodPost, "/admin/api/scim/tokens/"+tokenID+"/rotate", "")
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("roles.manage rotate status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var rotated map[string]any
+		decode(t, recorder, &rotated)
+		rotatedID, _ := rotated["id"].(string)
+		rotatedRaw, _ := rotated["token"].(string)
+		if rotatedID == "" || rotatedRaw == "" {
+			t.Fatalf("rotate response = %#v", rotated)
+		}
+		assertSCIMError(t, scimRequest(rawToken, "/scim/v2/ServiceProviderConfig"), http.StatusUnauthorized, "")
+		if recorder := adminRequest(userCreateCookie, userCreateCSRF, http.MethodDelete, "/admin/api/scim/tokens/"+rotatedID, ""); recorder.Code != http.StatusForbidden {
+			t.Fatalf("users.create revoke rotated status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if recorder := adminRequest(rolesManageCookie, rolesManageCSRF, http.MethodDelete, "/admin/api/scim/tokens/"+rotatedID, ""); recorder.Code != http.StatusOK {
+			t.Fatalf("roles.manage revoke status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		assertSCIMError(t, scimRequest(rotatedRaw, "/scim/v2/ServiceProviderConfig"), http.StatusUnauthorized, "")
 	})
 
 	t.Run("successful auth resets the rate limiter", func(t *testing.T) {

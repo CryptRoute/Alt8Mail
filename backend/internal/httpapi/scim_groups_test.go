@@ -2,11 +2,18 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+)
+
+const (
+	scimTestAliceID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	scimTestBobID   = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	scimTestCarolID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 )
 
 func scimGroupFixture() scimGroupRow {
@@ -186,18 +193,20 @@ func TestSCIMGroupMethodDispatch(t *testing.T) {
 }
 
 func TestSCIMGroupMemberValues(t *testing.T) {
-	value, handlerErr := decodeSCIMGroupMemberValues(json.RawMessage(`{"value":"user-1"}`))
-	if handlerErr != nil || len(value) != 1 || value[0] != "user-1" {
+	value, handlerErr := decodeSCIMGroupMemberValues(json.RawMessage(fmt.Sprintf(`{"value":%q}`, scimTestAliceID)))
+	if handlerErr != nil || len(value) != 1 || value[0] != scimTestAliceID {
 		t.Fatalf("object member = %v err=%v", value, handlerErr)
 	}
-	value, handlerErr = decodeSCIMGroupMemberValues(json.RawMessage(`[{"value":"user-1"},{"value":" user-2 "}]`))
-	if handlerErr != nil || strings.Join(value, ",") != "user-1,user-2" {
+	// Uppercase spellings are canonicalized and duplicates collapse.
+	value, handlerErr = decodeSCIMGroupMemberValues(json.RawMessage(fmt.Sprintf(
+		`[{"value":%q},{"value": " %s "}]`, strings.ToUpper(scimTestAliceID), scimTestAliceID)))
+	if handlerErr != nil || len(value) != 1 || value[0] != scimTestAliceID {
 		t.Fatalf("array members = %v err=%v", value, handlerErr)
 	}
 	if value, handlerErr := decodeSCIMGroupMemberValues(json.RawMessage(`[]`)); handlerErr != nil || len(value) != 0 {
 		t.Fatalf("empty array should be a valid no-op: %v err=%v", value, handlerErr)
 	}
-	for _, raw := range []string{`null`, ``, `{"display":"Alice"}`, `{"value":""}`, `"user-1"`, `[{"value":"a"},5]`} {
+	for _, raw := range []string{`null`, ``, `{"display":"Alice"}`, `{"value":""}`, `"user-1"`, `{"value":"not-a-uuid"}`, `[{"value":"a"},5]`} {
 		if _, handlerErr := decodeSCIMGroupMemberValues(json.RawMessage(raw)); handlerErr == nil ||
 			handlerErr.status != http.StatusBadRequest || handlerErr.scimType != "invalidValue" {
 			t.Fatalf("decodeSCIMGroupMemberValues(%q) = %v", raw, handlerErr)
@@ -206,7 +215,7 @@ func TestSCIMGroupMemberValues(t *testing.T) {
 }
 
 func TestSCIMGroupPatchChanges(t *testing.T) {
-	current := []string{"user-alice"}
+	current := []string{scimTestAliceID}
 	parse := func(t *testing.T, body string) (scimGroupChangeSet, *scimHandlerError) {
 		t.Helper()
 		var payload scimPatchRequest
@@ -215,43 +224,74 @@ func TestSCIMGroupPatchChanges(t *testing.T) {
 		}
 		return scimGroupPatchChanges(payload, current)
 	}
+	addBody := func(ids ...string) string {
+		parts := make([]string, 0, len(ids))
+		for _, id := range ids {
+			parts = append(parts, fmt.Sprintf(`{"value":%q}`, id))
+		}
+		return `{"Operations":[{"op":"add","path":"members","value":[` + strings.Join(parts, ",") + `]}]}`
+	}
 
 	t.Run("add single and array members", func(t *testing.T) {
-		changes, err := parse(t, `{"Operations":[{"op":"add","path":"members","value":{"value":"user-bob"}}]}`)
+		changes, err := parse(t, `{"Operations":[{"op":"add","path":"members","value":{"value":"`+scimTestBobID+`"}}]}`)
 		if err != nil {
 			t.Fatalf("add single: %v", err)
 		}
-		if !changes.MembersSet || strings.Join(changes.MemberIDs, ",") != "user-alice,user-bob" {
+		if !changes.MembersSet || strings.Join(changes.MemberIDs, ",") != scimTestAliceID+","+scimTestBobID {
 			t.Fatalf("add single changes = %#v", changes)
 		}
-		changes, err = parse(t, `{"Operations":[{"op":"add","path":"members","value":[{"value":"user-bob"},{"value":"user-bob"}]}]}`)
+		if strings.Join(changes.LiveMemberIDs, ",") != scimTestBobID {
+			t.Fatalf("add single live ids = %#v", changes.LiveMemberIDs)
+		}
+		changes, err = parse(t, addBody(scimTestBobID, scimTestBobID))
 		if err != nil {
 			t.Fatalf("add array: %v", err)
 		}
-		if strings.Join(changes.MemberIDs, ",") != "user-alice,user-bob" {
+		if strings.Join(changes.MemberIDs, ",") != scimTestAliceID+","+scimTestBobID {
 			t.Fatalf("duplicate add changes = %#v", changes)
+		}
+		// An uppercase id is the same set member.
+		changes, err = parse(t, addBody(strings.ToUpper(scimTestBobID)))
+		if err != nil {
+			t.Fatalf("uppercase add: %v", err)
+		}
+		if strings.Join(changes.MemberIDs, ",") != scimTestAliceID+","+scimTestBobID {
+			t.Fatalf("uppercase add changes = %#v", changes)
 		}
 	})
 
 	t.Run("remove non-member is idempotent but referenced", func(t *testing.T) {
-		changes, err := parse(t, `{"Operations":[{"op":"remove","path":"members","value":[{"value":"user-carol"}]}]}`)
+		changes, err := parse(t, `{"Operations":[{"op":"remove","path":"members","value":[{"value":"`+scimTestCarolID+`"}]}]}`)
 		if err != nil {
 			t.Fatalf("remove: %v", err)
 		}
-		if strings.Join(changes.MemberIDs, ",") != "user-alice" {
+		if strings.Join(changes.MemberIDs, ",") != scimTestAliceID {
 			t.Fatalf("remove changes = %#v", changes)
 		}
-		if strings.Join(changes.ReferencedIDs, ",") != "user-carol" {
+		if strings.Join(changes.ReferencedIDs, ",") != scimTestCarolID {
 			t.Fatalf("referenced = %#v", changes.ReferencedIDs)
 		}
 	})
 
+	t.Run("uppercase remove matches the canonical member", func(t *testing.T) {
+		changes, err := parse(t, `{"Operations":[{"op":"remove","path":"members","value":[{"value":"`+strings.ToUpper(scimTestAliceID)+`"}]}]}`)
+		if err != nil {
+			t.Fatalf("uppercase remove: %v", err)
+		}
+		if len(changes.MemberIDs) != 0 {
+			t.Fatalf("uppercase remove did not remove the canonical member: %#v", changes.MemberIDs)
+		}
+		if strings.Join(changes.ReferencedIDs, ",") != scimTestAliceID {
+			t.Fatalf("uppercase remove referenced = %#v", changes.ReferencedIDs)
+		}
+	})
+
 	t.Run("replace members", func(t *testing.T) {
-		changes, err := parse(t, `{"Operations":[{"op":"replace","path":"members","value":[{"value":"user-bob"}]}]}`)
+		changes, err := parse(t, `{"Operations":[{"op":"replace","path":"members","value":[{"value":"`+scimTestBobID+`"}]}]}`)
 		if err != nil {
 			t.Fatalf("replace: %v", err)
 		}
-		if strings.Join(changes.MemberIDs, ",") != "user-bob" {
+		if strings.Join(changes.MemberIDs, ",") != scimTestBobID || strings.Join(changes.LiveMemberIDs, ",") != scimTestBobID {
 			t.Fatalf("replace changes = %#v", changes)
 		}
 	})
@@ -274,12 +314,12 @@ func TestSCIMGroupPatchChanges(t *testing.T) {
 	})
 
 	t.Run("path-less replace object", func(t *testing.T) {
-		changes, err := parse(t, `{"Operations":[{"op":"replace","value":{"displayName":"Pathless","externalId":null,"members":[{"value":"user-bob"}],"schemas":["ignored"]}}]}`)
+		changes, err := parse(t, `{"Operations":[{"op":"replace","value":{"displayName":"Pathless","externalId":null,"members":[{"value":"`+scimTestBobID+`"}],"schemas":["ignored"]}}]}`)
 		if err != nil {
 			t.Fatalf("pathless: %v", err)
 		}
 		if !changes.DisplayNameSet || changes.DisplayName != "Pathless" || !changes.ExternalIDSet || changes.ExternalID != nil ||
-			!changes.MembersSet || strings.Join(changes.MemberIDs, ",") != "user-bob" {
+			!changes.MembersSet || strings.Join(changes.MemberIDs, ",") != scimTestBobID {
 			t.Fatalf("pathless changes = %#v", changes)
 		}
 	})
@@ -345,9 +385,9 @@ func TestSCIMGroupReplaceChanges(t *testing.T) {
 	}
 
 	changes, handlerErr = scimGroupReplaceChanges(scimGroupPayload{
-		Members: []scimGroupMemberPayload{{Value: " user-a "}, {Value: "user-a"}, {Value: "user-b"}},
+		Members: []scimGroupMemberPayload{{Value: " " + strings.ToUpper(scimTestAliceID) + " "}, {Value: scimTestAliceID}, {Value: scimTestBobID}},
 	})
-	if handlerErr != nil || strings.Join(changes.MemberIDs, ",") != "user-a,user-b" {
+	if handlerErr != nil || strings.Join(changes.MemberIDs, ",") != scimTestAliceID+","+scimTestBobID {
 		t.Fatalf("member dedupe = %#v err=%v", changes, handlerErr)
 	}
 }

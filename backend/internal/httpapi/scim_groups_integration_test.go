@@ -837,11 +837,59 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 			t.Fatalf("group after clear+type = %q/%q", group.ScimRole, group.GroupType)
 		}
 		// Unmapped-group membership remains available with groups.manage alone.
+		groupVersion := func(t *testing.T) string {
+			t.Helper()
+			recorder := scimRequest(tokenA, http.MethodGet, "/scim/v2/Groups/"+permissionGroup, "", "")
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("get group version status = %d: %s", recorder.Code, recorder.Body.String())
+			}
+			var resource map[string]any
+			decode(t, recorder, &resource)
+			version, _ := resource["meta"].(map[string]any)["version"].(string)
+			return version
+		}
+		versionBefore := groupVersion(t)
 		if recorder := adminAddMember(t, groupsCookie, groupsCSRF, permissionGroup, grace); recorder.Code != http.StatusOK {
 			t.Fatalf("groups.manage unmapped add status = %d: %s", recorder.Code, recorder.Body.String())
 		}
+		if versionAfter := groupVersion(t); versionAfter == "" || versionAfter == versionBefore {
+			t.Fatalf("admin membership change did not bump version: %q -> %q", versionBefore, versionAfter)
+		}
 		if recorder := adminRemoveMember(t, groupsCookie, groupsCSRF, permissionGroup, grace); recorder.Code != http.StatusOK {
 			t.Fatalf("groups.manage unmapped remove status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		// A malformed path user id is a 400, never a database 500.
+		if recorder := adminRequest(groupsCookie, groupsCSRF, http.MethodDelete, "/admin/api/groups/"+permissionGroup+"/members/not-a-uuid", ""); recorder.Code != http.StatusBadRequest {
+			t.Fatalf("malformed member id status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+
+		// A recompute that changes only role_source writes no role audit.
+		noRoleGroup, _ := createGroup(t, tokenA, "No Role Change", "grp-no-role-change")
+		adminSetMapping(t, noRoleGroup, "member")
+		var graceEmail string
+		if err := pool.QueryRow(ctx, `SELECT email::text FROM users WHERE id = $1`, grace).Scan(&graceEmail); err != nil {
+			t.Fatalf("load grace email: %v", err)
+		}
+		countRoleAudits := func() int {
+			t.Helper()
+			var count int
+			if err := pool.QueryRow(ctx, `
+				SELECT count(*) FROM admin_audit_log
+				WHERE tenant_id = $1 AND target = $2 AND action IN ('admin.role_mapped', 'admin.role_unmapped')
+			`, tenantA, graceEmail).Scan(&count); err != nil {
+				t.Fatalf("count role audits: %v", err)
+			}
+			return count
+		}
+		auditsBefore := countRoleAudits()
+		if recorder := adminAddMember(t, adminCookie, adminCSRF, noRoleGroup, grace); recorder.Code != http.StatusOK {
+			t.Fatalf("no-role-change add status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if role, source := loadRole(t, grace); role != "member" || source != "scim" {
+			t.Fatalf("grace in member-mapped group = %s/%s", role, source)
+		}
+		if auditsAfter := countRoleAudits(); auditsAfter != auditsBefore {
+			t.Fatalf("source-only recompute wrote %d role audits", auditsAfter-auditsBefore)
 		}
 	})
 
@@ -850,6 +898,10 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 		if _, err := pool.Exec(ctx, `UPDATE users SET deleted_at = now(), status = 'suspended' WHERE id = $1`, ivy); err != nil {
 			t.Fatalf("soft-delete ivy: %v", err)
 		}
+		t.Cleanup(func() {
+			cleanup := context.Background()
+			_, _ = pool.Exec(cleanup, `UPDATE users SET deleted_at = NULL, status = 'active' WHERE id = $1`, ivy)
+		})
 		// A displayName-only PATCH must succeed even though the group still has a
 		// closed membership row.
 		recorder := scimPatch(t, tokenA, closedGroup, `{"Operations":[{"op":"replace","path":"displayName","value":"Closed Member Renamed"}]}`)
@@ -1002,6 +1054,113 @@ func TestSCIMGroupsIntegration(t *testing.T) {
 				t.Fatalf("mapping lost concurrent add: %s/%s", role, source)
 			}
 		}
+	})
+
+	t.Run("uppercase member ids canonicalize", func(t *testing.T) {
+		group, _ := createGroup(t, tokenA, "Uppercase IDs", "grp-uppercase", alice)
+		countMembers := func() int {
+			t.Helper()
+			var count int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_members WHERE group_id = $1`, group).Scan(&count); err != nil {
+				t.Fatalf("count group members: %v", err)
+			}
+			return count
+		}
+		// Uppercase remove must delete the canonical row rather than silently
+		// leaving the membership (and its mapped role) in place.
+		recorder := scimPatch(t, tokenA, group, fmt.Sprintf(`{"Operations":[{"op":"remove","path":"members","value":[{"value":%q}]}]}`, strings.ToUpper(alice)))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("uppercase remove status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var resource map[string]any
+		decode(t, recorder, &resource)
+		if values := memberValues(t, resource); len(values) != 0 || countMembers() != 0 {
+			t.Fatalf("uppercase remove left membership: %v rows=%d", values, countMembers())
+		}
+		// Uppercase add stores the canonical spelling.
+		recorder = scimPatch(t, tokenA, group, fmt.Sprintf(`{"Operations":[{"op":"add","path":"members","value":[{"value":%q}]}]}`, strings.ToUpper(bob)))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("uppercase add status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		resource = nil
+		decode(t, recorder, &resource)
+		if values := memberValues(t, resource); len(values) != 1 || values[0] != bob {
+			t.Fatalf("uppercase add members = %v", values)
+		}
+		var canonicalRows int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_members WHERE group_id = $1 AND user_id = $2`, group, bob).Scan(&canonicalRows); err != nil || canonicalRows != 1 {
+			t.Fatalf("uppercase add canonical row = %d err=%v", canonicalRows, err)
+		}
+		// Uppercase PUT replaces membership with canonical rows and does not
+		// delete/reinsert the same canonical member.
+		body := fmt.Sprintf(`{"members":[{"value":%q}]}`, strings.ToUpper(carol))
+		recorder = scimRequest(tokenA, http.MethodPut, "/scim/v2/Groups/"+group, "", body)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("uppercase PUT status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		resource = nil
+		decode(t, recorder, &resource)
+		if values := memberValues(t, resource); len(values) != 1 || values[0] != carol {
+			t.Fatalf("uppercase PUT members = %v", values)
+		}
+		var bobRows, carolRows int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM group_members WHERE group_id = $1 AND user_id = $2`, group, bob).Scan(&bobRows)
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM group_members WHERE group_id = $1 AND user_id = $2`, group, carol).Scan(&carolRows)
+		if bobRows != 0 || carolRows != 1 {
+			t.Fatalf("uppercase PUT rows bob=%d carol=%d", bobRows, carolRows)
+		}
+	})
+
+	t.Run("mixed closed and live membership can be edited incrementally", func(t *testing.T) {
+		group, _ := createGroup(t, tokenA, "Mixed Closed", "grp-mixed-closed", henry, ivy)
+		if _, err := pool.Exec(ctx, `UPDATE users SET deleted_at = now(), status = 'suspended' WHERE id = $1`, ivy); err != nil {
+			t.Fatalf("soft-delete ivy: %v", err)
+		}
+		countRows := func() int {
+			t.Helper()
+			var count int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM group_members WHERE group_id = $1`, group).Scan(&count); err != nil {
+				t.Fatalf("count group members: %v", err)
+			}
+			return count
+		}
+		// Adding a new live member while a closed member remains must succeed.
+		recorder := scimPatch(t, tokenA, group, fmt.Sprintf(`{"Operations":[{"op":"add","path":"members","value":[{"value":%q}]}]}`, grace))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("add with closed member status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var resource map[string]any
+		decode(t, recorder, &resource)
+		if values := memberValues(t, resource); strings.Join(values, ",") != grace+","+henry {
+			t.Fatalf("members after add with closed member = %v", values)
+		}
+		if rows := countRows(); rows != 3 {
+			t.Fatalf("closed member row disappeared: rows=%d", rows)
+		}
+		// Removing another live member while the closed member remains works.
+		recorder = scimPatch(t, tokenA, group, fmt.Sprintf(`{"Operations":[{"op":"remove","path":"members","value":[{"value":%q}]}]}`, henry))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("remove live with closed member status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		resource = nil
+		decode(t, recorder, &resource)
+		if values := memberValues(t, resource); len(values) != 1 || values[0] != grace {
+			t.Fatalf("members after remove with closed member = %v", values)
+		}
+		// Removing the closed member is still allowed and idempotent.
+		recorder = scimPatch(t, tokenA, group, fmt.Sprintf(`{"Operations":[{"op":"remove","path":"members","value":[{"value":%q}]}]}`, ivy))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("remove closed member status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		recorder = scimPatch(t, tokenA, group, fmt.Sprintf(`{"Operations":[{"op":"remove","path":"members","value":[{"value":%q}]}]}`, ivy))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("repeat remove closed member status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if rows := countRows(); rows != 1 {
+			t.Fatalf("membership rows after closed removal = %d", rows)
+		}
+		// Adding the closed account is still rejected.
+		assertSCIMError(t, scimPatch(t, tokenA, group, fmt.Sprintf(`{"Operations":[{"op":"add","path":"members","value":[{"value":%q}]}]}`, ivy)), http.StatusBadRequest, "invalidValue")
 	})
 
 	t.Run("cross-tenant group access is denied", func(t *testing.T) {
