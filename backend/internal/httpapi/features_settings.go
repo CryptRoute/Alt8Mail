@@ -345,8 +345,12 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 		}
 		if value, ok := patch["undoSendSeconds"]; ok {
 			seconds := stateInt(map[string]any{"v": value}, "v")
-			if seconds < 5 || seconds > 10 {
-				return fail(http.StatusBadRequest, "PREFERENCES", "Undo send window must be between 5 and 10 seconds")
+			maxSeconds := int64(s.tenantPolicyFor(r.Context(), sess.User.TenantID).Mail.UndoSendSeconds)
+			if maxSeconds < 5 || maxSeconds > 60 {
+				maxSeconds = 8
+			}
+			if seconds < 5 || seconds > maxSeconds {
+				return fail(http.StatusBadRequest, "PREFERENCES", "Undo send window must be between 5 and the organization maximum")
 			}
 			assign("undoSendSeconds", seconds)
 		}

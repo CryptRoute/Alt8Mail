@@ -3502,6 +3502,17 @@ function setPreference(key, value, save = true) {
   }
 }
 
+function maxUndoSendSeconds() {
+  const configured = Number(state.tenantPolicy?.mail?.undoSendSeconds);
+  return configured >= 5 && configured <= 60 ? configured : 60;
+}
+
+function normalizeUndoSendSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 5) return Math.min(8, maxUndoSendSeconds());
+  return Math.min(seconds, maxUndoSendSeconds());
+}
+
 function loadPreferences() {
   const read = (key, fallback) => {
     const value = prefs.get(key);
@@ -3514,7 +3525,7 @@ function loadPreferences() {
   setPreference("notifyCalendar", read("notifyCalendar", true), false);
   setPreference("externalWarnings", read("externalWarnings", true), false);
   state.defaultPriority = ["low", "normal", "high"].includes(prefs.get("defaultPriority")) ? prefs.get("defaultPriority") : "normal";
-  state.undoSendSeconds = Number(prefs.get("undoSendSeconds")) >= 5 && Number(prefs.get("undoSendSeconds")) <= 10 ? Number(prefs.get("undoSendSeconds")) : 8;
+  state.undoSendSeconds = normalizeUndoSendSeconds(prefs.get("undoSendSeconds"));
   const prioritySelect = document.getElementById("defaultPrioritySelect");
   if (prioritySelect) prioritySelect.value = state.defaultPriority;
   const undoSelect = document.getElementById("undoSendSelect");
@@ -3545,7 +3556,7 @@ function applyServerPreferences() {
     setPreference(key, p[key] !== false, false);
   }
   state.defaultPriority = ["low", "normal", "high"].includes(p.defaultPriority) ? p.defaultPriority : "normal";
-  state.undoSendSeconds = Number(p.undoSendSeconds) >= 5 && Number(p.undoSendSeconds) <= 10 ? Number(p.undoSendSeconds) : 8;
+  state.undoSendSeconds = normalizeUndoSendSeconds(p.undoSendSeconds);
   const prioritySelect = document.getElementById("defaultPrioritySelect");
   if (prioritySelect) prioritySelect.value = state.defaultPriority;
   const undoSelect = document.getElementById("undoSendSelect");
@@ -3590,7 +3601,7 @@ function syncPreferencesUi() {
   const externalToggle = document.getElementById("externalWarningToggle");
   if (externalToggle) externalToggle.setAttribute("aria-checked", state.externalWarnings ? "true" : "false");
   state.defaultPriority = ["low", "normal", "high"].includes(preferences.defaultPriority) ? preferences.defaultPriority : "normal";
-  state.undoSendSeconds = Number(preferences.undoSendSeconds) >= 5 && Number(preferences.undoSendSeconds) <= 10 ? Number(preferences.undoSendSeconds) : 8;
+  state.undoSendSeconds = normalizeUndoSendSeconds(preferences.undoSendSeconds);
   const priorityControl = document.getElementById("defaultPrioritySelect");
   if (priorityControl) priorityControl.value = state.defaultPriority;
   const undoControl = document.getElementById("undoSendSelect");
@@ -28607,7 +28618,7 @@ function bindEvents() {
     patchPreferences({ defaultPriority: state.defaultPriority }, "Default importance saved");
   });
   document.getElementById("undoSendSelect").addEventListener("change", (event) => {
-    state.undoSendSeconds = Number(event.target.value);
+    state.undoSendSeconds = normalizeUndoSendSeconds(event.target.value);
     prefs.set("undoSendSeconds", String(state.undoSendSeconds));
     patchPreferences({ undoSendSeconds: state.undoSendSeconds }, "Undo send window saved");
   });

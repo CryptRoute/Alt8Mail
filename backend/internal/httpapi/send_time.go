@@ -68,10 +68,19 @@ func (s *Server) sendTimeSuggestions(w http.ResponseWriter, r *http.Request) {
 		OffsetMinutes int
 		Reason        string
 	}
+	policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
+	startHour := policy.Mail.RecipientWindowStartHour
+	endHour := policy.Mail.RecipientWindowEndHour
+	if startHour < 0 || startHour > 23 {
+		startHour = 9
+	}
+	if endHour <= startHour || endHour > 24 {
+		endHour = 17
+	}
 	suggestions := []suggestion{}
 	for _, profile := range profiles {
 		if profile.Known {
-			slot := nextRecipientWeekdaySlot(time.Now().UTC(), profile.OffsetMinutes)
+			slot := nextRecipientWeekdaySlot(time.Now().UTC(), profile.OffsetMinutes, startHour, endHour)
 			suggestions = append(suggestions, suggestion{
 				SendAt: slot, Recipient: profile.Email, RecipientName: profile.Name,
 				Known: true, OffsetMinutes: profile.OffsetMinutes,
@@ -82,7 +91,10 @@ func (s *Server) sendTimeSuggestions(w http.ResponseWriter, r *http.Request) {
 	if len(suggestions) == 0 {
 		location := userTimeLocation(sess.User)
 		now := time.Now().In(location)
-		for _, hour := range []int{9, 14} {
+		for _, hour := range []int{startHour, startHour + 4} {
+			if hour >= endHour {
+				continue
+			}
 			if slot := nextLocalWeekdaySlot(now, hour, 30); !slot.IsZero() {
 				suggestions = append(suggestions, suggestion{
 					SendAt: slot.UTC(), Known: false,
@@ -129,16 +141,18 @@ func (s *Server) sendTimeSuggestions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"suggestions": items, "recipients": recipientItems})
 }
 
-func nextRecipientWeekdaySlot(now time.Time, offsetMinutes int) time.Time {
+func nextRecipientWeekdaySlot(now time.Time, offsetMinutes, startHour, endHour int) time.Time {
 	zone := time.FixedZone("recipient", offsetMinutes*60)
 	local := now.In(zone)
 	for day := 0; day < 8; day++ {
-		candidate := time.Date(local.Year(), local.Month(), local.Day()+day, 9, 30, 0, 0, zone)
-		if candidate.Weekday() == time.Saturday || candidate.Weekday() == time.Sunday {
-			continue
-		}
-		if candidate.After(now.Add(10 * time.Minute)) {
-			return candidate.UTC()
+		for hour := startHour; hour < endHour; hour++ {
+			candidate := time.Date(local.Year(), local.Month(), local.Day()+day, hour, 30, 0, 0, zone)
+			if candidate.Weekday() == time.Saturday || candidate.Weekday() == time.Sunday {
+				continue
+			}
+			if candidate.After(now.Add(10 * time.Minute)) {
+				return candidate.UTC()
+			}
 		}
 	}
 	return now.Add(24 * time.Hour)

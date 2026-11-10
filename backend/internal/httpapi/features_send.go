@@ -176,10 +176,14 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			}
 			scheduledAt = parsed
 		}
-		holdMs := int64(8000)
+		maxHold := policy.Mail.UndoSendSeconds
+		if maxHold < 5 || maxHold > 60 {
+			maxHold = 8
+		}
+		holdMs := int64(maxHold) * 1000
 		if body.HoldSeconds != nil {
 			requested := int64(*body.HoldSeconds * 1000)
-			if requested >= 5000 && requested <= 10000 {
+			if requested >= 5000 && requested <= int64(maxHold)*1000 {
 				holdMs = requested
 			}
 		}

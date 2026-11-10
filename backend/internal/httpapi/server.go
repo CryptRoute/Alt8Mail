@@ -974,9 +974,12 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"defaultStorage":        s.defaultStorageProvider(ctx, sess.User.ID),
 		"tenantPolicy": map[string]any{
 			"mail": map[string]any{
-				"externalTag":      policy.Mail.ExternalTag,
-				"quarantine":       policy.Mail.Quarantine,
-				"externalAccounts": policy.Mail.ExternalAccounts,
+				"externalTag":              policy.Mail.ExternalTag,
+				"quarantine":               policy.Mail.Quarantine,
+				"externalAccounts":         policy.Mail.ExternalAccounts,
+				"undoSendSeconds":          policy.Mail.UndoSendSeconds,
+				"recipientWindowStartHour": policy.Mail.RecipientWindowStartHour,
+				"recipientWindowEndHour":   policy.Mail.RecipientWindowEndHour,
 			},
 			"directory": map[string]any{
 				"contactSharing":    policy.Directory.ContactSharing || webmailAdminRole(sess.User.Role),

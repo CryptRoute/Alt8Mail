@@ -151,6 +151,9 @@ type adminMailPolicy struct {
 	RetentionDays             int      `json:"retentionDays"`
 	Quarantine                bool     `json:"quarantine"`
 	ExternalTag               bool     `json:"externalTag"`
+	UndoSendSeconds           int      `json:"undoSendSeconds"`
+	RecipientWindowStartHour  int      `json:"recipientWindowStartHour"`
+	RecipientWindowEndHour    int      `json:"recipientWindowEndHour"`
 }
 
 type adminSharingPolicy struct {
@@ -241,6 +244,7 @@ func defaultTenantPolicy() adminTenantPolicy {
 			// Users release their own Junk by default. Organizations that need
 			// review can turn on "Restrict Junk release to administrators".
 			RetentionDays: 0, Quarantine: false, ExternalTag: true,
+			UndoSendSeconds: 8, RecipientWindowStartHour: 9, RecipientWindowEndHour: 17,
 		},
 		Sharing:   adminSharingPolicy{ExternalSharing: true, LinkDefault: "view", AllowedDomains: []string{}, GuestInvites: false},
 		Directory: adminDirectoryPolicy{ContactSharing: true, ExternalDirectory: false, ProfileEditing: true, AutoAddExternal: true},
