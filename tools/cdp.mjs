@@ -1,10 +1,22 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import net from "node:net";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 const DEFAULT_PORTS = [9333, 9334, 9335];
+
+async function availablePort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
 
 async function waitForJson(url, timeout = 12000) {
   const started = Date.now();
@@ -33,7 +45,7 @@ export async function launchBrowser({ chromePath, port, headless = true, width =
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   ].filter(Boolean);
   const executable = candidates.find((candidate) => existsSync(candidate)) || candidates[0];
-  const chosenPort = port || DEFAULT_PORTS.find((value) => value > 0) || 9333;
+  const chosenPort = port || await availablePort();
   const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "a8m-chrome-"));
   const args = [
     `--remote-debugging-port=${chosenPort}`,
