@@ -108,6 +108,63 @@ func TestMCPOAuthTokenIntegration(t *testing.T) {
 	}
 }
 
+func TestMCPOAuthConsentIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("A8M_SCIM_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("set A8M_SCIM_TEST_DSN to run the MCP consent integration test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	tenant := fmt.Sprintf("00000000-0000-4035-8000-%012d", time.Now().UnixNano()%1000000000000)
+	user := fmt.Sprintf("00000000-0000-4036-8000-%012d", (time.Now().UnixNano()+1)%1000000000000)
+	clientID := "mcpclient_consent_" + suffix
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM public.tenants WHERE id=$1`, tenant) }()
+	mustExec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("exec %s: %v", sql, err)
+		}
+	}
+	mustExec(`INSERT INTO public.tenants (id, slug, name) VALUES ($1,$2,'MCP Consent Test')`, tenant, "mcp-consent-"+suffix)
+	mustExec(`INSERT INTO public.users (id, tenant_id, email, name, role) VALUES ($1,$2,$3,'Consent User','member')`, user, tenant, "consent-"+suffix+"@mcp.example.test")
+	mustExec(`INSERT INTO public.mcp_clients (id, client_name, redirect_uris) VALUES ($1,'Consent client',ARRAY['https://client.example/callback'])`, clientID)
+	server := &Server{store: &store.Store{DB: pool}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), mcpLimit: newLoginLimiter(120, time.Minute), stateLocks: map[string]*sync.Mutex{}}
+	userRecord := userRecord{ID: user, TenantID: tenant, Email: "consent-" + suffix + "@mcp.example.test", Name: "Consent User", Status: "active"}
+	post := func(decision string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{
+			"response_type": "code", "client_id": clientID, "redirect_uri": "https://client.example/callback",
+			"scope": "mail.search", "state": "state-1", "code_challenge": strings.Repeat("a", 43),
+			"code_challenge_method": "S256", "decision": decision,
+		})
+		request := httptest.NewRequest(http.MethodPost, "/mcp/oauth/authorize", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request = request.WithContext(context.WithValue(request.Context(), sessionContextKey{}, &sessionRecord{UserID: user, TenantID: tenant, User: userRecord}))
+		recorder := httptest.NewRecorder()
+		server.mcpOAuthAuthorize(recorder, request)
+		return recorder
+	}
+	allowed := post("allow")
+	if allowed.Code != http.StatusOK || !strings.Contains(allowed.Body.String(), "code=") {
+		t.Fatalf("allow = %d %s", allowed.Code, allowed.Body.String())
+	}
+	var connections, codes int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM public.mcp_connections WHERE tenant_id=$1`, tenant).Scan(&connections); err != nil || connections != 1 {
+		t.Fatalf("connections = %d err=%v", connections, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM public.mcp_authorization_codes WHERE tenant_id=$1 AND used_at IS NULL`, tenant).Scan(&codes); err != nil || codes != 1 {
+		t.Fatalf("codes = %d err=%v", codes, err)
+	}
+	denied := post("deny")
+	if denied.Code != http.StatusOK || !strings.Contains(denied.Body.String(), "access_denied") {
+		t.Fatalf("deny = %d %s", denied.Code, denied.Body.String())
+	}
+}
+
 // TestMCPJSONRPCIntegration requires A8M_SCIM_TEST_DSN with all migrations,
 // including 0069_mcp_seed.
 func TestMCPJSONRPCIntegration(t *testing.T) {

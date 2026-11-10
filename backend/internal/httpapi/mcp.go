@@ -197,8 +197,9 @@ document.getElementById('allow').onclick = () => decide('allow');
 document.getElementById('deny').onclick = () => decide('deny');
 </script></body></html>`
 	params := map[string]string{
-		"client_id": client.ID, "redirect_uri": redirectURI, "scope": scopeLabels,
-		"state": state, "code_challenge": challenge, "code_challenge_method": "S256",
+		"response_type": "code", "client_id": client.ID, "redirect_uri": redirectURI,
+		"scope": scopeLabels, "state": state, "code_challenge": challenge,
+		"code_challenge_method": "S256",
 	}
 	paramsJSON, _ := json.Marshal(params)
 	page = strings.NewReplacer(
