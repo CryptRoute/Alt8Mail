@@ -401,6 +401,8 @@ input[type="checkbox"] { accent-color: var(--brand); width: 14px; height: 14px; 
 .detail-row b { font-weight: 600; text-align: right; word-break: break-word; }
 .mini-section { margin-top: 18px; }
 .mini-section h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.group-role-notice { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--muted); font-size: 12px; line-height: 1.45; }
+.group-role-notice .icon { width: 14px; height: 14px; flex: none; margin-top: 1px; color: var(--warn); }
 .avatar-block { display: flex; gap: 11px; align-items: center; margin-bottom: 14px; }
 .avatar-block .avatar { width: 46px; height: 46px; font-size: 15px; background: var(--brand-soft); color: var(--brand); }
 .avatar-block h3 { margin: 0; font-size: 16px; }

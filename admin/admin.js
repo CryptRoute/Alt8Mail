@@ -286,7 +286,7 @@ async function logout() {
 /* ------------------------------------------------------------
    Navigation / route
 ------------------------------------------------------------ */
-const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "tenants", "settings"]);
+const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "org-units", "domains", "roles", "provisioning", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "tenants", "settings"]);
 
 function route() {
   if (!state.admin) return;
@@ -299,7 +299,7 @@ function route() {
   else if (view === "mailboxes" && parts[1] === "import") view = "import-mailboxes";
   state.routeParam = routeParam;
   state.view = views.has(view) ? view : "overview";
-  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", policies: "policies.read", addons: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
+  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", provisioning: "roles.manage", policies: "policies.read", addons: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
   if (required && !can(required)) { state.view = "overview"; location.hash = "#/overview"; return; }
   const navView = ["user-detail", "import-users", "import-mailboxes"].includes(state.view) ? "users" : state.view;
   $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === navView));
@@ -314,6 +314,7 @@ function route() {
     case "org-units": renderOrgUnits(); break;
     case "domains": renderDomains(); break;
     case "roles": renderRoles(); break;
+    case "provisioning": renderProvisioning(); break;
     case "policies": renderPolicies(); break;
     case "addons": renderAddons(); break;
     case "storage": renderStoragePolicy(); break;
@@ -950,14 +951,56 @@ function openNewGroupModal() {
   });
 }
 
+function scimRoleLabel(role) {
+  return { admin: "Admin", member: "Member", readonly: "Read-only" }[role] || "None";
+}
+
+function scimRoleMappingSection(group) {
+  if (group.type !== "security") return "";
+  const role = String(group.scimRole || "");
+  if (can("roles.manage") && can("groups.manage")) {
+    return `<div class="mini-section"><h3>Role mapping</h3><label class="field"><span>All members receive</span><select id="scimRoleSelect" data-scim-role-select>${[["", "None"], ["admin", "Admin"], ["member", "Member"], ["readonly", "Read-only"]].map(([value, label]) => `<option value="${value}" ${role === value ? "selected" : ""}>${label}</option>`).join("")}</select><small class="muted">The mapped role wins over manual role changes while the mapping exists. The owner role is never changed. Saving recomputes every member immediately.</small></label></div>`;
+  }
+  const requirement = can("roles.manage")
+    ? "Changing this mapping requires both group management and role management permissions (<code>groups.manage</code> and <code>roles.manage</code>)."
+    : "Only an administrator with role management permission (<code>roles.manage</code>) can change this mapping.";
+  return `<div class="mini-section"><h3>Role mapping</h3><div class="detail-row"><span>All members receive</span><b>${esc(scimRoleLabel(role))}</b></div><p class="muted" style="font-size:11.5px;margin:7px 0 0">${requirement}</p></div>`;
+}
+
 async function openGroupDrawer(id) {
   try {
     const data = await api("groups/" + encodeURIComponent(id));
     const group = data.group;
     state.group = group;
     const members = group.members || [];
-    $("#drawerRoot").innerHTML = `<div class="drawer-backdrop" data-drawer-close></div><aside class="drawer" role="dialog" aria-modal="true"><div class="drawer-head"><div style="flex:1"><div class="avatar-block"><span class="avatar" style="background:var(--brand-soft);color:var(--brand)">${icon("group")}</span><div><h2>${esc(group.name)}</h2><p>${esc(group.email)} · ${esc(group.type)} group</p></div></div>${badge(group.status)}</div><button class="icon-button" data-drawer-close>${icon("x")}</button></div><div class="drawer-body"><div class="detail-list"><div class="detail-row"><span>Description</span><b>${esc(group.description || "—")}</b></div><div class="detail-row"><span>Members</span><b>${members.length}</b></div><div class="detail-row"><span>Created</span><b>${formatDate(group.createdAt)}</b></div></div><div class="mini-section"><h3>Members</h3>${members.length ? members.map((member) => `<div class="detail-row"><span style="display:flex;align-items:center;gap:7px"><span class="avatar" style="width:24px;height:24px;font-size:9px;background:${esc(member.color)}">${esc(member.initials)}</span>${esc(member.name)}<small class="muted">${esc(member.memberRole)}</small></span><b>${can("groups.manage") ? `<button class="icon-button" data-remove-member="${esc(member.id)}" aria-label="Remove member">${icon("x")}</button>` : esc(member.email)}</b></div>`).join("") : `<div class="empty-mini">No members yet.</div>`}</div>${can("groups.manage") ? `<form id="addGroupMemberForm" class="inline-form" style="margin-top:14px"><label class="field"><span>Add user by email</span><input id="groupMemberSearch" type="email" placeholder="user@company.com" required></label><button class="btn primary" type="submit">${icon("plus")}Add</button></form><p class="muted" style="font-size:10.5px;margin-top:7px">Enter the exact user email in this organization.</p>` : ""}</div><div class="drawer-foot">${can("groups.manage") ? `<button class="btn secondary" data-group-edit="${esc(group.id)}">${icon("sliders")}Edit group</button><button class="btn danger" data-group-delete="${esc(group.id)}">${icon("trash")}Delete group</button>` : ""}</div></aside>`;
+    const scimRole = String(group.scimRole || "");
+    const mapped = scimRole !== "";
+    const roleManager = can("roles.manage");
+    const canMembers = can("groups.manage") && (!mapped || roleManager);
+    const canDelete = can("groups.manage") && (!mapped || roleManager);
+    const mappedNotice = mapped && !roleManager
+      ? `<div class="group-role-notice" data-scim-mapped-notice>${icon("lock")}<span>This group is mapped to the ${esc(scimRoleLabel(scimRole))} role. Membership, deletion and type/status changes require role management permission (<code>roles.manage</code>).</span></div>`
+      : "";
+    $("#drawerRoot").innerHTML = `<div class="drawer-backdrop" data-drawer-close></div><aside class="drawer" role="dialog" aria-modal="true"><div class="drawer-head"><div style="flex:1"><div class="avatar-block"><span class="avatar" style="background:var(--brand-soft);color:var(--brand)">${icon("group")}</span><div><h2>${esc(group.name)}</h2><p>${esc(group.email)} · ${esc(group.type)} group</p></div></div>${badge(group.status)}</div><button class="icon-button" data-drawer-close aria-label="Close">${icon("x")}</button></div><div class="drawer-body"><div class="detail-list"><div class="detail-row"><span>Description</span><b>${esc(group.description || "—")}</b></div><div class="detail-row"><span>Members</span><b>${members.length}</b></div><div class="detail-row"><span>Created</span><b>${formatDate(group.createdAt)}</b></div></div>${scimRoleMappingSection(group)}${mappedNotice}<div class="mini-section"><h3>Members</h3>${members.length ? members.map((member) => `<div class="detail-row"><span style="display:flex;align-items:center;gap:7px"><span class="avatar" style="width:24px;height:24px;font-size:9px;background:${esc(member.color)}">${esc(member.initials)}</span>${esc(member.name)}<small class="muted">${esc(member.memberRole)}</small></span><b>${canMembers ? `<button class="icon-button" data-remove-member="${esc(member.id)}" aria-label="Remove ${esc(member.name)}">${icon("x")}</button>` : esc(member.email)}</b></div>`).join("") : `<div class="empty-mini">No members yet.</div>`}</div>${canMembers ? `<form id="addGroupMemberForm" class="inline-form" style="margin-top:14px"><label class="field"><span>Add user by email</span><input id="groupMemberSearch" type="email" placeholder="user@company.com" required></label><button class="btn primary" type="submit">${icon("plus")}Add</button></form><p class="muted" style="font-size:10.5px;margin-top:7px">Enter the exact user email in this organization.</p>` : ""}</div><div class="drawer-foot">${can("groups.manage") ? `<button class="btn secondary" data-group-edit="${esc(group.id)}">${icon("sliders")}Edit group</button>` : ""}${canDelete ? `<button class="btn danger" data-group-delete="${esc(group.id)}">${icon("trash")}Delete group</button>` : ""}</div></aside>`;
     $$("[data-drawer-close]").forEach((button) => button.addEventListener("click", closeDrawer));
+    $("#scimRoleSelect")?.addEventListener("change", async (event) => {
+      const select = event.currentTarget;
+      const nextRole = select.value;
+      if (nextRole === "admin" && !(await confirmDialog("Map group to Admin", "Every current and future member of this group will receive the tenant Admin role. Only continue if this group is controlled by your identity provider.", "Map to Admin", true))) {
+        select.value = scimRole;
+        return;
+      }
+      select.disabled = true;
+      try {
+        await api(`groups/${encodeURIComponent(group.id)}`, { method: "PATCH", body: { scimRole: nextRole } });
+        toast(nextRole ? `Group mapped to ${roleLabel(nextRole)}` : "Role mapping cleared");
+        await openGroupDrawer(group.id);
+      } catch (error) {
+        showError(error);
+        select.disabled = false;
+        select.value = scimRole;
+      }
+    });
     $("#addGroupMemberForm")?.addEventListener("submit", async (event) => {
       event.preventDefault();
       try {
@@ -985,10 +1028,16 @@ async function openGroupDrawer(id) {
 }
 
 function editGroupModal(group) {
+  const scimRole = String(group.scimRole || "");
+  const mapped = scimRole !== "";
+  const lifecycleLocked = mapped && !can("roles.manage");
+  const editNotice = !mapped ? "" : lifecycleLocked
+    ? `<div class="group-role-notice" data-scim-edit-notice>${icon("lock")}<span>This group is mapped to the ${esc(scimRoleLabel(scimRole))} role. Changing its type or status requires role management permission (<code>roles.manage</code>).</span></div>`
+    : `<div class="group-role-notice" data-scim-edit-notice>${icon("lock")}<span>This group is mapped to the ${esc(scimRoleLabel(scimRole))} role and must remain a security group. Clear the role mapping in the group drawer before changing its type.</span></div>`;
   openModal({
     title: "Edit group",
     subtitle: group.email,
-    body: `<form id="editGroupForm"><div class="field-row"><label class="field"><span>Group name</span><input data-group-edit-field="name" value="${esc(group.name)}" required></label><label class="field"><span>Email</span><input data-group-edit-field="email" type="email" value="${esc(group.email)}" required></label></div><div class="field-row"><label class="field"><span>Type</span><select data-group-edit-field="type">${["distribution", "security", "shared"].map((type) => `<option value="${type}" ${group.type === type ? "selected" : ""}>${type[0].toUpperCase() + type.slice(1)}</option>`).join("")}</select></label><label class="field"><span>Status</span><select data-group-edit-field="status">${["active", "archived"].map((status) => `<option value="${status}" ${group.status === status ? "selected" : ""}>${status[0].toUpperCase() + status.slice(1)}</option>`).join("")}</select></label></div><label class="field"><span>Description</span><input data-group-edit-field="description" value="${esc(group.description || "")}"></label></form>`,
+    body: `<form id="editGroupForm"><div class="field-row"><label class="field"><span>Group name</span><input data-group-edit-field="name" value="${esc(group.name)}" required></label><label class="field"><span>Email</span><input data-group-edit-field="email" type="email" value="${esc(group.email)}" required></label></div><div class="field-row"><label class="field"><span>Type</span><select data-group-edit-field="type" ${lifecycleLocked ? "disabled" : ""}>${["distribution", "security", "shared"].map((type) => `<option value="${type}" ${group.type === type ? "selected" : ""} ${mapped && type !== "security" ? "disabled" : ""}>${type[0].toUpperCase() + type.slice(1)}</option>`).join("")}</select></label><label class="field"><span>Status</span><select data-group-edit-field="status" ${lifecycleLocked ? "disabled" : ""}>${["active", "archived"].map((status) => `<option value="${status}" ${group.status === status ? "selected" : ""}>${status[0].toUpperCase() + status.slice(1)}</option>`).join("")}</select></label></div><label class="field"><span>Description</span><input data-group-edit-field="description" value="${esc(group.description || "")}"></label>${editNotice}</form>`,
     footer: `<button class="btn secondary" data-modal-close>Cancel</button><button class="btn primary" data-modal-submit="editGroupForm">Save group</button>`
   });
 }
@@ -1209,6 +1258,112 @@ async function submitAssignRoleForm(user) {
   closeModal();
   if (state.view === "user-detail") renderUserPage(userId);
   else if (state.drawerUser) openUserDrawer(userId);
+}
+
+/* ------------------------------------------------------------
+   Provisioning (SCIM 2.0)
+------------------------------------------------------------ */
+function scimTokenStatusBadge(status) {
+  const meta = { active: ["active", "Active"], expired: ["pending", "Expired"], revoked: ["suspended", "Revoked"] }[status] || ["neutral", status || "Unknown"];
+  return `<span class="badge ${meta[0]}">${esc(meta[1])}</span>`;
+}
+
+async function renderProvisioning() {
+  loading("Provisioning");
+  try {
+    const data = await api("scim/tokens");
+    const tokens = data.tokens || [];
+    const endpoint = location.origin + "/scim/v2";
+    const rows = tokens.map((token) => `<tr>
+      <td><b>${esc(token.name)}</b></td>
+      <td class="cell-sub"><code>${esc(token.prefix || "")}…</code></td>
+      <td class="cell-sub">${formatDate(token.createdAt, { time: true })}</td>
+      <td class="cell-sub">${token.lastUsedAt ? relativeTime(token.lastUsedAt) : "Never"}</td>
+      <td class="cell-sub">${token.expiresAt ? formatDate(token.expiresAt, { time: true }) : "No expiry"}</td>
+      <td>${scimTokenStatusBadge(token.status)}</td>
+      <td><div class="row-actions">${token.status === "active" ? `<button class="btn small secondary" data-scim-rotate="${esc(token.id)}" aria-label="Rotate ${esc(token.name)}">Rotate</button>` : ""}${token.status !== "revoked" ? `<button class="btn small ghost" data-scim-revoke="${esc(token.id)}" aria-label="Revoke ${esc(token.name)}">Revoke</button>` : ""}</div></td>
+    </tr>`).join("");
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Provisioning</h1><p>Issue SCIM 2.0 bearer tokens so your identity provider can manage users and groups in ${esc(state.activeTenant.name)}.</p></div><div class="view-actions"><button class="btn secondary" id="scimRefreshBtn">${icon("refresh")}Refresh</button><button class="btn primary" id="scimCreateBtn">${icon("plus")}Create token</button></div></div>
+      <div class="card"><div class="card-pad"><div class="detail-row"><span>SCIM base URL</span><b><code>${esc(endpoint)}</code></b></div><p class="muted" style="font-size:11.5px;margin:10px 0 0">Use this URL and a token as Bearer credentials in your identity provider. Token holders can change membership of role-mapped groups, so minting, listing, rotating and revoking tokens requires <code>roles.manage</code>. The full token is shown once and only its hash is stored.</p></div></div>
+      <div class="card" style="margin-top:14px"><div class="card-head"><div><h2>SCIM tokens</h2><p>Prefixes identify each token. Full token values are never displayed again after creation.</p></div><span class="badge neutral">${tokens.length} token${tokens.length === 1 ? "" : "s"}</span></div>${tokens.length ? `<div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>` : `<div class="card-pad"><div class="empty">${icon("plug")}<h3>No SCIM tokens yet</h3><p>Create a token, then paste it into your identity provider's SCIM configuration.</p><button class="btn primary" data-scim-create>${icon("plus")}Create token</button></div></div>`}</div>`;
+    $("#scimCreateBtn")?.addEventListener("click", openSCIMTokenModal);
+    $$("[data-scim-create]").forEach((button) => button.addEventListener("click", openSCIMTokenModal));
+    $("#scimRefreshBtn")?.addEventListener("click", async (event) => {
+      setBusy(event.currentTarget, true, "Refreshing…");
+      await renderProvisioning();
+    });
+    $$("[data-scim-rotate]").forEach((button) => button.addEventListener("click", () => rotateSCIMToken(tokens.find((token) => token.id === button.dataset.scimRotate), button)));
+    $$("[data-scim-revoke]").forEach((button) => button.addEventListener("click", () => revokeSCIMToken(tokens.find((token) => token.id === button.dataset.scimRevoke), button)));
+  } catch (error) { viewError(error); }
+}
+
+function openSCIMTokenModal() {
+  openModal({
+    title: "Create SCIM token",
+    subtitle: "The token is shown once. Store it in your identity provider immediately.",
+    body: `<form id="newScimTokenForm"><label class="field"><span>Token name</span><input id="scimTokenName" maxlength="100" placeholder="Entra ID production" required><small class="muted">A label to recognise the identity provider or environment.</small></label><label class="field" style="margin-top:10px"><span>Expiry <small class="muted">optional</small></span><input id="scimTokenExpiry" type="datetime-local"><small class="muted">Leave blank for a non-expiring token. Expired tokens stop working and cannot be rotated.</small></label></form>`,
+    footer: `<button class="btn secondary" data-modal-close>Cancel</button><button class="btn primary" data-modal-submit="newScimTokenForm">Create token</button>`
+  });
+}
+
+async function submitSCIMTokenForm() {
+  const name = $("#scimTokenName").value.trim();
+  if (!name) throw new Error("Token name is required");
+  const body = { name };
+  const expiry = $("#scimTokenExpiry").value;
+  if (expiry) {
+    const when = new Date(expiry);
+    if (Number.isNaN(when.getTime())) throw new Error("Choose a valid expiry");
+    if (when.getTime() <= Date.now()) throw new Error("Choose an expiry in the future");
+    body.expiresAt = when.toISOString();
+  }
+  const data = await api("scim/tokens", { method: "POST", body });
+  closeModal();
+  toast("SCIM token created");
+  await renderProvisioning();
+  showOneTimeSCIMToken(data, "Token created");
+}
+
+// The raw token is deliberately kept out of `state`: it lives only in this
+// modal's closure and is discarded when the modal closes.
+function showOneTimeSCIMToken(data, title) {
+  const rawToken = String(data.token || "");
+  if (!rawToken) {
+    toast("The token was saved, but the one-time value was not returned. Rotate the token to issue a new value.", "error");
+    return;
+  }
+  openModal({
+    title,
+    subtitle: "Copy the token now. It is shown once and cannot be retrieved later.",
+    body: `<div class="copy-box"><span>${esc(rawToken)}</span><button class="icon-button" data-copy-scim-token aria-label="Copy SCIM token">${icon("list")}</button></div><p class="muted" style="font-size:11.5px;margin:10px 0 0"><b>This is the only time the token is displayed.</b> Alt8Mail stores only a hash. If you lose it, rotate or revoke it from this page.</p><p class="muted" style="font-size:11.5px;margin:6px 0 0">Use it as the Bearer token for <code>${esc(location.origin + "/scim/v2")}</code>.</p>`,
+    footer: `<button class="btn primary" data-modal-close>I have stored it</button>`
+  });
+  $("[data-copy-scim-token]")?.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(rawToken).catch(() => {});
+    toast("SCIM token copied");
+  });
+}
+
+async function rotateSCIMToken(token, button) {
+  if (!token) return;
+  if (!(await confirmDialog("Rotate SCIM token", `“${token.name}” will stop working immediately. Update your identity provider with the new token.`, "Rotate token", true))) return;
+  setBusy(button, true, "Rotating…");
+  try {
+    const data = await api(`scim/tokens/${encodeURIComponent(token.id)}/rotate`, { method: "POST", body: {} });
+    await renderProvisioning();
+    showOneTimeSCIMToken(data, "Token rotated");
+  } catch (error) { showError(error); setBusy(button, false); }
+}
+
+async function revokeSCIMToken(token, button) {
+  if (!token) return;
+  if (!(await confirmDialog("Revoke SCIM token", `“${token.name}” will stop authenticating immediately. This cannot be undone.`, "Revoke token", true))) return;
+  setBusy(button, true, "Revoking…");
+  try {
+    await api(`scim/tokens/${encodeURIComponent(token.id)}`, { method: "DELETE" });
+    toast("SCIM token revoked");
+    await renderProvisioning();
+  } catch (error) { showError(error); setBusy(button, false); }
 }
 
 /* ------------------------------------------------------------
@@ -2197,6 +2352,7 @@ document.addEventListener("click", async (event) => {
       else if (formId === "newRoleForm") await submitRoleForm(formId);
       else if (formId === "editRoleForm") await submitRoleForm(formId, state.editingRoleId);
       else if (formId === "assignRoleForm") await submitAssignRoleForm(state.assignmentUser);
+      else if (formId === "newScimTokenForm") await submitSCIMTokenForm();
       else if (formId === "newTenantForm") await submitTenantForm();
       else if (formId === "adminTotpForm") await submitAdminTOTP();
       else if (formId === "disableTotpForm") await submitDisableAdminTOTP();
