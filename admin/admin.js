@@ -1356,8 +1356,10 @@ async function submitSCIMTokenForm() {
   const data = await api("scim/tokens", { method: "POST", body });
   closeModal();
   toast("SCIM token created");
-  await renderProvisioning();
+  // Show the only copy of the raw token before refreshing the list. A failed
+  // refresh must never hide the one-time value.
   showOneTimeSCIMToken(data, "Token created");
+  await renderProvisioning();
 }
 
 // The raw token is deliberately kept out of `state`: it lives only in this
@@ -1404,8 +1406,8 @@ async function rotateSCIMToken(token, button) {
   setBusy(button, true, "Rotating…");
   try {
     const data = await api(`scim/tokens/${encodeURIComponent(token.id)}/rotate`, { method: "POST", body: {} });
-    await renderProvisioning();
     showOneTimeSCIMToken(data, "Token rotated");
+    await renderProvisioning();
   } catch (error) { showError(error); setBusy(button, false); }
 }
 

@@ -432,6 +432,45 @@ func TestSCIMAdminTokenDatabaseErrorsReturn500(t *testing.T) {
 	}
 }
 
+// TestSCIMAdminTokenMalformedIDsReturn404 proves a non-UUID token id is
+// treated as an unknown token instead of reaching PostgreSQL as a cast error.
+// The nil store fails the test if the check is missing.
+func TestSCIMAdminTokenMalformedIDsReturn404(t *testing.T) {
+	server := New(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	sess := &adminSessionRecord{ActiveTenantID: "tenant-1", User: adminUser{ID: "user-1"}}
+	cases := []struct {
+		name   string
+		method string
+		call   http.HandlerFunc
+	}{
+		{name: "rotate", method: http.MethodPost, call: server.adminRotateSCIMToken},
+		{name: "revoke", method: http.MethodDelete, call: server.adminRevokeSCIMToken},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(tc.method, "/scim/tokens/not-a-uuid", nil)
+			request.SetPathValue("id", "not-a-uuid")
+			request = request.WithContext(context.WithValue(request.Context(), adminSessionContextKey{}, sess))
+			recorder := httptest.NewRecorder()
+			tc.call(recorder, request)
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: %s", recorder.Code, recorder.Body.String())
+			}
+			var payload struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode error: %v", err)
+			}
+			if payload.Error.Code != "SCIM_TOKEN_NOT_FOUND" {
+				t.Fatalf("error code = %q", payload.Error.Code)
+			}
+		})
+	}
+}
+
 func TestSCIMTokenPayloadHasNoSecretMaterial(t *testing.T) {
 	now := time.Now().UTC()
 	expires := now.Add(time.Hour)
@@ -564,6 +603,7 @@ func TestSCIMAdminTokenCreateValidation(t *testing.T) {
 		{name: "missing name", body: `{}`, contentType: "application/json", wantCode: "NAME"},
 		{name: "blank name", body: `{"name":"   "}`, contentType: "application/json", wantCode: "NAME"},
 		{name: "long name", body: `{"name":"` + strings.Repeat("n", scimTokenNameMaxLength+1) + `"}`, contentType: "application/json", wantCode: "NAME"},
+		{name: "control character name", body: `{"name":"Entra\u0000"}`, contentType: "application/json", wantCode: "NAME"},
 		{name: "oversized body", body: `{"name":"` + strings.Repeat("a", scimTokenBodyLimit) + `"}`, contentType: "application/json", wantCode: "BAD_JSON"},
 		{name: "invalid expiresAt", body: `{"name":"Entra","expiresAt":"tomorrow"}`, contentType: "application/json", wantCode: "EXPIRES_AT"},
 		{name: "past expiresAt", body: `{"name":"Entra","expiresAt":"2020-01-01T00:00:00Z"}`, contentType: "application/json", wantCode: "EXPIRES_AT"},

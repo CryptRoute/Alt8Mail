@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -412,6 +413,10 @@ func (s *Server) adminCreateSCIMToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "NAME", "Token name is too long")
 		return
 	}
+	if scimHasControlCharacters(name) {
+		writeError(w, http.StatusBadRequest, "NAME", "Token name must not contain control characters")
+		return
+	}
 	var expiresAt *time.Time
 	if raw := strings.TrimSpace(body.ExpiresAt); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)
@@ -453,6 +458,12 @@ func (s *Server) adminCreateSCIMToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminRotateSCIMToken(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	tokenID := r.PathValue("id")
+	if _, err := uuid.Parse(tokenID); err != nil {
+		// A malformed id is indistinguishable from an unknown one and must never
+		// reach PostgreSQL as a uuid cast error.
+		writeError(w, http.StatusNotFound, "SCIM_TOKEN_NOT_FOUND", "SCIM token not found")
+		return
+	}
 	ctx := r.Context()
 	tx, err := s.store.DB.Begin(ctx)
 	if err != nil {
@@ -523,6 +534,10 @@ func (s *Server) adminRotateSCIMToken(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminRevokeSCIMToken(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
 	tokenID := r.PathValue("id")
+	if _, err := uuid.Parse(tokenID); err != nil {
+		writeError(w, http.StatusNotFound, "SCIM_TOKEN_NOT_FOUND", "SCIM token not found")
+		return
+	}
 	var name string
 	err := s.store.DB.QueryRow(r.Context(), `
 		UPDATE scim_tokens SET revoked_at = now()
