@@ -31,6 +31,7 @@ type Config struct {
 	TLSCertFile           string
 	TLSKeyFile            string
 	BackupDir             string
+	UploadDir             string
 	CronFile              string
 	CertbotDir            string
 	CertbotWebroot        string
@@ -86,6 +87,7 @@ func LoadConfig() (Config, error) {
 		TLSCertFile:       env("CONTROL_TLS_CERT", "/etc/ssl/alt8mail/control.crt"),
 		TLSKeyFile:        env("CONTROL_TLS_KEY", "/etc/ssl/alt8mail/control.key"),
 		BackupDir:         env("CONTROL_BACKUP_DIR", "/var/backups/alt8mail"),
+		UploadDir:         env("CONTROL_UPLOAD_DIR", "/opt/a8m/uploads"),
 		CronFile:          env("CONTROL_CRON_FILE", "/etc/cron.d/alt8mail"),
 		CertbotDir:        env("CONTROL_CERTBOT_DIR", "/etc/letsencrypt/live"),
 		CertbotWebroot:    env("CONTROL_CERTBOT_WEBROOT", "/var/www/certbot"),

@@ -544,7 +544,7 @@ export async function renderBackups(ctx) {
       const done = backups.filter((backup) => backup.status === 'completed').length;
       const bytesTotal = backups.reduce((sum, backup) => sum + Number(backup.sizeBytes || 0), 0);
       document.getElementById('backup-summary').textContent = `${backups.length} archive${backups.length === 1 ? '' : 's'} · ${done} completed · ${running} running · ${ui.bytes(bytesTotal)} total`;
-      host.innerHTML = backups.length ? `<div class="table-wrap is-bare"><table class="data"><thead><tr><th>Name</th><th>Contents</th><th class="num">Size</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>${backups.map((backup) => `<tr><td><span class="cell-main">${esc(backup.name)}</span><span class="cell-sub mono break-all">${esc(backup.path)}</span>${backup.detail ? `<span class="cell-sub text-critical">${esc(backup.detail)}</span>` : ''}</td><td><div class="chip-list">${(backup.contents || []).map((content) => `<span class="mono-chip">${esc(content)}</span>`).join('')}</div></td><td class="num">${ui.bytes(backup.sizeBytes)}</td><td>${ui.statusPill(backup.status)}</td><td>${esc(fmt.dateTime(backup.createdAt))}</td><td class="actions">${backup.status === 'completed' ? `<a class="icon-btn" href="/control/api/backups/${esc(backup.id)}/download" title="Download archive" aria-label="Download archive">${ui.icon('download', 15)}</a>${canManage ? `<button class="icon-btn" type="button" data-backup-restore="${esc(backup.id)}" title="Restore archive" aria-label="Restore archive">${ui.icon('rotate', 15)}</button>` : ''}` : ''}${canManage && backup.status !== 'running' ? `<button class="icon-btn is-danger" type="button" data-backup-delete="${esc(backup.id)}" title="Delete archive" aria-label="Delete archive">${ui.icon('trash', 15)}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ui.emptyState('No backups yet', 'Create the first archive before making infrastructure changes.', canManage ? `<button class="btn btn-secondary btn-sm" type="button" id="backup-create-empty">${ui.icon('archive', 13)} Create backup</button>` : '', 'archive');
+      host.innerHTML = backups.length ? `<div class="table-wrap is-bare"><table class="data"><thead><tr><th>Name</th><th>Contents</th><th class="num">Size</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>${backups.map((backup) => `<tr><td><span class="cell-main">${esc(backup.name)}</span><span class="cell-sub mono break-all">${esc(backup.path)}</span>${backup.detail ? `<span class="cell-sub text-critical">${esc(backup.detail)}</span>` : ''}</td><td><div class="chip-list">${(backup.contents || []).map((content) => `<span class="mono-chip">${esc(content)}</span>`).join('')}</div></td><td class="num">${ui.bytes(backup.sizeBytes)}</td><td>${ui.statusPill(backup.status)}</td><td>${esc(fmt.dateTime(backup.createdAt))}</td><td class="actions">${backup.status === 'completed' ? `<a class="icon-btn" href="/control/api/backups/${esc(backup.id)}/download" title="Download archive" aria-label="Download archive">${ui.icon('download', 15)}</a>${canManage ? `<button class="icon-btn" type="button" data-backup-restore="${esc(backup.id)}" title="Restore archive" aria-label="Restore archive">${ui.icon('rotate', 15)}</button><button class="icon-btn" type="button" data-mailbox-restore="${esc(backup.id)}" title="Restore one mailbox or folder" aria-label="Restore one mailbox or folder">${ui.icon('users', 15)}</button>` : ''}` : ''}${canManage && backup.status !== 'running' ? `<button class="icon-btn is-danger" type="button" data-backup-delete="${esc(backup.id)}" title="Delete archive" aria-label="Delete archive">${ui.icon('trash', 15)}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ui.emptyState('No backups yet', 'Create the first archive before making infrastructure changes.', canManage ? `<button class="btn btn-secondary btn-sm" type="button" id="backup-create-empty">${ui.icon('archive', 13)} Create backup</button>` : '', 'archive');
       document.getElementById('backup-create-empty')?.addEventListener('click', openCreate);
       host.querySelectorAll('[data-backup-delete]').forEach((button) => button.addEventListener('click', async () => {
         const backup = backups.find((item) => item.id === button.dataset.backupDelete);
@@ -555,6 +555,7 @@ export async function renderBackups(ctx) {
         catch (error) { ui.toast(errorText(error), 'critical', { title: 'Could not delete backup' }); }
       }));
       host.querySelectorAll('[data-backup-restore]').forEach((button) => button.addEventListener('click', () => openRestore(backups.find((item) => item.id === button.dataset.backupRestore))));
+      host.querySelectorAll('[data-mailbox-restore]').forEach((button) => button.addEventListener('click', () => openMailboxRestore(backups.find((item) => item.id === button.dataset.mailboxRestore))));
       if (running && !timer) {
         timer = setInterval(() => { if (ctx.isCurrent()) load(true); }, 4000);
         ctx.onCleanup(() => { if (timer) { clearInterval(timer); timer = null; } });
@@ -620,6 +621,77 @@ export async function renderBackups(ctx) {
       } catch (error) {
         ui.toast(errorText(error), 'critical', { title: 'Restore failed' });
         button.classList.remove('is-loading'); button.disabled = false;
+      }
+    });
+  };
+
+  const openMailboxRestore = (backup) => {
+    if (!backup) return;
+    let previewed = null;
+    const modal = ctx.modal({
+      title: 'Restore one mailbox or folder', subtitle: backup.name, size: 'medium',
+      body: `<div class="notice tone-info">${ui.icon('info', 16)}<div><strong>Additive restore</strong><p>Messages are imported from the archive into the selected live folder. Existing messages and files are never deleted or overwritten; duplicates are skipped. Take a fresh backup first.</p></div></div>
+        <form id="mailbox-restore-form" class="mt-3"><div class="form-grid">
+          <label class="field"><span>Mailbox email</span><input class="input" name="email" type="email" required placeholder="user@example.com"></label>
+          <label class="field"><span>Tenant ID (optional)</span><input class="input mono" name="tenantId" placeholder="UUID — must match the mailbox tenant"></label>
+          <label class="field"><span>Folder</span><select class="input" name="folder"><option value="inbox">Inbox</option><option value="sent">Sent</option><option value="drafts">Drafts</option><option value="archive">Archive</option><option value="spam">Junk / Spam</option><option value="trash">Trash</option></select></label>
+          <label class="field"><span>Since (optional)</span><input class="input" name="since" type="date"></label>
+          <label class="field"><span>Until (optional)</span><input class="input" name="until" type="date"></label>
+        </div><div id="mailbox-restore-preview" class="mt-3"></div>
+        <div class="form-actions"><span class="form-note">The webmail indexes imported messages on its next mailbox sync.</span><div class="form-actions-right"><button type="button" class="btn btn-ghost" data-modal-close>Cancel</button><button type="button" class="btn btn-secondary" id="mailbox-preview">Preview</button><button type="submit" class="btn btn-danger" disabled>Restore mailbox</button></div></div></form>`,
+    });
+    const form = modal.root.querySelector('#mailbox-restore-form');
+    const previewHost = modal.root.querySelector('#mailbox-restore-preview');
+    const previewButton = modal.root.querySelector('#mailbox-preview');
+    const applyButton = form?.querySelector('button[type="submit"]');
+    const values = () => {
+      const raw = ui.formValues(form);
+      return { email: String(raw.email || '').trim(), tenantId: String(raw.tenantId || '').trim(), folder: String(raw.folder || 'inbox'), since: String(raw.since || ''), until: String(raw.until || '') };
+    };
+    const preview = async () => {
+      previewed = null;
+      applyButton.disabled = true;
+      previewButton.disabled = true;
+      previewButton.classList.add('is-loading');
+      previewHost.innerHTML = ui.loadingState('Reading the archive…', 2);
+      try {
+        const result = await ctx.api(`/control/api/backups/${backup.id}/mailbox-restore/preview`, { method: 'POST', body: values() });
+        previewed = result.preview || {};
+        previewHost.innerHTML = `<div class="notice tone-good">${ui.icon('check-circle', 16)}<div><strong>${ui.num(previewed.messages || 0)} message(s) in this folder</strong><p>${ui.num(previewed.conflicts || 0)} already present in the live mailbox and will be skipped. ${previewed.earliest ? `Archive range ${esc(fmt.dateTime(previewed.earliest))} – ${esc(fmt.dateTime(previewed.latest))}.` : ''}</p></div></div>`;
+        applyButton.disabled = false;
+      } catch (error) {
+        previewHost.innerHTML = ui.inlineNotice('critical', 'Preview failed', errorText(error));
+      } finally {
+        previewButton.disabled = false;
+        previewButton.classList.remove('is-loading');
+      }
+    };
+    previewButton?.addEventListener('click', preview);
+    form?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!previewed) { ui.toast('Preview the restore first.', 'critical'); return; }
+      const ok = await ctx.confirm({ title: 'Restore mailbox folder', message: `Import ${previewed.messages || 0} message(s) into ${values().email}'s ${values().folder} folder? Existing messages are preserved.`, confirmLabel: 'Restore mailbox', tone: 'danger' });
+      if (!ok) return;
+      applyButton.disabled = true;
+      applyButton.classList.add('is-loading');
+      try {
+        const result = await ctx.api(`/control/api/backups/${backup.id}/mailbox-restore`, { method: 'POST', body: values() });
+        modal.close();
+        ui.toast(`Mailbox restore started (${result.jobId}).`, 'good');
+        const poll = async (attempt) => {
+          try {
+            const payload = await ctx.api(`/control/api/restore-jobs/${encodeURIComponent(result.jobId)}`);
+            const job = payload.job || {};
+            if (job.status === 'running' && attempt < 60) { setTimeout(() => poll(attempt + 1), 2000); return; }
+            if (job.status === 'completed') ui.toast(`Mailbox restore completed: ${job.result?.messages || 0} message(s), ${job.result?.conflicts || 0} skipped.`, 'good');
+            else ui.toast(job.detail || 'Mailbox restore failed.', 'critical');
+          } catch { /* the job view is best-effort */ }
+        };
+        setTimeout(() => poll(0), 1500);
+      } catch (error) {
+        ui.toast(errorText(error), 'critical', { title: 'Mailbox restore failed' });
+        applyButton.disabled = false;
+        applyButton.classList.remove('is-loading');
       }
     });
   };

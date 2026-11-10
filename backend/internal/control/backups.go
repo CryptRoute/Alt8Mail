@@ -21,6 +21,7 @@ var backupContentNames = map[string]string{
 	"dkim":           "DKIM signing keys",
 	"letsencrypt":    "Let's Encrypt certificates",
 	"maildirs":       "Maildir message stores",
+	"uploads":        "Webmail attachment uploads",
 }
 
 func (s *Server) registerBackupRoutes(mux *http.ServeMux) {
@@ -29,6 +30,9 @@ func (s *Server) registerBackupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /control/api/backups/{id}/download", s.require("backups.read", s.handleBackupDownload))
 	mux.HandleFunc("DELETE /control/api/backups/{id}", s.require("backups.manage", s.handleBackupDelete))
 	mux.HandleFunc("POST /control/api/backups/{id}/restore", s.require("backups.manage", s.handleBackupRestore))
+	mux.HandleFunc("POST /control/api/backups/{id}/mailbox-restore/preview", s.require("backups.manage", s.handleMailboxRestorePreview))
+	mux.HandleFunc("POST /control/api/backups/{id}/mailbox-restore", s.require("backups.manage", s.handleMailboxRestoreApply))
+	mux.HandleFunc("GET /control/api/restore-jobs/{id}", s.require("backups.read", s.handleRestoreJob))
 }
 
 func (s *Server) handleBackups(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
@@ -71,7 +75,7 @@ func (s *Server) handleBackupCreate(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 	if len(body.Contents) == 0 {
-		body.Contents = []string{"panel_database", "postfix", "dovecot", "dkim", "letsencrypt"}
+		body.Contents = []string{"panel_database", "postfix", "dovecot", "dkim", "letsencrypt", "uploads"}
 	}
 	for _, content := range body.Contents {
 		if _, ok := backupContentNames[content]; !ok {
@@ -178,6 +182,13 @@ func (s *Server) runBackup(id, path string, contents []string) {
 			if err := addDirectoryToTar(tw, s.cfg.VmailRoot, "mail/vmail"); err != nil {
 				fail(err)
 				return
+			}
+		case "uploads":
+			if _, err := os.Stat(s.cfg.UploadDir); err == nil {
+				if err := addDirectoryToTar(tw, s.cfg.UploadDir, "uploads"); err != nil {
+					fail(err)
+					return
+				}
 			}
 		}
 	}

@@ -336,8 +336,12 @@ narrow `ReadWritePaths` allowlist. Treat access to port 8808 as root-equivalent.
 - One background import at a time, with progress, log, stop, retry and remove.
 - Import staging under `/var/vmail/.control-imports/<job>` with vmail ownership
   so `doveadm import` can read the source.
-- `.tar.gz` backups under `/var/backups/alt8mail`, with selectable contents,
-  download, delete and restore confirmation.
+- `.tar.gz` backups under `/var/backups/alt8mail`, with selectable contents
+  (including `uploads/` webmail attachments), download, delete and restore
+  confirmation.
+- Per-mailbox/per-folder restore: preview counts/conflicts, optional date
+  range, additive `doveadm import` into the live folder, job status and audit.
+  See [DR.md](DR.md) for the drill and safety properties.
 - Cron jobs in `/etc/cron.d/alt8mail` that invoke
   `alt8mail-control cron run <id>`; five-field validation, run-as user, stdin,
   date range, enable/disable, run-now, run log and run history.

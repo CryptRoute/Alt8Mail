@@ -40,9 +40,10 @@ type Server struct {
 
 	// Test seams. Production leaves these nil; tests replace the session,
 	// audit sink and seat counter so handlers can run without PostgreSQL.
-	sessionLoader func(*http.Request) (*sessionRecord, error)
-	auditSink     func(ctx context.Context, user *adminUser, action, target, detail string, ip net.IP, ua string, metadata any)
-	seatCounter   func(ctx context.Context, tenant string) (int, []map[string]any, error)
+	sessionLoader   func(*http.Request) (*sessionRecord, error)
+	auditSink       func(ctx context.Context, user *adminUser, action, target, detail string, ip net.IP, ua string, metadata any)
+	seatCounter     func(ctx context.Context, tenant string) (int, []map[string]any, error)
+	restoreImporter restoreImportFunc
 }
 
 type Options struct {
