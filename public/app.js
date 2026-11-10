@@ -4210,7 +4210,7 @@ function showTwoFactorChallenge(data, remember) {
   $$("#otpInputs input").forEach((input) => { input.value = ""; input.disabled = !canAuthenticator; });
   document.getElementById("recoveryCode").value = "";
   document.getElementById("trustDevice").checked = false;
-  setTwoFactorMode(canAuthenticator ? "otp" : "recovery");
+  setTwoFactorMode(canAuthenticator ? "otp" : "recovery", { focus: false });
   twoFactorForm.classList.remove("is-shaking");
   requestAnimationFrame(() => {
     const first = canAuthenticator ? document.getElementById("otp0") : document.getElementById("recoveryCode");
@@ -4218,15 +4218,20 @@ function showTwoFactorChallenge(data, remember) {
   });
 }
 
-function setTwoFactorMode(mode) {
+function setTwoFactorMode(mode, { focus = true } = {}) {
   state.twoFactorMode = mode === "recovery" ? "recovery" : "otp";
   const recovery = state.twoFactorMode === "recovery";
   document.getElementById("otpBlock").hidden = recovery;
   document.getElementById("recoveryBlock").hidden = !recovery;
   twoFactorSubmit.textContent = recovery ? "Verify recovery code" : "Verify and sign in";
+  if (!focus) return;
   setTimeout(() => {
     const target = recovery ? document.getElementById("recoveryCode") : document.getElementById("otp0");
-    if (target) target.focus();
+    // A mode switch focuses the new code field, but never steals focus from
+    // someone already typing in one.
+    const active = document.activeElement;
+    const inCodeField = Boolean(active && (active.closest?.("#otpInputs") || active.id === "recoveryCode"));
+    if (target && !inCodeField) target.focus();
   }, 40);
 }
 
