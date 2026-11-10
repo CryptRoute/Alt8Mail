@@ -54,6 +54,20 @@ async function fillDemoLogin() {
   await page.setValue("#loginPassword", DEMO_PASSWORD);
 }
 
+async function openSettings(page) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.waitFor(() => !document.querySelector(".overlay:not([hidden])"), 5000).catch(() => {});
+    await page.click("#settingsBtn");
+    try {
+      await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await sleep(300);
+    }
+  }
+}
+
 async function waitForApp() {
   await page.waitFor(() => document.readyState === "complete", 10000);
   await page.waitFor(() => !document.getElementById("app").hidden && document.querySelectorAll(".msg").length > 0, 12000);
@@ -217,8 +231,7 @@ try {
     const overlay = document.getElementById("accountDialogOverlay");
     return !overlay || overlay.hidden || getComputedStyle(overlay).display === "none";
   }, 5000);
-  await page.click("#settingsBtn");
-  await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+  await openSettings(page);
   await page.click("[data-settings-tab='accounts']");
   await page.waitFor(() => !document.querySelector("[data-settings-panel='accounts']").hidden, 5000);
   check(await page.eval("!document.getElementById('connectedAccountAdd').hidden && document.getElementById('connectedAccountAdd').textContent.includes('Add mail account')"), "Settings has a Connected accounts tab with an add-account action");
@@ -610,8 +623,7 @@ try {
   await sleep(500);
 
   console.log("\n[8] Sieve rules, vacation and audit log");
-  await page.click("#settingsBtn");
-  await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+  await openSettings(page);
   await page.click("[data-settings-tab='rules']");
   await sleep(400);
   equal(await page.eval("document.querySelectorAll('.rule-card').length"), 3, "three seeded Sieve rules are listed");
@@ -1742,8 +1754,7 @@ try {
   await sleep(500);
 
   console.log("\n[9o] Year in review and reaction rules");
-  await page.click("#settingsBtn");
-  await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+  await openSettings(page);
   await page.click("[data-settings-tab='account']");
   await sleep(300);
   check(await page.eval("Boolean(document.getElementById('yearReviewBlock'))"), "account settings expose year in review");
@@ -2158,8 +2169,7 @@ try {
   check(await page.eval("document.title.endsWith('Inbox — avery.chen@a8m.example - Alt8Mail')"), "online tab title returns to the folder format");
 
   console.log("\n[10b] Individual-view thread URLs");
-  await page.click("#settingsBtn");
-  await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+  await openSettings(page);
   await page.click("[data-settings-tab='mail']");
   await sleep(350);
   await page.setValue("#inboxViewSelect", "individual");
@@ -2194,8 +2204,7 @@ try {
   equal(await page.eval("document.querySelectorAll('.msg').length"), 0, "emptying a folder clears its rows without a refresh");
   check(await page.eval("document.querySelector('.list-empty')?.textContent.includes('folder is empty')"), "emptied folder shows its empty state immediately");
   await sleep(700);
-  await page.click("#settingsBtn");
-  await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+  await openSettings(page);
   await page.click("[data-settings-tab='mail']");
   await sleep(350);
   await page.setValue("#inboxViewSelect", "grouped");
@@ -2344,8 +2353,7 @@ try {
   await sleep(500);
 
   console.log("\n[11aa] Signature editor undo and redo");
-  await page.click("#settingsBtn");
-  await page.waitFor(() => !document.getElementById("settingsView").hidden, 5000);
+  await openSettings(page);
   await page.click("[data-settings-tab='mail']");
   await sleep(350);
   await page.click("#newSignatureBtn");
