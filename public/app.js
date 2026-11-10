@@ -6495,6 +6495,77 @@ function insertMeetingLink(session) {
   showToast("Jitsi meeting link inserted");
 }
 
+function ensureMailMergeOverlay() {
+  let overlay = document.getElementById("mailMergeOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="mailMergeOverlay" hidden>
+    <div class="dialog automation-dialog" role="dialog" aria-modal="true" aria-labelledby="mailMergeTitle">
+      <div class="dialog-head"><div><p class="eyebrow">Native mail merge</p><h2 id="mailMergeTitle">Send personalized mail</h2><p class="dialog-note" id="mailMergeNote"></p></div><button class="icon-btn" id="mailMergeClose" type="button" aria-label="Close mail merge"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body"><div class="field-row"><label class="field"><span>Throttle seconds between recipients</span><input id="mailMergeThrottle" type="number" min="1" max="60" value="5"></label><label class="field"><span>CSV recipients</span><input id="mailMergeCsvFile" type="file" accept=".csv,text/csv"></label></div><label class="field"><span>Recipients CSV</span><textarea id="mailMergeCsv" rows="7" placeholder="email,name,company&#10;alice@example.com,Alice,Acme&#10;bob@example.com,Bob,Beta"></textarea><small class="muted">Header row required. Use {{name}} and {{company}} in the subject/body; an unsubscribe link is added automatically.</small></label><div id="mailMergePreview" class="settings-note" hidden></div></div>
+      <div class="dialog-foot"><span class="dialog-note">Up to 500 unique recipients · suppressed addresses are skipped.</span><button class="btn-secondary" id="mailMergePreviewBtn" type="button">Preview</button><button class="btn-secondary" id="mailMergeCancel" type="button">Cancel</button><button class="btn-primary" id="mailMergeSend" type="button">Create &amp; queue</button></div>
+    </div>
+  </div>`);
+  overlay = document.getElementById("mailMergeOverlay");
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
+  document.getElementById("mailMergeClose").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("mailMergeCancel").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("mailMergePreviewBtn").addEventListener("click", () => previewMailMerge().catch(showError));
+  document.getElementById("mailMergeSend").addEventListener("click", () => queueMailMerge().catch(showError));
+  document.getElementById("mailMergeCsvFile").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    document.getElementById("mailMergeCsv").value = await file.text();
+  });
+  return overlay;
+}
+
+function openMailMergeDialog(session) {
+  if (!session) return;
+  state.mailMergeSession = session;
+  const overlay = ensureMailMergeOverlay();
+  const throttle = Math.min(60, Math.max(1, Number(state.undoSendSeconds) || 5));
+  document.getElementById("mailMergeThrottle").value = String(throttle);
+  document.getElementById("mailMergeNote").textContent = `${session.fromEmail || "Primary identity"} · ${session.subject.trim() || "(no subject)"}`;
+  document.getElementById("mailMergeCsv").value = "";
+  document.getElementById("mailMergePreview").hidden = true;
+  overlay.hidden = false;
+  document.getElementById("mailMergeCsv").focus();
+}
+
+function mailMergeRequest() {
+  const session = state.mailMergeSession;
+  if (!session) throw new Error("Open a compose window first");
+  const subject = session.subject.trim();
+  if (!subject) throw new Error("Add a subject before creating a merge");
+  return {
+    name: subject,
+    fromEmail: session.fromEmail || "",
+    subject,
+    bodyText: session.body || "",
+    bodyHtml: session.htmlMode ? session.bodyHtml || "" : "",
+    throttleSeconds: Math.min(60, Math.max(1, Number(document.getElementById("mailMergeThrottle").value) || 5)),
+    csv: document.getElementById("mailMergeCsv").value
+  };
+}
+
+async function previewMailMerge() {
+  const body = mailMergeRequest();
+  const data = await api("/api/mail-merges/preview", { method: "POST", body });
+  const host = document.getElementById("mailMergePreview");
+  host.hidden = false;
+  host.innerHTML = `<strong>${data.count} recipient${data.count === 1 ? "" : "s"} · ${data.throttleSeconds}s throttle</strong>` + (data.preview || []).slice(0, 3).map((item) => `<div class="shared-draft-row"><div class="shared-draft-copy"><strong>${esc(item.subject)}</strong><span>${esc(item.email)}</span></div></div>`).join("");
+}
+
+async function queueMailMerge() {
+  const body = mailMergeRequest();
+  const created = await api("/api/mail-merges", { method: "POST", body });
+  const mergeId = created?.merge?.id;
+  if (!mergeId) throw new Error("The merge could not be created");
+  const result = await api(`/api/mail-merges/${encodeURIComponent(mergeId)}/queue`, { method: "POST" });
+  document.getElementById("mailMergeOverlay").hidden = true;
+  showToast(`Mail merge queued: ${result.queued} recipient${result.queued === 1 ? "" : "s"}${result.suppressed ? ` · ${result.suppressed} suppressed` : ""}`);
+}
+
 function applyTeamTemplate(session, template) {  if (!session?.el || !template) return;
   if (template.subject) {
     session.subject = template.subject;
@@ -16046,6 +16117,7 @@ function composeTemplate(session) {
       <div class="compose-actions">
         <button class="icon-btn" data-compose-action="template" type="button" aria-label="Insert team template" title="Insert team template"><svg class="icon" aria-hidden="true"><use href="#i-file"/></svg></button>
         <button class="icon-btn" data-compose-action="meet" type="button" aria-label="Insert Jitsi meeting link" title="Insert Jitsi meeting link"><svg class="icon" aria-hidden="true"><use href="#i-video"/></svg></button>
+        <button class="icon-btn" data-compose-action="merge" type="button" aria-label="Send as mail merge" title="Send as mail merge"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg></button>
         <button class="icon-btn" data-compose-action="attach" type="button" aria-label="Attach files" title="Attach files"><svg class="icon" aria-hidden="true"><use href="#i-paperclip"/></svg></button>
         <button class="icon-btn" data-compose-action="discard" type="button" aria-label="Discard draft" title="Discard draft"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>
       </div>
@@ -29001,6 +29073,7 @@ function bindEvents() {
       } else if (kind === "attach") { openComposeAttach(session.id); }
       else if (kind === "template") { openTeamTemplatePicker(session); }
       else if (kind === "meet") { insertMeetingLink(session); }
+      else if (kind === "merge") { openMailMergeDialog(session); }
       else if (kind === "mention") { openComposeMentionPicker(session); }
       else if (kind === "mode") { setComposeMode(session, action.getAttribute("data-mode") === "plain" ? "plain" : "html"); }
       else if (kind === "editor-light") { setEditorLight(session, !session.editorLight); }

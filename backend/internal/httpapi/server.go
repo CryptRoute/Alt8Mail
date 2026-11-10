@@ -441,6 +441,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerFileCollaborationRoutes(mux)
 	s.registerSenderControlRoutes(mux)
 	s.registerFollowUpRoutes(mux)
+	s.registerMailMergeRoutes(mux)
 	s.registerMCPRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
