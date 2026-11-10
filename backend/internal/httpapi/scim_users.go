@@ -80,7 +80,7 @@ func writeSCIMHandlerError(w http.ResponseWriter, err error) {
 type scimUserPayload struct {
 	Schemas     []string               `json:"schemas"`
 	ID          string                 `json:"id"`
-	ExternalID  *string                `json:"externalId"`
+	ExternalID  scimNullableString     `json:"externalId"`
 	UserName    *string                `json:"userName"`
 	Name        *scimUserNamePayload   `json:"name"`
 	DisplayName *string                `json:"displayName"`
@@ -88,6 +88,28 @@ type scimUserPayload struct {
 	Active      *bool                  `json:"active"`
 	Roles       []map[string]any       `json:"roles"`
 	Meta        json.RawMessage        `json:"meta"`
+}
+
+// scimNullableString distinguishes an omitted attribute (Set false) from an
+// explicit JSON null (Set with a nil Value), which PUT needs in order to clear
+// externalId.
+type scimNullableString struct {
+	Set   bool
+	Value *string
+}
+
+func (value *scimNullableString) UnmarshalJSON(data []byte) error {
+	value.Set = true
+	if string(bytes.TrimSpace(data)) == "null" {
+		value.Value = nil
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err != nil {
+		return err
+	}
+	value.Value = &text
+	return nil
 }
 
 type scimUserNamePayload struct {
@@ -127,9 +149,43 @@ type scimUserChanges struct {
 }
 
 type scimUserTransition struct {
-	Changed     bool
-	Deactivated bool
-	Reactivated bool
+	MetadataChanged bool
+	Deactivated     bool
+	Reactivated     bool
+}
+
+// metadataChanged reports whether name or externalId values actually differ
+// from the stored row. Active-only no-ops must not be audited as updates.
+func (changes scimUserChanges) metadataChanged(existing scimUserRow) bool {
+	if changes.Name != nil && *changes.Name != existing.Name {
+		return true
+	}
+	if changes.GivenName != nil && *changes.GivenName != existing.GivenName {
+		return true
+	}
+	if changes.FamilyName != nil && *changes.FamilyName != existing.FamilyName {
+		return true
+	}
+	if changes.ExternalIDSet && !sameSCIMExternalID(changes.ExternalID, existing.ExternalID) {
+		return true
+	}
+	return false
+}
+
+// scimUserAuditEvents lists the fixed actions for one successful mutation.
+// Metadata changes are audited in addition to lifecycle transitions.
+func scimUserAuditEvents(transition scimUserTransition) []string {
+	actions := []string{}
+	if transition.MetadataChanged {
+		actions = append(actions, "scim.user_updated")
+	}
+	if transition.Deactivated {
+		actions = append(actions, "scim.user_deactivated")
+	}
+	if transition.Reactivated {
+		actions = append(actions, "scim.user_reactivated")
+	}
+	return actions
 }
 
 // decodeSCIMRequest accepts the two SCIM JSON media types, caps the body at
@@ -275,6 +331,49 @@ func scanSCIMUser(row pgx.Row) (scimUserRow, error) {
 	return user, err
 }
 
+// scimHasControlCharacters rejects C0 controls and DEL. These are never valid
+// identity attributes and PostgreSQL rejects NUL outright, so they must fail
+// as a SCIM validation error before a transaction starts.
+func scimHasControlCharacters(value string) bool {
+	for _, char := range value {
+		if char < 0x20 || char == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+func validateSCIMText(field, value string) *scimHandlerError {
+	if scimHasControlCharacters(value) {
+		return newSCIMHandlerError(http.StatusBadRequest, "invalidValue", field+" must not contain control characters")
+	}
+	return nil
+}
+
+func validateSCIMExternalIDText(raw *string) *scimHandlerError {
+	if raw == nil {
+		return nil
+	}
+	return validateSCIMText("externalId", *raw)
+}
+
+func validateSCIMNameText(formatted, given, family string) *scimHandlerError {
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{name: "name.formatted", value: formatted},
+		{name: "name.givenName", value: given},
+		{name: "name.familyName", value: family},
+	}
+	for _, field := range fields {
+		if err := validateSCIMText(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // scimUserName normalizes a SCIM userName. It must be an email-shaped value;
 // the returned email is lowercased.
 func scimUserName(raw *string) (email, localPart string, err error) {
@@ -282,7 +381,7 @@ func scimUserName(raw *string) (email, localPart string, err error) {
 		return "", "", errors.New("userName is required")
 	}
 	email = strings.ToLower(strings.TrimSpace(*raw))
-	if strings.ContainsAny(email, " \t\r\n") {
+	if strings.ContainsAny(email, " \t\r\n") || scimHasControlCharacters(email) {
 		return "", "", errors.New("userName must be a valid email address")
 	}
 	localPart, domain := splitEmail(email)
@@ -294,7 +393,14 @@ func scimUserName(raw *string) (email, localPart string, err error) {
 
 // normalizeSCIMExternalID trims the value and maps the empty string to SQL
 // NULL, per the phase ruling on externalId idempotency.
-func normalizeSCIMExternalID(raw *string) *string {
+func normalizeSCIMExternalID(raw scimNullableString) *string {
+	if !raw.Set || raw.Value == nil {
+		return nil
+	}
+	return normalizeSCIMExternalIDValue(raw.Value)
+}
+
+func normalizeSCIMExternalIDValue(raw *string) *string {
 	if raw == nil {
 		return nil
 	}
@@ -388,11 +494,17 @@ func scimReplaceChanges(payload scimUserPayload, existing scimUserRow) (scimUser
 	if payload.Name != nil {
 		localPart, _ := splitEmail(existing.Email)
 		formatted, given, family := scimDisplayName(payload.Name, localPart)
+		if err := validateSCIMNameText(formatted, given, family); err != nil {
+			return changes, err
+		}
 		changes.Name = &formatted
 		changes.GivenName = &given
 		changes.FamilyName = &family
 	}
-	if payload.ExternalID != nil {
+	if payload.ExternalID.Set {
+		if err := validateSCIMExternalIDText(payload.ExternalID.Value); err != nil {
+			return changes, err
+		}
 		changes.ExternalIDSet = true
 		changes.ExternalID = normalizeSCIMExternalID(payload.ExternalID)
 	}
@@ -495,6 +607,9 @@ func applySCIMPatchObject(changes *scimUserChanges, raw json.RawMessage, existin
 				return newSCIMHandlerError(http.StatusBadRequest, "invalidValue", "name must be an object")
 			}
 			formatted, given, family := scimDisplayName(&name, localPart)
+			if err := validateSCIMNameText(formatted, given, family); err != nil {
+				return err
+			}
 			changes.Name = &formatted
 			changes.GivenName = &given
 			changes.FamilyName = &family
@@ -504,7 +619,11 @@ func applySCIMPatchObject(changes *scimUserChanges, raw json.RawMessage, existin
 				return newSCIMHandlerError(http.StatusBadRequest, "invalidValue", err.Error())
 			}
 			changes.ExternalIDSet = true
-			if null || text == "" {
+			if null {
+				changes.ExternalID = nil
+			} else if err := validateSCIMExternalIDText(&text); err != nil {
+				return err
+			} else if text == "" {
 				changes.ExternalID = nil
 			} else {
 				changes.ExternalID = &text
@@ -551,7 +670,11 @@ func applySCIMPatchPath(changes *scimUserChanges, op, path string, raw json.RawM
 			return newSCIMHandlerError(http.StatusBadRequest, "invalidValue", err.Error())
 		}
 		changes.ExternalIDSet = true
-		if null || text == "" {
+		if null {
+			changes.ExternalID = nil
+		} else if err := validateSCIMExternalIDText(&text); err != nil {
+			return err
+		} else if text == "" {
 			changes.ExternalID = nil
 		} else {
 			changes.ExternalID = &text
@@ -595,6 +718,9 @@ func applySCIMPatchPath(changes *scimUserChanges, op, path string, raw json.RawM
 			return newSCIMHandlerError(http.StatusBadRequest, "invalidValue", "name must be an object")
 		}
 		formatted, given, family := scimDisplayName(&name, localPart)
+		if err := validateSCIMNameText(formatted, given, family); err != nil {
+			return err
+		}
 		changes.Name = &formatted
 		changes.GivenName = &given
 		changes.FamilyName = &family
@@ -617,6 +743,20 @@ func applySCIMPatchPath(changes *scimUserChanges, op, path string, raw json.RawM
 		value, err := decodeSCIMString(raw)
 		if err != nil {
 			return newSCIMHandlerError(http.StatusBadRequest, "invalidValue", err.Error())
+		}
+		field := ""
+		switch segments[1] {
+		case "formatted":
+			field = "name.formatted"
+		case "givenname":
+			field = "name.givenName"
+		case "familyname":
+			field = "name.familyName"
+		default:
+			return newSCIMHandlerError(http.StatusBadRequest, "invalidPath", "PATCH path is not supported")
+		}
+		if err := validateSCIMText(field, value); err != nil {
+			return err
 		}
 		switch segments[1] {
 		case "formatted":
@@ -689,13 +829,15 @@ func (s *Server) scimAudit(r *http.Request, tenant scimTenant, action, target, d
 }
 
 func (s *Server) scimAuditUserChange(r *http.Request, tenant scimTenant, email string, transition scimUserTransition) {
-	switch {
-	case transition.Deactivated:
-		s.scimAudit(r, tenant, "scim.user_deactivated", email, "sessions revoked; mailbox preserved")
-	case transition.Reactivated:
-		s.scimAudit(r, tenant, "scim.user_reactivated", email, "mailbox reactivated")
-	case transition.Changed:
-		s.scimAudit(r, tenant, "scim.user_updated", email, "Updated user through SCIM")
+	for _, action := range scimUserAuditEvents(transition) {
+		switch action {
+		case "scim.user_updated":
+			s.scimAudit(r, tenant, action, email, "Updated user through SCIM")
+		case "scim.user_deactivated":
+			s.scimAudit(r, tenant, action, email, "sessions revoked; mailbox preserved")
+		case "scim.user_reactivated":
+			s.scimAudit(r, tenant, action, email, "mailbox reactivated")
+		}
 	}
 }
 
@@ -847,8 +989,18 @@ func (s *Server) scimCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeSCIMError(w, http.StatusBadRequest, "invalidValue", err.Error())
 		return
 	}
+	if payload.ExternalID.Set {
+		if handlerErr := validateSCIMExternalIDText(payload.ExternalID.Value); handlerErr != nil {
+			writeSCIMHandlerError(w, handlerErr)
+			return
+		}
+	}
 	externalID := normalizeSCIMExternalID(payload.ExternalID)
 	name, given, family := scimDisplayName(payload.Name, localPart)
+	if handlerErr := validateSCIMNameText(name, given, family); handlerErr != nil {
+		writeSCIMHandlerError(w, handlerErr)
+		return
+	}
 	active := payload.Active == nil || *payload.Active
 
 	ctx := r.Context()
@@ -934,6 +1086,14 @@ func (s *Server) scimCreateUser(w http.ResponseWriter, r *http.Request) {
 		    role = 'member', role_source = 'manual', updated_at = now()
 		WHERE id = $1 AND tenant_id = $2
 	`, userID, tenant.TenantID, given, family, externalID); err != nil {
+		_ = tx.Rollback(ctx)
+		if isUniqueViolation(err) {
+			// A concurrent create claimed the same externalId between the
+			// pre-check and this update. The whole provisioning transaction
+			// rolled back, so there is no partial user.
+			writeSCIMError(w, http.StatusConflict, "uniqueness", "A user with this userName or externalId already exists")
+			return
+		}
 		s.logger.Warn("SCIM user attribute update failed")
 		writeSCIMError(w, http.StatusInternalServerError, "", "Could not create the SCIM user")
 		return
@@ -948,9 +1108,45 @@ func (s *Server) scimCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeSCIMError(w, http.StatusInternalServerError, "", "Could not create the SCIM user")
 		return
 	}
+	// app_states powers bootstrap/onboarding and can only be built for an
+	// active user, so it is initialized after commit (mirroring admin create).
+	if created.Status == "active" {
+		s.scimEnsureUserState(ctx, created.Email)
+	}
 	s.scimAudit(r, tenant, "scim.user_created", email, "Created user through SCIM")
 	w.Header().Set("Location", base+"/Users/"+created.ID)
 	writeSCIMJSON(w, http.StatusCreated, scimUserResource(created, base))
+}
+
+// scimEnsureUserState initializes the per-user application state. A failure is
+// logged but never fails provisioning, matching adminCreateUser.
+func (s *Server) scimEnsureUserState(ctx context.Context, email string) {
+	if stateErr := s.ensureUserState(ctx, email); stateErr != nil {
+		s.logger.Warn("SCIM user state provisioning failed", "email", email, "err", stateErr)
+	}
+}
+
+// revokeSCIMUserAccess clears every live authentication artefact for a
+// deprovisioned user. Web/admin sessions and pending challenges are deleted
+// together so an in-flight login cannot complete later; registered passkeys are
+// kept because the account may be reactivated.
+func revokeSCIMUserAccess(ctx context.Context, tx pgx.Tx, tenantID, userID string) error {
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{sql: `DELETE FROM sessions WHERE tenant_id = $1 AND user_id = $2`, args: []any{tenantID, userID}},
+		{sql: `DELETE FROM auth_challenges WHERE tenant_id = $1 AND user_id = $2`, args: []any{tenantID, userID}},
+		{sql: `DELETE FROM admin_sessions WHERE tenant_id = $1 AND user_id = $2`, args: []any{tenantID, userID}},
+		{sql: `DELETE FROM trusted_devices WHERE user_id = $1`, args: []any{userID}},
+		{sql: `DELETE FROM admin_auth_challenges WHERE tenant_id = $1 AND user_id = $2`, args: []any{tenantID, userID}},
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(ctx, statement.sql, statement.args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // scimApplyUserChanges persists a validated mutation inside the caller's
@@ -1005,6 +1201,11 @@ func (s *Server) scimApplyUserChanges(ctx context.Context, tx pgx.Tx, tenantID s
 	if len(sets) > 0 {
 		sets = append(sets, "updated_at = now()")
 		if _, err := tx.Exec(ctx, `UPDATE users SET `+strings.Join(sets, ", ")+` WHERE id = $1 AND tenant_id = $2`, args...); err != nil {
+			if isUniqueViolation(err) {
+				// A concurrent PUT/PATCH claimed this externalId between the
+				// pre-check and the update.
+				return existing, transition, newSCIMHandlerError(http.StatusConflict, "uniqueness", "externalId is already in use")
+			}
 			s.logger.Warn("SCIM user update failed")
 			return existing, transition, newSCIMHandlerError(http.StatusInternalServerError, "", "Could not update the SCIM user")
 		}
@@ -1019,7 +1220,7 @@ func (s *Server) scimApplyUserChanges(ctx context.Context, tx pgx.Tx, tenantID s
 				s.logger.Warn("SCIM mailbox deactivation failed")
 				return existing, transition, newSCIMHandlerError(http.StatusInternalServerError, "", "Could not update the SCIM user")
 			}
-			if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE tenant_id = $1 AND user_id = $2`, tenantID, existing.ID); err != nil {
+			if err := revokeSCIMUserAccess(ctx, tx, tenantID, existing.ID); err != nil {
 				s.logger.Warn("SCIM session revocation failed")
 				return existing, transition, newSCIMHandlerError(http.StatusInternalServerError, "", "Could not update the SCIM user")
 			}
@@ -1031,7 +1232,7 @@ func (s *Server) scimApplyUserChanges(ctx context.Context, tx pgx.Tx, tenantID s
 			}
 		}
 	}
-	transition.Changed = len(sets) > 0
+	transition.MetadataChanged = changes.metadataChanged(existing)
 	updated, err := scanSCIMUser(tx.QueryRow(ctx, `SELECT `+scimUserColumns+` FROM users WHERE id = $1 AND tenant_id = $2`, existing.ID, tenantID))
 	if err != nil {
 		s.logger.Warn("SCIM user reload failed")
@@ -1085,6 +1286,11 @@ func (s *Server) scimReplaceUser(w http.ResponseWriter, r *http.Request) {
 		writeSCIMError(w, http.StatusInternalServerError, "", "Could not update the SCIM user")
 		return
 	}
+	if transition.Reactivated {
+		// A user created suspended has no app_states yet; initialize it once
+		// reactivation has been committed so bootstrap/onboarding works.
+		s.scimEnsureUserState(ctx, updated.Email)
+	}
 	s.scimAuditUserChange(r, tenant, updated.Email, transition)
 	writeSCIMJSON(w, http.StatusOK, scimUserResource(updated, base))
 }
@@ -1134,6 +1340,11 @@ func (s *Server) scimPatchUser(w http.ResponseWriter, r *http.Request) {
 		writeSCIMError(w, http.StatusInternalServerError, "", "Could not update the SCIM user")
 		return
 	}
+	if transition.Reactivated {
+		// A user created suspended has no app_states yet; initialize it once
+		// reactivation has been committed so bootstrap/onboarding works.
+		s.scimEnsureUserState(ctx, updated.Email)
+	}
 	s.scimAuditUserChange(r, tenant, updated.Email, transition)
 	writeSCIMJSON(w, http.StatusOK, scimUserResource(updated, base))
 }
@@ -1179,7 +1390,7 @@ func (s *Server) scimDeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeSCIMError(w, http.StatusInternalServerError, "", "Could not delete the SCIM user")
 		return
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE tenant_id = $1 AND user_id = $2`, tenant.TenantID, existing.ID); err != nil {
+	if err := revokeSCIMUserAccess(ctx, tx, tenant.TenantID, existing.ID); err != nil {
 		s.logger.Warn("SCIM session revocation failed")
 		writeSCIMError(w, http.StatusInternalServerError, "", "Could not delete the SCIM user")
 		return
