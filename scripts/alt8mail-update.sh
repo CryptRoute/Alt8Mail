@@ -20,9 +20,12 @@ env_file_value() { grep -E "^${1}=" "$2" 2>/dev/null | tail -n1 | cut -d= -f2- |
 set_env_if_missing() {
   local file="$1" key="$2" value="$3"
   [[ -n "$value" && -f "$file" ]] || return 0
-  if grep -qE "^${key}=" "$file" 2>/dev/null; then
+  # A non-empty existing value is authoritative. An empty KEY= line is treated
+  # as unset, matching install.sh, and is replaced by the fallback.
+  if grep -qE "^${key}=.+" "$file" 2>/dev/null; then
     return 0
   fi
+  sed -i "/^${key}=$/d" "$file" 2>/dev/null || true
   printf '%s=%s\n' "$key" "$value" >> "$file"
   log "added missing $key to $file"
 }

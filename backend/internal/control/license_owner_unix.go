@@ -15,28 +15,27 @@ import (
 // license file before it is renamed over the target.
 //
 // The Control service runs as root in production while the webmail runs as the
-// unprivileged a8m user, so the installed token must be group-readable. When a
-// target already exists its uid/gid are preserved; otherwise root-owned files
-// use the configured group (a8m by default). Non-root development installs
-// skip chown because they cannot change ownership.
+// unprivileged a8m user, so the installed token must be group-readable. The
+// owner uid is preserved when a target already exists, but the group is always
+// normalized to the configured group (a8m by default). That repairs a legacy
+// root:root token on the next upload instead of silently leaving it unreadable
+// by the webmail. Non-root development installs skip chown because they cannot
+// change ownership.
 func resolveLicenseFileOwner(path, group string) (licenseFileOwner, error) {
-	root := os.Geteuid() == 0
+	if os.Geteuid() != 0 {
+		return licenseFileOwner{}, nil
+	}
+	uid := 0
 	if info, err := os.Stat(path); err == nil {
 		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-			if !root {
-				return licenseFileOwner{}, nil
-			}
-			return licenseFileOwner{uid: int(stat.Uid), gid: int(stat.Gid), apply: true}, nil
+			uid = int(stat.Uid)
 		}
-	}
-	if !root {
-		return licenseFileOwner{}, nil
 	}
 	gid, err := lookupLicenseGroupID(group)
 	if err != nil {
 		return licenseFileOwner{}, err
 	}
-	return licenseFileOwner{uid: 0, gid: gid, apply: true}, nil
+	return licenseFileOwner{uid: uid, gid: gid, apply: true}, nil
 }
 
 func lookupLicenseGroupID(group string) (int, error) {

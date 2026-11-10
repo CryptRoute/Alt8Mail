@@ -28,9 +28,10 @@ const licenseFileMode os.FileMode = 0o640
 
 var errLicenseFileTooLarge = errors.New("license file exceeds the size limit")
 
-// licenseFileOwner describes the uid/gid to install on the license file.
-// apply is false on non-root development installs and Windows, where chown is
-// skipped and the 0640 mode is used as-is.
+// licenseFileOwner describes the owner uid and group gid to install on the
+// license file. The group is always the configured webmail group; an existing
+// target's uid is preserved. apply is false on non-root development installs
+// and Windows, where chown is skipped and the 0640 mode is used as-is.
 type licenseFileOwner struct {
 	uid   int
 	gid   int

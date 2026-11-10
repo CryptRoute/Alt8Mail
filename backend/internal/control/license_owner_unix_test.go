@@ -65,7 +65,7 @@ func TestLicenseFileUsesConfiguredGroupWhenRoot(t *testing.T) {
 	}
 }
 
-func TestLicenseFilePreservesExistingOwner(t *testing.T) {
+func TestLicenseFilePreservesOwnerAndNormalizesGroup(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires root to change file ownership")
 	}
@@ -73,20 +73,25 @@ func TestLicenseFilePreservesExistingOwner(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "license.token")
 	licenseTestWriteFile(t, path, "old", 0o600)
-	const wantUID, wantGID = 12345, 23456
-	if err := os.Chown(path, wantUID, wantGID); err != nil {
+	const wantUID = 12345
+	// A legacy token may be owned by an unrelated group. The upload must keep
+	// the owner uid but replace the group with the configured webmail group so
+	// the unprivileged webmail can read the new token.
+	originalGID := os.Getegid() + 1
+	if err := os.Chown(path, wantUID, originalGID); err != nil {
 		t.Skipf("cannot chown test file: %v", err)
 	}
+	configuredGID := os.Getegid()
 	token := licenseTestToken(t, privateKey, licenseTestLicense(time.Now()))
-	if err := writeLicenseTokenFile(path, licenseTestPublicKey(publicKey), token, "a8m", nil); err != nil {
+	if err := writeLicenseTokenFile(path, licenseTestPublicKey(publicKey), token, strconv.Itoa(configuredGID), nil); err != nil {
 		t.Fatal(err)
 	}
 	info, stat := licenseTestStat(t, path)
 	if info.Mode().Perm() != 0o640 {
 		t.Fatalf("mode = %o, want 0640", info.Mode().Perm())
 	}
-	if int(stat.Uid) != wantUID || int(stat.Gid) != wantGID {
-		t.Fatalf("owner = %d:%d, want preserved %d:%d", stat.Uid, stat.Gid, wantUID, wantGID)
+	if int(stat.Uid) != wantUID || int(stat.Gid) != configuredGID {
+		t.Fatalf("owner = %d:%d, want uid %d with normalized gid %d", stat.Uid, stat.Gid, wantUID, configuredGID)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
