@@ -218,6 +218,7 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /audit", s.adminRequirePermission("audit.read", s.adminListAudit))
 	mux.HandleFunc("GET /audit.csv", s.adminRequirePermission("audit.read", s.adminExportAudit))
+	mux.HandleFunc("GET /audit/export", s.adminRequirePermission("audit.read", s.adminExportAuditBundle))
 	mux.HandleFunc("GET /audit/office", s.adminRequirePermission("audit.read", s.adminListOfficeAudit))
 	mux.HandleFunc("GET /audit/office.csv", s.adminRequirePermission("audit.read", s.adminExportOfficeAudit))
 	mux.HandleFunc("GET /legal/holds", s.adminRequirePermission("legal.read", s.adminListLegalHolds))
