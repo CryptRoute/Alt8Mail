@@ -223,9 +223,9 @@ func (s *Server) runAISearch(ctx context.Context, tenantID, userID string, filte
 	}
 	if filters.HasAttachment != nil {
 		if *filters.HasAttachment {
-			where = append(where, `jsonb_array_length(m.attachments) > 0`)
+			where = append(where, `EXISTS (SELECT 1 FROM public.mail_message_attachments ma WHERE ma.message_id=m.id)`)
 		} else {
-			where = append(where, `jsonb_array_length(m.attachments) = 0`)
+			where = append(where, `NOT EXISTS (SELECT 1 FROM public.mail_message_attachments ma WHERE ma.message_id=m.id)`)
 		}
 	}
 	if filters.After != "" {

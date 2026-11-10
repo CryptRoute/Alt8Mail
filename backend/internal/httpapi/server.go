@@ -451,6 +451,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAITriageRoutes(mux)
 	s.registerAIObligationRoutes(mux)
 	s.registerAISearchRoutes(mux)
+	s.registerAIInsightRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
 	s.registerSubscriptionRoutes(mux)
