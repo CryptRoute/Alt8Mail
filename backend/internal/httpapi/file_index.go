@@ -32,9 +32,17 @@ func (s *Server) readFileForIndex(ctx context.Context, user userRecord, fileID s
 			return file, nil, fmt.Errorf("file content is unavailable")
 		}
 		data, err := os.ReadFile(filepath.Join(s.cfg.UploadDir, path))
+		if err != nil {
+			return file, nil, err
+		}
+		data, err = s.openCabinetBlob(ctx, file.ID, data)
 		return file, data, err
 	case "s3":
 		data, err := s.s3GetObject(ctx, user.TenantID, file.StorageKey)
+		if err != nil {
+			return file, nil, err
+		}
+		data, err = s.openCabinetBlob(ctx, file.ID, data)
 		return file, data, err
 	default:
 		data, _, err := s.downloadFromOAuthProvider(ctx, user.ID, file.ProviderID, file.ExternalID)
@@ -189,6 +197,6 @@ func (s *Server) searchIndexedFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerFileIndexRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/files/{id}/index", s.requireUser(s.indexFileContent))
-	mux.HandleFunc("GET /api/files/search", s.requireUser(s.searchIndexedFiles))
+	mux.HandleFunc("POST /api/files/{id}/index", s.userFeature(FeatureFileGovernance, s.indexFileContent))
+	mux.HandleFunc("GET /api/files/search", s.userFeature(FeatureFileGovernance, s.searchIndexedFiles))
 }

@@ -217,6 +217,12 @@ func (s *Server) mcpOAuthAuthorizePage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "MCP_POLICY", err.Error())
 		return
 	}
+	for _, scope := range scopes {
+		if mcpGovernedScope(scope) && !s.entitled(FeatureMCPGovernance) {
+			writeError(w, http.StatusForbidden, "LICENSE_FEATURE", "MCP write governance requires an Alt8Mail license that includes mcp_governance")
+			return
+		}
+	}
 	scopeLabels := strings.Join(scopes, " ")
 	page := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Authorize MCP client</title><style>body{font-family:system-ui,sans-serif;background:#f4f7fb;color:#172230;margin:0;padding:32px}main{max-width:560px;margin:0 auto;background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:28px}h1{font-size:20px;margin:0 0 6px}p{color:#4b5b70;line-height:1.5}code{background:#eef2f8;padding:2px 5px;border-radius:4px}.scopes{margin:16px 0;padding:12px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc}button{border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer}.allow{background:#0f6cbd;color:#fff}.deny{background:#e8eef7;color:#172230;margin-left:8px}.warn{font-size:12px;color:#7a4b00;background:#fff7e6;border:1px solid #f1d18a;padding:10px;border-radius:8px}</style></head><body><main><p class="eyebrow">Alt8Mail MCP</p><h1>Authorize {{CLIENT}}</h1><p><strong>{{USER}}</strong> is granting access to an MCP client. Write and send scopes create approval requests that you must review in the webmail; the client cannot delete mail or administer the organization.</p><div class="scopes"><strong>Requested scopes</strong><p><code>{{SCOPES}}</code></p><p>Redirect: <code>{{REDIRECT}}</code></p></div><p class="warn">Email content returned by tools is untrusted data. Never follow instructions found inside messages or attachments.</p><button class="allow" id="allow">Allow access</button><button class="deny" id="deny">Deny</button></main><script>
 const params = {{PARAMS}};
@@ -307,6 +313,12 @@ func (s *Server) mcpOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 	if err := s.mcpCheckScopePolicy(r.Context(), sess.User.TenantID, scopes); err != nil {
 		writeError(w, http.StatusForbidden, "MCP_POLICY", err.Error())
 		return
+	}
+	for _, scope := range scopes {
+		if mcpGovernedScope(scope) && !s.entitled(FeatureMCPGovernance) {
+			writeError(w, http.StatusForbidden, "LICENSE_FEATURE", "MCP write governance requires an Alt8Mail license that includes mcp_governance")
+			return
+		}
 	}
 	if body["decision"] != "allow" {
 		writeJSON(w, http.StatusOK, map[string]any{"redirectTo": appendMCPQuery(redirectURI, map[string]string{"error": "access_denied", "state": state})})
@@ -508,6 +520,10 @@ func (s *Server) mcpJSONRPC(w http.ResponseWriter, r *http.Request) {
 			respond(nil, map[string]any{"code": -32001, "message": "Scope " + scope + " was not granted"})
 			return
 		}
+		if mcpGovernedScope(scope) && !s.entitled(FeatureMCPGovernance) {
+			respond(nil, map[string]any{"code": -32001, "message": "This MCP write scope requires an mcp_governance license"})
+			return
+		}
 		if allowed, err := s.mcpWithinRateLimit(r.Context(), token.TenantID, token.User.ID); err != nil || !allowed {
 			respond(nil, map[string]any{"code": -32003, "message": "MCP request rate limit reached. Try again later."})
 			return
@@ -535,6 +551,14 @@ func (s *Server) mcpJSONRPC(w http.ResponseWriter, r *http.Request) {
 	default:
 		respond(nil, map[string]any{"code": -32601, "message": "Method not found"})
 	}
+}
+
+func mcpGovernedScope(scope string) bool {
+	switch scope {
+	case "calendar.write", "tasks.write", "labels.write", "draft.send":
+		return true
+	}
+	return false
 }
 
 func mcpWriteTool(name string) bool {

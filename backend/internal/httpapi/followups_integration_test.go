@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CryptRoute/Alt8Mail/backend/internal/licensing"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -48,7 +49,7 @@ func TestFollowUpIntegration(t *testing.T) {
 	mustExec(`INSERT INTO public.mail_messages (id, tenant_id, user_id, mailbox_id, folder, thread_id, subject, from_email, sent_at)
 		SELECT $1,$2,$3,m.id,'inbox','follow-thread','Waiting on pricing',$4,now()-interval '1 hour'
 		FROM public.mailboxes m WHERE m.user_id=$3`, "follow-msg-"+suffix, tenant, user, client)
-	server := &Server{store: &store.Store{DB: pool}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), stateLocks: map[string]*sync.Mutex{}}
+	server := &Server{store: &store.Store{DB: pool}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), stateLocks: map[string]*sync.Mutex{}, license: &licensing.License{Version: licensing.Version, ID: "follow-test", Edition: "enterprise", Seats: 10, Features: []string{FeatureFollowUps}, ExpiresAt: time.Now().Add(time.Hour)}}
 	userRecord := userRecord{ID: user, TenantID: tenant, Email: email, Name: "Follow User", Status: "active"}
 	withSession := func(request *http.Request) *http.Request {
 		return request.WithContext(context.WithValue(request.Context(), sessionContextKey{}, &sessionRecord{UserID: user, TenantID: tenant, User: userRecord}))

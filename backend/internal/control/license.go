@@ -42,23 +42,25 @@ type licenseFileOwner struct {
 // file. It never contains the token or signature. error is one of the fixed
 // categories not_configured, unreadable, malformed or signature.
 type licenseStatus struct {
-	Configured     bool       `json:"configured"`
-	FilePath       string     `json:"filePath"`
-	State          string     `json:"state"`
-	Edition        string     `json:"edition"`
-	InGrace        bool       `json:"inGrace"`
-	Expired        bool       `json:"expired"`
-	Seats          int        `json:"seats"`
-	UsedSeats      int        `json:"usedSeats"`
-	RemainingSeats int        `json:"remainingSeats"`
-	Warning        bool       `json:"warning"`
-	WarningPercent int        `json:"warningPercent"`
-	Features       []string   `json:"features"`
-	ExpiresAt      *time.Time `json:"expiresAt"`
-	Tenant         string     `json:"tenant"`
-	LicenseID      string     `json:"licenseId"`
-	LastModified   *time.Time `json:"lastModified"`
-	Error          string     `json:"error"`
+	Configured        bool       `json:"configured"`
+	FilePath          string     `json:"filePath"`
+	State             string     `json:"state"`
+	Edition           string     `json:"edition"`
+	InGrace           bool       `json:"inGrace"`
+	Expired           bool       `json:"expired"`
+	Seats             int        `json:"seats"`
+	UsedSeats         int        `json:"usedSeats"`
+	RemainingSeats    int        `json:"remainingSeats"`
+	Warning           bool       `json:"warning"`
+	WarningPercent    int        `json:"warningPercent"`
+	Features          []string   `json:"features"`
+	AvailableFeatures []string   `json:"availableFeatures"`
+	MissingFeatures   []string   `json:"missingFeatures"`
+	ExpiresAt         *time.Time `json:"expiresAt"`
+	Tenant            string     `json:"tenant"`
+	LicenseID         string     `json:"licenseId"`
+	LastModified      *time.Time `json:"lastModified"`
+	Error             string     `json:"error"`
 }
 
 func (s *Server) registerLicenseRoutes(mux *http.ServeMux) {
@@ -162,11 +164,13 @@ func (s *Server) licenseStatusView(ctx context.Context) (licenseStatus, []map[st
 		warningPercent = 80
 	}
 	status := licenseStatus{
-		FilePath:       s.cfg.LicenseFile,
-		State:          "unlicensed",
-		Edition:        "oss",
-		Features:       []string{},
-		WarningPercent: warningPercent,
+		FilePath:          s.cfg.LicenseFile,
+		State:             "unlicensed",
+		Edition:           "oss",
+		Features:          []string{},
+		AvailableFeatures: append([]string{}, licensing.PaidFeatureKeys...),
+		MissingFeatures:   []string{},
+		WarningPercent:    warningPercent,
 	}
 	byTenant := []map[string]any{}
 
@@ -219,6 +223,9 @@ func (s *Server) licenseStatusView(ctx context.Context) (licenseStatus, []map[st
 	status.ExpiresAt = &expiresAt
 	if !lifecycle.Expired {
 		status.Features = append(status.Features, lifecycle.Features...)
+		status.MissingFeatures = license.MissingFeatures()
+	} else {
+		status.MissingFeatures = append([]string{}, licensing.PaidFeatureKeys...)
 	}
 
 	used, perTenant, err := s.licenseSeatUsage(ctx, license.Tenant)

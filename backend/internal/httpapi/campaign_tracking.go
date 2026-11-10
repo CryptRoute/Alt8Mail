@@ -131,5 +131,5 @@ func (s *Server) campaignTrackingReport(w http.ResponseWriter, r *http.Request) 
 func (s *Server) registerCampaignTrackingRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /t/o/{token}", s.recordCampaignOpen)
 	mux.HandleFunc("GET /t/c/{token}", s.recordCampaignClick)
-	mux.HandleFunc("GET /api/campaign-tracking", s.requireUser(s.campaignTrackingReport))
+	mux.HandleFunc("GET /api/campaign-tracking", s.userFeature(FeatureDeliverability, s.campaignTrackingReport))
 }

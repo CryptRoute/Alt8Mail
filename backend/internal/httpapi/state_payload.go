@@ -486,17 +486,18 @@ func (s *Server) auditRequest(r *http.Request, sess *sessionRecord, action, targ
 }
 
 func (s *Server) insertAudit(user userRecord, action, target, detail, ip, userAgent string) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_, err := s.store.DB.Exec(ctx, `
-			INSERT INTO audit_log (tenant_id, user_id, actor, action, target, detail, ip, user_agent)
-			VALUES (NULLIF($1, '')::uuid, NULLIF($2, '')::uuid, $3, $4, $5, $6, NULLIF($7, '')::inet, $8)
-		`, user.TenantID, user.ID, user.Name, action, target, detail, ip, userAgent)
-		if err != nil {
-			s.logger.Warn("audit insert failed", "err", err)
-		}
-	}()
+	// Audit writes are synchronous: a security-relevant action must not be
+	// acknowledged to the caller before its audit row is durable. The timeout
+	// keeps an unhealthy database from stalling the request indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := s.store.DB.Exec(ctx, `
+		INSERT INTO audit_log (tenant_id, user_id, actor, action, target, detail, ip, user_agent)
+		VALUES (NULLIF($1, '')::uuid, NULLIF($2, '')::uuid, $3, $4, $5, $6, NULLIF($7, '')::inet, $8)
+	`, user.TenantID, user.ID, user.Name, action, target, detail, ip, userAgent)
+	if err != nil {
+		s.logger.Warn("audit insert failed", "err", err)
+	}
 }
 
 func filterStateAudit(state map[string]any, category string) []any {

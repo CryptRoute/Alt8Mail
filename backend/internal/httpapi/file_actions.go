@@ -120,9 +120,13 @@ func (s *Server) readFileBytes(ctx context.Context, file contentFile, tenantID s
 		if err != nil {
 			return nil, fmt.Errorf("file content is no longer available")
 		}
-		return data, nil
+		return s.openCabinetBlob(ctx, file.ID, data)
 	case "s3":
-		return s.s3GetObject(ctx, tenantID, file.StorageKey)
+		data, err := s.s3GetObject(ctx, tenantID, file.StorageKey)
+		if err != nil {
+			return nil, err
+		}
+		return s.openCabinetBlob(ctx, file.ID, data)
 	default:
 		data, _, err := s.downloadFromOAuthProvider(ctx, file.OwnerID, file.ProviderID, file.ExternalID)
 		return data, err

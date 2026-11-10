@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func newID(prefix string) string {
@@ -51,6 +53,13 @@ func nowISO() string { return time.Now().UTC().Format(time.RFC3339) }
 func (s *Server) loadState(ctx context.Context, userID string) (map[string]any, error) {
 	var raw []byte
 	err := s.store.DB.QueryRow(ctx, `SELECT state FROM app_states WHERE user_id = $1`, userID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// A user created outside the normal bootstrap (for example by an
+		// import hand-off or a test fixture) has no state document yet. The
+		// normalized tables are the source of truth for mail, so an empty
+		// document is the correct starting point.
+		return map[string]any{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}

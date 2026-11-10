@@ -134,19 +134,16 @@ func (s *Server) syncHubSpot(ctx context.Context, tenantID string) (int, error) 
 
 func (s *Server) adminSyncCRM(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireAdminSession(r)
-	provider := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("provider")))
-	if provider == "" {
-		provider = "hubspot"
-	}
-	if provider != "hubspot" {
-		writeError(w, http.StatusNotImplemented, "CRM_PROVIDER", "This CRM sync adapter is not enabled in this build")
+	provider, ok := normalizeCRMProvider(r.URL.Query().Get("provider"))
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "CRM_PROVIDER", "Choose a supported CRM provider")
 		return
 	}
 	_, _ = s.store.DB.Exec(r.Context(), `
 		INSERT INTO public.crm_sync_state (tenant_id, provider, status) VALUES ($1,$2,'running')
 		ON CONFLICT (tenant_id, provider) DO UPDATE SET status='running', last_error=''
 	`, sess.ActiveTenantID, provider)
-	count, err := s.syncHubSpot(r.Context(), sess.ActiveTenantID)
+	count, err := s.syncCRM(r.Context(), sess.ActiveTenantID, provider)
 	if err != nil {
 		_, _ = s.store.DB.Exec(r.Context(), `
 			UPDATE public.crm_sync_state SET status='failed', last_error=$3, last_sync_at=now()
@@ -222,5 +219,5 @@ func (s *Server) adminCRMState(w http.ResponseWriter, r *http.Request) {
 			states = append(states, item)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"states": states, "providers": []string{"hubspot"}})
+	writeJSON(w, http.StatusOK, map[string]any{"states": states, "providers": supportedCRMProviders})
 }

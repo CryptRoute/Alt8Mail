@@ -276,6 +276,39 @@ The webmail bootstrap exposes a redacted `license` snapshot with edition,
 state, seats, features, remaining days and expiry. It never exposes the token
 or signature. `GET /api/entitlements` returns the same snapshot.
 
+## Paid feature keys (Phase 3–6)
+
+The license `features` array is the server-side entitlement vocabulary. A
+license may list individual keys or the wildcard `all` / `*`. The canonical
+Phase 3–6 keys are:
+
+```
+recipient_scheduling, mail_followups, template_gallery, deliverability,
+campaign_tracking, ai_triage, ai_obligations, ai_search, ai_meeting_prep,
+office_ai, ai_policy_assist, mcp_governance, ai_budget, dlp_advanced,
+ediscovery, byok, file_governance, audit_export, crm_sync, migration,
+analytics, security_awareness, support_ops
+```
+
+Legacy keys still work for the features they already gate (`sso`, `saml`,
+`scim`, `shared_inbox`, `shared_drafts`, `team_templates`, `automation`,
+`mail_merge`, `booking_pages`, `white_label`). Existing licenses do **not**
+silently gain new Phase 3–6 capabilities. Reissue customer licenses with the
+new keys (or `all` for an enterprise/suite license). System Control and the
+webmail license snapshot expose `availableFeatures` and `missingFeatures` so
+operators can identify licenses that need reissue. The webmail/API return
+`LICENSE_FEATURE` for a gated capability when the key is absent or expired.
+
+### Upgrade/reissue runbook
+
+1. Read the current license snapshot in System Control → License.
+2. Copy the existing tenant/seat/expiry claims.
+3. Add the missing Phase 3–6 keys, or `all` where the contract covers the full
+   suite; keep seat and expiry unchanged.
+4. Re-sign with the offline Ed25519 key and upload the new token.
+5. Verify the webmail license snapshot shows no unexpected `missingFeatures`.
+6. Record the reissue and the old/new license IDs in the customer record.
+
 ## Signing
 
 Generate and keep the Ed25519 private key outside the repository. Sign the

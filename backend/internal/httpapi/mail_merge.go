@@ -614,14 +614,14 @@ func (s *Server) removeMailSuppression(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerMailMergeRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/mail-merges", s.requireUser(s.listMailMerges))
-	mux.HandleFunc("POST /api/mail-merges", s.requireUser(s.createMailMerge))
-	mux.HandleFunc("POST /api/mail-merges/preview", s.requireUser(s.previewMailMerge))
-	mux.HandleFunc("GET /api/mail-merges/{id}", s.requireUser(s.getMailMerge))
-	mux.HandleFunc("POST /api/mail-merges/{id}/queue", s.requireUser(s.queueMailMerge))
-	mux.HandleFunc("POST /api/mail-merges/{id}/cancel", s.requireUser(s.cancelMailMerge))
-	mux.HandleFunc("GET /api/mail-suppressions", s.requireUser(s.listMailSuppressions))
-	mux.HandleFunc("POST /api/mail-suppressions", s.requireUser(s.addMailSuppression))
-	mux.HandleFunc("DELETE /api/mail-suppressions/{email}", s.requireUser(s.removeMailSuppression))
+	mux.HandleFunc("GET /api/mail-merges", s.requireUser(featureGate(s, "mail_merge", s.listMailMerges)))
+	mux.HandleFunc("POST /api/mail-merges", s.requireUser(featureGate(s, "mail_merge", s.createMailMerge)))
+	mux.HandleFunc("POST /api/mail-merges/preview", s.requireUser(featureGate(s, "mail_merge", s.previewMailMerge)))
+	mux.HandleFunc("GET /api/mail-merges/{id}", s.requireUser(featureGate(s, "mail_merge", s.getMailMerge)))
+	mux.HandleFunc("POST /api/mail-merges/{id}/queue", s.requireUser(featureGate(s, "mail_merge", s.queueMailMerge)))
+	mux.HandleFunc("POST /api/mail-merges/{id}/cancel", s.requireUser(featureGate(s, "mail_merge", s.cancelMailMerge)))
+	mux.HandleFunc("GET /api/mail-suppressions", s.requireUser(featureGate(s, "mail_merge", s.listMailSuppressions)))
+	mux.HandleFunc("POST /api/mail-suppressions", s.requireUser(featureGate(s, "mail_merge", s.addMailSuppression)))
+	mux.HandleFunc("DELETE /api/mail-suppressions/{email}", s.requireUser(featureGate(s, "mail_merge", s.removeMailSuppression)))
 	mux.HandleFunc("GET /u/{token}", s.unsubscribeMerge)
 }

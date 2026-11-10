@@ -167,5 +167,5 @@ Do not include message details, secrets or personal data in the explanation. The
 }
 
 func (s *Server) registerAIPolicyAssistRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/ai/policy-assist", s.requireUser(s.aiPolicyAssist))
+	mux.HandleFunc("POST /api/ai/policy-assist", s.userFeature(FeatureAIPolicyAssist, s.aiPolicyAssist))
 }

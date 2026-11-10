@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -52,18 +51,7 @@ func (s *Server) officeSignedContent(w http.ResponseWriter, r *http.Request) {
 	if known {
 		mime = format.MIME
 	}
-	path, ok := s.officeStoragePath(firstNonEmpty(storageKey, attachmentID))
-	if !ok {
-		writeError(w, http.StatusNotFound, "NOT_FOUND", "File content is unavailable")
-		return
-	}
-	handle, err := os.Open(path)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "NOT_FOUND", "File content is unavailable")
-		return
-	}
-	defer handle.Close()
-	stat, err := handle.Stat()
+	data, err := s.officeReadStorage(firstNonEmpty(storageKey, attachmentID))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "File content is unavailable")
 		return
@@ -74,11 +62,11 @@ func (s *Server) officeSignedContent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", mime)
 	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(name))
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size()))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, handle)
+	_, _ = w.Write(data)
 }
 
 // officeCallback receives save events from the Document Server. The callback
@@ -428,7 +416,7 @@ func (s *Server) officeSaveCallbackVersion(ctx context.Context, document officeD
 	warningsJSON, _ := json.Marshal(dlp.Warnings)
 	matchesJSON, _ := json.Marshal(dlp.Matches)
 	var prunedStorageKeys []string
-	storageKey, checksum, err := s.officeStoreBytes(data, document.Format)
+	storageKey, checksum, err := s.officeStoreBytesForTenant(ctx, document.TenantID, data, document.Format)
 	if err != nil {
 		return 0, "", "", fmt.Errorf("could not store the saved document")
 	}

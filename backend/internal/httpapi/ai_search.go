@@ -344,5 +344,5 @@ func describeAISearchFilters(filters aiSearchFilters) string {
 }
 
 func (s *Server) registerAISearchRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/ai/search", s.requireUser(s.aiSearch))
+	mux.HandleFunc("POST /api/ai/search", s.userFeature(FeatureAISearch, s.aiSearch))
 }

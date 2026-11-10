@@ -4,7 +4,10 @@ Phase 6 turns Alt8Mail into an integrable platform: a tenant API with keys,
 idempotency and signed webhooks; CRM cache/sync; migration fidelity reporting;
 tenant analytics, support bundles and optional telemetry; an authorized
 phishing-awareness workflow; and webmail productivity/offline improvements.
-Migrations: `0079_api_platform.sql`, `0080_ecosystem.sql`.
+Migrations: `0079_api_platform.sql`, `0080_ecosystem.sql`,
+`0082_addon_action_tokens.sql` (interactive Slack/Teams actions). Storage
+encryption metadata from `0081_encrypted_storage.sql` is documented in
+`docs/PHASE5.md`.
 
 ## 6A API and automation ecosystem
 
@@ -26,19 +29,30 @@ Migrations: `0079_api_platform.sql`, `0080_ecosystem.sql`.
 
 ## 6B Integrations
 
-- `crm_records` caches HubSpot contacts and deals. `POST /admin/api/crm/sync`
-  uses the existing tenant-scoped HubSpot add-on credential. `GET
-  /admin/api/crm/records` and `/crm/state` expose the cache and sync state.
+- `crm_records` caches contacts and deals from HubSpot, Salesforce, Zoho CRM and
+  Pipedrive. `POST /admin/api/crm/sync?provider=` uses the matching tenant-scoped
+  add-on credential; `GET /admin/api/crm/records` and `/crm/state` expose the
+  cache and sync state.
+- Salesforce uses the connected-app refresh token against the production or
+  sandbox login host; Zoho exchanges a refresh token at the configured data
+  centre; Pipedrive uses an API token. Personal-data-bearing provider payloads
+  stay in the tenant's CRM cache table.
 - Sender profiles/meeting prep now include cached CRM company, title and deal
   stage when available.
-- Existing add-ons already provide Slack posting, Jira, Linear and CRM logging
-  actions. Slack/Teams interactive callback routing and Salesforce/Zoho/
-  Pipedrive sync adapters are follow-up work.
+- Slack posting now includes Block Kit actions (mark read, archive, create task)
+  when the workspace Slack app has an interactivity signing secret. Button
+  presses are verified with the Slack signature over the raw body and consumed
+  once. Microsoft Teams is a first-class add-on: it posts Adaptive Cards with
+  signed, single-use action links handled at
+  `GET /api/addons/actions/{token}`.
 - Coexistence: SCIM handles directory synchronization, calendar feeds and
-  internal free/busy exist. Dual delivery and external free/busy federation are
-  documented operator gaps, not implemented in this slice.
-- Tests: `TestPhase6CRMSyncIntegration` uses a fake HubSpot API and verifies
-  contact/deal cache, sync state and CRM-aware sender snapshots.
+  internal free/busy exist. Outbound dual delivery journals a copy of every
+  delivered message to the tenant policy's archive address. External free/busy
+  federation accepts up to five public HTTPS iCalendar feeds on
+  `GET /api/calendar/free-busy?external=…` and returns busy intervals only.
+- Tests: `TestPhase6CRMSyncIntegration`, `TestCRMProviderAdaptersIntegration`,
+  `TestAddonInteractiveActionsIntegration`, `TestICSRecurrenceExpansion` and
+  `TestBusyIntervalsSkipTransparentAndCancelled`.
 
 ## 6C Migration and adoption
 
@@ -47,11 +61,16 @@ Migrations: `0079_api_platform.sql`, `0080_ecosystem.sql`.
   imported counts and target message/folder/attachment/unread/starred/calendar
   counts, writes `migration_reports` and audits the generation.
 - The importer validation phase remains the rehearsal path: source credentials
-  and mailbox access are checked before queued writes. Native Gmail API and
-  Microsoft Graph importers are follow-up work; Gmail/M365 can be migrated over
-  IMAP/POP today.
-- Tests: `TestPhase6MigrationFidelityIntegration` verifies counts, flags,
-  attachment/calendar evidence and report persistence.
+  and mailbox access are checked before queued writes.
+- Native `gmail` and `graph` protocols import through the Gmail API and
+  Microsoft Graph. The credential column accepts a raw OAuth access token or a
+  JSON bundle (`accessToken`, `refreshToken`, `clientId`, `clientSecret`) for
+  refresh-capable long jobs. The token's account must match the mailbox row.
+  Source folders map to INBOX/Sent/Drafts/Trash/Junk, flags and received dates
+  are preserved, and cursors survive restarts.
+- Tests: `TestPhase6MigrationFidelityIntegration`,
+  `TestMailImportOAuthTokenAndProfile` and
+  `TestMailImportProviderFolderMapping`.
 
 ## 6D Scale and operations
 

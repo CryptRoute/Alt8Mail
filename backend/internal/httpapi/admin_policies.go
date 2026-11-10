@@ -174,6 +174,8 @@ type adminMailPolicy struct {
 	PreventForward            bool           `json:"preventForward"`
 	WatermarkExternal         bool           `json:"watermarkExternal"`
 	RetentionByClassification map[string]int `json:"retentionByClassification"`
+	DualDeliveryEnabled       bool           `json:"dualDeliveryEnabled"`
+	DualDeliveryAddress       string         `json:"dualDeliveryAddress"`
 }
 
 type adminFilesPolicy struct {
@@ -455,6 +457,12 @@ func validateTenantPolicy(policy adminTenantPolicy) (adminTenantPolicy, []string
 	}
 	if policy.Mail.RetentionDays < 0 || policy.Mail.RetentionDays > 3650 {
 		errors = append(errors, "Retention must be between 0 and 3650 days")
+	}
+	policy.Mail.DualDeliveryAddress = strings.ToLower(strings.TrimSpace(policy.Mail.DualDeliveryAddress))
+	if policy.Mail.DualDeliveryEnabled {
+		if _, err := normalizeMailImportEmail(policy.Mail.DualDeliveryAddress); err != nil {
+			errors = append(errors, "Dual delivery needs a valid archive mailbox address")
+		}
 	}
 	retentionByClass := map[string]int{}
 	for rawClass, days := range policy.Mail.RetentionByClassification {

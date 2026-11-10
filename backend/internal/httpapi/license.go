@@ -111,6 +111,8 @@ func (s *Server) licenseSnapshot(ctx context.Context) map[string]any {
 			"edition": "oss", "state": state, "inGrace": false, "expired": false,
 			"seats": 0, "seatLimit": 0, "usedSeats": 0,
 			"features": []string{}, "daysRemaining": 0, "expiresAt": "",
+			"availableFeatures": append([]string{}, paidFeatureKeys...),
+			"missingFeatures":   append([]string{}, paidFeatureKeys...),
 		}
 	}
 	status := s.license.Status(s.licenseTime())
@@ -134,9 +136,11 @@ func (s *Server) licenseSnapshot(ctx context.Context) map[string]any {
 		"edition": s.license.Edition, "state": status.State,
 		"inGrace": status.InGrace, "expired": status.Expired,
 		"seats": status.SeatLimit, "seatLimit": status.SeatLimit, "usedSeats": used,
-		"features":      features,
-		"daysRemaining": status.DaysRemaining,
-		"expiresAt":     status.ExpiresAt.UTC().Format(time.RFC3339),
+		"features":          features,
+		"availableFeatures": append([]string{}, paidFeatureKeys...),
+		"missingFeatures":   s.missingPaidFeatures(),
+		"daysRemaining":     status.DaysRemaining,
+		"expiresAt":         status.ExpiresAt.UTC().Format(time.RFC3339),
 	}
 }
 

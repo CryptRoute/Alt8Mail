@@ -247,8 +247,8 @@ func (s *Server) registerPhishingPublicRoutes(mux *http.ServeMux) {
 }
 
 func (s *Server) registerPhishingAdminRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /phishing/campaigns", s.adminRequirePermission("phishing.read", s.adminListPhishingCampaigns))
-	mux.HandleFunc("POST /phishing/campaigns", s.adminRequirePermission("phishing.manage", s.adminCreatePhishingCampaign))
-	mux.HandleFunc("POST /phishing/campaigns/{id}/launch", s.adminRequirePermission("phishing.manage", s.adminLaunchPhishingCampaign))
-	mux.HandleFunc("GET /phishing/campaigns/{id}/report", s.adminRequirePermission("phishing.read", s.adminPhishingReport))
+	mux.HandleFunc("GET /phishing/campaigns", s.adminFeature("phishing.read", FeatureSecurityAwareness, s.adminListPhishingCampaigns))
+	mux.HandleFunc("POST /phishing/campaigns", s.adminFeature("phishing.manage", FeatureSecurityAwareness, s.adminCreatePhishingCampaign))
+	mux.HandleFunc("POST /phishing/campaigns/{id}/launch", s.adminFeature("phishing.manage", FeatureSecurityAwareness, s.adminLaunchPhishingCampaign))
+	mux.HandleFunc("GET /phishing/campaigns/{id}/report", s.adminFeature("phishing.read", FeatureSecurityAwareness, s.adminPhishingReport))
 }

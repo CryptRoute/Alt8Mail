@@ -11,20 +11,23 @@ import (
 const maxFileFolderDepth = 8
 
 type fileFolderRecord struct {
-	ID        string
-	ParentID  string
-	Name      string
-	Color     string
-	Path      string
-	FileCount int64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID                string
+	ParentID          string
+	Name              string
+	Color             string
+	Path              string
+	FileCount         int64
+	ClientEncrypted   bool
+	EncryptionKeyHint string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 func (folder fileFolderRecord) public() map[string]any {
 	return map[string]any{
 		"id": folder.ID, "parentId": folder.ParentID, "name": folder.Name,
 		"color": folder.Color, "path": folder.Path, "count": folder.FileCount,
+		"clientEncrypted": folder.ClientEncrypted, "encryptionKeyHint": folder.EncryptionKeyHint,
 		"createdAt": folder.CreatedAt.UTC().Format(time.RFC3339),
 		"updatedAt": folder.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -33,6 +36,7 @@ func (folder fileFolderRecord) public() map[string]any {
 func (s *Server) loadFileFolders(ctx context.Context, userID string) ([]map[string]any, error) {
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT f.id, COALESCE(f.parent_id, ''), f.name, f.color, f.created_at, f.updated_at,
+		       f.client_encrypted, f.encryption_key_hint,
 		       (SELECT count(*) FROM files x WHERE x.user_id=f.user_id AND x.folder_id=f.id
 		          AND x.provider_id='a8m')
 		FROM file_folders f WHERE f.user_id=$1
@@ -46,7 +50,7 @@ func (s *Server) loadFileFolders(ctx context.Context, userID string) ([]map[stri
 	for rows.Next() {
 		var folder fileFolderRecord
 		if rows.Scan(&folder.ID, &folder.ParentID, &folder.Name, &folder.Color,
-			&folder.CreatedAt, &folder.UpdatedAt, &folder.FileCount) == nil {
+			&folder.CreatedAt, &folder.UpdatedAt, &folder.ClientEncrypted, &folder.EncryptionKeyHint, &folder.FileCount) == nil {
 			records = append(records, folder)
 		}
 	}
@@ -88,9 +92,11 @@ func (s *Server) getFileFolders(w http.ResponseWriter, r *http.Request) {
 }
 
 type fileFolderBody struct {
-	Name     *string `json:"name"`
-	ParentID *string `json:"parentId"`
-	Color    *string `json:"color"`
+	Name              *string `json:"name"`
+	ParentID          *string `json:"parentId"`
+	Color             *string `json:"color"`
+	ClientEncrypted   *bool   `json:"clientEncrypted"`
+	EncryptionKeyHint *string `json:"encryptionKeyHint"`
 }
 
 func cleanFolderName(value string) (string, bool) {
@@ -182,9 +188,9 @@ func (s *Server) createFileFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	id := newID("folder")
 	_, err = s.store.DB.Exec(r.Context(), `
-		INSERT INTO file_folders (id, tenant_id, user_id, parent_id, name, color)
-		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6)
-	`, id, sess.User.TenantID, sess.User.ID, parentID, name, color)
+		INSERT INTO file_folders (id, tenant_id, user_id, parent_id, name, color, client_encrypted, encryption_key_hint)
+		VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8)
+	`, id, sess.User.TenantID, sess.User.ID, parentID, name, color, body.ClientEncrypted != nil && *body.ClientEncrypted, truncate(strings.TrimSpace(valueOrEmpty(body.EncryptionKeyHint)), 120))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "FOLDER", "Could not create the folder")
 		return

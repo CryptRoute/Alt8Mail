@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Server) registerSendTimeRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/send-time-suggestions", s.requireUser(s.sendTimeSuggestions))
+	mux.HandleFunc("POST /api/send-time-suggestions", s.userFeature(FeatureRecipientScheduling, s.sendTimeSuggestions))
 }
 
 type recipientTimeProfile struct {

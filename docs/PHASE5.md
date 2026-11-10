@@ -4,7 +4,7 @@ Phase 5 adds compliance and data-governance controls: advanced DLP detectors,
 legal hold and retention across mail and Cabinet files, signed eDiscovery and
 audit exports, a review queue, BYOK envelope keys, an OCR/file text index and
 SIEM export packs. Migrations: `0076_governance.sql`, `0077_legal_review.sql`,
-`0078_audit_exports.sql`.
+`0078_audit_exports.sql`, `0081_encrypted_storage.sql`.
 
 ## 5A Advanced DLP
 
@@ -67,11 +67,24 @@ SIEM export packs. Migrations: `0076_governance.sql`, `0077_legal_review.sql`,
 - Tests: `TestPhase5BYOKIntegration` covers enable, sealing, locked error,
   wrong-key rejection, unlock, rotation, v2 sealing, isolation and key-material
   non-disclosure.
-- Known limit: BYOK covers tenant secrets (AI credentials in this slice).
-  Application-level encryption of mailbox rows, Office binaries and Cabinet
-  blobs, and client-side encrypted Cabinet folders, are not implemented here;
-  use PostgreSQL/storage-at-rest encryption for those layers. See the lost-key
-  runbook note below.
+- Blob encryption (`blob_encryption.go`, migration `0081_encrypted_storage`):
+  when BYOK is active, new Office binaries and Cabinet file blobs are sealed
+  with the active tenant DEK using AES-256-GCM envelopes. Reads decrypt through
+  the same key version; a locked tenant key fails closed rather than serving
+  plaintext. Legacy plaintext blobs remain readable.
+- Client-side encrypted Cabinet folders set `client_encrypted` on the folder
+  and files. The server never decrypts those files; uploads into such a folder
+  must declare `clientEncrypted: true` and carry only client ciphertext.
+- Data residency: S3 uploads compare the configured bucket region with the
+  tenant policy region and reject a mismatch. Local storage residency remains
+  an operator placement decision.
+- Known limit: mail message rows (`mail_messages`) and their search index are
+  not application-encrypted, because encryption would break server-side search
+  and AI retrieval without a separate searchable-index design. Use PostgreSQL
+  storage encryption (TDE) or encrypted volumes for that layer. See the
+  lost-key runbook note below.
+- Tests: `TestPhase5StorageEncryptionIntegration` covers Office/Cabinet blob
+  sealing, decryption, client-encrypted pass-through and locked-key failure.
 
 ## 5D Files governance, OCR and file search
 

@@ -561,9 +561,9 @@ func (s *Server) bookingPageForOwner(ctx context.Context, user userRecord, id st
 }
 
 func (s *Server) registerBookingRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/booking-pages", s.requireUser(s.listBookingPages))
-	mux.HandleFunc("POST /api/booking-pages", s.requireUser(s.createBookingPage))
-	mux.HandleFunc("POST /api/booking-pages/{id}/members", s.requireUser(s.addBookingMember))
+	mux.HandleFunc("GET /api/booking-pages", s.requireUser(featureGate(s, "booking_pages", s.listBookingPages)))
+	mux.HandleFunc("POST /api/booking-pages", s.requireUser(featureGate(s, "booking_pages", s.createBookingPage)))
+	mux.HandleFunc("POST /api/booking-pages/{id}/members", s.requireUser(featureGate(s, "booking_pages", s.addBookingMember)))
 	mux.HandleFunc("GET /api/public/booking/{slug}/slots", s.publicBookingSlots)
 	mux.HandleFunc("POST /api/public/booking/{slug}/book", s.bookSlot)
 	mux.HandleFunc("GET /book/{slug}", s.publicBookingPage)

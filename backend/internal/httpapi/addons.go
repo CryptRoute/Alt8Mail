@@ -138,6 +138,29 @@ var addonDefinitions = []addonDefinition{
 		SortOrder: 30,
 	},
 	{
+		ID: "teams", Name: "Microsoft Teams", Vendor: "Microsoft Corporation", Category: "Communication",
+		Description: "Post an Adaptive Card summary of an email into a Microsoft Teams channel with one-click actions.",
+		Icon:        "i-people", Color: "#5b5fc7", LogoAsset: "teams.svg",
+		Tagline:    "Share an email summary and act on it from Microsoft Teams.",
+		WebsiteURL: "https://www.microsoft.com/microsoft-teams", SupportURL: "https://support.microsoft.com/teams",
+		PrivacyURL: "https://privacy.microsoft.com", DocsURL: "https://learn.microsoft.com/microsoftteams/platform/webhooks-and-connectors/",
+		ConnectorVersion: "1.0",
+		ConnectionScope:  "tenant", AuthType: "webhook", RequiresTenantSetup: true,
+		Scopes: []string{"chat:write"},
+		Permissions: []string{
+			"Read the selected email's subject, sender and preview",
+			"Post that summary to the configured Microsoft Teams channel",
+			"Mark the message read, archive it or create a task from Teams",
+		},
+		Actions: []addonAction{
+			{ID: "send-to-channel", Label: "Send to Teams", Description: "Post the selected email summary to Microsoft Teams.", Surface: "reader"},
+		},
+		Fields: []addonField{
+			{Key: "webhookUrl", Label: "Microsoft Teams workflow webhook URL", Type: "password", Required: true, Secret: true, Placeholder: "https://…webhook.office.com/webhookb2/…", Help: "In Microsoft Teams, open the channel menu → Workflows → \"Post to a channel when a webhook request is received\", then paste the URL it creates. The URL is encrypted before it is stored."},
+		},
+		SortOrder: 31,
+	},
+	{
 		ID: "hubspot", Name: "HubSpot", Vendor: "HubSpot, Inc.", Category: "CRM",
 		Description: "Log the selected email to the matching HubSpot contact's CRM timeline.",
 		Icon:        "i-people", Color: "#ff7a59", LogoAsset: "hubspot.svg",
@@ -884,6 +907,14 @@ func (s *Server) connectAddon(w http.ResponseWriter, r *http.Request) {
 		}
 		credentials["webhookUrl"] = webhookURL
 		accountLabel = "Slack channel"
+	case "teams":
+		webhookURL := strings.TrimSpace(body["webhookUrl"])
+		if err := validateTeamsWebhook(webhookURL); err != nil {
+			writeError(w, http.StatusBadRequest, "ADDON_WEBHOOK", err.Error())
+			return
+		}
+		credentials["webhookUrl"] = webhookURL
+		accountLabel = "Teams channel"
 	case "todoist":
 		apiKey := strings.TrimSpace(body["apiKey"])
 		if len(apiKey) < 8 || len(apiKey) > 2000 {
@@ -1558,12 +1589,37 @@ func (s *Server) runAddonAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "ADDON_ACTION", "Add-on action not found")
 			return
 		}
-		if err := slackPost(r.Context(), credentials["webhookUrl"], message); err != nil {
+		actions := map[string]string{}
+		if s.addonTenantRecord(r.Context(), sess.User.TenantID, "slack").WebhookSecretSealed != "" {
+			actions, _ = s.createAddonActionTokens(r.Context(), sess.User.TenantID, sess.User.ID, "slack", connection.ID, body.MessageID)
+		}
+		if err := slackPost(r.Context(), credentials["webhookUrl"], message, actions); err != nil {
 			s.logger.Warn("slack post", "err", err)
 			writeError(w, http.StatusBadGateway, "ADDON_PROVIDER", "Slack could not accept this message")
 			return
 		}
-		result = map[string]any{"posted": true}
+		result = map[string]any{"posted": true, "interactive": len(actions) > 0}
+	case "teams":
+		if action != "send-to-channel" {
+			writeError(w, http.StatusNotFound, "ADDON_ACTION", "Add-on action not found")
+			return
+		}
+		tokens, err := s.createAddonActionTokens(r.Context(), sess.User.TenantID, sess.User.ID, "teams", connection.ID, body.MessageID)
+		if err != nil {
+			s.logger.Warn("teams action tokens", "err", err)
+			writeError(w, http.StatusInternalServerError, "ADDON_ACTION", "Could not prepare Teams actions")
+			return
+		}
+		actionURLs := map[string]string{}
+		for key, token := range tokens {
+			actionURLs[key] = s.teamsActionBase(r) + "/api/addons/actions/" + url.PathEscape(token)
+		}
+		if err := teamsPost(r.Context(), credentials["webhookUrl"], message, actionURLs); err != nil {
+			s.logger.Warn("teams post", "err", err)
+			writeError(w, http.StatusBadGateway, "ADDON_PROVIDER", "Microsoft Teams could not accept this message")
+			return
+		}
+		result = map[string]any{"posted": true, "interactive": true}
 	case "hubspot":
 		if action != "log-email" {
 			writeError(w, http.StatusNotFound, "ADDON_ACTION", "Add-on action not found")
@@ -2115,6 +2171,25 @@ func validateSlackWebhook(raw string) error {
 	host := strings.ToLower(parsed.Hostname())
 	if host != "hooks.slack.com" && host != "hooks.slack-gov.com" {
 		return fmt.Errorf("Use a webhook URL from hooks.slack.com")
+	}
+	return nil
+}
+
+func validateTeamsWebhook(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.Path == "" || parsed.Path == "/" {
+		return fmt.Errorf("Paste the full HTTPS Microsoft Teams workflow webhook URL")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	allowed := false
+	for _, suffix := range []string{".webhook.office.com", ".logic.azure.com", ".powerplatform.com", ".office.com"} {
+		if strings.HasSuffix(host, suffix) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("Use a webhook URL from Microsoft Teams or Power Automate")
 	}
 	return nil
 }
@@ -3104,7 +3179,7 @@ func mergoAddContact(ctx context.Context, webhookURL string, message addonMailMe
 	return nil
 }
 
-func slackPost(ctx context.Context, webhookURL string, message addonMailMessage) error {
+func slackPost(ctx context.Context, webhookURL string, message addonMailMessage, actions map[string]string) error {
 	if err := validateSlackWebhook(webhookURL); err != nil {
 		return err
 	}
@@ -3118,8 +3193,29 @@ func slackPost(ctx context.Context, webhookURL string, message addonMailMessage)
 		preview = preview[:1200]
 	}
 	text := fmt.Sprintf("*New email from %s*\n*Subject:* %s\n> %s", slackEscape(from), slackEscape(subject), slackEscape(preview))
-	payload, _ := json.Marshal(map[string]string{"text": text})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, strings.NewReader(string(payload)))
+	payload := map[string]any{"text": text}
+	if len(actions) > 0 {
+		elements := []map[string]any{}
+		for _, action := range addonInteractiveActions {
+			token := strings.TrimSpace(actions[action.Key])
+			if token == "" {
+				continue
+			}
+			elements = append(elements, map[string]any{
+				"type": "button", "action_id": "a8m_" + action.Key,
+				"text":  map[string]any{"type": "plain_text", "text": action.Label},
+				"value": token,
+			})
+		}
+		if len(elements) > 0 {
+			payload["blocks"] = []map[string]any{
+				{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": text}},
+				{"type": "actions", "elements": elements},
+			}
+		}
+	}
+	encoded, _ := json.Marshal(payload)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, strings.NewReader(string(encoded)))
 	if err != nil {
 		return err
 	}
@@ -3135,6 +3231,67 @@ func slackPost(ctx context.Context, webhookURL string, message addonMailMessage)
 	}
 	if body := strings.TrimSpace(string(raw)); body != "" && body != "ok" {
 		return fmt.Errorf("Slack rejected the webhook")
+	}
+	return nil
+}
+
+func teamsPost(ctx context.Context, webhookURL string, message addonMailMessage, actionURLs map[string]string) error {
+	if err := validateTeamsWebhook(webhookURL); err != nil {
+		return err
+	}
+	from := strings.TrimSpace(firstNonEmpty(message.FromName, message.FromEmail))
+	subject := strings.TrimSpace(message.Subject)
+	if subject == "" {
+		subject = "(no subject)"
+	}
+	preview := strings.TrimSpace(firstNonEmpty(message.Snippet, message.BodyText))
+	if len(preview) > 1200 {
+		preview = preview[:1200]
+	}
+	body := []map[string]any{
+		{"type": "TextBlock", "size": "Medium", "weight": "Bolder", "text": "New email from " + from, "wrap": true},
+		{"type": "TextBlock", "weight": "Bolder", "text": subject, "wrap": true},
+		{"type": "TextBlock", "text": preview, "wrap": true, "isSubtle": true},
+	}
+	actions := []map[string]any{}
+	for _, action := range addonInteractiveActions {
+		link := strings.TrimSpace(actionURLs[action.Key])
+		if link == "" {
+			continue
+		}
+		actions = append(actions, map[string]any{"type": "Action.OpenUrl", "title": action.Label, "url": link})
+	}
+	card := map[string]any{
+		"$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+		"type":    "AdaptiveCard", "version": "1.4", "body": body,
+	}
+	if len(actions) > 0 {
+		card["actions"] = actions
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"type": "message",
+		"attachments": []map[string]any{{
+			"contentType": "application/vnd.microsoft.card.adaptive",
+			"content":     card,
+		}},
+	})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := addonDo(ctx, "teams", request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 16*1024))
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("Microsoft Teams returned %d", response.StatusCode)
+	}
+	bodyText := strings.ToLower(string(raw))
+	if strings.Contains(bodyText, `"error"`) || strings.Contains(bodyText, "webhook is invalid") {
+		return fmt.Errorf("Microsoft Teams rejected the webhook")
 	}
 	return nil
 }

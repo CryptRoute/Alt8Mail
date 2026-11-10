@@ -272,7 +272,7 @@ func (s *Server) feedbackAITriage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerAITriageRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/ai/triage", s.requireUser(s.aiTriageBatch))
-	mux.HandleFunc("GET /api/ai/triage", s.requireUser(s.listAITriage))
-	mux.HandleFunc("POST /api/ai/triage/{id}/feedback", s.requireUser(s.feedbackAITriage))
+	mux.HandleFunc("POST /api/ai/triage", s.userFeature(FeatureAITriage, s.aiTriageBatch))
+	mux.HandleFunc("GET /api/ai/triage", s.userFeature(FeatureAITriage, s.listAITriage))
+	mux.HandleFunc("POST /api/ai/triage/{id}/feedback", s.userFeature(FeatureAITriage, s.feedbackAITriage))
 }

@@ -119,7 +119,7 @@ func (s *Server) validatePaymentLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerGalleryRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/template-gallery", s.requireUser(s.listTemplateGallery))
-	mux.HandleFunc("POST /api/template-gallery/{id}/install", s.requireUser(s.installGalleryTemplate))
-	mux.HandleFunc("POST /api/payment-links/validate", s.requireUser(s.validatePaymentLink))
+	mux.HandleFunc("GET /api/template-gallery", s.userFeature(FeatureTemplateGallery, s.listTemplateGallery))
+	mux.HandleFunc("POST /api/template-gallery/{id}/install", s.userFeature(FeatureTemplateGallery, s.installGalleryTemplate))
+	mux.HandleFunc("POST /api/payment-links/validate", s.userFeature(FeatureTemplateGallery, s.validatePaymentLink))
 }

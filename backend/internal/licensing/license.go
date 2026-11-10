@@ -167,7 +167,8 @@ func (l License) HasFeature(name string) bool {
 		return false
 	}
 	for _, feature := range l.Features {
-		if strings.ToLower(feature) == name {
+		normalized := strings.ToLower(strings.TrimSpace(feature))
+		if normalized == "all" || normalized == "*" || normalized == name {
 			return true
 		}
 	}

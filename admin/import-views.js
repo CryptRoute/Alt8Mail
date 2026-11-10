@@ -211,24 +211,30 @@ function mailImportStatusClass(status) {
 
 function renderMailImportSetup() {
   const source = mailImportState.source;
+  const oauthProtocol = source.protocol === "gmail" || source.protocol === "graph";
+  const oauthHost = source.protocol === "gmail" ? "gmail.googleapis.com" : "graph.microsoft.com";
+  const protocolOptions = [
+    ["imap", "IMAP (recommended)"], ["pop3", "POP3"], ["gmail", "Gmail API (OAuth)"], ["graph", "Microsoft Graph (OAuth)"]
+  ];
   return `<section class="card import-card">
     <div class="import-step"><span>1</span><div><h2>Connect to the old mail server</h2><p>Mail is copied, never deleted from the old provider unless you explicitly enable that option.</p></div></div>
     <div class="field-row">
-      <label class="field"><span>Protocol</span><select id="mailImportProtocol"><option value="imap" ${source.protocol === "imap" ? "selected" : ""}>IMAP (recommended)</option><option value="pop3" ${source.protocol === "pop3" ? "selected" : ""}>POP3</option></select></label>
-      <label class="field grow"><span>Server hostname</span><input id="mailImportHost" value="${esc(source.host)}" placeholder="mail.old-provider.com" autocomplete="off"></label>
-      <label class="field"><span>Port</span><input id="mailImportPort" type="number" min="1" max="65535" value="${Number(source.port) || 993}"></label>
-      <label class="field"><span>Security</span><select id="mailImportSecurity"><option value="ssl" ${source.security === "ssl" ? "selected" : ""}>SSL / TLS</option><option value="starttls" ${source.security === "starttls" ? "selected" : ""}>STARTTLS</option><option value="none" ${source.security === "none" ? "selected" : ""}>Unencrypted (not recommended)</option></select></label>
+      <label class="field"><span>Protocol</span><select id="mailImportProtocol">${protocolOptions.map(([value, label]) => `<option value="${value}" ${source.protocol === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+      <label class="field grow"><span>Server hostname</span><input id="mailImportHost" value="${esc(oauthProtocol ? oauthHost : source.host)}" placeholder="mail.old-provider.com" autocomplete="off" ${oauthProtocol ? "disabled" : ""}></label>
+      <label class="field"><span>Port</span><input id="mailImportPort" type="number" min="1" max="65535" value="${oauthProtocol ? 443 : (Number(source.port) || 993)}" ${oauthProtocol ? "disabled" : ""}></label>
+      <label class="field"><span>Security</span><select id="mailImportSecurity" ${oauthProtocol ? "disabled" : ""}><option value="ssl" ${source.security === "ssl" || oauthProtocol ? "selected" : ""}>SSL / TLS</option><option value="starttls" ${source.security === "starttls" && !oauthProtocol ? "selected" : ""}>STARTTLS</option><option value="none" ${source.security === "none" && !oauthProtocol ? "selected" : ""}>Unencrypted (not recommended)</option></select></label>
     </div>
+    ${oauthProtocol ? `<div class="notice tone-info" style="margin:10px 0 0"><div><strong>OAuth migration</strong><p>Paste a Google or Microsoft OAuth access token in the password column. For jobs longer than one hour use a JSON bundle with <code>accessToken</code>, <code>refreshToken</code>, <code>clientId</code> and <code>clientSecret</code>. The token must belong to the mailbox being imported.</p></div></div>` : ""}
     <div class="import-options">
       <label class="switch-inline"><input type="checkbox" id="mailImportJunk" ${source.includeJunk ? "checked" : ""}><span>Include Junk / Spam</span></label>
       <label class="switch-inline"><input type="checkbox" id="mailImportTrash" ${source.includeTrash ? "checked" : ""}><span>Include Trash / Deleted</span></label>
       <label class="switch-inline"><input type="checkbox" id="mailImportDrafts" ${source.includeDrafts !== false ? "checked" : ""}><span>Include Drafts</span></label>
       <span class="muted">Messages above ${Number(source.maxMessageMB) || 50} MB are skipped for safety.</span>
     </div>
-    <div class="import-step" style="margin-top:22px"><span>2</span><div><h2>Add mailbox credentials</h2><p>Upload a CSV with <code>email</code> and <code>password</code>, plus optional <code>notify_email</code>, or add rows manually.</p></div></div>
-    <label class="import-drop" id="mailImportDrop">${icon("arrow-up")}<b>Drop the mailbox CSV here</b><span>email, password, notify_email</span><input type="file" id="mailImportFile" accept=".csv,.tsv,.txt,.xlsx,.xlsm" hidden></label>
+    <div class="import-step" style="margin-top:22px"><span>2</span><div><h2>Add mailbox credentials</h2><p>Upload a CSV with <code>email</code> and <code>password</code> (or an OAuth token for Gmail/Graph), plus optional <code>notify_email</code>, or add rows manually.</p></div></div>
+    <label class="import-drop" id="mailImportDrop">${icon("arrow-up")}<b>Drop the mailbox CSV here</b><span>email, password / OAuth token, notify_email</span><input type="file" id="mailImportFile" accept=".csv,.tsv,.txt,.xlsx,.xlsm" hidden></label>
     <div class="import-toolbar"><button class="btn secondary" type="button" id="mailImportChoose">${icon("list")}Choose file</button><button class="btn ghost small" type="button" id="mailImportTemplate">Download CSV template</button><button class="btn ghost small" type="button" id="mailImportAddRow">${icon("plus")}Add row manually</button></div>
-    <div class="manual-mailbox-list">${mailImportState.manualRows.map((row, index) => `<div class="manual-mailbox-row"><input data-manual-email="${index}" placeholder="user@old-provider.com" value="${esc(row.email)}"><input data-manual-password="${index}" type="password" placeholder="Mailbox password" value="${esc(row.password)}"><input data-manual-notify="${index}" type="email" placeholder="Notify email (optional)" value="${esc(row.notifyEmail || "")}"><button class="icon-button" type="button" data-manual-remove="${index}" aria-label="Remove row">${icon("x")}</button></div>`).join("") || `<div class="empty-mini">No manual rows. Upload a CSV or add one below.</div>`}</div>
+    <div class="manual-mailbox-list">${mailImportState.manualRows.map((row, index) => `<div class="manual-mailbox-row"><input data-manual-email="${index}" placeholder="user@old-provider.com" value="${esc(row.email)}"><input data-manual-password="${index}" type="password" placeholder="${oauthProtocol ? "OAuth token or JSON bundle" : "Mailbox password"}" value="${esc(row.password)}"><input data-manual-notify="${index}" type="email" placeholder="Notify email (optional)" value="${esc(row.notifyEmail || "")}"><button class="icon-button" type="button" data-manual-remove="${index}" aria-label="Remove row">${icon("x")}</button></div>`).join("") || `<div class="empty-mini">No manual rows. Upload a CSV or add one below.</div>`}</div>
     <div class="import-actions"><span class="muted" style="font-size:11px">${mailImportState.manualRows.length} manual row${mailImportState.manualRows.length === 1 ? "" : "s"} · credentials are sealed with AES-GCM before storage</span><button class="btn primary" type="button" id="mailImportValidate">${icon("shield")}Validate credentials</button></div>
   </section>`;
 }
@@ -293,9 +299,11 @@ function mailImportMappingRow(item) {
 function bindImportMailboxes() {
   $("#mailImportProtocol")?.addEventListener("change", (event) => {
     mailImportState.source.protocol = event.target.value;
-    mailImportState.source.port = mailImportState.source.security === "ssl"
-      ? (event.target.value === "pop3" ? 995 : 993)
-      : (event.target.value === "pop3" ? 110 : 143);
+    mailImportState.source.port = event.target.value === "gmail" || event.target.value === "graph"
+      ? 443
+      : mailImportState.source.security === "ssl"
+        ? (event.target.value === "pop3" ? 995 : 993)
+        : (event.target.value === "pop3" ? 110 : 143);
     renderImportMailboxes();
   });
   $("#mailImportHost")?.addEventListener("input", (event) => { mailImportState.source.host = event.target.value; });

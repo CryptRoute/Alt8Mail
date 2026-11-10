@@ -21,14 +21,15 @@ import (
 const maxAttachmentBytes = 8 * 1024 * 1024
 
 type fileCreateBody struct {
-	ProviderID   string  `json:"providerId"`
-	AttachmentID string  `json:"attachmentId"`
-	Name         string  `json:"name"`
-	SizeBytes    float64 `json:"sizeBytes"`
-	MIME         string  `json:"mime"`
-	Path         string  `json:"path"`
-	FolderID     string  `json:"folderId"`
-	Description  string  `json:"description"`
+	ProviderID      string  `json:"providerId"`
+	AttachmentID    string  `json:"attachmentId"`
+	Name            string  `json:"name"`
+	SizeBytes       float64 `json:"sizeBytes"`
+	MIME            string  `json:"mime"`
+	Path            string  `json:"path"`
+	FolderID        string  `json:"folderId"`
+	Description     string  `json:"description"`
+	ClientEncrypted bool    `json:"clientEncrypted"`
 }
 
 type filePatchBody struct {
@@ -364,6 +365,29 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 			path = provider.Name
 		}
 	}
+	clientEncrypted := body.ClientEncrypted
+	if folderID != "" {
+		var folderEncrypted bool
+		_ = s.store.DB.QueryRow(r.Context(), `SELECT client_encrypted FROM public.file_folders WHERE id=$1 AND user_id=$2`, folderID, sess.User.ID).Scan(&folderEncrypted)
+		if folderEncrypted && !clientEncrypted {
+			writeError(w, http.StatusBadRequest, "CLIENT_ENCRYPTION_REQUIRED", "This Cabinet folder is client-encrypted; upload ciphertext from a client that holds the folder key")
+			return
+		}
+		if folderEncrypted {
+			clientEncrypted = true
+		}
+	}
+	storedData := data
+	encryptionVersion := 0
+	if !clientEncrypted {
+		sealed, version, err := s.sealTenantBlob(r.Context(), sess.User.TenantID, data)
+		if err != nil {
+			writeError(w, http.StatusLocked, "ENCRYPTION_LOCKED", "Unlock the organization's customer-managed key before adding files")
+			return
+		}
+		storedData = sealed
+		encryptionVersion = version
+	}
 	if provider.Kind == "internal" {
 		if err := s.enforceStorageQuota(r.Context(), sess.User, int64(len(data))); err != nil {
 			writeError(w, http.StatusInsufficientStorage, "STORAGE_QUOTA", err.Error())
@@ -372,13 +396,25 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	}
 	id := newID("file")
 	storageKey := storedName
+	if provider.Kind == "internal" {
+		storageKey = newID("fileblob")
+		target := filepath.Join(s.cfg.UploadDir, storageKey)
+		if err := os.MkdirAll(s.cfg.UploadDir, 0o750); err != nil || os.WriteFile(target, storedData, 0o640) != nil {
+			writeError(w, http.StatusInternalServerError, "FILE_STORE", "Could not store the encrypted file")
+			return
+		}
+	}
 	externalID := ""
 	externalURL := ""
 	mime, _ = detectUploadMIME(data, mime, name)
 	switch provider.Kind {
 	case "s3":
+		if region := strings.TrimSpace(s.tenantPolicyFor(r.Context(), sess.User.TenantID).Security.DataResidencyRegion); region != "" && !strings.EqualFold(strings.TrimSpace(s.cfg.S3Region), region) {
+			writeError(w, http.StatusForbidden, "DATA_RESIDENCY", "The configured S3 region does not match the organization's data-residency policy")
+			return
+		}
 		key := fmt.Sprintf("tenants/%s/users/%s/files/%s/%s", sess.User.TenantID, sess.User.ID, id, name)
-		if err := s.s3PutObject(r.Context(), sess.User.TenantID, key, mime, data); err != nil {
+		if err := s.s3PutObject(r.Context(), sess.User.TenantID, key, mime, storedData); err != nil {
 			writeError(w, http.StatusBadGateway, "S3_UPLOAD", "Could not upload the file to S3: "+err.Error())
 			return
 		}
@@ -387,6 +423,10 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 		// updates this row instead of creating a duplicate.
 		externalID = key
 	case "oauth":
+		if encryptionVersion > 0 {
+			writeError(w, http.StatusConflict, "ENCRYPTION_STORAGE", "Connected storage requires a client-encrypted Cabinet folder for BYOK-protected files")
+			return
+		}
 		remoteID, remoteURL, err := s.uploadToOAuthProvider(r.Context(), sess, providerID, name, mime, data)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "PROVIDER_UPLOAD", err.Error())
@@ -399,10 +439,12 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	previewable := (mime == "application/pdf" || strings.HasPrefix(mime, "image/")) && mime != "image/svg+xml"
 	_, err = s.store.DB.Exec(r.Context(), `
 		INSERT INTO files (id, tenant_id, user_id, provider_id, external_id, name, mime, path, folder_id, description,
-		                   size_bytes, storage_key, attachment_id, external_url, previewable, metadata)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10,$11,$12,$13,$14,$15,$16)
+		                   size_bytes, storage_key, attachment_id, external_url, previewable, metadata,
+		                   encryption_key_version, client_encrypted)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10,$11,$12,$13,$14,$15,$16,$17,$18)
 	`, id, sess.User.TenantID, sess.User.ID, providerID, externalID, name, mime, truncate(path, 160),
-		folderID, truncate(description, 500), len(data), storageKey, body.AttachmentID, externalURL, previewable, `{}`)
+		folderID, truncate(description, 500), len(data), storageKey, body.AttachmentID, externalURL, previewable, `{}`,
+		encryptionVersion, clientEncrypted)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "FILE", "Could not save the file record")
 		return
@@ -835,21 +877,28 @@ func (s *Server) serveFileContent(w http.ResponseWriter, r *http.Request, file c
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "File content is no longer available")
 			return
 		}
-		handle, err := os.Open(filepath.Join(s.cfg.UploadDir, path))
+		data, err := os.ReadFile(filepath.Join(s.cfg.UploadDir, path))
 		if err != nil {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "File content is no longer available")
 			return
 		}
-		defer handle.Close()
-		if stat, err := handle.Stat(); err == nil {
-			w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size()))
+		data, err = s.openCabinetBlob(r.Context(), file.ID, data)
+		if err != nil {
+			writeError(w, http.StatusLocked, "ENCRYPTION_LOCKED", "The organization's encryption key is locked")
+			return
 		}
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(w, handle)
+		_, _ = w.Write(data)
 	case "s3":
 		data, err := s.s3GetObject(r.Context(), tenantID, file.StorageKey)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "STORAGE_CONTENT", "Could not read the S3 object")
+			return
+		}
+		data, err = s.openCabinetBlob(r.Context(), file.ID, data)
+		if err != nil {
+			writeError(w, http.StatusLocked, "ENCRYPTION_LOCKED", "The organization's encryption key is locked")
 			return
 		}
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))

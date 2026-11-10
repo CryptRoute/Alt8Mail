@@ -60,6 +60,15 @@ func (s *Server) calendarFreeBusy(w http.ResponseWriter, r *http.Request) {
 		}
 		results = append(results, map[string]any{"email": user.Email, "busy": busy})
 	}
+	if feeds := externalFeedQuery(r.URL); len(feeds) > 0 {
+		for _, feed := range s.externalFreeBusy(r.Context(), feeds, start, end) {
+			item := map[string]any{"email": "external:" + feed.Label, "external": true, "label": feed.Label, "busy": feed.Busy}
+			if feed.Error != "" {
+				item["error"] = feed.Error
+			}
+			results = append(results, item)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"freeBusy": results, "start": start.UTC().Format(time.RFC3339), "end": end.UTC().Format(time.RFC3339)})
 }
 

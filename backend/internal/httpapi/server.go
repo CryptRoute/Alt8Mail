@@ -98,6 +98,16 @@ type Server struct {
 	webhookPost         func(context.Context, string, map[string]string, []byte) (int, error)
 	webhookAllowPrivate bool
 	hubspotBaseURL      string
+	pipedriveBaseURL    string
+	zohoAccountsBaseURL string
+	zohoCRMBaseURL      string
+	salesforceBaseURL   string
+	crmHTTPClient       *http.Client
+	gmailBaseURL        string
+	gmailTokenURL       string
+	graphBaseURL        string
+	graphTokenURL       string
+	importHTTPClient    *http.Client
 }
 
 type Options struct {
@@ -214,6 +224,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /oauth/slack/callback", s.slackAddonOAuthCallback)
 	mux.HandleFunc("GET /oauth/relay/complete", s.addonRelayComplete)
 	mux.HandleFunc("POST /api/addons/webhooks/slack", s.slackAddonWebhook)
+	mux.HandleFunc("POST /api/addons/webhooks/slack/interactions", s.slackInteraction)
+	mux.HandleFunc("GET /api/addons/actions/{token}", s.teamsInteractiveLink)
 	mux.HandleFunc("POST /api/session", s.login)
 	mux.HandleFunc("GET /api/session", s.session)
 	mux.HandleFunc("DELETE /api/session", s.logout)

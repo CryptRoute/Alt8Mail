@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -312,11 +311,7 @@ func (s *Server) officeAIDocumentText(ctx context.Context, user userRecord, docu
 	if err != nil || access.Access == "" {
 		return "", "", fmt.Errorf("document not accessible")
 	}
-	path, ok := s.officeStoragePath(storageKey)
-	if !ok {
-		return "", "", fmt.Errorf("document content unavailable")
-	}
-	data, err := os.ReadFile(path)
+	data, err := s.officeReadStorage(storageKey)
 	if err != nil {
 		return "", "", err
 	}

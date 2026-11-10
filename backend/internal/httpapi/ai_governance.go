@@ -89,7 +89,7 @@ func (s *Server) aiUsageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerAIGovernanceRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/ai/usage", s.requireUser(s.aiUsageHandler))
+	mux.HandleFunc("GET /api/ai/usage", s.userFeature(FeatureAIBudget, s.aiUsageHandler))
 }
 
 func aiBudgetError(err error) bool { return errors.Is(err, errAIBudget) }

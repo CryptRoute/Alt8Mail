@@ -131,6 +131,7 @@ func (s *Server) processOutboxItem(ctx context.Context, userID, tenantID, itemID
 	}
 	if sender, senderErr := s.userByID(ctx, userID); senderErr == nil {
 		s.createMentionNotifications(ctx, sender, itemCopy, sentID)
+		s.deliverDualDeliveryCopy(ctx, sender, delivered.Raw)
 	}
 	fromIdentity, _ := itemCopy["from"].(map[string]any)
 	if account.Kind == mailAccountKindNative {
@@ -186,6 +187,26 @@ func (s *Server) finalizeOutboxItem(userID, tenantID, itemID, messageID string, 
 		}
 	}
 	return sentID, err
+}
+
+// deliverDualDeliveryCopy journals a copy of a successfully delivered
+// message to the tenant's archive mailbox. The primary delivery is already
+// committed, so a journal failure is audited and never triggers a resend.
+func (s *Server) deliverDualDeliveryCopy(ctx context.Context, sender userRecord, raw []byte) {
+	policy := s.tenantPolicyFor(ctx, sender.TenantID)
+	archive := strings.ToLower(strings.TrimSpace(policy.Mail.DualDeliveryAddress))
+	if !policy.Mail.DualDeliveryEnabled || archive == "" {
+		return
+	}
+	if strings.EqualFold(sender.Email, archive) {
+		return
+	}
+	detail := "Journal copy delivered to " + archive
+	if err := s.submitSMTPMessage(sender.Email, []string{archive}, raw); err != nil {
+		s.logger.Warn("dual delivery journal failed", "tenant", sender.TenantID, "err", err)
+		detail = "Journal copy to " + archive + " failed: " + truncate(err.Error(), 240)
+	}
+	s.insertAudit(sender, "mail.dual_delivery", archive, detail, "", "")
 }
 
 func (s *Server) markDeliveryRetry(userID, tenantID, itemID string, deliveryErr error) {

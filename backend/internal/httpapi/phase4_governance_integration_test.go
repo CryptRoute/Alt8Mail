@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CryptRoute/Alt8Mail/backend/internal/licensing"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -53,7 +54,9 @@ func TestPhase4MCPGovernanceIntegration(t *testing.T) {
 	mustExec(`INSERT INTO public.addon_system_catalog (id, name, category, connection_scope, auth_type) VALUES ($1,'Phase CRM','CRM','user','api_key')`, addonID)
 	mustExec(`INSERT INTO public.addon_installs (id, tenant_id, addon_id, user_id, status) VALUES ($1,$2,$3,$4,'active')`, "install_"+suffix, tenant, addonID, user)
 
-	server := &Server{store: &store.Store{DB: pool}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), stateLocks: map[string]*sync.Mutex{}}
+	server := &Server{store: &store.Store{DB: pool}, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), stateLocks: map[string]*sync.Mutex{},
+		license: &licensing.License{Version: licensing.Version, ID: "mcp-governance-test", Edition: "enterprise", Seats: 10,
+			Features: []string{FeatureMCPGovernance}, ExpiresAt: time.Now().Add(time.Hour)}}
 	userValue := userRecord{ID: user, TenantID: tenant, Email: email, Name: "MCP Owner", Status: "active"}
 	token := mcpTokenRecord{ConnectionID: connectionID, UserID: user, TenantID: tenant, User: userValue,
 		Scopes: []string{"tasks.write", "calendar.write", "crm.read"}}

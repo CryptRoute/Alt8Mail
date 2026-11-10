@@ -342,8 +342,8 @@ func (s *Server) createAIObligationTask(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) registerAIObligationRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/ai/obligations/extract", s.requireUser(s.aiExtractObligations))
-	mux.HandleFunc("GET /api/ai/obligations", s.requireUser(s.listAIObligations))
-	mux.HandleFunc("PATCH /api/ai/obligations/{id}", s.requireUser(s.updateAIObligation))
-	mux.HandleFunc("POST /api/ai/obligations/{id}/task", s.requireUser(s.createAIObligationTask))
+	mux.HandleFunc("POST /api/ai/obligations/extract", s.userFeature(FeatureAIObligations, s.aiExtractObligations))
+	mux.HandleFunc("GET /api/ai/obligations", s.userFeature(FeatureAIObligations, s.listAIObligations))
+	mux.HandleFunc("PATCH /api/ai/obligations/{id}", s.userFeature(FeatureAIObligations, s.updateAIObligation))
+	mux.HandleFunc("POST /api/ai/obligations/{id}/task", s.userFeature(FeatureAIObligations, s.createAIObligationTask))
 }

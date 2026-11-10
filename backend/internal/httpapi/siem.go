@@ -423,6 +423,9 @@ func (s *Server) siemWorker(ctx context.Context) {
 }
 
 func (s *Server) dispatchSIEM(ctx context.Context) {
+	if !s.entitled(FeatureAuditExport) {
+		return
+	}
 	s.collectSIEMEvents(ctx)
 	s.deliverPendingSIEM(ctx)
 }

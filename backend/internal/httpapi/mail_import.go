@@ -207,17 +207,31 @@ func (s *Server) adminMailImportCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	protocol := strings.ToLower(strings.TrimSpace(body.Protocol))
-	if protocol != "imap" && protocol != "pop3" {
-		writeError(w, http.StatusBadRequest, "PROTOCOL", "Choose IMAP or POP3")
+	switch protocol {
+	case "imap", "pop3":
+	case "gmail":
+		protocol = "gmail"
+	case "graph", "microsoft", "m365", "outlook":
+		protocol = "graph"
+	default:
+		writeError(w, http.StatusBadRequest, "PROTOCOL", "Choose IMAP, POP3, Gmail API or Microsoft Graph")
 		return
 	}
 	host := strings.TrimSuffix(strings.TrimSpace(body.Host), ".")
+	if protocol == "gmail" {
+		host = "gmail.googleapis.com"
+	} else if protocol == "graph" {
+		host = "graph.microsoft.com"
+	}
 	if !validMailImportHost(host) {
 		writeError(w, http.StatusBadRequest, "HOST", "Enter a valid old mail server hostname or IP address")
 		return
 	}
 	security := strings.ToLower(strings.TrimSpace(body.Security))
 	if security != "ssl" && security != "starttls" && security != "none" {
+		security = "ssl"
+	}
+	if protocol == "gmail" || protocol == "graph" {
 		security = "ssl"
 	}
 	if len(body.Items) > maxMailImportItems {
@@ -245,6 +259,8 @@ func (s *Server) adminMailImportCreate(w http.ResponseWriter, r *http.Request) {
 			} else {
 				port = 110
 			}
+		case "gmail", "graph":
+			port = 443
 		}
 	}
 	if port < 1 || port > 65535 {
@@ -659,8 +675,22 @@ func (s *Server) validateMailImportJob(ctx context.Context, job mailImportJobRec
 }
 
 func (s *Server) validateSourceLogin(job mailImportJobRecord, email, password string) error {
-	if job.Protocol == "pop3" {
+	switch job.Protocol {
+	case "pop3":
 		return validatePOP3Login(job.Host, job.Port, job.Security, email, password)
+	case "gmail", "graph":
+		token, err := s.importOAuthAccessToken(context.Background(), job.Protocol, password)
+		if err != nil {
+			return err
+		}
+		account, err := s.importOAuthProfile(context.Background(), job.Protocol, token)
+		if err != nil {
+			return err
+		}
+		if account != "" && !strings.EqualFold(account, email) {
+			return fmt.Errorf("the OAuth token belongs to %s, not %s", account, email)
+		}
+		return nil
 	}
 	conn, err := dialExternalIMAP(job.Host, job.Port, job.Security)
 	if err != nil {
@@ -851,7 +881,28 @@ func (s *Server) runMailImportItem(ctx context.Context, job mailImportJobRecord,
 		_ = s.store.DB.QueryRow(ctx, `SELECT email::text FROM users WHERE id=$1`, targetUserID).Scan(&targetEmail)
 	}
 
-	if job.Protocol == "pop3" {
+	if job.Protocol == "gmail" || job.Protocol == "graph" {
+		var imported, total int64
+		var providerErr error
+		if job.Protocol == "gmail" {
+			imported, total, providerErr = s.importGmailMailbox(ctx, job, sourceEmail, password, targetEmail, cursorJSON, itemID)
+		} else {
+			imported, total, providerErr = s.importGraphMailbox(ctx, job, sourceEmail, password, targetEmail, cursorJSON, itemID)
+		}
+		if providerErr != nil {
+			if providerErr == errMailImportCancelled {
+				update("skipped", "Cancelled")
+				s.mailImportEvent(ctx, job.ID, itemID, "warn", "import", "Import cancelled", "")
+				return
+			}
+			update("failed", providerErr.Error())
+			s.mailImportEvent(ctx, job.ID, itemID, "error", job.Protocol, "Native mailbox import failed", providerErr.Error())
+			return
+		}
+		_, _ = s.store.DB.Exec(ctx, `UPDATE mail_import_items SET imported_messages=$2, total_messages=$3, updated_at=now() WHERE id=$1`, itemID, imported, total)
+		s.mailImportEvent(ctx, job.ID, itemID, "info", job.Protocol, "Native mailbox import finished",
+			fmt.Sprintf("%d / %d messages", imported, total))
+	} else if job.Protocol == "pop3" {
 		imported, total, err := s.importPOP3Mailbox(ctx, job, sourceEmail, password, targetEmail, cursorJSON, itemID)
 		if err != nil {
 			if err == errMailImportCancelled {
@@ -1173,14 +1224,24 @@ func (s *Server) importPOP3Mailbox(ctx context.Context, job mailImportJobRecord,
 func (s *Server) persistImportCursor(ctx context.Context, itemID, jobID, sourceEmail string, cursor map[string]int64, imported int64) {
 	folders := map[string]any{}
 	pop3Index := int64(0)
+	gmailAfter := int64(0)
+	graphSince := int64(0)
 	for key, value := range cursor {
-		if key == "pop3Index" {
+		switch key {
+		case "pop3Index":
 			pop3Index = value
-			continue
+		case "gmailAfter":
+			gmailAfter = value
+		case "graphSince":
+			graphSince = value
+		default:
+			folders[key] = value
 		}
-		folders[key] = value
 	}
-	encoded, _ := json.Marshal(map[string]any{"folders": folders, "pop3Index": pop3Index})
+	encoded, _ := json.Marshal(map[string]any{
+		"folders": folders, "pop3Index": pop3Index,
+		"gmailAfter": gmailAfter, "graphSince": graphSince,
+	})
 	_, _ = s.store.DB.Exec(ctx, `
 		UPDATE mail_import_items SET cursor=$2::jsonb, imported_messages=$3, updated_at=now() WHERE id=$1
 	`, itemID, encoded, imported)

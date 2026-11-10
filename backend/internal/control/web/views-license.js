@@ -81,8 +81,9 @@ function expirySummary(license) {
 
 function featureChips(license) {
   const features = Array.isArray(license?.features) ? license.features : [];
+  const missing = Array.isArray(license?.missingFeatures) ? license.missingFeatures : [];
   if (features.length) {
-    return `<div class="license-features">${features.map((feature) => ui.badge(String(feature), 'info', 'sparkles')).join('')}</div>`;
+    return `<div class="license-features">${features.map((feature) => ui.badge(String(feature), 'info', 'sparkles')).join('')}</div>${missing.length ? `<p class="form-note">Missing Phase 3–6 entitlements: ${missing.map((feature) => `<code>${esc(feature)}</code>`).join(', ')}. Reissue the license with these keys (or <code>all</code>) to enable them.</p>` : ''}`;
   }
   if (license?.state === 'expired') {
     return '<p class="form-note">Paid feature entitlements are disabled while the license is expired.</p>';

@@ -57,7 +57,7 @@ func (s *Server) registerOfficeDocumentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/office/documents/{id}/versions/{version}/restore", s.requireUser(s.restoreOfficeVersion))
 	mux.HandleFunc("POST /api/office/documents/{id}/versions/{version}/review", s.requireUser(s.reviewOfficeVersion))
 	mux.HandleFunc("POST /api/office/documents/{id}/convert", s.requireUser(s.convertOfficeDocument))
-	mux.HandleFunc("POST /api/office/ai", s.requireUser(s.officeAI))
+	mux.HandleFunc("POST /api/office/ai", s.userFeature(FeatureOfficeAI, s.officeAI))
 	mux.HandleFunc("GET /api/office/content", s.officeSignedContent)
 	mux.HandleFunc("POST /api/office/callback", s.officeCallback)
 	mux.HandleFunc("POST /api/public/shares/{token}/office", s.publicShareOfficeOpen)
@@ -114,7 +114,7 @@ func (s *Server) createOfficeDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInsufficientStorage, "STORAGE_QUOTA", err.Error())
 		return
 	}
-	storageKey, checksum, err := s.officeStoreBytes(data, format.Ext)
+	storageKey, checksum, err := s.officeStoreBytesForTenant(r.Context(), sess.User.TenantID, data, format.Ext)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "OFFICE_STORAGE", "Could not store the new document")
 		return
@@ -353,7 +353,7 @@ func (s *Server) ensureOfficeDocument(ctx context.Context, userID, tenantID stri
 			return officeDocumentRecord{}, fmt.Errorf("the current file content is unavailable")
 		}
 		var storeErr error
-		storageKey, checksum, storeErr = s.officeStoreBytes(data, format.Ext)
+		storageKey, checksum, storeErr = s.officeStoreBytesForTenant(ctx, tenantID, data, format.Ext)
 		if storeErr != nil {
 			return officeDocumentRecord{}, fmt.Errorf("could not prepare the initial document version")
 		}
@@ -565,17 +565,9 @@ func (s *Server) compareOfficeVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	readVersion := func(record officeVersionRecord) (string, error) {
-		path, ok := s.officeStoragePath(record.StorageKey)
-		if !ok {
+		data, err := s.officeReadStorage(record.StorageKey)
+		if err != nil || len(data) > officeDocumentMaxBytes {
 			return "", fmt.Errorf("version content is unavailable")
-		}
-		info, err := os.Stat(path)
-		if err != nil || info.Size() > officeDocumentMaxBytes {
-			return "", fmt.Errorf("version content is unavailable")
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
 		}
 		return office.ExtractText(name, data)
 	}
@@ -628,11 +620,6 @@ func (s *Server) downloadOfficeVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "OFFICE_VERSION", "Version not found")
 		return
 	}
-	path, ok := s.officeStoragePath(storageKey)
-	if !ok {
-		writeError(w, http.StatusNotFound, "OFFICE_VERSION", "Version content is unavailable")
-		return
-	}
 	fileFormat, _ := office.LookupExt(format)
 	displayName := officeVersionFileName(name, versionNumber, format)
 	s.recordWorkspaceAudit(r.Context(), sess, "office.version_downloaded", name,
@@ -645,7 +632,13 @@ func (s *Server) downloadOfficeVersion(w http.ResponseWriter, r *http.Request) {
 	if s.tenantPolicyFor(r.Context(), sess.User.TenantID).Files.WatermarkDownloads && dlpClassificationRank(canonicalDLPClassification(classification)) >= dlpClassificationRank("Confidential") {
 		w.Header().Set("X-A8M-Watermark", canonicalDLPClassification(classification)+" · "+sess.User.Email+" · "+time.Now().UTC().Format(time.RFC3339)+" · Alt8Mail")
 	}
-	http.ServeFile(w, r, path)
+	data, err := s.officeReadStorage(storageKey)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "OFFICE_VERSION", "Version content is unavailable")
+		return
+	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	_, _ = w.Write(data)
 }
 
 func officeVersionFileName(name string, version int, ext string) string {
@@ -716,7 +709,7 @@ func (s *Server) restoreOfficeVersion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	newKey, checksum, err := s.officeStoreBytes(data, document.Format)
+	newKey, checksum, err := s.officeStoreBytesForTenant(r.Context(), document.TenantID, data, document.Format)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "OFFICE_STORAGE", "Could not restore the version")
 		return
@@ -886,7 +879,7 @@ func (s *Server) convertOfficeDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInsufficientStorage, "STORAGE_QUOTA", err.Error())
 		return
 	}
-	storageKey, checksum, err := s.officeStoreBytes(pdf, "pdf")
+	storageKey, checksum, err := s.officeStoreBytesForTenant(r.Context(), sess.User.TenantID, pdf, "pdf")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "OFFICE_STORAGE", "Could not store the converted PDF")
 		return
@@ -949,6 +942,10 @@ func (s *Server) officeStoragePath(key string) (string, bool) {
 }
 
 func (s *Server) officeStoreBytes(data []byte, ext string) (string, string, error) {
+	return s.officeStoreBytesForTenant(context.Background(), "", data, ext)
+}
+
+func (s *Server) officeStoreBytesForTenant(ctx context.Context, tenantID string, data []byte, ext string) (string, string, error) {
 	if err := os.MkdirAll(s.cfg.UploadDir, 0o750); err != nil {
 		return "", "", err
 	}
@@ -957,7 +954,15 @@ func (s *Server) officeStoreBytes(data []byte, ext string) (string, string, erro
 	if !ok {
 		return "", "", fmt.Errorf("invalid storage key")
 	}
-	if err := os.WriteFile(path, data, 0o640); err != nil {
+	stored := data
+	if tenantID != "" {
+		sealed, _, err := s.sealTenantBlob(ctx, tenantID, data)
+		if err != nil {
+			return "", "", err
+		}
+		stored = sealed
+	}
+	if err := os.WriteFile(path, stored, 0o640); err != nil {
 		return "", "", err
 	}
 	sum := sha256.Sum256(data)
@@ -969,7 +974,11 @@ func (s *Server) officeReadStorage(key string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid storage key")
 	}
-	return os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return s.openTenantBlob(data)
 }
 
 func (s *Server) officeRemoveStorage(key string) {

@@ -162,6 +162,9 @@ func (s *Server) followupWorker(ctx context.Context) {
 }
 
 func (s *Server) runFollowUpChecks(ctx context.Context) {
+	if !s.entitled(FeatureFollowUps) {
+		return
+	}
 	rows, err := s.store.DB.Query(ctx, `
 		SELECT f.id, f.user_id::text, f.owner_user_id::text, f.thread_id, f.kind, f.due_at,
 		       f.note, f.status, f.created_at, owner.email::text
@@ -234,7 +237,7 @@ func (s *Server) runFollowUpChecks(ctx context.Context) {
 }
 
 func (s *Server) registerFollowUpRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/followups", s.requireUser(s.listFollowUps))
-	mux.HandleFunc("POST /api/followups", s.requireUser(s.createFollowUp))
-	mux.HandleFunc("DELETE /api/followups/{id}", s.requireUser(s.cancelFollowUp))
+	mux.HandleFunc("GET /api/followups", s.userFeature(FeatureFollowUps, s.listFollowUps))
+	mux.HandleFunc("POST /api/followups", s.userFeature(FeatureFollowUps, s.createFollowUp))
+	mux.HandleFunc("DELETE /api/followups/{id}", s.userFeature(FeatureFollowUps, s.cancelFollowUp))
 }

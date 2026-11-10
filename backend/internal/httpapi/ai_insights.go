@@ -330,6 +330,6 @@ Use only the facts provided and clearly say when data is missing. Do not invent 
 }
 
 func (s *Server) registerAIInsightRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/ai/sender-profile", s.requireUser(s.aiSenderProfile))
-	mux.HandleFunc("GET /api/ai/meeting-prep", s.requireUser(s.aiMeetingPrep))
+	mux.HandleFunc("GET /api/ai/sender-profile", s.userFeature(FeatureAIMeetingPrep, s.aiSenderProfile))
+	mux.HandleFunc("GET /api/ai/meeting-prep", s.userFeature(FeatureAIMeetingPrep, s.aiMeetingPrep))
 }

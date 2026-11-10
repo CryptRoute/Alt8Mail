@@ -250,8 +250,8 @@ func (s *Server) adminDMARCSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerDMARCRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /dmarc/ingest", s.adminRequirePermission("domains.manage", s.adminIngestDMARC))
-	mux.HandleFunc("GET /dmarc/summary", s.adminRequirePermission("domains.read", s.adminDMARCSummary))
+	mux.HandleFunc("POST /dmarc/ingest", s.adminFeature("domains.manage", FeatureDeliverability, s.adminIngestDMARC))
+	mux.HandleFunc("GET /dmarc/summary", s.adminFeature("domains.read", FeatureDeliverability, s.adminDMARCSummary))
 }
 
 // parseDMARCDate is used by tests and future report exporters.

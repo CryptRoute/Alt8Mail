@@ -25,6 +25,9 @@ func mcpWriteRequiredArgs(tool string, args map[string]any) error {
 }
 
 func (s *Server) mcpRequestWrite(r *http.Request, token mcpTokenRecord, tool string, args map[string]any, dryRun bool) (map[string]any, error) {
+	if !s.entitled(FeatureMCPGovernance) {
+		return nil, fmt.Errorf("MCP write governance requires an Alt8Mail license that includes mcp_governance")
+	}
 	if err := mcpWriteRequiredArgs(tool, args); err != nil {
 		return nil, err
 	}
@@ -208,6 +211,6 @@ func (s *Server) executeMCPAction(ctx context.Context, user userRecord, tool str
 }
 
 func (s *Server) registerMCPActionRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/mcp/action-requests", s.requireUser(s.listMCPActionRequests))
-	mux.HandleFunc("POST /api/mcp/action-requests/{id}/decide", s.requireUser(s.decideMCPAction))
+	mux.HandleFunc("GET /api/mcp/action-requests", s.userFeature(FeatureMCPGovernance, s.listMCPActionRequests))
+	mux.HandleFunc("POST /api/mcp/action-requests/{id}/decide", s.userFeature(FeatureMCPGovernance, s.decideMCPAction))
 }

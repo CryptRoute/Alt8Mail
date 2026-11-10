@@ -11,8 +11,8 @@ import (
 )
 
 func TestAddonDefinitionsAreUniqueAndComplete(t *testing.T) {
-	if len(addonDefinitions) != 20 {
-		t.Fatalf("add-on catalog has %d connectors, want 20", len(addonDefinitions))
+	if len(addonDefinitions) != 21 {
+		t.Fatalf("add-on catalog has %d connectors, want 21", len(addonDefinitions))
 	}
 	seen := map[string]bool{}
 	for _, definition := range addonDefinitions {
