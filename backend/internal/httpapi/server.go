@@ -361,6 +361,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/calendar/import", s.requireUser(s.importCalendarFile))
 	mux.HandleFunc("GET /api/calendar/export", s.requireUser(s.exportCalendar))
 	mux.HandleFunc("GET /api/calendar/resources", s.requireUser(s.getCalendarResources))
+	s.registerCalendarAvailabilityRoutes(mux)
 	mux.HandleFunc("POST /api/calendar/resources", s.requireUser(s.createCalendarResource))
 	mux.HandleFunc("GET /api/calendar/polls", s.requireUser(s.getCalendarPolls))
 	mux.HandleFunc("POST /api/calendar/polls", s.requireUser(s.createCalendarPoll))

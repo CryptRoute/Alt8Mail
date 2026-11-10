@@ -124,6 +124,10 @@ func TestMailMergeIntegration(t *testing.T) {
 	if queued != 99 || suppressed != 1 || outboxCount != 99 {
 		t.Fatalf("queued=%d suppressed=%d outbox=%d", queued, suppressed, outboxCount)
 	}
+	var trackingCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM public.campaign_tracking WHERE merge_id=$1`, mergeID).Scan(&trackingCount); err != nil || trackingCount != 0 {
+		t.Fatalf("tracking created while policy disabled: %d err=%v", trackingCount, err)
+	}
 	var first, second time.Time
 	if err := pool.QueryRow(ctx, `SELECT send_at FROM public.outbox WHERE merge_id=$1 ORDER BY send_at LIMIT 1`, mergeID).Scan(&first); err != nil {
 		t.Fatal(err)

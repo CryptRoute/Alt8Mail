@@ -157,6 +157,10 @@ func bookingIntervalFree(busy []bookingBusyInterval, userID string, start, end t
 }
 
 func (s *Server) bookingSlots(ctx context.Context, page bookingPageRecord, days int) []bookingSlot {
+	return s.bookingSlotsAt(ctx, page, time.Now(), days)
+}
+
+func (s *Server) bookingSlotsAt(ctx context.Context, page bookingPageRecord, now time.Time, days int) []bookingSlot {
 	if days < 1 || days > 30 {
 		days = 14
 	}
@@ -164,7 +168,6 @@ func (s *Server) bookingSlots(ctx context.Context, page bookingPageRecord, days 
 	if err != nil {
 		location = time.UTC
 	}
-	now := time.Now()
 	from := now.Add(-24 * time.Hour)
 	to := now.Add(time.Duration(days+1) * 24 * time.Hour)
 	busy := s.bookingBusy(ctx, page, from, to)

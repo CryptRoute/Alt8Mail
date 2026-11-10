@@ -25519,6 +25519,54 @@ function calendarDraftColor(selected) {
   return CAL_COLORS.map((color) => `<button type="button" class="cal-color-choice${color === selected ? " is-active" : ""}" style="--swatch:${color}" data-cal-color-choice="${color}" aria-label="Use colour ${color}"></button>`).join("");
 }
 
+function ensureBookingPagesOverlay() {
+  let overlay = document.getElementById("bookingPagesOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="bookingPagesOverlay" hidden><div class="dialog shared-drafts-dialog" role="dialog" aria-modal="true" aria-labelledby="bookingPagesTitle"><div class="dialog-head"><div><p class="eyebrow">Booking pages</p><h2 id="bookingPagesTitle">Public scheduling links</h2><p class="dialog-note">Share a link and let people book an open time. Only busy/free is exposed.</p></div><button class="icon-btn" id="bookingPagesClose" type="button" aria-label="Close booking pages"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="dialog-body"><div class="automation-rule-list" id="bookingPagesList"></div><form id="bookingPageForm"><div class="field-row"><label class="field"><span>Title</span><input id="bookingPageTitle" required placeholder="Meet with Avery"></label><label class="field"><span>Slug</span><input id="bookingPageSlug" placeholder="meet-avery"></label></div><div class="field-row"><label class="field"><span>Duration (minutes)</span><input id="bookingPageDuration" type="number" min="5" max="240" value="30"></label><label class="field"><span>Timezone</span><input id="bookingPageTimezone" value="UTC"></label></div><div class="field-row"><label class="field"><span>Start hour</span><input id="bookingPageStart" type="number" min="0" max="23" value="9"></label><label class="field"><span>End hour</span><input id="bookingPageEnd" type="number" min="1" max="24" value="17"></label></div><label class="check-field"><input id="bookingPageRoundRobin" type="checkbox"> Round-robin across team members</label><div class="dialog-foot"><button class="btn-secondary" id="bookingPagesCancel" type="button">Close</button><button class="btn-primary" type="submit" id="bookingPageSave">Create page</button></div></form></div></div></div>`);
+  overlay = document.getElementById("bookingPagesOverlay");
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
+  document.getElementById("bookingPagesClose").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("bookingPagesCancel").addEventListener("click", () => { overlay.hidden = true; });
+  document.getElementById("bookingPageForm").addEventListener("submit", (event) => { event.preventDefault(); createBookingPage().catch(showError); });
+  return overlay;
+}
+
+async function openBookingPages() {
+  const overlay = ensureBookingPagesOverlay();
+  document.getElementById("bookingPageTimezone").value = currentTimeZone();
+  overlay.hidden = false;
+  await refreshBookingPages();
+}
+
+async function refreshBookingPages() {
+  const host = document.getElementById("bookingPagesList");
+  if (!host) return;
+  host.innerHTML = '<div class="settings-note">Loading booking pages…</div>';
+  const data = await api("/api/booking-pages");
+  state.bookingPages = data.pages || [];
+  host.innerHTML = state.bookingPages.length ? state.bookingPages.map((page) => `<div class="automation-rule-row"><div class="shared-draft-copy"><strong>${esc(page.title)}</strong><span>${esc(page.timezone)} · ${page.durationMinutes} min${page.roundRobin ? " · round-robin" : ""}</span></div><button class="btn-secondary small" type="button" data-booking-copy="${esc(page.url)}">Copy link</button></div>`).join("") : '<div class="empty-mini">No booking pages yet.</div>';
+  $$("[data-booking-copy]", host).forEach((button) => button.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(location.origin + button.dataset.bookingCopy); showToast("Booking link copied"); }
+    catch { showToast(location.origin + button.dataset.bookingCopy); }
+  }));
+}
+
+async function createBookingPage() {
+  const body = {
+    title: document.getElementById("bookingPageTitle").value.trim(),
+    slug: document.getElementById("bookingPageSlug").value.trim(),
+    durationMinutes: Number(document.getElementById("bookingPageDuration").value) || 30,
+    timezone: document.getElementById("bookingPageTimezone").value.trim() || "UTC",
+    workingStartHour: Number(document.getElementById("bookingPageStart").value),
+    workingEndHour: Number(document.getElementById("bookingPageEnd").value),
+    roundRobin: document.getElementById("bookingPageRoundRobin").checked
+  };
+  await api("/api/booking-pages", { method: "POST", body });
+  showToast("Booking page created");
+  document.getElementById("bookingPageForm").reset();
+  await refreshBookingPages();
+}
+
 function openCalendarAdd(tab = "create", calendarId = "") {
   state.calendarAddTab = tab;
   state.calendarEditId = calendarId || state.calendars.find((calendar) => calendar.owned)?.id || "default";
@@ -26013,6 +26061,7 @@ function setupCalendarInteractions() {
   });
   calSearchInput?.addEventListener("input", () => { state.calendarSearch = calSearchInput.value; renderCalendar(); });
   document.getElementById("calAddCalendar")?.addEventListener("click", () => openCalendarAdd("create"));
+  document.getElementById("calBookingPages")?.addEventListener("click", () => openBookingPages().catch(showError));
   document.getElementById("calSidebarAdd")?.addEventListener("click", () => openCalendarAdd("create"));
   document.getElementById("calListMore")?.addEventListener("click", () => openCalendarAdd("edit"));
   document.getElementById("calShareBtn")?.addEventListener("click", () => openCalendarShare(state.calendarActiveId));

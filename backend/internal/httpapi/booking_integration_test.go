@@ -75,11 +75,27 @@ func TestBookingIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	location := mustBookingLocation(page.Timezone)
+	// Crossing the US spring DST boundary keeps 09:00 local and shifts UTC.
+	dstNow := time.Date(2027, 3, 12, 12, 0, 0, 0, time.UTC)
+	dstSlots := server.bookingSlotsAt(ctx, page, dstNow, 5)
+	dstFound := false
+	for _, slot := range dstSlots {
+		localSlot := slot.StartAt.In(location)
+		if localSlot.Day() == 15 && localSlot.Month() == time.March && localSlot.Hour() == 9 {
+			dstFound = true
+			if slot.StartAt.UTC().Hour() != 13 {
+				t.Fatalf("DST slot UTC hour = %d, want 13", slot.StartAt.UTC().Hour())
+			}
+		}
+	}
+	if !dstFound {
+		t.Fatalf("no DST slot found: %#v", dstSlots)
+	}
 	slots := server.bookingSlots(ctx, page, 14)
 	if len(slots) == 0 {
 		t.Fatal("no booking slots generated")
 	}
-	location := mustBookingLocation(page.Timezone)
 	local := slots[0].StartAt.In(location)
 	if local.Hour() < 9 || local.Hour() >= 17 || local.Minute()%30 != 0 {
 		t.Fatalf("slot outside working hours: %s", local)
