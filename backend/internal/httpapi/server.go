@@ -440,6 +440,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAutomationRoutes(mux)
 	s.registerFileCollaborationRoutes(mux)
 	s.registerSenderControlRoutes(mux)
+	s.registerFollowUpRoutes(mux)
 	s.registerMCPRoutes(mux)
 	s.registerReactionRoutes(mux)
 	s.registerStickyNoteRoutes(mux)
@@ -926,6 +927,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	threadMeta := s.collaborationThreadMeta(ctx, sess.User)
 	vipSenders := s.vipSenderList(ctx, sess.User.ID)
 	threadMutes := s.threadMuteList(ctx, sess.User.ID)
+	followUps := s.followUpViews(ctx, sess.User.ID)
 	teamInboxes := []map[string]any{}
 	if s.entitled("shared_inbox") {
 		teamInboxes = s.teamMailboxesForUser(ctx, sess.User)
@@ -954,6 +956,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"teamInboxes":      teamInboxes,
 		"vipSenders":       vipSenders,
 		"threadMutes":      threadMutes,
+		"followUps":        followUps,
 		"people":           people,
 		"messages":         messages,
 		"mailPage": map[string]any{

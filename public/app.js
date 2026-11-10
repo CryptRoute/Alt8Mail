@@ -1009,6 +1009,7 @@ const state = {
   threadMeta: new Map(),
   vipSenders: [],
   threadMutes: [],
+  followUps: [],
   mcpConnections: [],
   mcpConnectionsLoading: false,
   teamPresence: new Map(),
@@ -5337,6 +5338,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.teamInboxes = Array.isArray(data.teamInboxes) ? data.teamInboxes : [];
   state.vipSenders = Array.isArray(data.vipSenders) ? data.vipSenders.map(normalizeEmail) : [];
   state.threadMutes = Array.isArray(data.threadMutes) ? data.threadMutes : [];
+  state.followUps = Array.isArray(data.followUps) ? data.followUps : [];
   if (data.sessionKind === "delegated" || data.delegated === true) {
     state.delegatedMode = true;
     if (!state.delegatedSession) {
@@ -10438,6 +10440,7 @@ function threadCollabMarkup(thread) {
   const senderEmail = normalizeEmail(latest?.from?.email || latest?.fromEmail || "");
   const vip = senderEmail && state.vipSenders.includes(senderEmail);
   const muted = state.threadMutes.includes(thread.id);
+  const followUp = state.followUps.find((item) => item.threadId === thread.id && item.ownerId === ownerId);
   return `<div class="thread-collab-bar" data-collab-owner="${esc(ownerId)}" data-collab-thread="${esc(thread.id)}"${team ? ` data-collab-team="${esc(team.id)}"` : ""}>
       <div class="collab-field"><span>Handling</span><select data-thread-status aria-label="Conversation handling status">
         ${["new", "in_progress", "done"].map((value) => `<option value="${value}"${status === value ? " selected" : ""}>${esc(collabStatusLabel(value))}</option>`).join("")}
@@ -10448,6 +10451,7 @@ function threadCollabMarkup(thread) {
       <button class="collab-action" data-thread-notes-toggle type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Team notes</button>
       ${senderEmail ? `<button class="collab-action${vip ? " is-active" : ""}" data-vip-toggle="${esc(senderEmail)}" type="button" aria-pressed="${vip ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>${vip ? "VIP sender" : "Mark VIP"}</button>` : ""}
       <button class="collab-action${muted ? " is-active" : ""}" data-thread-mute="${esc(thread.id)}" type="button" aria-pressed="${muted ? "true" : "false"}">${muted ? "Unmute" : "Mute"}</button>
+      ${followUp ? `<span class="collab-chip" title="Follow-up due ${esc(formatListWhen(followUp.dueAt))}">Follow-up ${esc(formatListWhen(followUp.dueAt))}</span><button class="collab-action" data-followup-cancel="${esc(followUp.id)}" type="button">Cancel follow-up</button>` : `<button class="collab-action" data-followup-create="${esc(thread.id)}" data-followup-owner="${esc(ownerId)}" data-followup-kind="awaiting_reply" type="button">Follow up</button><button class="collab-action" data-followup-create="${esc(thread.id)}" data-followup-owner="${esc(ownerId)}" data-followup-kind="remind_me" type="button">Remind me</button>`}
       ${team ? `<span class="collab-chip" title="${esc(team.name)} · ${esc(team.strategy === "round_robin" ? "round-robin" : "manual")} assignment">Shared inbox${sla ? ` · ${esc(sla.replace("_", " "))}` : ""}</span>` : ""}
       ${closed ? '<span class="collab-chip is-closed"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Closed</span>' : ""}
     </div>
@@ -28464,6 +28468,35 @@ function bindEvents() {
       if (await appConfirm({ title: "Revoke AI app access", message: "The MCP client will immediately lose its tokens and cannot read, search or draft again until re-approved.", confirmLabel: "Revoke access", tone: "danger" })) {
         revokeMCPConnection(mcpRevoke.getAttribute("data-mcp-revoke")).catch(showError);
       }
+      return;
+    }
+    const followCreate = event.target.closest("[data-followup-create]");
+    if (followCreate) {
+      const kind = followCreate.getAttribute("data-followup-kind") || "awaiting_reply";
+      const promptText = kind === "remind_me" ? "Remind me to reply in how many days? (1–90)" : "Nudge me if there is no reply in how many days? (1–90)";
+      const days = Number(window.prompt(promptText, kind === "remind_me" ? "1" : "3"));
+      if (!Number.isFinite(days) || days < 1 || days > 90) return;
+      api("/api/followups", {
+        method: "POST", body: {
+          threadId: followCreate.getAttribute("data-followup-create"),
+          ownerId: followCreate.getAttribute("data-followup-owner") || "",
+          kind, days
+        }
+      }).then(() => api("/api/followups")).then((data) => {
+        state.followUps = data.followUps || [];
+        renderReader({ preserveScroll: true });
+        showToast(kind === "remind_me" ? "Reply reminder scheduled" : "Follow-up scheduled");
+      }).catch(showError);
+      return;
+    }
+    const followCancel = event.target.closest("[data-followup-cancel]");
+    if (followCancel) {
+      api(`/api/followups/${encodeURIComponent(followCancel.getAttribute("data-followup-cancel"))}`, { method: "DELETE" })
+        .then(() => api("/api/followups")).then((data) => {
+          state.followUps = data.followUps || [];
+          renderReader({ preserveScroll: true });
+          showToast("Follow-up cancelled");
+        }).catch(showError);
       return;
     }
     const claimButton = event.target.closest("[data-thread-claim]");
