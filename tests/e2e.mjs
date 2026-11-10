@@ -107,6 +107,36 @@ async function openYearReviewOverlay(page) {
   }
 }
 
+async function dismissOverlay(page, selector, overlayId) {
+  const closed = `document.getElementById(${JSON.stringify(overlayId)})?.hidden !== false`;
+  await page.click(selector);
+  try {
+    await page.waitFor(closed, 3000);
+  } catch (error) {
+    await page.eval(`document.querySelector(${JSON.stringify(selector)})?.click()`);
+    await page.waitFor(closed, 3000);
+  }
+}
+
+async function openReactionRuleOverlay(page) {
+  await page.waitFor(() => {
+    const button = document.getElementById("addReactionRuleBtn");
+    if (!button) return false;
+    const rect = button.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }, 5000);
+  const ready = () => !document.getElementById("reactionRuleOverlay")?.hidden;
+  await page.click("#addReactionRuleBtn");
+  try {
+    await page.waitFor(ready, 4000);
+  } catch (error) {
+    const blocking = await page.eval("[...document.querySelectorAll('.overlay:not([hidden])')].map((overlay) => overlay.id || overlay.className).join(',')");
+    if (blocking) throw new Error(`Reaction rule editor blocked by: ${blocking}`);
+    await page.eval("document.getElementById('addReactionRuleBtn')?.click()");
+    await page.waitFor(ready, 4000);
+  }
+}
+
 async function waitForApp() {
   await page.waitFor(() => document.readyState === "complete", 10000);
   await page.waitFor(() => !document.getElementById("app").hidden && document.querySelectorAll(".msg").length > 0, 12000);
@@ -1802,12 +1832,11 @@ try {
   check(await page.eval("document.querySelectorAll('#yearReviewBody .year-stat').length === 4"), "year in review renders headline statistics");
   check(await page.eval("document.getElementById('yearReviewBody').textContent.includes('People who shaped your year')"), "year in review names key contacts");
   await page.screenshot(path.join(artifacts, "25d-year-review.png"));
-  await page.click("[data-year-review-close]");
+  await dismissOverlay(page, "[data-year-review-close]", "yearReviewOverlay");
   await openSettingsTab(page, "rules");
   await page.waitFor(() => Boolean(document.getElementById("reactionRulesBlock")), 5000);
   check(await page.eval("Boolean(document.getElementById('reactionRulesBlock'))"), "rules settings expose reaction rules");
-  await page.click("#addReactionRuleBtn");
-  await page.waitFor(() => !document.getElementById("reactionRuleOverlay").hidden, 3000);
+  await openReactionRuleOverlay(page);
   await page.setValue("#reactionRuleName", "Thank the customer team");
   await page.setValue("#reactionRuleSender", "tomas.ribeiro@a8m.example");
   await page.setValue("#reactionRuleEmoji", "🙏");
