@@ -615,6 +615,10 @@ func (s *Server) adminUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Role != nil {
 		fields["role"] = *body.Role
+		// An explicit admin role decision is manual authority. Recording the
+		// source lets a later SCIM group-mapping recompute leave it untouched
+		// instead of silently reverting it.
+		fields["role_source"] = "manual"
 	}
 	if body.Status != nil {
 		status := *body.Status
