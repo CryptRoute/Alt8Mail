@@ -431,6 +431,13 @@ function formatDateOnly(value) {
   return new Intl.DateTimeFormat(currentLocale(), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(date);
 }
 
+function formatDate(value, { time = false } = {}) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const dateText = new Intl.DateTimeFormat(currentLocale(), { month: "short", day: "numeric", year: "numeric", timeZone: currentTimeZone() }).format(date);
+  return time ? `${dateText} · ${formatClock(date)}` : dateText;
+}
+
 function formatFullWhen(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -1538,6 +1545,192 @@ function appConfirm({ title = "Confirm action", message = "", confirmLabel = "Co
     confirmOverlay.hidden = false;
     setTimeout(() => (tone === "danger" ? cancel : accept).focus(), 30);
   });
+}
+
+let promptResolver = null;
+let promptReturnFocus = null;
+
+function ensurePromptOverlay() {
+  let overlay = document.getElementById("promptOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay prompt-overlay" id="promptOverlay" hidden>
+    <div class="dialog prompt-dialog" role="dialog" aria-modal="true" aria-labelledby="promptTitle" aria-describedby="promptMessage">
+      <div class="dialog-head"><div class="dialog-title-wrap"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg></span><div><p class="eyebrow" id="promptEyebrow">Alt8Mail</p><h2 id="promptTitle">Enter a value</h2><p class="dialog-note" id="promptMessage"></p></div></div><button class="icon-btn" type="button" data-prompt-cancel aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body"><label class="field"><span id="promptLabel">Value</span><input class="input" id="promptInput" autocomplete="off" spellcheck="false"><select class="input" id="promptSelect" hidden></select><small id="promptHint"></small></label><p class="prompt-error" id="promptError" hidden></p></div>
+      <div class="dialog-foot"><button class="btn-secondary" type="button" data-prompt-cancel id="promptCancel">Cancel</button><button class="btn-primary" type="button" id="promptSubmit">Save</button></div>
+    </div>
+  </div>`);
+  overlay = document.getElementById("promptOverlay");
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest("[data-prompt-cancel]")) closeAppPrompt(null);
+  });
+  overlay.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeAppPrompt(null); }
+    if (event.key === "Enter" && event.target.id !== "promptSelect") { event.preventDefault(); document.getElementById("promptSubmit")?.click(); }
+  });
+  document.getElementById("promptSubmit")?.addEventListener("click", () => {
+    const input = document.getElementById("promptInput");
+    const select = document.getElementById("promptSelect");
+    const error = document.getElementById("promptError");
+    const value = select.hidden ? input.value.trim() : select.value;
+    const validate = overlay.__a8mValidate;
+    const required = overlay.__a8mRequired !== false;
+    const problem = typeof validate === "function" ? validate(value) : (required && !value ? "Enter a value to continue." : "");
+    if (problem) {
+      if (error) { error.hidden = false; error.textContent = problem; }
+      (select.hidden ? input : select).focus();
+      return;
+    }
+    closeAppPrompt(value);
+  });
+  return overlay;
+}
+
+function appPrompt({ title = "Enter a value", message = "", eyebrow = "Alt8Mail", label = "Value", value = "", placeholder = "", type = "text", options = null, hint = "", confirmLabel = "Save", cancelLabel = "Cancel", required = true, validate = null } = {}) {
+  const overlay = ensurePromptOverlay();
+  if (promptResolver) { promptResolver(null); promptResolver = null; }
+  promptReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  document.getElementById("promptEyebrow").textContent = eyebrow;
+  document.getElementById("promptTitle").textContent = title;
+  const messageNode = document.getElementById("promptMessage");
+  messageNode.textContent = message || "";
+  messageNode.hidden = !message;
+  document.getElementById("promptLabel").textContent = label;
+  const input = document.getElementById("promptInput");
+  const select = document.getElementById("promptSelect");
+  const hintNode = document.getElementById("promptHint");
+  hintNode.textContent = hint || "";
+  hintNode.hidden = !hint;
+  if (Array.isArray(options) && options.length) {
+    input.hidden = true;
+    select.hidden = false;
+    select.innerHTML = options.map((option) => {
+      const item = typeof option === "string" ? { value: option, label: option } : option;
+      return `<option value="${esc(item.value)}"${String(item.value) === String(value) ? " selected" : ""}>${esc(item.label)}</option>`;
+    }).join("");
+  } else {
+    select.hidden = true;
+    input.hidden = false;
+    input.type = type;
+    input.value = value;
+    input.placeholder = placeholder;
+    input.min = type === "number" ? "1" : "";
+    input.max = type === "number" ? "90" : "";
+  }
+  overlay.__a8mValidate = validate;
+  overlay.__a8mRequired = required;
+  const error = document.getElementById("promptError");
+  if (error) { error.hidden = true; error.textContent = ""; }
+  document.getElementById("promptSubmit").textContent = confirmLabel;
+  document.getElementById("promptCancel").textContent = cancelLabel;
+  overlay.hidden = false;
+  setTimeout(() => {
+    (select.hidden ? input : select).focus();
+    if (!select.hidden) select.focus();
+    else if (input.value) input.select();
+  }, 40);
+  return new Promise((resolve) => { promptResolver = resolve; });
+}
+
+function closeAppPrompt(value) {
+  const overlay = document.getElementById("promptOverlay");
+  if (overlay) overlay.hidden = true;
+  const resolve = promptResolver;
+  promptResolver = null;
+  const returnFocus = promptReturnFocus;
+  promptReturnFocus = null;
+  if (returnFocus && returnFocus.isConnected) returnFocus.focus();
+  if (resolve) resolve(value);
+}
+
+let followUpResolver = null;
+let followUpReturnFocus = null;
+
+function ensureFollowUpOverlay() {
+  let overlay = document.getElementById("followupOverlay");
+  if (overlay) return overlay;
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay followup-overlay" id="followupOverlay" hidden>
+    <div class="dialog followup-dialog" role="dialog" aria-modal="true" aria-labelledby="followupTitle">
+      <div class="dialog-head"><div class="dialog-title-wrap"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></span><div><p class="eyebrow" id="followupEyebrow">Follow-up</p><h2 id="followupTitle">Remind me to reply</h2><p class="dialog-note" id="followupMessage"></p></div></div><button class="icon-btn" type="button" data-followup-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body followup-body">
+        <div class="followup-presets" role="group" aria-label="When to follow up">
+          ${[1, 3, 7, 14, 30].map((days) => `<button class="followup-preset" type="button" data-followup-days-preset="${days}">${days} day${days === 1 ? "" : "s"}</button>`).join("")}
+          <label class="followup-custom"><input id="followupDays" type="number" min="1" max="90" value="1" aria-label="Custom days"><span>days</span></label>
+        </div>
+        <div class="followup-note"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span id="followupDueLabel">We'll bring this conversation back tomorrow.</span></div>
+        <p class="prompt-error" id="followupError" hidden></p>
+      </div>
+      <div class="dialog-foot"><button class="btn-secondary danger-text" id="followupRemove" type="button" hidden>Remove</button><span class="followup-foot-spacer"></span><button class="btn-secondary" type="button" data-followup-close>Cancel</button><button class="btn-primary" type="button" id="followupSave">Schedule</button></div>
+    </div>
+  </div>`);
+  overlay = document.getElementById("followupOverlay");
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest("[data-followup-close]")) closeFollowUpDialog(null);
+    const preset = event.target.closest("[data-followup-days-preset]");
+    if (preset) {
+      const input = document.getElementById("followupDays");
+      if (input) input.value = preset.getAttribute("data-followup-days-preset");
+      updateFollowUpDialog();
+    }
+  });
+  overlay.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeFollowUpDialog(null); }
+    if (event.key === "Enter" && event.target.id !== "followupRemove") { event.preventDefault(); document.getElementById("followupSave")?.click(); }
+  });
+  document.getElementById("followupDays")?.addEventListener("input", updateFollowUpDialog);
+  document.getElementById("followupSave")?.addEventListener("click", () => {
+    const days = Math.max(1, Math.min(90, Number(document.getElementById("followupDays")?.value) || 0));
+    if (!days) {
+      const error = document.getElementById("followupError");
+      if (error) { error.hidden = false; error.textContent = "Choose between 1 and 90 days."; }
+      return;
+    }
+    closeFollowUpDialog({ action: "save", days });
+  });
+  document.getElementById("followupRemove")?.addEventListener("click", () => closeFollowUpDialog({ action: "remove" }));
+  return overlay;
+}
+
+function updateFollowUpDialog() {
+  const days = Math.max(1, Math.min(90, Number(document.getElementById("followupDays")?.value) || 1));
+  $$("[data-followup-days-preset]").forEach((button) => {
+    button.classList.toggle("is-active", Number(button.getAttribute("data-followup-days-preset")) === days);
+  });
+  const due = new Date(Date.now() + days * 86400000);
+  const label = new Intl.DateTimeFormat(currentLocale(), { weekday: "long", month: "long", day: "numeric" }).format(due);
+  const node = document.getElementById("followupDueLabel");
+  if (node) node.textContent = `We'll bring this conversation back on ${label}.`;
+}
+
+function openFollowUpDialog({ kind = "awaiting_reply", days = 1, existing = false } = {}) {
+  const overlay = ensureFollowUpOverlay();
+  followUpReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const remind = kind === "remind_me";
+  document.getElementById("followupEyebrow").textContent = remind ? "Reply reminder" : "Follow-up";
+  document.getElementById("followupTitle").textContent = remind ? "Remind me to reply" : "Follow up on this conversation";
+  document.getElementById("followupMessage").textContent = remind
+    ? "Bring this conversation back to your inbox when it is time to reply."
+    : "Nudge you if nobody has replied by the chosen day.";
+  document.getElementById("followupSave").textContent = existing ? "Update" : "Schedule";
+  document.getElementById("followupRemove").hidden = !existing;
+  document.getElementById("followupDays").value = String(days);
+  const error = document.getElementById("followupError");
+  if (error) { error.hidden = true; error.textContent = ""; }
+  updateFollowUpDialog();
+  overlay.hidden = false;
+  setTimeout(() => { const input = document.getElementById("followupDays"); input?.focus(); input?.select?.(); }, 40);
+  return new Promise((resolve) => { followUpResolver = resolve; });
+}
+
+function closeFollowUpDialog(result) {
+  const overlay = document.getElementById("followupOverlay");
+  if (overlay) overlay.hidden = true;
+  const resolve = followUpResolver;
+  followUpResolver = null;
+  const returnFocus = followUpReturnFocus;
+  followUpReturnFocus = null;
+  if (returnFocus && returnFocus.isConnected) returnFocus.focus();
+  if (resolve) resolve(result);
 }
 
 function settleConfirm(value) {
@@ -6535,7 +6728,14 @@ async function openTeamTemplatePicker(session) {
         const template = detail.template;
         const variables = {};
         for (const name of template.variables || []) {
-          const value = window.prompt(`Value for {{${name}}}`, "");
+          const value = await appPrompt({
+            eyebrow: "Team template",
+            title: template.name || "Insert template",
+            message: "Fill in the template variable for this message.",
+            label: `{{${name}}}`,
+            placeholder: `Value for ${name}`,
+            confirmLabel: "Continue"
+          });
           if (value == null) return;
           variables[name] = value;
         }
@@ -6584,7 +6784,17 @@ function insertMeetingLink(session) {
 
 async function insertPaymentLink(session) {
   if (!session?.el) return;
-  const raw = window.prompt("Payment link URL (must be approved by your organization)", "https://");
+  const raw = await appPrompt({
+    eyebrow: "Compose",
+    title: "Insert payment link",
+    message: "Only payment URLs approved by your organization can be inserted.",
+    label: "Payment URL",
+    value: "https://",
+    placeholder: "https://pay.example.com/invoice",
+    type: "url",
+    confirmLabel: "Insert link",
+    validate: (value) => /^https?:\/\//i.test(value) ? "" : "Enter a valid https:// payment URL."
+  });
   if (!raw) return;
   try {
     const data = await api("/api/payment-links/validate", { method: "POST", body: { url: raw.trim() } });
@@ -8465,7 +8675,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.0.5";
+const MAIL_PROVIDER_ASSET_VERSION = "3.0.6";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -10658,7 +10868,14 @@ function threadCollabMarkup(thread) {
   const senderEmail = normalizeEmail(latest?.from?.email || latest?.fromEmail || "");
   const vip = senderEmail && state.vipSenders.includes(senderEmail);
   const muted = state.threadMutes.includes(thread.id);
-  const followUp = state.followUps.find((item) => item.threadId === thread.id && item.ownerId === ownerId);
+  const followUps = (state.followUps || []).filter((item) => item.threadId === thread.id && item.ownerId === ownerId);
+  const followUpFor = (kind) => followUps.find((item) => item.kind === kind);
+  const followUpDays = (item) => item ? Math.max(1, Math.ceil((Date.parse(item.dueAt) - Date.now()) / 86400000)) : 0;
+  const followUpButton = (kind, label) => {
+    const item = followUpFor(kind);
+    const days = followUpDays(item);
+    return `<button class="collab-action collab-followup${item ? " is-active has-badge" : ""}" data-followup-create="${esc(thread.id)}" data-followup-owner="${esc(ownerId)}" data-followup-kind="${kind}" data-followup-id="${esc(item?.id || "")}" data-followup-days="${days || ""}" type="button" aria-pressed="${item ? "true" : "false"}"${item ? ` title="Due ${esc(formatDateTimeFull(item.dueAt))}"` : ""}><svg class="icon" aria-hidden="true"><use href="#${kind === "remind_me" ? "i-clock" : "i-refresh"}"/></svg>${label}${item ? `<span class="collab-day-badge">${days}d</span>` : ""}</button>`;
+  };
   return `<div class="thread-collab-bar" data-collab-owner="${esc(ownerId)}" data-collab-thread="${esc(thread.id)}"${team ? ` data-collab-team="${esc(team.id)}"` : ""}>
       <div class="collab-field"><span>Handling</span><select data-thread-status aria-label="Conversation handling status">
         ${["new", "in_progress", "done"].map((value) => `<option value="${value}"${status === value ? " selected" : ""}>${esc(collabStatusLabel(value))}</option>`).join("")}
@@ -10669,7 +10886,7 @@ function threadCollabMarkup(thread) {
       <button class="collab-action" data-thread-notes-toggle type="button"><svg class="icon" aria-hidden="true"><use href="#i-people"/></svg>Team notes</button>
       ${senderEmail ? `<button class="collab-action${vip ? " is-active" : ""}" data-vip-toggle="${esc(senderEmail)}" type="button" aria-pressed="${vip ? "true" : "false"}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>${vip ? "VIP sender" : "Mark VIP"}</button>` : ""}
       <button class="collab-action${muted ? " is-active" : ""}" data-thread-mute="${esc(thread.id)}" type="button" aria-pressed="${muted ? "true" : "false"}">${muted ? "Unmute" : "Mute"}</button>
-      ${followUp ? `<span class="collab-chip" title="Follow-up due ${esc(formatListWhen(followUp.dueAt))}">Follow-up ${esc(formatListWhen(followUp.dueAt))}</span><button class="collab-action" data-followup-cancel="${esc(followUp.id)}" type="button">Cancel follow-up</button>` : `<button class="collab-action" data-followup-create="${esc(thread.id)}" data-followup-owner="${esc(ownerId)}" data-followup-kind="awaiting_reply" type="button">Follow up</button><button class="collab-action" data-followup-create="${esc(thread.id)}" data-followup-owner="${esc(ownerId)}" data-followup-kind="remind_me" type="button">Remind me</button>`}
+      ${followUpButton("awaiting_reply", "Follow up")}${followUpButton("remind_me", "Remind me")}
       ${team ? `<span class="collab-chip" title="${esc(team.name)} · ${esc(team.strategy === "round_robin" ? "round-robin" : "manual")} assignment">Shared inbox${sla ? ` · ${esc(sla.replace("_", " "))}` : ""}</span>` : ""}
       ${closed ? '<span class="collab-chip is-closed"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Closed</span>' : ""}
     </div>
@@ -16733,18 +16950,24 @@ function updateComposeAlignmentState(session, editor = null) {
   });
 }
 
-function applyComposeEditorCommand(session, command, value = null, options = {}) {
+async function applyComposeEditorCommand(session, command, value = null, options = {}) {
   if (!session?.el) return;
   const editor = session.el.querySelector("[data-compose-editor]");
   if (!editor) return;
   restoreComposeEditorSelection(session, editor);
   try { document.execCommand("styleWithCSS", false, true); } catch {}
   if (command === "createLink") {
-    const href = window.prompt("Link URL", "https://");
-    if (!href || !/^(https?:\/\/|mailto:)/i.test(href.trim())) {
-      showToast("Links must start with https://, http:// or mailto:");
-      return;
-    }
+    const href = await appPrompt({
+      eyebrow: "Compose",
+      title: "Insert link",
+      label: "Link URL",
+      value: "https://",
+      placeholder: "https://example.com",
+      type: "url",
+      confirmLabel: "Insert link",
+      validate: (value) => /^(https?:\/\/|mailto:)/i.test(value) ? "" : "Links must start with https://, http:// or mailto:."
+    });
+    if (!href) return;
     document.execCommand("createLink", false, href.trim());
   } else if (command === "formatBlock") {
     document.execCommand("formatBlock", false, value || "p");
@@ -19815,14 +20038,29 @@ function ensureAISettingsUi() {
   document.getElementById("aiSearchQuery")?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); runAIMailboxSearch(); } });
   document.getElementById("aiSenderRun")?.addEventListener("click", () => loadAISenderProfile());
   document.getElementById("aiSenderEmail")?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); loadAISenderProfile(); } });
-  document.getElementById("aiTriageResults")?.addEventListener("click", (event) => {
+  document.getElementById("aiTriageResults")?.addEventListener("click", async (event) => {
     const feedback = event.target.closest("[data-ai-triage-feedback]");
     if (feedback) {
       const card = feedback.closest("[data-ai-triage-id]");
       const triageId = card?.getAttribute("data-ai-triage-id");
       let category = "";
       if (feedback.getAttribute("data-ai-triage-feedback") === "incorrect") {
-        const answer = window.prompt("Correct category (action, fyi, newsletter, spam_like, needs_reply). Leave blank to just mark it wrong.", card?.getAttribute("data-ai-triage-category") || "");
+        const answer = await appPrompt({
+          eyebrow: "AI triage",
+          title: "Correct the category",
+          message: "Choose the right category, or leave it blank to simply mark the suggestion wrong.",
+          label: "Category",
+          options: [
+            { value: "", label: "No category — just mark it wrong" },
+            { value: "action", label: "Action" },
+            { value: "fyi", label: "FYI" },
+            { value: "newsletter", label: "Newsletter" },
+            { value: "spam_like", label: "Spam-like" },
+            { value: "needs_reply", label: "Needs reply" }
+          ],
+          value: card?.getAttribute("data-ai-triage-category") || "",
+          confirmLabel: "Submit feedback"
+        });
         if (answer === null) return;
         category = answer.trim().toLowerCase();
       }
@@ -25012,13 +25250,22 @@ function closeScheduledEdit() {
   scheduledEditSave.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save changes';
 }
 
-function applyScheduledEditCommand(command, value = null) {
+async function applyScheduledEditCommand(command, value = null) {
   const editor = scheduledEditBody;
   if (!editor) return;
   editor.focus();
   if (command === "createLink") {
-    const href = window.prompt("Link URL", "https://");
-    if (!href || !/^(https?:\/\/|mailto:)/i.test(href.trim())) return;
+    const href = await appPrompt({
+      eyebrow: "Scheduled message",
+      title: "Insert link",
+      label: "Link URL",
+      value: "https://",
+      placeholder: "https://example.com",
+      type: "url",
+      confirmLabel: "Insert link",
+      validate: (value) => /^(https?:\/\/|mailto:)/i.test(value) ? "" : "Links must start with https://, http:// or mailto:."
+    });
+    if (!href) return;
     try { document.execCommand("styleWithCSS", false, true); } catch {}
     document.execCommand("createLink", false, href.trim());
     return;
@@ -25988,14 +26235,18 @@ let calendarEditingId = null;
 let calendarEditingPayload = null;
 
 function calendarTimezoneOptions(selected) {
-  const zones = [
-    "UTC", "Africa/Lagos", "Africa/Cairo", "Africa/Johannesburg", "America/New_York", "America/Chicago",
-    "America/Denver", "America/Los_Angeles", "America/Sao_Paulo", "America/Mexico_City", "Asia/Dubai",
-    "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Asia/Shanghai", "Australia/Sydney", "Europe/London",
-    "Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Europe/Rome", "Europe/Amsterdam", "Europe/Warsaw",
-    "Europe/Istanbul", "Pacific/Auckland"
-  ];
+  let zones = [];
+  try { zones = Intl.supportedValuesOf("timeZone"); } catch {}
+  if (!Array.isArray(zones) || !zones.length) {
+    zones = ["UTC", "Africa/Lagos", "Africa/Cairo", "Africa/Johannesburg", "America/New_York", "America/Chicago",
+      "America/Denver", "America/Los_Angeles", "America/Sao_Paulo", "America/Mexico_City", "Asia/Dubai",
+      "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Asia/Shanghai", "Australia/Sydney", "Europe/London",
+      "Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Europe/Rome", "Europe/Amsterdam", "Europe/Warsaw",
+      "Europe/Istanbul", "Pacific/Auckland"];
+  }
+  if (!zones.includes("UTC")) zones.unshift("UTC");
   if (selected && !zones.includes(selected)) zones.push(selected);
+  zones.sort((a, b) => a.localeCompare(b));
   return zones.map((zone) => `<option value="${esc(zone)}"${zone === selected ? " selected" : ""}>${esc(zone.replace(/_/g, " "))}</option>`).join("");
 }
 
@@ -26889,23 +27140,130 @@ function calendarDraftColor(selected) {
   return CAL_COLORS.map((color) => `<button type="button" class="cal-color-choice${color === selected ? " is-active" : ""}" style="--swatch:${color}" data-cal-color-choice="${color}" aria-label="Use colour ${color}"></button>`).join("");
 }
 
+const BOOKING_WEEKDAYS = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [0, "Sun"]];
+let bookingTimezoneCache = "";
+
+function bookingTimezoneOptions(selected) {
+  if (!bookingTimezoneCache) {
+    let zones = [];
+    try { zones = Intl.supportedValuesOf("timeZone"); } catch {}
+    if (!Array.isArray(zones) || !zones.length) {
+      zones = ["UTC", "Africa/Lagos", "Africa/Cairo", "Africa/Johannesburg", "America/New_York", "America/Chicago",
+        "America/Denver", "America/Los_Angeles", "America/Sao_Paulo", "America/Mexico_City", "Asia/Dubai",
+        "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Asia/Shanghai", "Australia/Sydney", "Europe/London",
+        "Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Europe/Rome", "Europe/Amsterdam", "Europe/Warsaw",
+        "Europe/Istanbul", "Pacific/Auckland"];
+    }
+    if (!zones.includes("UTC")) zones.unshift("UTC");
+    zones.sort((a, b) => a.localeCompare(b));
+    bookingTimezoneCache = zones.map((zone) => `<option value="${esc(zone)}">${esc(zone.replace(/_/g, " "))}</option>`).join("");
+  }
+  return bookingTimezoneCache;
+}
+
+function fillBookingTimezoneSelect(selected) {
+  const select = document.getElementById("bookingPageTimezone");
+  if (!select) return;
+  if (!select.options.length) select.innerHTML = bookingTimezoneOptions(selected || currentTimeZone());
+  const zone = selected || select.value || currentTimeZone();
+  if (zone && ![...select.options].some((option) => option.value === zone)) {
+    select.insertAdjacentHTML("afterbegin", `<option value="${esc(zone)}">${esc(zone.replace(/_/g, " "))}</option>`);
+  }
+  select.value = zone;
+}
+
+function bookingWeekdayButtons(selected = [1, 2, 3, 4, 5]) {
+  return BOOKING_WEEKDAYS.map(([value, label]) => `<button class="booking-weekday${selected.includes(value) ? " is-active" : ""}" type="button" data-booking-weekday="${value}" aria-pressed="${selected.includes(value) ? "true" : "false"}">${label}</button>`).join("");
+}
+
+function bookingWeekdayValues() {
+  return $$("#bookingWeekdays [data-booking-weekday]")
+    .filter((button) => button.getAttribute("aria-pressed") === "true")
+    .map((button) => Number(button.getAttribute("data-booking-weekday")));
+}
+
+function updateBookingUrlPreview() {
+  const slug = (document.getElementById("bookingPageSlug")?.value || "").trim();
+  const title = (document.getElementById("bookingPageTitle")?.value || "").trim();
+  const derived = slug || title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
+  const node = document.getElementById("bookingUrlPreview");
+  if (node) node.textContent = `${location.origin}/book/${derived || "your-page"}`;
+}
+
 function ensureBookingPagesOverlay() {
   let overlay = document.getElementById("bookingPagesOverlay");
   if (overlay) return overlay;
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="bookingPagesOverlay" hidden><div class="dialog shared-drafts-dialog" role="dialog" aria-modal="true" aria-labelledby="bookingPagesTitle"><div class="dialog-head"><div><p class="eyebrow">Booking pages</p><h2 id="bookingPagesTitle">Public scheduling links</h2><p class="dialog-note">Share a link and let people book an open time. Only busy/free is exposed.</p></div><button class="icon-btn" id="bookingPagesClose" type="button" aria-label="Close booking pages"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="dialog-body"><div class="automation-rule-list" id="bookingPagesList"></div><form id="bookingPageForm"><div class="field-row"><label class="field"><span>Title</span><input id="bookingPageTitle" required placeholder="Meet with Avery"></label><label class="field"><span>Slug</span><input id="bookingPageSlug" placeholder="meet-avery"></label></div><div class="field-row"><label class="field"><span>Duration (minutes)</span><input id="bookingPageDuration" type="number" min="5" max="240" value="30"></label><label class="field"><span>Timezone</span><input id="bookingPageTimezone" value="UTC"></label></div><div class="field-row"><label class="field"><span>Start hour</span><input id="bookingPageStart" type="number" min="0" max="23" value="9"></label><label class="field"><span>End hour</span><input id="bookingPageEnd" type="number" min="1" max="24" value="17"></label></div><label class="check-field"><input id="bookingPageRoundRobin" type="checkbox"> Round-robin across team members</label><div class="dialog-foot"><button class="btn-secondary" id="bookingPagesCancel" type="button">Close</button><button class="btn-primary" type="submit" id="bookingPageSave">Create page</button></div></form></div></div></div>`);
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay booking-pages-overlay" id="bookingPagesOverlay" hidden>
+    <div class="dialog booking-pages-dialog" role="dialog" aria-modal="true" aria-labelledby="bookingPagesTitle">
+      <div class="dialog-head"><div class="dialog-title-wrap"><span class="dialog-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span><div><p class="eyebrow" id="bookingPagesEyebrow">Booking pages</p><h2 id="bookingPagesTitle">Public scheduling links</h2><p class="dialog-note">Share a link and let people book an open time. Only busy/free is exposed.</p></div></div><button class="icon-btn" id="bookingPagesClose" type="button" aria-label="Close booking pages"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <div class="dialog-body booking-pages-body">
+        <section class="booking-pages-list-section">
+          <div class="booking-section-head"><div><h3>Your pages</h3><p>Active links, bookings and availability.</p></div><span class="booking-count" id="bookingPageCount"></span></div>
+          <div class="booking-pages-list" id="bookingPagesList"><div class="settings-note">Loading booking pages…</div></div>
+        </section>
+        <section class="booking-editor-card">
+          <div class="booking-editor-head"><div><p class="eyebrow" id="bookingFormEyebrow">New page</p><h3 id="bookingFormTitle">Create a booking page</h3><p>Set the window guests can book inside.</p></div><button class="btn-secondary small" id="bookingFormReset" type="button">Reset</button></div>
+          <form id="bookingPageForm">
+            <div class="field-row">
+              <label class="field"><span>Title</span><input id="bookingPageTitle" required maxlength="120" placeholder="Meet with Avery" autocomplete="off"></label>
+              <label class="field"><span>Slug</span><input id="bookingPageSlug" maxlength="64" placeholder="meet-avery" autocomplete="off" spellcheck="false"></label>
+            </div>
+            <p class="booking-url-preview"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg><span id="bookingUrlPreview"></span></p>
+            <div class="field-row">
+              <label class="field"><span>Duration</span><select id="bookingPageDuration">${[15, 30, 45, 60, 90].map((minutes) => `<option value="${minutes}"${minutes === 30 ? " selected" : ""}>${minutes} minutes</option>`).join("")}</select></label>
+              <label class="field"><span>Time zone</span><select id="bookingPageTimezone"></select></label>
+            </div>
+            <div class="field-row">
+              <label class="field"><span>Available from</span><input id="bookingPageStart" type="time" step="3600" value="09:00"></label>
+              <label class="field"><span>Available until</span><input id="bookingPageEnd" type="time" step="3600" value="17:00"></label>
+              <div class="field booking-weekdays-field"><span>Days</span><div class="booking-weekdays" id="bookingWeekdays">${bookingWeekdayButtons()}</div></div>
+            </div>
+            <div class="setting-list booking-toggle-row"><div class="setting-row"><div class="setting-copy"><strong>Round-robin</strong><span>Distribute bookings across every available team member.</span></div><button class="switch" id="bookingPageRoundRobin" type="button" role="switch" aria-checked="false" aria-label="Round-robin across team members"><span></span></button></div></div>
+            <p class="booking-form-error" id="bookingFormError" hidden></p>
+            <div class="booking-form-actions"><button class="btn-primary" id="bookingPageSave" type="submit">Create page</button></div>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>`);
   overlay = document.getElementById("bookingPagesOverlay");
   overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.hidden = true; });
   document.getElementById("bookingPagesClose").addEventListener("click", () => { overlay.hidden = true; });
-  document.getElementById("bookingPagesCancel").addEventListener("click", () => { overlay.hidden = true; });
-  document.getElementById("bookingPageForm").addEventListener("submit", (event) => { event.preventDefault(); createBookingPage().catch(showError); });
+  document.getElementById("bookingFormReset").addEventListener("click", () => resetBookingForm());
+  document.getElementById("bookingPageForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    createBookingPage().catch(showError);
+  });
+  document.getElementById("bookingPageTitle")?.addEventListener("input", updateBookingUrlPreview);
+  document.getElementById("bookingPageSlug")?.addEventListener("input", updateBookingUrlPreview);
+  document.getElementById("bookingWeekdays")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-booking-weekday]");
+    if (!button) return;
+    const active = button.getAttribute("aria-pressed") === "true";
+    button.setAttribute("aria-pressed", active ? "false" : "true");
+    button.classList.toggle("is-active", !active);
+  });
+  document.getElementById("bookingPageRoundRobin")?.addEventListener("click", () => {
+    const toggle = document.getElementById("bookingPageRoundRobin");
+    const active = toggle.getAttribute("aria-checked") === "true";
+    toggle.setAttribute("aria-checked", active ? "false" : "true");
+  });
   return overlay;
 }
 
 async function openBookingPages() {
   const overlay = ensureBookingPagesOverlay();
-  document.getElementById("bookingPageTimezone").value = currentTimeZone();
+  fillBookingTimezoneSelect(currentTimeZone());
+  resetBookingForm();
   overlay.hidden = false;
   await refreshBookingPages();
+}
+
+function bookingPageMeta(page) {
+  const days = Array.isArray(page.weekdays) && page.weekdays.length
+    ? page.weekdays.map((value) => (BOOKING_WEEKDAYS.find(([day]) => day === value) || [value, "?"])[1]).join(" · ")
+    : "Mon – Fri";
+  return `${esc(page.durationMinutes || 30)} min · ${esc(page.timezone || "UTC")} · ${esc(days)}${page.roundRobin ? " · round-robin" : ""}`;
 }
 
 async function refreshBookingPages() {
@@ -26914,10 +27272,25 @@ async function refreshBookingPages() {
   host.innerHTML = '<div class="settings-note">Loading booking pages…</div>';
   const data = await api("/api/booking-pages");
   state.bookingPages = data.pages || [];
-  host.innerHTML = state.bookingPages.length ? state.bookingPages.map((page) => `<div class="automation-rule-row"><div class="shared-draft-copy"><strong>${esc(page.title)}</strong><span>${esc(page.timezone)} · ${page.durationMinutes} min${page.roundRobin ? " · round-robin" : ""}${page.active === false ? " · disabled" : ""}</span></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn-secondary small" type="button" data-booking-copy="${esc(page.url)}">Copy link</button><button class="btn-secondary small" type="button" data-booking-edit="${esc(page.id)}">Edit</button><button class="btn-secondary small" type="button" data-booking-bookings="${esc(page.id)}">Bookings</button><button class="btn-secondary small" type="button" data-booking-disable="${esc(page.id)}">${page.active === false ? "Enable" : "Disable"}</button></div></div>`).join("") : '<div class="empty-mini">No booking pages yet.</div>';
+  const count = document.getElementById("bookingPageCount");
+  if (count) count.textContent = `${state.bookingPages.length} page${state.bookingPages.length === 1 ? "" : "s"}`;
+  host.innerHTML = state.bookingPages.length ? state.bookingPages.map((page) => `<article class="booking-page-card${page.active === false ? " is-disabled" : ""}">
+      <div class="booking-page-main">
+        <span class="booking-page-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span>
+        <div class="booking-page-copy"><strong>${esc(page.title)}</strong><span>${bookingPageMeta(page)}</span><code>/book/${esc(page.slug)}</code></div>
+        <span class="booking-status${page.active === false ? " is-off" : ""}">${page.active === false ? "Disabled" : "Active"}</span>
+      </div>
+      <div class="booking-page-actions">
+        <button class="btn-secondary small" type="button" data-booking-copy="${esc(page.url)}">Copy link</button>
+        <button class="btn-secondary small" type="button" data-booking-edit="${esc(page.id)}">Edit</button>
+        <button class="btn-secondary small" type="button" data-booking-bookings="${esc(page.id)}">Bookings</button>
+        <button class="btn-secondary small" type="button" data-booking-disable="${esc(page.id)}">${page.active === false ? "Enable" : "Disable"}</button>
+      </div>
+    </article>`).join("") : '<div class="booking-empty"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg><strong>No booking pages yet</strong><span>Create one below and share the link with your guests.</span></div>';
   $$("[data-booking-copy]", host).forEach((button) => button.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(location.origin + button.dataset.bookingCopy); showToast("Booking link copied"); }
-    catch { showToast(location.origin + button.dataset.bookingCopy); }
+    const url = location.origin + button.dataset.bookingCopy;
+    try { await navigator.clipboard.writeText(url); showToast("Booking link copied"); }
+    catch { showToast(url); }
   }));
   $$("[data-booking-edit]", host).forEach((button) => button.addEventListener("click", () => editBookingPage(button.dataset.bookingEdit)));
   $$("[data-booking-bookings]", host).forEach((button) => button.addEventListener("click", () => openBookingList(button.dataset.bookingBookings)));
@@ -26926,27 +27299,56 @@ async function refreshBookingPages() {
 
 function resetBookingForm() {
   state.bookingEditId = "";
-  document.getElementById("bookingPageForm")?.reset();
+  const form = document.getElementById("bookingPageForm");
+  form?.reset();
+  const set = (id, value) => { const node = document.getElementById(id); if (node) node.value = value; };
+  set("bookingPageTitle", "");
+  set("bookingPageSlug", "");
+  set("bookingPageDuration", "30");
+  fillBookingTimezoneSelect(currentTimeZone());
+  set("bookingPageStart", "09:00");
+  set("bookingPageEnd", "17:00");
+  const days = document.getElementById("bookingWeekdays");
+  if (days) days.innerHTML = bookingWeekdayButtons();
+  document.getElementById("bookingPageRoundRobin")?.setAttribute("aria-checked", "false");
+  const error = document.getElementById("bookingFormError");
+  if (error) { error.hidden = true; error.textContent = ""; }
   const save = document.getElementById("bookingPageSave");
   if (save) save.textContent = "Create page";
-  const title = document.querySelector("#bookingPagesOverlay .eyebrow");
-  if (title) title.textContent = "Booking pages";
+  const eyebrow = document.getElementById("bookingFormEyebrow");
+  if (eyebrow) eyebrow.textContent = "New page";
+  const title = document.getElementById("bookingFormTitle");
+  if (title) title.textContent = "Create a booking page";
+  updateBookingUrlPreview();
 }
 
 function editBookingPage(id) {
   const page = state.bookingPages.find((item) => item.id === id);
   if (!page) return;
   state.bookingEditId = page.id;
-  document.getElementById("bookingPageTitle").value = page.title || "";
-  document.getElementById("bookingPageSlug").value = page.slug || "";
-  document.getElementById("bookingPageDuration").value = Number(page.durationMinutes) || 30;
-  document.getElementById("bookingPageTimezone").value = page.timezone || "UTC";
-  document.getElementById("bookingPageStart").value = Number(page.workingStartHour ?? 9);
-  document.getElementById("bookingPageEnd").value = Number(page.workingEndHour ?? 17);
-  document.getElementById("bookingPageRoundRobin").checked = Boolean(page.roundRobin);
+  const set = (field, value) => { const node = document.getElementById(field); if (node) node.value = value; };
+  set("bookingPageTitle", page.title || "");
+  set("bookingPageSlug", page.slug || "");
+  set("bookingPageDuration", String(Number(page.durationMinutes) || 30));
+  fillBookingTimezoneSelect(page.timezone || currentTimeZone());
+  const startHour = Number(page.workingStartHour ?? 9);
+  const endHour = Number(page.workingEndHour ?? 17);
+  set("bookingPageStart", `${String(startHour).padStart(2, "0")}:00`);
+  set("bookingPageEnd", `${String(endHour).padStart(2, "0")}:00`);
+  const selectedDays = Array.isArray(page.weekdays) && page.weekdays.length ? page.weekdays : [1, 2, 3, 4, 5];
+  const daysHost = document.getElementById("bookingWeekdays");
+  if (daysHost) daysHost.innerHTML = bookingWeekdayButtons(selectedDays);
+  document.getElementById("bookingPageRoundRobin")?.setAttribute("aria-checked", page.roundRobin ? "true" : "false");
+  const error = document.getElementById("bookingFormError");
+  if (error) { error.hidden = true; error.textContent = ""; }
   const save = document.getElementById("bookingPageSave");
   if (save) save.textContent = "Save page";
-  document.querySelector("#bookingPagesOverlay .eyebrow").textContent = "Editing booking page";
+  const eyebrow = document.getElementById("bookingFormEyebrow");
+  if (eyebrow) eyebrow.textContent = "Editing page";
+  const title = document.getElementById("bookingFormTitle");
+  if (title) title.textContent = "Update this booking page";
+  updateBookingUrlPreview();
+  document.querySelector(".booking-editor-card")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 async function openBookingList(id) {
@@ -26955,7 +27357,14 @@ async function openBookingList(id) {
   const rows = data.bookings || [];
   const host = document.getElementById("bookingPagesList");
   if (!host) return;
-  host.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px"><strong>${esc(page?.title || "Bookings")}</strong><button class="btn-secondary small" type="button" id="bookingListBack">Back to pages</button></div><div class="detail-list">${rows.map((booking) => `<div class="detail-row"><span>${esc(booking.bookerName)} · ${esc(booking.bookerEmail)}<br><small>${formatDate(booking.startAt, { time: true })} → ${formatDate(booking.endAt, { time: true })}</small></span><b>${esc(booking.status)}</b>${booking.status === "confirmed" ? `<button class="btn-secondary small" type="button" data-booking-cancel="${esc(booking.id)}" data-booking-page="${esc(id)}">Cancel</button>` : ""}</div>`).join("") || `<div class="empty-mini">No bookings yet.</div>`}</div>`;
+  host.innerHTML = `<div class="booking-list-head"><div><strong>${esc(page?.title || "Bookings")}</strong><span>${rows.length} booking${rows.length === 1 ? "" : "s"}</span></div><button class="btn-secondary small" type="button" id="bookingListBack">Back to pages</button></div>
+    <div class="booking-list">${rows.map((booking) => `<div class="booking-list-row">
+      <span class="booking-list-avatar">${esc(initialsFrom(booking.bookerName, booking.bookerEmail))}</span>
+      <div class="booking-list-copy"><strong>${esc(booking.bookerName)}</strong><span>${esc(booking.bookerEmail)}</span></div>
+      <span class="booking-list-when">${esc(formatDate(booking.startAt, { time: true }))} → ${esc(formatDate(booking.endAt, { time: true }))}</span>
+      <span class="booking-status${booking.status === "confirmed" ? "" : " is-off"}">${esc(booking.status)}</span>
+      ${booking.status === "confirmed" ? `<button class="btn-secondary small" type="button" data-booking-cancel="${esc(booking.id)}" data-booking-page="${esc(id)}">Cancel</button>` : ""}
+    </div>`).join("") || '<div class="booking-empty"><strong>No bookings yet</strong><span>Confirmed bookings will appear here.</span></div>'}</div>`;
   document.getElementById("bookingListBack")?.addEventListener("click", () => refreshBookingPages().catch(showError));
   $$("[data-booking-cancel]").forEach((button) => button.addEventListener("click", async () => {
     if (!(await appConfirm({ title: "Cancel booking?", message: "The booker and the calendar event will be marked cancelled.", confirmLabel: "Cancel booking", tone: "danger" }))) return;
@@ -26969,7 +27378,7 @@ async function toggleBookingPage(id) {
   const page = state.bookingPages.find((item) => item.id === id);
   if (!page) return;
   if (page.active === false) {
-    await api(`/api/booking-pages/${encodeURIComponent(id)}`, { method: "PUT", body: { title: page.title, slug: page.slug, durationMinutes: page.durationMinutes, timezone: page.timezone, workingStartHour: page.workingStartHour, workingEndHour: page.workingEndHour, roundRobin: page.roundRobin, active: true } });
+    await api(`/api/booking-pages/${encodeURIComponent(id)}`, { method: "PUT", body: { title: page.title, slug: page.slug, durationMinutes: page.durationMinutes, timezone: page.timezone, workingStartHour: page.workingStartHour, workingEndHour: page.workingEndHour, weekdays: page.weekdays, roundRobin: page.roundRobin, active: true } });
     showToast("Booking page enabled");
   } else {
     if (!(await appConfirm({ title: "Disable booking page?", message: "The public link stops accepting new bookings. Existing bookings stay in place.", confirmLabel: "Disable page", tone: "danger" }))) return;
@@ -26980,24 +27389,46 @@ async function toggleBookingPage(id) {
 }
 
 async function createBookingPage() {
-  const body = {
-    title: document.getElementById("bookingPageTitle").value.trim(),
-    slug: document.getElementById("bookingPageSlug").value.trim(),
-    durationMinutes: Number(document.getElementById("bookingPageDuration").value) || 30,
-    timezone: document.getElementById("bookingPageTimezone").value.trim() || "UTC",
-    workingStartHour: Number(document.getElementById("bookingPageStart").value),
-    workingEndHour: Number(document.getElementById("bookingPageEnd").value),
-    roundRobin: document.getElementById("bookingPageRoundRobin").checked
+  const title = document.getElementById("bookingPageTitle").value.trim();
+  const slug = document.getElementById("bookingPageSlug").value.trim();
+  const durationMinutes = Number(document.getElementById("bookingPageDuration").value) || 30;
+  const timezone = document.getElementById("bookingPageTimezone").value || "UTC";
+  const start = document.getElementById("bookingPageStart").value;
+  const end = document.getElementById("bookingPageEnd").value;
+  const weekdays = bookingWeekdayValues();
+  const roundRobin = document.getElementById("bookingPageRoundRobin").getAttribute("aria-checked") === "true";
+  const error = document.getElementById("bookingFormError");
+  const fail = (message) => {
+    if (error) { error.hidden = false; error.textContent = message; }
+    return false;
   };
-  if (state.bookingEditId) {
-    await api(`/api/booking-pages/${encodeURIComponent(state.bookingEditId)}`, { method: "PUT", body });
-    showToast("Booking page updated");
-  } else {
-    await api("/api/booking-pages", { method: "POST", body });
-    showToast("Booking page created");
+  if (!title) return fail("Give the page a title.");
+  if (!start || !end) return fail("Choose an availability window.");
+  const [startHour, startMinute] = start.split(":").map(Number);
+  const [endHour, endMinute] = end.split(":").map(Number);
+  if (startMinute || endMinute) return fail("Availability must start and end on the hour.");
+  if (endHour <= startHour) return fail("The end of the window must be after the start.");
+  if (!weekdays.length) return fail("Select at least one available day.");
+  if (error) { error.hidden = true; error.textContent = ""; }
+  const body = { title, slug, durationMinutes, timezone, workingStartHour: startHour, workingEndHour: endHour, weekdays, roundRobin };
+  const button = document.getElementById("bookingPageSave");
+  const original = button ? button.textContent : "";
+  if (button) { button.disabled = true; button.textContent = state.bookingEditId ? "Saving…" : "Creating…"; }
+  try {
+    if (state.bookingEditId) {
+      await api(`/api/booking-pages/${encodeURIComponent(state.bookingEditId)}`, { method: "PUT", body });
+      showToast("Booking page updated");
+    } else {
+      await api("/api/booking-pages", { method: "POST", body });
+      showToast("Booking page created");
+    }
+    resetBookingForm();
+    await refreshBookingPages();
+  } catch (error) {
+    fail(error.message || "The booking page could not be saved.");
+  } finally {
+    if (button) { button.disabled = false; button.textContent = state.bookingEditId ? "Save page" : "Create page"; }
   }
-  resetBookingForm();
-  await refreshBookingPages();
 }
 
 function openCalendarAdd(tab = "create", calendarId = "") {
@@ -29067,13 +29498,22 @@ function handleFeatureClick(event) {
   return false;
 }
 
-function applySignatureRichCommand(editor, command, value = null) {
+async function applySignatureRichCommand(editor, command, value = null) {
   if (!editor) return;
   restoreEditorRange(editor);
   try { document.execCommand("styleWithCSS", false, true); } catch {}
   if (command === "createLink") {
-    const href = window.prompt("Link URL", "https://");
-    if (!href || !/^(https?:\/\/|mailto:)/i.test(href.trim())) return;
+    const href = await appPrompt({
+      eyebrow: "Signature",
+      title: "Insert link",
+      label: "Link URL",
+      value: "https://",
+      placeholder: "https://example.com",
+      type: "url",
+      confirmLabel: "Insert link",
+      validate: (value) => /^(https?:\/\/|mailto:)/i.test(value) ? "" : "Links must start with https://, http:// or mailto:."
+    });
+    if (!href) return;
     document.execCommand("createLink", false, href.trim());
   } else if (command === "formatBlock") {
     document.execCommand("formatBlock", false, value || "p");
@@ -29154,6 +29594,8 @@ function wireHtmlSourceDialog() {
 }
 
 function bindEvents() {
+  document.addEventListener("pointerdown", () => { document.documentElement.dataset.input = "pointer"; }, true);
+  document.addEventListener("keydown", () => { document.documentElement.dataset.input = "keyboard"; }, true);
   bindStickyNoteEvents(document);
   bindStickyEditorEvents();
   document.addEventListener("click", (event) => {
@@ -30107,20 +30549,33 @@ function bindEvents() {
     const followCreate = event.target.closest("[data-followup-create]");
     if (followCreate) {
       const kind = followCreate.getAttribute("data-followup-kind") || "awaiting_reply";
-      const promptText = kind === "remind_me" ? "Remind me to reply in how many days? (1–90)" : "Nudge me if there is no reply in how many days? (1–90)";
-      const days = Number(window.prompt(promptText, kind === "remind_me" ? "1" : "3"));
-      if (!Number.isFinite(days) || days < 1 || days > 90) return;
-      api("/api/followups", {
-        method: "POST", body: {
-          threadId: followCreate.getAttribute("data-followup-create"),
-          ownerId: followCreate.getAttribute("data-followup-owner") || "",
-          kind, days
-        }
-      }).then(() => api("/api/followups")).then((data) => {
+      const existingId = followCreate.getAttribute("data-followup-id") || "";
+      const existing = existingId ? (state.followUps || []).find((item) => item.id === existingId) : null;
+      const initialDays = Number(followCreate.getAttribute("data-followup-days")) || (kind === "remind_me" ? 1 : 3);
+      const result = await openFollowUpDialog({ kind, days: initialDays, existing: Boolean(existing) });
+      if (!result) return;
+      if (result.action === "remove") {
+        if (!existing) return;
+        await api(`/api/followups/${encodeURIComponent(existing.id)}`, { method: "DELETE" });
+        state.followUps = (state.followUps || []).filter((item) => item.id !== existing.id);
+        renderReader({ preserveScroll: true });
+        showToast("Follow-up removed");
+        return;
+      }
+      if (result.action !== "save") return;
+      try {
+        await api("/api/followups", {
+          method: "POST", body: {
+            threadId: followCreate.getAttribute("data-followup-create"),
+            ownerId: followCreate.getAttribute("data-followup-owner") || "",
+            kind, days: result.days
+          }
+        });
+        const data = await api("/api/followups");
         state.followUps = data.followUps || [];
         renderReader({ preserveScroll: true });
         showToast(kind === "remind_me" ? "Reply reminder scheduled" : "Follow-up scheduled");
-      }).catch(showError);
+      } catch (error) { showError(error); }
       return;
     }
     const followCancel = event.target.closest("[data-followup-cancel]");

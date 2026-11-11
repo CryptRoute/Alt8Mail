@@ -130,4 +130,17 @@ func TestBookingIntegration(t *testing.T) {
 	if recorder.Code != http.StatusOK || strings.Contains(recorder.Body.String(), "Demo") || strings.Contains(recorder.Body.String(), "Booking Host") {
 		t.Fatalf("privacy leak in slots: %s", recorder.Body.String())
 	}
+	pageRequest := httptest.NewRequest(http.MethodGet, "/book/"+slug, nil)
+	pageRequest.SetPathValue("slug", slug)
+	pageRecorder := httptest.NewRecorder()
+	server.publicBookingPage(pageRecorder, pageRequest)
+	if pageRecorder.Code != http.StatusOK {
+		t.Fatalf("public booking page = %d %s", pageRecorder.Code, pageRecorder.Body.String())
+	}
+	pageHTML := pageRecorder.Body.String()
+	for _, marker := range []string{"Choose a time", "Your details", "Confirm booking", "bookingSuccess", "America/New_York"} {
+		if !strings.Contains(pageHTML, marker) {
+			t.Fatalf("public booking page missing %q", marker)
+		}
+	}
 }

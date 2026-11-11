@@ -1,3 +1,30 @@
+# Alt8Mail 3.0.6
+
+Release date: 2026-11-11. Enterprise interaction polish.
+
+## 3.0.6 compose, scheduling and dialog UX
+
+- The compose editor no longer paints a focus rectangle on mouse click. A
+  keyboard-only focus ring remains when tabbing into the editor.
+- Booking pages use a redesigned scheduler modal: a title/slug URL preview,
+  duration presets, a full searchable list of IANA timezones, real time
+  pickers for the availability window, weekday selection, a round-robin
+  switch and inline validation. The public booking page is rebuilt as a
+  responsive two-column enterprise scheduling page with grouped time slots,
+  selected-time summary, proper form fields and a booking confirmation state.
+- Meeting polls inherit the same form-field system and the full timezone list;
+  their date/time option rows remain proper pickers.
+- All native `window.prompt` dialogs are replaced with an in-app prompt modal.
+  Link insertion, template variables, payment links and AI category feedback
+  now use styled dialogs with validation and focus return.
+- Follow up / Remind me use a designed reminder dialog with day presets, a
+  custom day count and a due-date summary. Active reminders show a day-count
+  badge on the button, can be updated in place or removed.
+- Marking a sender VIP now visibly switches the button to a gold active state;
+  active mute/follow-up states use the accent state style.
+- Fixed the booking list date formatter, which previously threw after opening
+  a page's bookings.
+
 # Alt8Mail 3.0.5
 
 Release date: 2026-11-11. Large-file scanning, settings UI and license-gate UX.

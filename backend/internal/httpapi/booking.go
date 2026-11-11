@@ -7,6 +7,7 @@ import (
 	"html"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -272,14 +273,193 @@ func (s *Server) publicBookingPage(w http.ResponseWriter, r *http.Request) {
 	slotsJSON, _ := json.Marshal(views)
 	title := html.EscapeString(page.Title)
 	description := html.EscapeString(page.Description)
-	pageHTML := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>` + title + `</title><style>body{font-family:system-ui,sans-serif;background:#f4f7fb;color:#172230;margin:0;padding:32px}main{max-width:680px;margin:0 auto;background:#fff;border:1px solid #dbe3ee;border-radius:16px;padding:28px}h1{font-size:24px;margin:0 0 8px}p{color:#4b5b70;line-height:1.5}.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin:20px 0}.slot{padding:11px 12px;border:1px solid #dbe3ee;border-radius:10px;background:#f8fafc;cursor:pointer;text-align:left;font:inherit}.slot.is-selected{border-color:#0f6cbd;background:#e8f2fc}form{display:grid;gap:10px;margin-top:18px}label{display:grid;gap:4px;font-weight:650}input,textarea{padding:9px 10px;border:1px solid #dbe3ee;border-radius:8px;font:inherit}button.primary{padding:11px 16px;border:0;border-radius:9px;background:#0f6cbd;color:#fff;font-weight:700;cursor:pointer}.note{font-size:12px;color:#667085}.error{color:#b42318}.ok{color:#087443}</style></head><body><main><h1>` + title + `</h1><p>` + description + `</p><div class="slots" id="slots"></div><form id="bookingForm"><label>Name<input id="bookerName" required></label><label>Email<input id="bookerEmail" type="email" required></label><label>Note<textarea id="bookerNote" rows="3"></textarea></label><button class="primary" type="submit">Confirm booking</button><p class="note" id="bookingStatus">Times are shown in ` + html.EscapeString(page.Timezone) + `.</p></form></main><script>
+	if strings.TrimSpace(page.Description) == "" {
+		description = "Choose a time that works for you."
+	}
+	timezone := html.EscapeString(page.Timezone)
+	slug := html.EscapeString(page.Slug)
+	pageHTML := `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>` + title + ` · Alt8Mail scheduling</title>
+<style>
+:root{--ink:#142033;--ink-2:#3c4b62;--muted:#6b7a90;--line:#e2e8f0;--line-strong:#cbd5e1;--surface:#fff;--surface-2:#f6f8fb;--accent:#0f6cbd;--accent-soft:#eaf2fb;--navy:#0a2440;--success:#15803d;--success-soft:#e9f8ef;--danger:#b42318;--danger-soft:#fef0ee}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(900px 460px at 12% -8%,#e8f1fb 0,transparent 60%),#f3f6fa;color:var(--ink);font-family:"Inter","Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;line-height:1.5}
+a{color:inherit}
+.page{min-height:100vh;display:flex;flex-direction:column}
+.topbar{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(18px,4vw,48px);background:var(--navy);color:#fff}
+.brand{display:inline-flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.02em;font-size:15px}
+.brand img{width:30px;height:30px;border-radius:8px;display:block}
+.topbar .tag{font-size:10px;font-weight:750;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.62)}
+.shell{width:min(1080px,calc(100% - 32px));margin:clamp(20px,4vw,44px) auto;display:grid;grid-template-columns:1.02fr .98fr;gap:22px;align-items:start;flex:1}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:0 18px 50px rgba(15,27,51,.08)}
+.info{padding:clamp(22px,3vw,32px);position:sticky;top:24px}
+.eyebrow{margin:0 0 8px;color:var(--accent);font-size:10px;font-weight:750;letter-spacing:.13em;text-transform:uppercase}
+h1{margin:0;font-size:clamp(28px,3.2vw,40px);line-height:1.06;letter-spacing:-.045em}
+.lead{margin:14px 0 0;color:var(--ink-2);font-size:14px;line-height:1.65;max-width:48ch}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 0}
+.meta span{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);color:var(--ink-2);font-size:11px;font-weight:600}
+.meta svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.selected{margin:20px 0 0;padding:13px 14px;border:1px solid #bcd8f2;border-radius:12px;background:var(--accent-soft)}
+.selected[hidden]{display:none}
+.selected span{display:block;font-size:10px;font-weight:750;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.selected strong{display:block;margin-top:3px;font-size:14px}
+.host{display:flex;align-items:center;gap:10px;margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+.host-mark{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--navy);color:#fff;font-size:11px;font-weight:750}
+.host div{display:flex;flex-direction:column;gap:1px}
+.host strong{font-size:12px}
+.host span{font-size:10.5px;color:var(--muted)}
+.steps{display:flex;flex-direction:column;gap:8px;margin-top:18px}
+.steps div{display:flex;align-items:center;gap:9px;color:var(--ink-2);font-size:11px}
+.steps span{width:20px;height:20px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--surface-2);border:1px solid var(--line);font-size:9.5px;font-weight:750;color:var(--muted)}
+.steps p{margin:0}
+.booker{overflow:hidden}
+.booker-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:20px 22px 14px;border-bottom:1px solid var(--line)}
+.booker-head h2{margin:0;font-size:16px;letter-spacing:-.02em}
+.booker-head span{font-size:10.5px;color:var(--muted)}
+.days{padding:14px 22px 4px;max-height:390px;overflow-y:auto}
+.day{margin-bottom:14px}
+.day h3{margin:0 0 6px;font-size:10px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.slot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px}
+.slot{appearance:none;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink-2);padding:9px 6px;font:inherit;font-size:11.5px;font-weight:650;cursor:pointer;transition:border-color .15s,background .15s,color .15s}
+.slot:hover{border-color:var(--line-strong);background:var(--surface-2)}
+.slot.is-selected{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.slot:disabled{opacity:.45;cursor:not-allowed}
+.booking-form{padding:18px 22px 22px;border-top:1px solid var(--line);background:var(--surface-2)}
+.booking-form h3{margin:0 0 10px;font-size:12px;letter-spacing:-.01em}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+label{display:flex;flex-direction:column;gap:5px;font-size:10.5px;font-weight:650;color:var(--ink-2)}
+input,textarea{width:100%;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit;font-size:12px;padding:9px 10px;outline:0}
+input:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(15,108,189,.14)}
+textarea{resize:vertical;min-height:70px}
+.primary{width:100%;height:40px;margin-top:11px;border:0;border-radius:10px;background:var(--accent);color:#fff;font:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:background .15s}
+.primary:hover{background:#0b5aa0}
+.primary:disabled{opacity:.65;cursor:progress}
+.status{margin:9px 0 0;font-size:10.5px;color:var(--muted);line-height:1.5}
+.status.error{color:var(--danger)}
+.success{padding:28px 22px;text-align:center;background:var(--surface)}
+.success[hidden]{display:none}
+.success-icon{width:46px;height:46px;margin:0 auto 12px;display:grid;place-items:center;border-radius:50%;background:var(--success-soft);color:var(--success);font-size:20px;font-weight:800}
+.success h2{margin:0 0 6px;font-size:18px;letter-spacing:-.03em}
+.success p{margin:0;color:var(--ink-2);font-size:12px;line-height:1.6}
+.success .muted{margin-top:8px;color:var(--muted);font-size:11px}
+.foot{padding:18px clamp(18px,4vw,48px) 26px;text-align:center;color:var(--muted);font-size:10.5px}
+.foot strong{color:var(--ink-2)}
+.empty{padding:22px;border:1px dashed var(--line-strong);border-radius:10px;color:var(--muted);font-size:11.5px;text-align:center}
+@media (max-width:820px){.shell{grid-template-columns:1fr}.info{position:static}.days{max-height:none}}
+@media (max-width:520px){.grid{grid-template-columns:1fr}.shell{width:calc(100% - 20px)}.topbar{height:56px}.topbar .tag{display:none}}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="topbar"><span class="brand"><img src="/icons/icon-512.png" alt="" width="30" height="30">Alt8Mail</span><span class="tag">Scheduling</span></header>
+  <main class="shell">
+    <section class="card info">
+      <p class="eyebrow">Book a time</p>
+      <h1>` + title + `</h1>
+      <p class="lead">` + description + `</p>
+      <div class="meta">
+        <span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>` + strconv.Itoa(page.Duration) + ` minutes</span>
+        <span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.8 5.6 3.8 9S14.5 18.5 12 21c-2.5-2.5-3.8-5.6-3.8-9S9.5 5.5 12 3Z"/></svg>` + timezone + `</span>
+      </div>
+      <div class="selected" id="selectedSummary" hidden><span>Selected time</span><strong id="selectedLabel"></strong></div>
+      <div class="host"><span class="host-mark">A8</span><div><strong>` + title + `</strong><span>Hosted with Alt8Mail · times shown in ` + timezone + `</span></div></div>
+      <div class="steps"><div><span>1</span><p>Pick a time that works for you.</p></div><div><span>2</span><p>Share your name and email.</p></div><div><span>3</span><p>Receive a calendar invitation.</p></div></div>
+    </section>
+    <section class="card booker">
+      <div class="booker-head"><h2>Choose a time</h2><span id="slotCount"></span></div>
+      <div class="days" id="slots"></div>
+      <div class="success" id="bookingSuccess" hidden>
+        <div class="success-icon">✓</div>
+        <h2>You are booked</h2>
+        <p id="successCopy"></p>
+        <p class="muted">A calendar invitation has been sent to your email.</p>
+      </div>
+      <form class="booking-form" id="bookingForm">
+        <h3>Your details</h3>
+        <div class="grid">
+          <label>Name<input id="bookerName" autocomplete="name" required placeholder="Your name"></label>
+          <label>Email<input id="bookerEmail" type="email" autocomplete="email" required placeholder="you@company.com"></label>
+        </div>
+        <label style="margin-top:9px">Note <span style="font-weight:500;color:var(--muted)">optional</span><textarea id="bookerNote" rows="3" placeholder="Anything the host should know?"></textarea></label>
+        <button class="primary" id="bookingSubmit" type="submit">Confirm booking</button>
+        <p class="status" id="bookingStatus">Times are shown in ` + timezone + `.</p>
+      </form>
+    </section>
+  </main>
+  <footer class="foot">Secured by <strong>Alt8Mail</strong> · Your details are shared only with the host.</footer>
+</div>
+<script>
 const slots = ` + string(slotsJSON) + `;
+const duration = ` + strconv.Itoa(page.Duration) + `;
+const timezone = "` + timezone + `";
+const slug = "` + slug + `";
 let selected = "";
 const host = document.getElementById("slots");
-host.innerHTML = slots.length ? slots.map((slot) => '<button type="button" class="slot" data-slot="' + slot.startAt + '">' + slot.label + '</button>').join("") : '<p class="note">No open times in the next two weeks.</p>';
-host.addEventListener("click", (event) => { const button = event.target.closest("[data-slot]"); if (!button) return; selected = button.dataset.slot; host.querySelectorAll(".slot").forEach((item) => item.classList.toggle("is-selected", item === button)); });
-document.getElementById("bookingForm").addEventListener("submit", async (event) => { event.preventDefault(); const status = document.getElementById("bookingStatus"); if (!selected) { status.textContent = "Choose a time first."; status.className = "error"; return; } status.textContent = "Booking…"; status.className = "note"; const response = await fetch(location.pathname.replace(/\/book\/.*$/, "") + "/api/public/booking/` + html.EscapeString(page.Slug) + `/book", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ startAt: selected, name: document.getElementById("bookerName").value, email: document.getElementById("bookerEmail").value, note: document.getElementById("bookerNote").value }) }); const data = await response.json(); if (!response.ok) { status.textContent = data.error?.message || "That time is no longer available."; status.className = "error"; return; } status.textContent = "Booked. A calendar invitation has been created."; status.className = "ok"; document.getElementById("bookingForm").querySelectorAll("input,textarea,button").forEach((item) => { item.disabled = true; }); });
-</script></body></html>`
+const count = document.getElementById("slotCount");
+const summary = document.getElementById("selectedSummary");
+const summaryLabel = document.getElementById("selectedLabel");
+count.textContent = slots.length + (slots.length === 1 ? " time available" : " times available");
+function esc(value) { return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function renderSlots() {
+  if (!slots.length) { host.innerHTML = '<div class="empty">No open times in the next two weeks. Please contact the host directly.</div>'; return; }
+  const groups = new Map();
+  for (const slot of slots) {
+    const pieces = String(slot.label || "").split(" · ");
+    const day = pieces[0] || "Available";
+    const time = pieces[1] || String(slot.label || "");
+    if (!groups.has(day)) groups.set(day, []);
+    groups.get(day).push({ startAt: slot.startAt, time });
+  }
+  host.innerHTML = Array.from(groups.entries()).map(([day, items]) => '<section class="day"><h3>' + esc(day) + '</h3><div class="slot-grid">' + items.map((item) => '<button type="button" class="slot" data-slot="' + esc(item.startAt) + '" data-label="' + esc(day + " · " + item.time) + '" aria-pressed="false">' + esc(item.time) + '</button>').join("") + '</div></section>').join("");
+}
+host.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-slot]");
+  if (!button) return;
+  selected = button.getAttribute("data-slot");
+  host.querySelectorAll(".slot").forEach((item) => { const on = item === button; item.classList.toggle("is-selected", on); item.setAttribute("aria-pressed", on ? "true" : "false"); });
+  summary.hidden = false;
+  summaryLabel.textContent = button.getAttribute("data-label") + " · " + duration + " minutes";
+});
+document.getElementById("bookingForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = document.getElementById("bookingStatus");
+  const submit = document.getElementById("bookingSubmit");
+  if (!selected) { status.textContent = "Choose a time first."; status.className = "status error"; return; }
+  status.textContent = "Confirming your booking…"; status.className = "status";
+  submit.disabled = true;
+  try {
+    const response = await fetch(location.pathname.replace(/\/book\/.*$/, "") + "/api/public/booking/" + encodeURIComponent(slug) + "/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ startAt: selected, name: document.getElementById("bookerName").value, email: document.getElementById("bookerEmail").value, note: document.getElementById("bookerNote").value })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      status.textContent = (data.error && data.error.message) || "That time is no longer available. Choose another.";
+      status.className = "status error";
+      submit.disabled = false;
+      return;
+    }
+    document.getElementById("bookingForm").hidden = true;
+    document.getElementById("slots").querySelectorAll("button").forEach((item) => { item.disabled = true; });
+    const success = document.getElementById("bookingSuccess");
+    document.getElementById("successCopy").textContent = summaryLabel.textContent;
+    success.hidden = false;
+  } catch (error) {
+    status.textContent = "Cannot reach the scheduling service. Check your connection and try again.";
+    status.className = "status error";
+    submit.disabled = false;
+  }
+});
+renderSlots();
+</script>
+</body>
+</html>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(pageHTML))
 }
