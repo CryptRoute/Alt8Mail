@@ -862,6 +862,61 @@ select.select, select.input {
 .filterbar .search-box .input { width: 100%; }
 .form-note { font-size: 11px; color: var(--text-3); line-height: 1.55; }
 .form-note strong { color: var(--text-2); }
+
+/* ---------------------------------------------------------- mail OAuth apps */
+.oauth-provider-title { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+.oauth-provider-title > div { min-width: 0; }
+.oauth-app-mark {
+  width: 38px; height: 38px; flex: none;
+  display: grid; place-items: center;
+  border: 1px solid var(--accent-soft-2); border-radius: 11px;
+  background: var(--accent-soft); color: var(--accent-ink);
+}
+.oauth-app-mark.is-microsoft {
+  border-color: var(--status-info-line);
+  background: var(--status-info-bg);
+  color: var(--status-info-ink);
+}
+.oauth-provider-status { display: flex; align-items: center; justify-content: flex-end; gap: 5px; flex-wrap: wrap; }
+.oauth-redirect { margin-top: 16px; }
+.oauth-redirect .section-label { margin: 0 0 5px; }
+.oauth-redirect .form-note { margin: 6px 0 0; }
+.oauth-live { margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--border); }
+.oauth-live .section-label { margin: 0 0 3px; }
+.oauth-live .tile-link { padding: 6px 0; }
+.oauth-live .tile-link .value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+.oauth-steps { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.oauth-steps summary { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-2); font-size: 11.5px; font-weight: 600; list-style: none; }
+.oauth-steps summary::-webkit-details-marker { display: none; }
+.oauth-steps summary:hover { color: var(--ink); }
+.oauth-steps ol { margin: 10px 0 0; padding-left: 19px; color: var(--text-3); font-size: 11px; line-height: 1.65; }
+.oauth-steps ol li + li { margin-top: 4px; }
+.oauth-steps ol strong, .oauth-notes strong { color: var(--text-2); font-weight: 600; }
+.oauth-steps code, .oauth-notes code { font-family: var(--font-mono); font-size: 9.5px; padding: 1px 4px; border-radius: 3px; background: var(--surface-muted); color: var(--text-2); }
+.oauth-notes { margin: 9px 0 0; padding-left: 16px; color: var(--text-3); font-size: 10.5px; line-height: 1.6; }
+.oauth-links { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.oauth-scope-row { margin-top: 4px; }
+.oauth-scope-row .section-label { margin: 0 0 3px; }
+.oauth-scope-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.oauth-scope-list code { font-family: var(--font-mono); font-size: 9.5px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-soft); color: var(--text-2); }
+.oauth-warning-list { margin: 4px 0 0; padding-left: 16px; color: var(--text-3); font-size: 10.5px; line-height: 1.55; }
+.oauth-warning-list li + li { margin-top: 2px; }
+.oauth-flow { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; counter-reset: oauth-flow; }
+.oauth-flow li { position: relative; padding-left: 27px; counter-increment: oauth-flow; }
+.oauth-flow li::before {
+  content: counter(oauth-flow);
+  position: absolute; left: 0; top: 1px;
+  width: 18px; height: 18px;
+  display: grid; place-items: center;
+  border: 1px solid var(--border-strong); border-radius: 50%;
+  background: var(--surface-soft); color: var(--text-3);
+  font-size: 9px; font-weight: 700;
+}
+.oauth-flow strong { display: block; color: var(--text-2); font-size: 11.5px; font-weight: 600; }
+.oauth-flow span { display: block; margin-top: 1px; color: var(--text-3); font-size: 10.5px; line-height: 1.45; }
+.oauth-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; color: var(--text-3); font-size: 10.5px; line-height: 1.45; }
+.oauth-checks li { display: flex; align-items: flex-start; gap: 7px; }
+.oauth-checks .icon { flex: none; margin-top: 1px; color: var(--status-good); }
 .form-section-title { font-size: 12px; font-weight: 650; margin: 0 0 10px; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
 .form-section-title + .form-grid { margin-bottom: 18px; }
 .input-hint-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

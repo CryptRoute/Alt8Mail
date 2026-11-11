@@ -1,3 +1,45 @@
+# Alt8Mail 3.1.0
+
+Release date: 2026-11-11. Gmail and Outlook OAuth from System Control.
+
+## 3.1.0 mail OAuth applications
+
+- System Control has a new **Mail OAuth** page under Mail for the Google and
+  Microsoft OAuth applications used by the multi-mailbox inbox. It replaces
+  hand-editing `ALT8MAIL_GOOGLE_MAIL_*` and `ALT8MAIL_MICROSOFT_MAIL_*` in
+  `/etc/a8m/app.env`.
+- Each provider has an enable switch, client ID, encrypted client secret,
+  Microsoft tenant (common, organizations, consumers, directory ID or verified
+  domain), the exact authorized redirect URI with copy, requested scopes and
+  step-by-step registration guidance for Google Cloud Console and Microsoft
+  Entra.
+- Secrets are sealed with the control-plane key before being stored in
+  `control.mail_oauth_providers`. The API returns only whether a secret exists
+  and where it came from; it never returns a stored secret.
+- **Apply to webmail** writes the complete provider configuration to `app.env`,
+  restarts the webmail and admin services and waits for their health checks.
+  A failed restart restores the previous environment and brings the old
+  services back. Saving a draft alone does not affect users.
+- **Test connection** saves the draft, verifies the HTTPS redirect URI, checks
+  that each enabled provider's OIDC metadata is reachable, and reports the
+  authorize and token endpoints. Disabled providers are reported as skipped.
+- Existing installations keep working without a click: before the first save
+  the page mirrors the credentials already in `app.env`, including the shared
+  OIDC client fallback, and marks whether mail-specific or shared credentials
+  are in use.
+- Disabling a provider writes an explicit `ALT8MAIL_*_MAIL_OAUTH_ENABLED=false`
+  so shared OIDC credentials can no longer silently enable mail sign-in.
+- The webmail now receives provider availability at bootstrap. When an
+  administrator has not configured an OAuth application, the Add mail account
+  wizard explains the missing setup and disables the provider button instead
+  of opening a popup that immediately fails. Gmail still offers the app-password
+  path in that state.
+- The old “OAuth is not configured for this provider” error now names the
+  provider and points to **System Control → Mail OAuth**.
+- Added migration `0084_mail_oauth_config.sql` and unit coverage for credential
+  resolution, encrypted draft storage, disable semantics, environment import,
+  redirect URI validation and provider discovery.
+
 # Alt8Mail 3.0.6
 
 Release date: 2026-11-11. Enterprise interaction polish.

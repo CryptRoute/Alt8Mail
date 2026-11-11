@@ -245,10 +245,20 @@ ALT8MAIL_GOOGLE_CLIENT_ID / ALT8MAIL_GOOGLE_CLIENT_SECRET
 ALT8MAIL_DROPBOX_CLIENT_ID / ALT8MAIL_DROPBOX_CLIENT_SECRET
 ALT8MAIL_MICROSOFT_CLIENT_ID / ALT8MAIL_MICROSOFT_CLIENT_SECRET
 ALT8MAIL_GOOGLE_MAIL_CLIENT_ID / ALT8MAIL_GOOGLE_MAIL_CLIENT_SECRET
+ALT8MAIL_GOOGLE_MAIL_OAUTH_ENABLED (default: true)
 ALT8MAIL_MICROSOFT_MAIL_CLIENT_ID / ALT8MAIL_MICROSOFT_MAIL_CLIENT_SECRET
 ALT8MAIL_MICROSOFT_MAIL_TENANT (default: common)
+ALT8MAIL_MICROSOFT_MAIL_OAUTH_ENABLED (default: true)
 ALT8MAIL_SESSION_SECRET_PREVIOUS (optional rotation fallback)
 ```
+
+Mail account OAuth can also be configured in System Control → Mail OAuth.
+That page stores the client secrets encrypted in `control.mail_oauth_providers`,
+writes the `ALT8MAIL_*_MAIL_*` values above into `app.env`, and restarts the
+webmail services. Setting `ALT8MAIL_GOOGLE_MAIL_OAUTH_ENABLED=false` or
+`ALT8MAIL_MICROSOFT_MAIL_OAUTH_ENABLED=false` blocks the corresponding mail
+sign-in even when the shared `ALT8MAIL_GOOGLE_CLIENT_*` or
+`ALT8MAIL_MICROSOFT_CLIENT_*` OIDC credentials are present.
 
 OAuth refresh/access tokens are encrypted with AES-GCM using a key derived from
 `ALT8MAIL_SESSION_SECRET`. Rotating that secret invalidates stored connector

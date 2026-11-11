@@ -997,6 +997,7 @@ const state = {
   accountPingCurrent: null,
   accountPingTimer: null,
   accounts: [],
+  mailOAuth: null,
   activeAccount: null,
   activeAccountId: "",
   accountRestoreAttempted: false,
@@ -5717,6 +5718,7 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.storageProviders = data.storageProviders || [];
   state.defaultStorage = data.defaultStorage || state.defaultStorage || "a8m";
   state.tenantPolicy = data.tenantPolicy || null;
+  state.mailOAuth = data.mailOAuth || null;
   if (state.activeAccountId === "all" && !unifiedAccountsAvailable()) {
     const native = nativeMailAccount();
     if (native) {
@@ -8073,6 +8075,11 @@ function externalAccountsEnabled() {
   return Boolean(policy.mail && policy.mail.externalAccounts === true);
 }
 
+function mailOAuthProviderAvailable(provider) {
+  if (!state.mailOAuth || typeof state.mailOAuth[provider] !== "boolean") return true;
+  return state.mailOAuth[provider];
+}
+
 function activeAccountStorageKey() {
   return `a8m.activeAccount.${normalizeEmail(state.user?.email || "anonymous")}`;
 }
@@ -8676,7 +8683,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.0.6";
+const MAIL_PROVIDER_ASSET_VERSION = "3.1.0";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -8807,7 +8814,9 @@ function openAddMailAccountDialog(account = null) {
       <li>${icon("i-refresh")}<span>Kept in sync automatically</span></li>
     </ul>`;
 
-  const oauthStage = () => `
+  const oauthStage = () => {
+    const configured = mailOAuthProviderAvailable(selected.oauth);
+    return `
     <div class="mailbox-stage mailbox-oauth-stage">
       <div class="mailbox-oauth-card">
         <div class="mailbox-oauth-logo">${providerLogo()}</div>
@@ -8816,11 +8825,16 @@ function openAddMailAccountDialog(account = null) {
         <p>${selected.id === "microsoft"
           ? "Sign in with Microsoft to connect Outlook, Hotmail, Live or Microsoft 365. Microsoft verifies the mailbox before Alt8Mail saves it."
           : "Sign in with Google to connect Gmail or Google Workspace. Google verifies the mailbox before Alt8Mail saves it."}</p>
+        ${configured ? "" : `<div class="mailbox-oauth-unavailable" role="status">
+          ${icon("i-alert")}
+          <div><strong>${esc(selected.name)} sign-in is not set up yet</strong><span>Ask your administrator to add the ${selected.id === "microsoft" ? "Microsoft" : "Google"} OAuth application in System Control → Mail OAuth.${selected.id === "gmail" ? " You can use an app password instead." : ""}</span></div>
+        </div>`}
         ${securePoints}
         ${selected.id === "gmail" ? `<button class="mailbox-text-btn" type="button" data-gmail-password>${icon("i-key")}Use an app password instead</button>` : ""}
         <p class="mailbox-form-status${testError ? " is-error" : ""}" role="status" aria-live="polite">${testError ? esc(testError) : ""}</p>
       </div>
     </div>`;
+  };
 
   const passwordStage = () => {
     const provider = selected || mailProviderMeta("imap");
@@ -8883,6 +8897,9 @@ function openAddMailAccountDialog(account = null) {
     if (step === 1) return `<div class="mailbox-actions mailbox-actions-end">${cancel}</div>`;
     if (step === 2 && selected?.oauth && mode === "oauth") {
       const oauthLabel = reauth ? "Reconnect with" : "Continue with";
+      if (!mailOAuthProviderAvailable(selected.oauth)) {
+        return `<div class="mailbox-actions">${back}<span class="mailbox-actions-spacer"></span>${cancel}<button class="btn-primary mailbox-btn mailbox-oauth-btn" type="button" disabled>${icon("i-alert")}<span>${esc(selected.name)} sign-in unavailable</span></button></div>`;
+      }
       return `<div class="mailbox-actions">${back}<span class="mailbox-actions-spacer"></span>${cancel}<button class="btn-primary mailbox-btn mailbox-oauth-btn" type="button" data-account-action="oauth">${providerLogo()}<span>${oauthLabel} ${esc(selected.name)}</span>${icon("i-chevron-right")}</button></div>`;
     }
     if (step === 2) {
@@ -8995,6 +9012,11 @@ function openAddMailAccountDialog(account = null) {
     }
     if (event.target.closest('[data-account-action="oauth"]')) {
       if (!selected?.oauth || busy) return;
+      if (!mailOAuthProviderAvailable(selected.oauth)) {
+        testError = `${selected.name} sign-in is not configured on this server. Ask your administrator to add the OAuth application in System Control → Mail OAuth.`;
+        render();
+        return;
+      }
       busy = true;
       testError = "";
       render();

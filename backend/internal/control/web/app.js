@@ -1,5 +1,5 @@
 /* Alt8Mail System Control — application shell, authentication and core views. */
-import * as ui from './ui.js?v=3.0.6';
+import * as ui from './ui.js?v=3.1.0';
 import {
   renderDomains, renderDomainDetail, renderMailboxes, renderMailboxDetail,
   renderAliases, renderImports,
@@ -15,14 +15,15 @@ import { renderWebPush } from './views-push.js';
 import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
 import { renderLicense } from './views-license.js';
-import { renderAddons } from './views-addons.js?v=3.0.6';
-import { renderOffice } from './views-office.js?v=3.0.6';
+import { renderAddons } from './views-addons.js?v=3.1.0';
+import { renderOffice } from './views-office.js?v=3.1.0';
+import { renderMailOAuth } from './views-mail-oauth.js?v=3.1.0';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '3.0.6';
+const APP_VERSION = '3.1.0';
 
 // A stale admin binary can lack the embedded brand artwork. Hide the broken
 // image rather than letting the browser paint a missing-image glyph.
@@ -68,6 +69,7 @@ const NAV_GROUPS = [
     { key: 'domains', label: 'Domains & DNS', icon: 'globe', href: '#/domains', perm: 'domains.read', desc: 'Domains, DKIM, DNS plans and sending caps' },
     { key: 'mailboxes', label: 'Mailboxes', icon: 'mail', href: '#/mailboxes', perm: 'mailboxes.read', desc: 'Accounts, quotas, passwords and Sieve' },
     { key: 'aliases', label: 'Aliases & forwarding', icon: 'forward', href: '#/aliases', perm: 'aliases.read', desc: 'Forwarders, catch-alls and distribution lists' },
+    { key: 'mail-oauth', label: 'Mail OAuth', icon: 'key-round', href: '#/mail-oauth', perm: 'server.read', desc: 'Gmail and Microsoft sign-in applications for connected mailboxes' },
     { key: 'imports', label: 'Mail import', icon: 'upload', href: '#/imports', perm: 'imports.read', desc: 'Bring in IMAP, mbox or Maildir mailboxes' },
   ] },
   { label: 'Deliverability', items: [
@@ -114,6 +116,7 @@ const ROUTE_DEFS = {
   mailboxes: { title: 'Mailboxes', crumb: 'Mail', nav: 'mailboxes', perm: 'mailboxes.read', render: renderMailboxes },
   'mailbox-detail': { title: 'Mailbox details', crumb: 'Mailboxes', nav: 'mailboxes', perm: 'mailboxes.read', render: renderMailboxDetail },
   aliases: { title: 'Aliases & forwarding', crumb: 'Mail', nav: 'aliases', perm: 'aliases.read', render: renderAliases },
+  'mail-oauth': { title: 'Mail OAuth', crumb: 'Mail', nav: 'mail-oauth', perm: 'server.read', render: renderMailOAuth },
   imports: { title: 'Mail import', crumb: 'Mail', nav: 'imports', perm: 'imports.read', render: renderImports },
   delivery: { title: 'Deliverability', crumb: 'Deliverability', nav: 'delivery', perm: 'delivery.read', render: renderDelivery },
   queue: { title: 'Mail queue', crumb: 'Deliverability', nav: 'queue', perm: 'delivery.read', render: renderQueue },

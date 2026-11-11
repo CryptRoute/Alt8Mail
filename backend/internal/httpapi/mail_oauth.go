@@ -29,6 +29,9 @@ type mailOAuthProvider struct {
 func (s *Server) mailOAuthConfig(provider string) (mailOAuthProvider, string, string, bool) {
 	switch provider {
 	case "gmail":
+		if s.cfg.GoogleMailOAuthDisabled {
+			return mailOAuthProvider{}, "", "", false
+		}
 		clientID := firstNonEmpty(s.cfg.GoogleMailClientID, s.cfg.GoogleClientID)
 		clientSecret := firstNonEmpty(s.cfg.GoogleMailClientSecret, s.cfg.GoogleClientSecret)
 		if clientID == "" || clientSecret == "" {
@@ -43,6 +46,9 @@ func (s *Server) mailOAuthConfig(provider string) (mailOAuthProvider, string, st
 			ExtraAuth: map[string]string{"access_type": "offline", "prompt": "consent"},
 		}, clientID, clientSecret, true
 	case "microsoft":
+		if s.cfg.MicrosoftMailOAuthDisabled {
+			return mailOAuthProvider{}, "", "", false
+		}
 		clientID := firstNonEmpty(s.cfg.MicrosoftMailClientID, s.cfg.MicrosoftClientID)
 		clientSecret := firstNonEmpty(s.cfg.MicrosoftMailClientSecret, s.cfg.MicrosoftClientSecret)
 		if clientID == "" || clientSecret == "" {
@@ -71,6 +77,51 @@ func (s *Server) mailOAuthConfig(provider string) (mailOAuthProvider, string, st
 	return mailOAuthProvider{}, "", "", false
 }
 
+// mailOAuthConfigured reports whether an administrator has supplied usable
+// credentials for the provider. The webmail shell uses this to hide sign-in
+// actions that would only fail after the user leaves Alt8Mail.
+func (s *Server) mailOAuthConfigured(provider string) bool {
+	_, _, _, ok := s.mailOAuthConfig(provider)
+	return ok
+}
+
+func mailOAuthUnavailable(provider string) error {
+	name := "This sign-in provider"
+	switch provider {
+	case "gmail":
+		name = "Gmail sign-in"
+	case "microsoft":
+		name = "Microsoft sign-in"
+	}
+	return fmt.Errorf("%s is not configured on this server. Ask your administrator to add OAuth credentials in System Control → Mail OAuth", name)
+}
+
+func mailOAuthProviderErrorMessage(provider, code, description, redirectURI string) string {
+	name := "the sign-in provider"
+	switch provider {
+	case "gmail":
+		name = "Google"
+	case "microsoft":
+		name = "Microsoft"
+	}
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "access_denied":
+		return "Sign-in was cancelled. No account was connected."
+	case "redirect_uri_mismatch":
+		return fmt.Sprintf("%s rejected the redirect URI. Register %s in the OAuth application, then try again.", name, redirectURI)
+	case "invalid_client", "unauthorized_client":
+		return fmt.Sprintf("%s rejected the OAuth client. Ask your administrator to check the client ID and secret in System Control → Mail OAuth.", name)
+	case "invalid_scope":
+		return fmt.Sprintf("%s rejected the requested mail permissions. Ask your administrator to verify the app registration and consent screen.", name)
+	case "consent_required", "interaction_required":
+		return fmt.Sprintf("%s requires consent or an administrator approval before this mailbox can connect.", name)
+	}
+	if detail := truncate(strings.TrimSpace(description), 220); detail != "" {
+		return fmt.Sprintf("%s rejected the sign-in: %s", name, detail)
+	}
+	return "Sign-in was cancelled or rejected by the provider"
+}
+
 func (s *Server) mailOAuthRedirectURL(provider string) string {
 	return strings.TrimRight(s.cfg.PublicURL, "/") + "/api/mail/oauth/" + url.PathEscape(provider) + "/callback"
 }
@@ -86,7 +137,7 @@ func (s *Server) beginMailOAuth(ctx context.Context, sess *sessionRecord, provid
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	config, clientID, _, ok := s.mailOAuthConfig(provider)
 	if !ok {
-		return "", fmt.Errorf("OAuth is not configured for this provider")
+		return "", mailOAuthUnavailable(provider)
 	}
 	if !s.externalMailAccountsAllowed(ctx, sess.User) {
 		return "", fmt.Errorf("connected mail accounts are disabled for this organization")
@@ -156,7 +207,7 @@ func (s *Server) mailOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		if state := strings.TrimSpace(r.URL.Query().Get("state")); state != "" {
 			_, _ = s.store.DB.Exec(r.Context(), `DELETE FROM public.mail_oauth_states WHERE id=$1 AND provider=$2`, state, provider)
 		}
-		s.mailOAuthResult(w, "error", "Sign-in was cancelled or rejected by the provider")
+		s.mailOAuthResult(w, "error", mailOAuthProviderErrorMessage(provider, providerError, r.URL.Query().Get("error_description"), s.mailOAuthRedirectURL(provider)))
 		return
 	}
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
@@ -177,7 +228,7 @@ func (s *Server) mailOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	config, clientID, clientSecret, ok := s.mailOAuthConfig(provider)
 	if !ok {
-		s.mailOAuthResult(w, "error", "OAuth is not configured for this provider")
+		s.mailOAuthResult(w, "error", mailOAuthUnavailable(provider).Error())
 		return
 	}
 	verifier, err := s.openMailAccountSecret(verifierSealed)
@@ -350,6 +401,9 @@ func (s *Server) exchangeMailOAuthCode(ctx context.Context, config mailOAuthProv
 		"client_secret": {clientSecret},
 		"redirect_uri":  {s.mailOAuthRedirectURL(provider)},
 		"code_verifier": {verifier},
+		// Microsoft expects the granted scopes repeated at the token endpoint;
+		// Google accepts the same field, and both fall back to the grant.
+		"scope": {config.Scope},
 	}
 	return s.mailOAuthTokenRequest(ctx, config.Token, form)
 }
@@ -376,12 +430,20 @@ func (s *Server) mailOAuthTokenRequest(ctx context.Context, endpoint string, for
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
 	if response.StatusCode >= 300 {
 		var payload struct {
-			Error string `json:"error"`
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
 		}
 		_ = json.Unmarshal(body, &payload)
 		code := strings.TrimSpace(payload.Error)
 		if code == "" {
 			code = fmt.Sprintf("HTTP %d", response.StatusCode)
+		}
+		switch strings.ToLower(code) {
+		case "invalid_client", "unauthorized_client":
+			return oauthToken{}, fmt.Errorf("the sign-in provider rejected the OAuth client (%s); check the client ID and secret in System Control → Mail OAuth", code)
+		}
+		if detail := strings.TrimSpace(payload.ErrorDescription); detail != "" {
+			return oauthToken{}, fmt.Errorf("the sign-in provider rejected the request (%s: %s)", truncate(code, 80), truncate(detail, 200))
 		}
 		return oauthToken{}, fmt.Errorf("the sign-in provider rejected the request (%s)", truncate(code, 120))
 	}
@@ -484,7 +546,7 @@ func (s *Server) mailOAuthAccessToken(ctx context.Context, account mailAccountRe
 	}
 	config, clientID, clientSecret, ok := s.mailOAuthConfig(account.Provider)
 	if !ok {
-		return "", fmt.Errorf("OAuth is not configured for this provider")
+		return "", mailOAuthUnavailable(account.Provider)
 	}
 	token, err := s.refreshMailOAuthToken(ctx, config, clientID, clientSecret, refresh)
 	if err != nil {

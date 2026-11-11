@@ -1674,7 +1674,7 @@ function policySections(policy) {
       ${toggleRow("IMAP access", "Permit IMAP clients to authenticate.", "mail.imapAccess", mail.imapAccess)}
       ${toggleRow("POP access", "Permit POP3 clients to authenticate.", "mail.popAccess", mail.popAccess)}
       ${toggleRow("SMTP submission", "Permit authenticated outbound SMTP.", "mail.smtpAccess", mail.smtpAccess)}
-      ${toggleRow("Connected accounts", "Allow users to add their own IMAP accounts and send through those providers. Credentials are encrypted and never returned.", "mail.externalAccounts", mail.externalAccounts)}
+      ${toggleRow("Connected accounts", "Allow users to add their own IMAP accounts and send through those providers. Credentials are encrypted and never returned. Gmail and Outlook sign-in additionally require the server operator to configure OAuth applications in System Control → Mail OAuth.", "mail.externalAccounts", mail.externalAccounts)}
       ${toggleRow("Dual delivery journal", "Send a copy of every successfully delivered outbound message to an archive mailbox for coexistence or records retention.", "mail.dualDeliveryEnabled", mail.dualDeliveryEnabled)}
       <div class="setting-row"><div class="setting-copy"><b>Journal mailbox</b><small>Destination address for dual-delivery copies. The original recipients still receive the message.</small></div><div class="setting-control"><input class="input" type="email" data-policy-input="mail.dualDeliveryAddress" value="${esc(mail.dualDeliveryAddress || "")}" placeholder="archive@records.example.com"></div></div>
     </div>

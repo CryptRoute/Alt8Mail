@@ -1011,8 +1011,12 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		"calendarSubscriptions": calendarSubscriptions,
 		"addressBooks":          addressBooks,
 		"storageProviders":      providers,
-		"storageQuota":          storageQuota,
-		"defaultStorage":        s.defaultStorageProvider(ctx, sess.User.ID),
+		"mailOAuth": map[string]any{
+			"gmail":     s.mailOAuthConfigured("gmail"),
+			"microsoft": s.mailOAuthConfigured("microsoft"),
+		},
+		"storageQuota":   storageQuota,
+		"defaultStorage": s.defaultStorageProvider(ctx, sess.User.ID),
 		"tenantPolicy": map[string]any{
 			"mail": map[string]any{
 				"externalTag":              policy.Mail.ExternalTag,

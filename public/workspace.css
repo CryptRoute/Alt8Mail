@@ -2795,6 +2795,23 @@ body.office-editor-open { overflow: hidden; }
 .mailbox-oauth-card > p { margin: 0; max-width: 44ch; color: var(--text-3); font-size: .75rem; line-height: 1.55; }
 .mailbox-oauth-card .mailbox-form-status { margin-top: 4px; }
 .mailbox-oauth-card .mailbox-text-btn { margin-top: 2px; }
+.mailbox-oauth-unavailable {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border));
+  border-radius: 10px;
+  background: var(--warning-soft);
+  color: var(--text-2);
+  font-size: .6875rem;
+  line-height: 1.5;
+  text-align: left;
+}
+.mailbox-oauth-unavailable > svg { width: 16px; height: 16px; flex: none; margin-top: 1px; color: var(--warning); }
+.mailbox-oauth-unavailable strong { display: block; color: var(--text); font-size: .6875rem; font-weight: 650; }
+.mailbox-oauth-unavailable span { display: block; margin-top: 2px; }
 
 .mailbox-success-stage { display: flex; flex-direction: column; align-items: center; max-width: 520px; margin: 18px auto 6px; text-align: center; }
 .mailbox-success-ring {

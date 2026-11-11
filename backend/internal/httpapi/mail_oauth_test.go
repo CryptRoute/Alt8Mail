@@ -104,6 +104,52 @@ func TestMailOAuthProviderConfig(t *testing.T) {
 	}
 }
 
+func TestMailOAuthDisabledByAdministrator(t *testing.T) {
+	cfg := configForOAuthTest()
+	cfg.GoogleMailOAuthDisabled = true
+	cfg.MicrosoftMailOAuthDisabled = true
+	server := &Server{cfg: cfg}
+	if _, _, _, ok := server.mailOAuthConfig("gmail"); ok {
+		t.Fatal("Gmail OAuth stayed enabled after the administrator disabled it")
+	}
+	if _, _, _, ok := server.mailOAuthConfig("microsoft"); ok {
+		t.Fatal("Microsoft OAuth stayed enabled after the administrator disabled it")
+	}
+	// Shared OIDC credentials must not resurrect a disabled mail connection.
+	shared := &Server{cfg: config.Config{
+		GoogleClientID: "shared-google", GoogleClientSecret: "shared-secret",
+		GoogleMailOAuthDisabled: true,
+	}}
+	if _, _, _, ok := shared.mailOAuthConfig("gmail"); ok {
+		t.Fatal("shared OIDC credentials resurrected disabled Gmail OAuth")
+	}
+}
+
+func TestMailOAuthUnavailableMessageNamesControlPage(t *testing.T) {
+	err := mailOAuthUnavailable("microsoft")
+	if !strings.Contains(err.Error(), "Microsoft sign-in") || !strings.Contains(err.Error(), "Mail OAuth") {
+		t.Fatalf("unhelpful unavailable message: %v", err)
+	}
+}
+
+func TestMailOAuthProviderErrorMessage(t *testing.T) {
+	redirect := "https://mail.example.test/api/mail/oauth/gmail/callback"
+	message := mailOAuthProviderErrorMessage("gmail", "redirect_uri_mismatch", "", redirect)
+	if !strings.Contains(message, "Google") || !strings.Contains(message, redirect) {
+		t.Fatalf("redirect mismatch message = %q", message)
+	}
+	message = mailOAuthProviderErrorMessage("microsoft", "invalid_client", "", redirect)
+	if !strings.Contains(message, "client ID and secret") || !strings.Contains(message, "Mail OAuth") {
+		t.Fatalf("invalid client message = %q", message)
+	}
+	if message = mailOAuthProviderErrorMessage("gmail", "access_denied", "The user denied access", redirect); !strings.Contains(message, "cancelled") {
+		t.Fatalf("denied message = %q", message)
+	}
+	if message = mailOAuthProviderErrorMessage("gmail", "server_error", "Please try again later", redirect); !strings.Contains(message, "Please try again later") {
+		t.Fatalf("description was not surfaced: %q", message)
+	}
+}
+
 func TestUnifiedMailAccountView(t *testing.T) {
 	view := unifiedMailAccountView([]map[string]any{{"id": "a"}, {"id": "b"}})
 	if view["id"] != "all" || view["isUnified"] != true || view["accountCount"] != 2 {

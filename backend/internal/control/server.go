@@ -110,6 +110,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerBackupRoutes(mux)
 	s.registerCronRoutes(mux)
 	s.registerServerRoutes(mux)
+	s.registerMailOAuthRoutes(mux)
 	s.registerWebNetRoutes(mux)
 	s.registerDatabaseRoutes(mux)
 	s.registerAccessRoutes(mux)
