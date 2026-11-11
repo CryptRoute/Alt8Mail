@@ -2390,13 +2390,12 @@ try {
     });
   })()`);
   await page.click('[data-folder="inbox"]');
-  await sleep(500);
+  await page.waitFor(() => [...document.querySelectorAll(".msg")].some((item) => item.textContent.includes("HTML reply fixture")), 8000);
   await page.eval(`(() => {
     const row = [...document.querySelectorAll('.msg')].find((item) => item.textContent.includes('HTML reply fixture'));
     if (row) row.click();
   })()`);
-  await sleep(400);
-  await page.waitFor(() => Boolean(document.querySelector(".reader [data-trust-explain]")), 5000);
+  await page.waitFor(() => Boolean(document.querySelector(".reader [data-trust-explain]")), 10000);
   check(await page.eval("document.querySelector('.reader [data-trust-explain]')?.textContent.includes('Why is this')"), "reader shows a visible safety-explanation action");
   await page.click(".reader [data-trust-explain]");
   await page.waitFor(() => !document.getElementById("detailsOverlay").hidden, 5000);
