@@ -453,6 +453,14 @@ func (s *Server) handleMailOAuthSave(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	env := s.readMailOAuthEnv()
+	type preparedProvider struct {
+		provider string
+		enabled  bool
+		clientID string
+		tenant   string
+		sealed   string
+	}
+	prepared := []preparedProvider{}
 	seen := map[string]bool{}
 	saved := []string{}
 	for _, input := range body.Providers {
@@ -510,7 +518,22 @@ func (s *Server) handleMailOAuthSave(w http.ResponseWriter, r *http.Request, ses
 				return
 			}
 		}
-		if _, err := s.db.Exec(ctx, `
+		prepared = append(prepared, preparedProvider{
+			provider: definition.Provider, enabled: input.Enabled,
+			clientID: clientID, tenant: tenant, sealed: sealed,
+		})
+		saved = append(saved, definition.Provider)
+	}
+	// Validate every provider before writing so a bad Microsoft value cannot
+	// leave a successful Gmail draft behind.
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, item := range prepared {
+		if _, err := tx.Exec(ctx, `
 			INSERT INTO control.mail_oauth_providers
 				(provider,enabled,client_id,tenant,secret_sealed,draft_saved,updated_by,updated_at)
 			VALUES ($1,$2,$3,$4,$5,true,$6,now())
@@ -523,11 +546,14 @@ func (s *Server) handleMailOAuthSave(w http.ResponseWriter, r *http.Request, ses
 				draft_saved=true,
 				updated_by=EXCLUDED.updated_by,
 				updated_at=now()
-		`, definition.Provider, input.Enabled, clientID, tenant, sealed, sess.User.ID); err != nil {
+		`, item.provider, item.enabled, item.clientID, item.tenant, item.sealed, sess.User.ID); err != nil {
 			writeFromError(w, err)
 			return
 		}
-		saved = append(saved, definition.Provider)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeFromError(w, err)
+		return
 	}
 	s.actorAudit(r, sess, "mail_oauth.draft_saved", "Mail OAuth", "Saved Gmail and Microsoft sign-in application settings",
 		map[string]any{"providers": saved})
