@@ -707,7 +707,10 @@ h1{font-size:22px;line-height:1.25;letter-spacing:-.025em;margin:0 0 10px;color:
     var focusBtn = document.getElementById("focusBtn");
     if (focusBtn) {
       focusBtn.hidden = false;
-      focusBtn.addEventListener("click", function () { try { opener.focus(); } catch (e) {} });
+      focusBtn.addEventListener("click", function () {
+        try { opener.focus(); } catch (e) {}
+        try { window.close(); } catch (e) {}
+      });
     }
   } else {
     var hint = document.getElementById("resultHint");
