@@ -92,7 +92,7 @@ function providerCard(provider, canManage) {
       <div class="oauth-provider-status">
         ${ui.badge(status.label, status.tone, status.icon)}
         ${provider.pending ? ui.badge('Draft not applied', 'warning', 'alert') : ''}
-        ${applied.enabled && applied.hasSecret ? ui.badge('Live', 'good', 'check-circle') : ''}
+        ${applied.enabled && applied.clientId && applied.hasSecret ? ui.badge('Live', 'good', 'check-circle') : ''}
       </div>
     </header>
     <div class="card-body">
@@ -181,6 +181,7 @@ export async function renderMailOAuth(ctx) {
   const providers = Array.isArray(data.providers) ? data.providers : [];
   const warnings = Array.isArray(data.warnings) ? data.warnings : [];
   const enabledCount = providers.filter((provider) => provider.enabled && provider.clientId && provider.hasSecret).length;
+  const liveCount = providers.filter((provider) => provider.applied?.enabled && provider.applied?.clientId && provider.applied?.hasSecret).length;
   const lastApplied = providers.map((provider) => provider.appliedAt).filter(Boolean).sort().pop() || '';
   const publicLabel = data.publicUrl ? data.publicUrl : 'Not configured';
   const actionButtons = canManage
@@ -205,7 +206,7 @@ export async function renderMailOAuth(ctx) {
         ${providers.map((provider) => providerCard(provider, canManage)).join('')}
       </form>
       <section class="card">
-        <header class="card-head"><div><h3>Connection test</h3><p>Saves the draft, then checks provider reachability and the redirect address.</p></div><button class="btn btn-secondary btn-sm" type="button" id="mail-oauth-test-inline">${ui.icon('plug', 13)} Run test</button></header>
+        <header class="card-head"><div><h3>Connection test</h3><p>Saves the draft, then checks provider reachability and the redirect address.</p></div>${canManage ? `<button class="btn btn-secondary btn-sm" type="button" id="mail-oauth-test-inline">${ui.icon('plug', 13)} Run test</button>` : ''}</header>
         <div class="card-body" id="mail-oauth-checks">${ui.emptyState('Not tested yet', 'Run the test after saving the client ID and secret.', '', 'activity')}</div>
       </section>
     </div>
@@ -216,7 +217,7 @@ export async function renderMailOAuth(ctx) {
           <div class="tile-link"><span>${ui.icon('globe', 15)} Public webmail URL</span><span class="value mono">${esc(publicLabel)}</span></div>
           <div class="tile-link"><span>${ui.icon('layers', 15)} Redirect source</span><span class="value">${esc(data.publicUrlSource || 'Not set')}</span></div>
           <div class="tile-link"><span>${ui.icon('file-code', 15)} Environment file</span><span class="value mono">${esc(data.appEnvPath || 'Not configured')}</span></div>
-          <div class="tile-link"><span>${ui.icon('plug', 15)} Providers ready</span><span class="value">${enabledCount} of ${providers.length}</span></div>
+          <div class="tile-link"><span>${ui.icon('plug', 15)} Providers live</span><span class="value">${liveCount} of ${providers.length}</span></div>
           <div class="tile-link"><span>${ui.icon('clock', 15)} Last applied</span><span class="value">${esc(lastApplied ? ui.dateTime(lastApplied) : 'Never')}</span></div>
           <div class="notice tone-info mt-3">${ui.icon('info', 15)}<div><strong>Applying restarts the webmail services</strong><p>Saving a draft does not affect users. Apply writes the Google and Microsoft credentials to app.env, restarts both application services and waits for their health checks. Open sign-in windows and mailbox sync pause for a few seconds.</p></div></div>
           <div class="notice tone-warning mt-3">${ui.icon('alert', 15)}<div><strong>Changing the webmail hostname breaks sign-in</strong><p>Registered redirect URIs are tied to the exact webmail origin. If you change it under Web Net, update the same callback URLs in the Google and Microsoft consoles before the next sign-in.</p></div></div>
