@@ -1,3 +1,34 @@
+# Alt8Mail 3.1.2
+
+Release date: 2026-11-11. OAuth popup and transient IMAP recovery.
+
+## 3.1.2 connected-account resilience and OAuth result page
+
+- A temporary Gmail IMAP failure such as `Temporary system problem. Please try
+  again later` no longer sets the mailbox to `Reconnect required`. It is stored
+  as a retrying sync error, the account stays in the sync worker, and the worker
+  retries with backoff (2, 4, 8, then every 10 minutes). A successful pass
+  restores the `Connected` status automatically.
+- The account summary endpoint now returns `status` and `lastError`; the webmail
+  refreshes them with its existing 15-second summary poll. Connected accounts
+  settings, the account menu warning and the status row update without a page
+  reload. Transient errors read `Sync error · retrying`; only real credential
+  failures ask for a reconnect.
+- Migration `0085_mail_sync_transient_status.sql` moves accounts that the old
+  build already marked `Reconnect required` because of Gmail's temporary
+  system-problem error back into the retrying worker, so they recover without
+  asking the user to reconnect.
+- Gmail's XOAUTH2 challenge scope is no longer appended to transient errors,
+  where it was misleading. It remains in genuine authentication failures.
+- The OAuth result window is a designed success/error card instead of an
+  auto-closing page. It shows the connected mailbox, has a real **Close window**
+  button and a **Return to Alt8Mail** button that focuses the main window. It no
+  longer closes itself after 900 ms.
+- On success the result page posts to the opener, focuses it immediately and the
+  main app reloads bootstrap, re-renders connected accounts and opens the new
+  mailbox, so the main window shows the `Connected` state while the result card
+  is still visible.
+
 # Alt8Mail 3.1.1
 
 Release date: 2026-11-11. Gmail IMAP OAuth diagnostics.

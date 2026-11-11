@@ -1,23 +1,23 @@
 /* Alt8Mail — offline app shell.
    API calls are always network-only; mailbox data is never cached here. */
-const VERSION = "3.1.1";
+const VERSION = "3.1.2";
 const CACHE = `a8m-shell-${VERSION}`;
 const SHELL = [
   "/",
-  "/styles.css?v=3.1.1",
-  "/features.css?v=3.1.1",
-  "/workspace.css?v=3.1.1",
-  "/cabinet-calendar.css?v=3.1.1",
-  "/features-0.7.css?v=3.1.1",
-  "/onboarding.css?v=3.1.1",
-  "/email-ui.css?v=3.1.1",
-  "/selects.css?v=3.1.1",
+  "/styles.css?v=3.1.2",
+  "/features.css?v=3.1.2",
+  "/workspace.css?v=3.1.2",
+  "/cabinet-calendar.css?v=3.1.2",
+  "/features-0.7.css?v=3.1.2",
+  "/onboarding.css?v=3.1.2",
+  "/email-ui.css?v=3.1.2",
+  "/selects.css?v=3.1.2",
   "/vendor/typo.js",
   "/vendor/qrcode.min.js",
   "/vendor/en_US.aff",
   "/vendor/en_US.dic",
-  "/app.js?v=3.1.1",
-  "/sw-update.js?v=3.1.1",
+  "/app.js?v=3.1.2",
+  "/sw-update.js?v=3.1.2",
   "/search.mjs",
   "/manifest.webmanifest",
   "/icons/icon-192.png",

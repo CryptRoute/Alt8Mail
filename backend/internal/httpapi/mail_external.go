@@ -503,13 +503,8 @@ func (s *Server) pruneExternalAccountCache(ctx context.Context, account mailAcco
 }
 
 func (s *Server) recordExternalSyncFailure(ctx context.Context, account mailAccountRecord, syncErr error) {
-	status := "active"
+	status := externalSyncFailureStatus(syncErr)
 	message := truncate(syncErr.Error(), 500)
-	lower := strings.ToLower(message)
-	if strings.Contains(lower, "login failed") || strings.Contains(lower, "authentication") ||
-		strings.Contains(lower, "invalid credentials") || strings.Contains(lower, "authenticate") {
-		status = "reauth"
-	}
 	_, _ = s.store.DB.Exec(ctx, `
 		UPDATE public.mail_accounts SET status=$2, last_error=$3, updated_at=now()
 		WHERE id=$1 AND user_id=$4

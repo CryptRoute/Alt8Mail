@@ -238,6 +238,54 @@ func xoauth2ChallengeDetail(challenge []byte) string {
 	return fmt.Sprintf(" (the server requested scope %s)", strings.TrimSpace(payload.Scope))
 }
 
+// transientExternalMailError separates a provider hiccup from a credential
+// problem. Gmail uses "Temporary system problem" for rate limits and backend
+// incidents; treating that as a reconnect requirement strands the account
+// because the sync worker only retries accounts that are not in reauth.
+func transientExternalMailError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"temporary system problem", "temporary failure", "temporarily unavailable",
+		"try again later", "timeout", "i/o timeout", "connection reset", "connection refused",
+		"no such host", "network is unreachable", "server busy", "too many",
+		"rate limit", "service unavailable", "bad gateway", "gateway timeout",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func externalMailAuthFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"invalid credentials", "authentication failed", "invalid_grant",
+		"authorization expired", "needs to be reconnected", "unauthorized",
+		"invalid token",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	// "login failed" is Gmail's outer wording for both expired tokens and
+	// transient IMAP incidents. The transient check runs first in the caller.
+	return strings.Contains(message, "login failed") || strings.Contains(message, "authenticate")
+}
+
+func externalSyncFailureStatus(err error) string {
+	if !transientExternalMailError(err) && externalMailAuthFailure(err) {
+		return "reauth"
+	}
+	return "error"
+}
+
 // xoauth2SMTPAuth implements the net/smtp Auth interface for XOAUTH2.
 type xoauth2SMTPAuth struct {
 	username   string
@@ -332,7 +380,11 @@ func openExternalIMAPWithAuth(ctx context.Context, host string, port int, tlsMod
 		err = conn.Authenticate(oauthClient)
 		if err != nil {
 			_ = conn.Logout()
-			return nil, fmt.Errorf("IMAP login failed: %w%s", err, xoauth2ChallengeDetail(oauthClient.challenge))
+			detail := ""
+			if !transientExternalMailError(err) {
+				detail = xoauth2ChallengeDetail(oauthClient.challenge)
+			}
+			return nil, fmt.Errorf("IMAP login failed: %w%s", err, detail)
 		}
 	} else {
 		err = conn.Login(auth.Username, auth.Password)

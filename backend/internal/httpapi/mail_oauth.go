@@ -259,7 +259,7 @@ func (s *Server) mailOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	sess := &sessionRecord{User: user}
 	s.recordWorkspaceAudit(r.Context(), sess, "account.connected", account.Email, "Connected external mail account "+account.Email+" with OAuth")
 	s.scheduleMailAccountSync(account.ID, user.ID)
-	s.mailOAuthResult(w, "connected", "", account.ID)
+	s.mailOAuthResult(w, "connected", account.Email, account.ID)
 }
 
 func (s *Server) verifyMailOAuthIMAP(ctx context.Context, account mailAccountRecord, email string, token oauthToken) error {
@@ -284,6 +284,9 @@ func (s *Server) verifyMailOAuthIMAP(ctx context.Context, account mailAccountRec
 	auth := externalMailAuth{Username: username, AccessToken: token.AccessToken}
 	conn, err := openExternalIMAPWithAuth(ctx, account.IMAPHost, account.IMAPPort, account.IMAPTLS, auth)
 	if err != nil {
+		if transientExternalMailError(err) {
+			return fmt.Errorf("the mail provider's IMAP server is temporarily unavailable: %w. Try the connection again in a minute", err)
+		}
 		switch account.Provider {
 		case "gmail":
 			return fmt.Errorf("the provider account could not open IMAP: %w. Gmail accepted the sign-in. Personal Gmail always has IMAP on, so check that Gmail is enabled for this account and that the OAuth consent screen includes https://mail.google.com/. For Google Workspace, an administrator must allow IMAP in Admin console → Apps → Google Workspace → Gmail → End User Access → POP and IMAP access", err)
@@ -640,20 +643,79 @@ func (s *Server) mailOAuthResult(w http.ResponseWriter, status, message string, 
 	// Prevent a provider-supplied message from closing the script element.
 	messageJSON = bytes.ReplaceAll(messageJSON, []byte("</"), []byte("<\\/"))
 	statusJSON = bytes.ReplaceAll(statusJSON, []byte("</"), []byte("<\\/"))
-	title := "Mail account connected"
-	body := "You can close this window and return to Alt8Mail."
-	link := "Return to Alt8Mail"
-	if status != "connected" {
-		title = "Mail account not connected"
-		body = message
-		link = "Back to Alt8Mail"
+	accountEmail := ""
+	if status == "connected" {
+		accountEmail = strings.TrimSpace(message)
 	}
-	returnURL := strings.TrimRight(s.cfg.PublicURL, "/") + "/?mailAccount=" + url.QueryEscape(status)
-	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>%s</title><style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f4f6fa;color:#1c2733;margin:0;display:grid;min-height:100vh;place-items:center;padding:24px}.card{max-width:460px;background:#fff;border:1px solid #dde3ec;border-radius:18px;padding:32px;box-shadow:0 18px 50px rgba(20,35,55,.12)}h1{font-size:20px;margin:0 0 10px}p{line-height:1.55;margin:0 0 20px;color:#4a5b6e}a{color:#1f5fbf;font-weight:600}</style></head>
-<body><div class="card"><h1>%s</h1><p>%s</p><a href="%s">%s</a></div>
+	title := "Mail account connected · Alt8Mail"
+	eyebrow := "Alt8Mail · Connected account"
+	heading := "Mail account connected"
+	body := "The mailbox is now available in your multi-mailbox inbox. The main Alt8Mail window has been updated."
+	markClass := "is-good"
+	markIcon := `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>`
+	if status != "connected" {
+		title = "Mail account not connected · Alt8Mail"
+		eyebrow = "Alt8Mail · Sign-in result"
+		heading = "Mail account not connected"
+		body = message
+		markClass = "is-bad"
+		markIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`
+	}
+	accountChip := ""
+	if accountEmail != "" {
+		accountChip = `<div class="account"><span class="account-label">Mailbox</span><strong>` + html.EscapeString(accountEmail) + `</strong></div>`
+	}
+	bodyHTML := html.EscapeString(body)
+	// A provider error can be a long diagnostic; keep it readable and selectable.
+	fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>%s</title><style>
+:root{color-scheme:light dark;--bg:#f3f6fa;--card:#fff;--ink:#101828;--copy:#526174;--muted:#7b8798;--line:#e1e7ef;--accent:#0b6bcb;--accent-hover:#0959ab;--good:#067647;--good-bg:#ecfdf3;--good-line:#abefc6;--bad:#b42318;--bad-bg:#fef3f2;--bad-line:#fecdca;--chip:#f6f8fb}
+@media (prefers-color-scheme:dark){:root{--bg:#0a0f16;--card:#111923;--ink:#eef4fb;--copy:#b7c4d3;--muted:#92a3b6;--line:#223142;--accent:#4d9df0;--accent-hover:#70b2f5;--good:#75e0a7;--good-bg:#0b2a1c;--good-line:#1a4d35;--bad:#fda29b;--bad-bg:#2b1212;--bad-line:#5a2422;--chip:#151f2b}}
+*{box-sizing:border-box}html,body{min-height:100%%}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);background:radial-gradient(120%% 90%% at 50%% 0%%,color-mix(in srgb,var(--accent) 7%%,var(--bg)),var(--bg) 60%%);color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.card{width:min(480px,100%%);background:var(--card);border:1px solid var(--line);border-radius:20px;padding:34px 32px 28px;box-shadow:0 24px 70px rgba(9,16,32,.12);text-align:center}
+.mark{width:58px;height:58px;margin:0 auto 18px;border-radius:50%%;display:grid;place-items:center;border:1px solid var(--line);background:var(--chip);color:var(--muted)}
+.mark svg{width:26px;height:26px}.mark.is-good{background:var(--good-bg);border-color:var(--good-line);color:var(--good)}.mark.is-bad{background:var(--bad-bg);border-color:var(--bad-line);color:var(--bad)}
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+h1{font-size:22px;line-height:1.25;letter-spacing:-.025em;margin:0 0 10px;color:var(--ink)}
+.copy{margin:0 auto 20px;max-width:38ch;color:var(--copy);font-size:13.5px;overflow-wrap:anywhere}
+.account{display:flex;flex-direction:column;gap:2px;margin:0 0 22px;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:var(--chip);text-align:left}
+.account-label{font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.account strong{font-size:13.5px;color:var(--ink);overflow-wrap:anywhere}
+.btn{display:inline-flex;align-items:center;justify-content:center;width:100%%;height:40px;border-radius:9px;border:1px solid transparent;background:var(--accent);color:#fff;font:600 13px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;transition:background .15s ease}
+.btn:hover{background:var(--accent-hover)}.btn:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 35%%,transparent);outline-offset:2px}
+.btn.secondary{margin-top:8px;background:transparent;border-color:var(--line);color:var(--copy)}.btn.secondary:hover{background:var(--chip);color:var(--ink)}
+.hint{margin:14px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
+</style></head>
+<body><main class="card">
+  <div class="mark %s">%s</div>
+  <div class="eyebrow">%s</div>
+  <h1>%s</h1>
+  <p class="copy">%s</p>
+  %s
+  <button type="button" class="btn" id="closeBtn">Close window</button>
+  <button type="button" class="btn secondary" id="focusBtn" hidden>Return to Alt8Mail</button>
+  <p class="hint" id="resultHint">Alt8Mail is already open in the main window. You can close this window.</p>
+</main>
 <script>
-try { if (window.opener) window.opener.postMessage({type:"a8m-mail-oauth", status:%s, message:%s, accountId:%s}, %s || "*"); } catch (e) {}
-setTimeout(function(){ try { window.close(); } catch (e) {} }, 900);
-</script></body></html>`, html.EscapeString(title), html.EscapeString(title), html.EscapeString(body), html.EscapeString(returnURL), html.EscapeString(link), statusJSON, messageJSON, accountJSON, originJSON)
+(function () {
+  var status = %s, message = %s, accountId = %s;
+  var opener = null;
+  try { opener = window.opener; } catch (e) {}
+  if (opener) {
+    try { opener.postMessage({type:"a8m-mail-oauth", status:status, message:message, accountId:accountId}, %s || "*"); } catch (e) {}
+    try { opener.focus(); } catch (e) {}
+    var focusBtn = document.getElementById("focusBtn");
+    if (focusBtn) {
+      focusBtn.hidden = false;
+      focusBtn.addEventListener("click", function () { try { opener.focus(); } catch (e) {} });
+    }
+  } else {
+    var hint = document.getElementById("resultHint");
+    if (hint) hint.textContent = "Return to the Alt8Mail tab; it has already been updated.";
+  }
+  document.getElementById("closeBtn").addEventListener("click", function () {
+    try { window.close(); } catch (e) {}
+  });
+})();
+</script></body></html>`, html.EscapeString(title), markClass, markIcon, html.EscapeString(eyebrow), html.EscapeString(heading), bodyHTML, accountChip, statusJSON, messageJSON, accountJSON, originJSON)
 }

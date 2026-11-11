@@ -5907,9 +5907,21 @@ async function pollAccountSummaries() {
   if (!state.user || state.delegatedMode || !externalAccountsEnabled()) return;
   if (!(state.accounts || []).some((account) => !account.isNative)) return;
   const data = await api("/api/accounts/summary");
+  let accountStateChanged = false;
   for (const summary of data.accounts || []) {
     const account = (state.accounts || []).find((item) => item.id === summary.id);
     if (!account) continue;
+    if (summary.status && account.status !== summary.status) {
+      account.status = summary.status;
+      if (state.activeAccount?.id === account.id) state.activeAccount.status = summary.status;
+      accountStateChanged = true;
+    }
+    const nextError = String(summary.lastError || "");
+    if (String(account.lastError || "") !== nextError) {
+      account.lastError = nextError;
+      if (state.activeAccount?.id === account.id) state.activeAccount.lastError = nextError;
+      accountStateChanged = true;
+    }
     const next = Math.max(0, Number(summary.unreadCount) || 0);
     const previous = state.knownAccountUnread.get(account.id);
     const latestId = summary.latestUnread?.id || "";
@@ -5934,6 +5946,10 @@ async function pollAccountSummaries() {
     }
   }
   renderAccountSwitcher();
+  if (accountStateChanged) {
+    renderConnectedAccounts();
+    renderAccountChrome();
+  }
 }
 
 function showBrowserNotification(title, body, tag = "a8m-new-mail") {
@@ -8184,7 +8200,7 @@ function accountMenuBadge(account) {
   if (account?.isUnified) return { label: "Combined", className: "is-unified" };
   if (account?.isNative) return { label: "Primary", className: "is-primary" };
   if (account?.status === "reauth") return { label: "Reconnect", className: "is-warning" };
-  if (account?.status === "error") return { label: "Sync error", className: "is-error" };
+  if (account?.status === "error") return { label: "Sync error · retrying", className: "is-error" };
   return { label: accountMenuProviderLabel(account), className: "" };
 }
 
@@ -8485,7 +8501,7 @@ function removeAccountPings(accountId) {
 function connectedAccountStatus(account) {
   switch (account.status) {
     case "reauth": return { label: "Reconnect required", className: "is-reauth" };
-    case "error": return { label: "Sync error", className: "is-error" };
+    case "error": return { label: "Sync error · retrying", className: "is-error" };
     case "disabled": return { label: "Disabled", className: "" };
     default: return { label: "Connected", className: "" };
   }
@@ -8589,6 +8605,7 @@ function startMailOAuth(provider, accountId = "") {
       if (event.origin !== window.location.origin) return;
       const data = event.data || {};
       if (data.type !== "a8m-mail-oauth") return;
+      try { window.focus(); } catch {}
       if (data.status === "connected") finish(resolve, data.accountId || "");
       else finish(reject, new Error(data.message || "The mail account was not connected."));
     };
@@ -8602,8 +8619,11 @@ function startMailOAuth(provider, accountId = "") {
 
 async function connectMailAccountWithOAuth(provider, accountId = "") {
   const accountID = await startMailOAuth(provider, accountId);
+  try { window.focus(); } catch {}
   showToast(accountId ? "Mail account reconnected" : "Mail account connected");
   await loadBootstrap({ quiet: true });
+  renderConnectedAccounts();
+  renderAccountChrome();
   if (!accountId && accountID) {
     const connected = state.accounts.find((account) => account.id === accountID);
     if (connected) switchMailAccount(connected.id, { reload: false });
@@ -8683,7 +8703,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.1.1";
+const MAIL_PROVIDER_ASSET_VERSION = "3.1.2";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();

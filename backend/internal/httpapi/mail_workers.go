@@ -130,7 +130,7 @@ func (s *Server) activeMailWorkerAccounts(ctx context.Context) ([]mailWorkerAcco
 		FROM public.mail_accounts a
 		JOIN public.users u ON u.id = a.user_id
 		JOIN public.tenants t ON t.id = a.tenant_id
-		WHERE a.status = 'active' AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'
+		WHERE a.status IN ('active', 'error') AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'
 		  AND (a.kind <> 'native' OR EXISTS (
 			SELECT 1 FROM public.mailboxes m WHERE m.user_id = a.user_id AND m.active
 		  ))
@@ -255,33 +255,44 @@ func (p *mailWorkerPool) runExternalWorker(ctx context.Context, worker *mailWork
 		return
 	case <-time.After(jitter):
 	}
-	p.syncExternalWorker(ctx, worker)
-	pollTicker := time.NewTicker(60 * time.Second)
-	defer pollTicker.Stop()
-	fullTicker := time.NewTicker(10 * time.Minute)
-	defer fullTicker.Stop()
+	delay := 60 * time.Second
 	for {
+		if err := p.syncExternalWorker(ctx, worker); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			// A provider hiccup must not turn into a reconnect requirement.
+			// Retry with backoff while the account stays in the worker pool;
+			// a successful pass resets the cadence.
+			if delay < 10*time.Minute {
+				delay *= 2
+				if delay > 10*time.Minute {
+					delay = 10 * time.Minute
+				}
+			}
+		} else {
+			delay = 60 * time.Second
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-pollTicker.C:
-			p.syncExternalWorker(ctx, worker)
-		case <-fullTicker.C:
-			p.syncExternalWorker(ctx, worker)
+		case <-time.After(delay):
 		}
 	}
 }
 
-func (p *mailWorkerPool) syncExternalWorker(ctx context.Context, worker *mailWorker) {
+func (p *mailWorkerPool) syncExternalWorker(ctx context.Context, worker *mailWorker) error {
 	select {
 	case p.sem <- struct{}{}:
 		defer func() { <-p.sem }()
 	case <-ctx.Done():
-		return
+		return ctx.Err()
 	}
 	if err := p.server.syncExternalAccount(ctx, worker.account, worker.user); err != nil {
 		p.server.logger.Debug("connected account sync failed", "account", worker.account.Email, "err", err)
+		return err
 	}
+	return nil
 }
 
 func (p *mailWorkerPool) runCheck(ctx context.Context, user userRecord) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/smtp"
@@ -193,6 +194,63 @@ func TestMailOAuthScopeGuardGivesActionableErrors(t *testing.T) {
 	}
 }
 
+func TestTransientExternalMailError(t *testing.T) {
+	for _, message := range []string{
+		"IMAP login failed: Temporary system problem. Please try again later. cdc0902",
+		"dial tcp 142.250.1.1:993: i/o timeout",
+		"read tcp: connection reset by peer",
+		"server busy",
+		"HTTP 503 Service Unavailable",
+	} {
+		if !transientExternalMailError(errors.New(message)) {
+			t.Fatalf("transient error was not recognized: %q", message)
+		}
+	}
+	for _, message := range []string{
+		"IMAP login failed: Invalid credentials (Failure)",
+		"this account needs to be reconnected",
+		"the mail server did not expose any usable folders",
+	} {
+		if transientExternalMailError(errors.New(message)) {
+			t.Fatalf("permanent error was treated as transient: %q", message)
+		}
+	}
+}
+
+func TestExternalMailAuthFailure(t *testing.T) {
+	for _, message := range []string{
+		"IMAP login failed: Invalid credentials (Failure)",
+		"authentication failed",
+		"invalid_grant",
+		"this account needs to be reconnected",
+		"unauthorized",
+	} {
+		if !externalMailAuthFailure(errors.New(message)) {
+			t.Fatalf("auth failure was not recognized: %q", message)
+		}
+	}
+	if externalMailAuthFailure(errors.New("the mail server did not expose any usable folders")) {
+		t.Fatal("a folder error was treated as an auth failure")
+	}
+}
+
+func TestExternalSyncFailureStatus(t *testing.T) {
+	cases := []struct {
+		message string
+		status  string
+	}{
+		{"IMAP login failed: Temporary system problem. Please try again later. cdc0902", "error"},
+		{"IMAP login failed: Invalid credentials (Failure)", "reauth"},
+		{"the mail server did not expose any usable folders", "error"},
+		{"this account needs to be reconnected", "reauth"},
+	}
+	for _, test := range cases {
+		if got := externalSyncFailureStatus(errors.New(test.message)); got != test.status {
+			t.Fatalf("status for %q = %q, want %q", test.message, got, test.status)
+		}
+	}
+}
+
 func TestUnifiedMailAccountView(t *testing.T) {
 	view := unifiedMailAccountView([]map[string]any{{"id": "a"}, {"id": "b"}})
 	if view["id"] != "all" || view["isUnified"] != true || view["accountCount"] != 2 {
@@ -289,10 +347,16 @@ func TestMailOAuthUserInfo(t *testing.T) {
 
 func TestMailOAuthResultPage(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	(&Server{}).mailOAuthResult(recorder, "connected", "", "macct_1")
+	(&Server{}).mailOAuthResult(recorder, "connected", "person@example.test", "macct_1")
 	body := recorder.Body.String()
-	if !strings.Contains(body, `accountId:"macct_1"`) || !strings.Contains(body, "a8m-mail-oauth") {
+	if !strings.Contains(body, `accountId = "macct_1"`) || !strings.Contains(body, "a8m-mail-oauth") {
 		t.Fatalf("result page is missing the account acknowledgement: %s", body)
+	}
+	if !strings.Contains(body, "person@example.test") || !strings.Contains(body, "Close window") {
+		t.Fatalf("result page is missing the mailbox or close action: %s", body)
+	}
+	if strings.Contains(body, "setTimeout") {
+		t.Fatal("the result page must not close itself before the user can read it")
 	}
 	if recorder.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("cache-control = %q", recorder.Header().Get("Cache-Control"))

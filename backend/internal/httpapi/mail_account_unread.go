@@ -87,6 +87,10 @@ func (s *Server) getMailAccountSummaries(w http.ResponseWriter, r *http.Request)
 		view := map[string]any{
 			"id":          account.ID,
 			"unreadCount": summary.UnreadCount,
+			"status":      account.Status,
+		}
+		if account.LastError != "" {
+			view["lastError"] = account.LastError
 		}
 		if summary.LatestUnread != nil {
 			view["latestUnread"] = summary.LatestUnread
