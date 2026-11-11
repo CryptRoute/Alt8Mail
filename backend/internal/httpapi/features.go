@@ -37,8 +37,11 @@ var paidFeatureKeys = licensing.PaidFeatureKeys
 func featureGate(s *Server, feature string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.entitled(feature) {
-			writeError(w, http.StatusForbidden, "LICENSE_FEATURE",
-				"This capability ("+feature+") is not included in the active Alt8Mail license. Contact your administrator or upgrade the license.")
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]any{
+				"code":    "LICENSE_FEATURE",
+				"message": "This capability (" + feature + ") is not included in the active Alt8Mail license. Contact your administrator or upgrade the license.",
+				"details": map[string]any{"feature": feature},
+			}})
 			return
 		}
 		next(w, r)

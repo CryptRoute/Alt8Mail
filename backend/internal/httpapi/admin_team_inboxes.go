@@ -23,7 +23,7 @@ func (s *Server) adminRequireSharedInbox(w http.ResponseWriter) bool {
 	if s.entitled("shared_inbox") {
 		return true
 	}
-	writeError(w, http.StatusForbidden, "FEATURE_REQUIRED", "Shared inboxes require a license with the shared_inbox feature")
+	writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]any{"code": "FEATURE_REQUIRED", "message": "Shared inboxes require a license with the shared_inbox feature", "details": map[string]any{"feature": "shared_inbox"}}})
 	return false
 }
 

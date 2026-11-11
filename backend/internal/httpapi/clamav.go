@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-var errUploadInfected = errors.New("upload contains malware")
+var (
+	errUploadInfected  = errors.New("upload contains malware")
+	errUploadScanLimit = errors.New("upload exceeds the malware scanner size limit")
+)
 
 const maxClamAVResponse = 4096
 
@@ -37,7 +40,7 @@ func (s *Server) scanUpload(ctx context.Context, data []byte) error {
 		return fmt.Errorf("connect to clamd: %w", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(45 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Minute))
 	if _, err := io.WriteString(conn, "zINSTREAM\x00"); err != nil {
 		return fmt.Errorf("start clamd scan: %w", err)
 	}
@@ -67,8 +70,12 @@ func (s *Server) scanUpload(ctx context.Context, data []byte) error {
 	if strings.HasSuffix(strings.ToUpper(result), " OK") || strings.EqualFold(result, "OK") {
 		return nil
 	}
-	if strings.Contains(strings.ToUpper(result), "FOUND") {
+	upper := strings.ToUpper(result)
+	if strings.Contains(upper, "FOUND") {
 		return fmt.Errorf("%w: %s", errUploadInfected, result)
+	}
+	if strings.Contains(upper, "SIZE LIMIT") || strings.Contains(upper, "MAXFILESIZE") || strings.Contains(upper, "FILE SIZE LIMIT") {
+		return fmt.Errorf("%w: %s", errUploadScanLimit, result)
 	}
 	return fmt.Errorf("clamd scan was inconclusive: %s", result)
 }

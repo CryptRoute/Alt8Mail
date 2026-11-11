@@ -70,6 +70,14 @@ func TestScanUploadClamAV(t *testing.T) {
 	if !errors.Is(err, errUploadInfected) {
 		t.Fatalf("expected infected error, got %v", err)
 	}
+
+	address, closeServer = fakeClamd(t, "INSTREAM size limit exceeded. ERROR\x00")
+	defer closeServer()
+	server = &Server{cfg: config.Config{ClamAVAddr: address}}
+	err = server.scanUpload(context.Background(), []byte("large file"))
+	if !errors.Is(err, errUploadScanLimit) {
+		t.Fatalf("expected scanner size-limit error, got %v", err)
+	}
 }
 
 func TestScanUploadDisabledAndUnavailable(t *testing.T) {

@@ -3488,13 +3488,34 @@ function renderFolderDensitySettings() {
   const host = document.getElementById("folderDensitySettings");
   if (!host) return;
   const folders = (state.folders || []).filter((folder) => !folder.virtual);
-  host.innerHTML = folders.length ? folders.map((folder) => `<div class="detail-row"><span>${esc(folder.label || folder.id)}</span><select class="pref-select" data-folder-density="${esc(folder.id)}" aria-label="Density for ${esc(folder.label || folder.id)}"><option value="">Default (${esc(state.density)})</option><option value="comfortable" ${state.folderDensity?.[folder.id] === "comfortable" ? "selected" : ""}>Comfortable</option><option value="compact" ${state.folderDensity?.[folder.id] === "compact" ? "selected" : ""}>Compact</option></select></div>`).join("") : '<div class="settings-note">No folders available.</div>';
+  if (!folders.length) {
+    host.innerHTML = '<div class="settings-note">No folders available yet.</div>';
+    return;
+  }
+  host.innerHTML = `<div class="pref-list">${folders.map((folder) => {
+    const label = folder.label || folder.id;
+    const override = state.folderDensity?.[folder.id];
+    const hint = override ? `${override === "compact" ? "Compact" : "Comfortable"} override active` : "Follows the default density";
+    return `<div class="pref-row folder-density-row">
+      <span class="folder-density-icon"${folder.color ? ` style="color:${esc(folder.color)}"` : ""}><svg class="icon" aria-hidden="true"><use href="#${esc(folder.icon || "i-folder")}"/></svg></span>
+      <div class="pref-copy"><strong>${esc(label)}</strong><span>${esc(hint)}</span></div>
+      <select class="pref-select" data-folder-density="${esc(folder.id)}" aria-label="Density for ${esc(label)}">
+        <option value="">Default (${esc(state.density)})</option>
+        <option value="comfortable"${override === "comfortable" ? " selected" : ""}>Comfortable</option>
+        <option value="compact"${override === "compact" ? " selected" : ""}>Compact</option>
+      </select>
+    </div>`;
+  }).join("")}</div>`;
   $$("[data-folder-density]", host).forEach((select) => select.addEventListener("change", () => {
     const folder = select.dataset.folderDensity;
     if (!select.value) delete state.folderDensity[folder];
     else state.folderDensity[folder] = select.value;
     saveFolderDensity();
     if (folder === state.folder) applyFolderDensity(folder);
+    const hint = select.closest(".folder-density-row")?.querySelector(".pref-copy span");
+    if (hint) hint.textContent = state.folderDensity[folder]
+      ? `${state.folderDensity[folder] === "compact" ? "Compact" : "Comfortable"} override active`
+      : "Follows the default density";
     showToast("Folder density saved");
   }));
 }
@@ -3504,7 +3525,7 @@ function setHighContrast(enabled, save = true) {
   if (state.highContrast) document.documentElement.setAttribute("data-contrast", "high");
   else document.documentElement.removeAttribute("data-contrast");
   const toggle = document.getElementById("highContrastToggle");
-  if (toggle) toggle.checked = state.highContrast;
+  if (toggle) toggle.setAttribute("aria-checked", state.highContrast ? "true" : "false");
   if (save) {
     try { localStorage.setItem("a8m.highContrast", state.highContrast ? "1" : "0"); } catch {}
   }
@@ -7584,8 +7605,10 @@ function ensurePhase3SettingsUi() {
   if (rulesPanel && tenantFeatureEnabled("reactions") && !document.getElementById("reactionRulesBlock")) {
     rulesPanel.insertAdjacentHTML("beforeend", `<div class="settings-block" id="reactionRulesBlock">
       <div class="settings-block-head"><h3>Reaction rules</h3><p>Automatically add a private reaction when new mail matches a sender or subject. Rules never send email.</p></div>
-      <div class="reaction-rule-list" id="reactionRuleList"><div class="settings-note">Loading reaction rules…</div></div>
-      <div class="settings-actions"><button class="btn-secondary" id="addReactionRuleBtn" type="button">New reaction rule</button><span class="settings-note">Private reactions are visible only to you.</span></div>
+      <div class="settings-block-body">
+        <div class="reaction-rule-list" id="reactionRuleList"><div class="settings-note">Loading reaction rules…</div></div>
+        <div class="reaction-rules-foot"><span class="settings-note">Private reactions are visible only to you.</span><button class="btn-secondary small" id="addReactionRuleBtn" type="button">New reaction rule</button></div>
+      </div>
     </div>`);
     document.getElementById("addReactionRuleBtn")?.addEventListener("click", () => openReactionRuleEditor());
     loadReactionRules().catch(() => {});
@@ -7647,7 +7670,7 @@ function renderReactionRules() {
   const list = document.getElementById("reactionRuleList");
   if (!list) return;
   if (!state.reactionRules.length) {
-    list.innerHTML = `<div class="settings-note">No reaction rules yet. Create one to add a private reaction when matching mail arrives.</div>`;
+    list.innerHTML = `<div class="reaction-rules-empty"><span class="reaction-rules-empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span><div><strong>No reaction rules yet</strong><span>Add a private reaction when matching mail arrives.</span></div></div>`;
     return;
   }
   list.innerHTML = state.reactionRules.map((rule) => {
@@ -8442,7 +8465,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.0.4";
+const MAIL_PROVIDER_ASSET_VERSION = "3.0.5";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -19652,20 +19675,62 @@ function saveShortcutMap(map) {
   try { localStorage.setItem(SHORTCUTS_KEY, JSON.stringify(map)); } catch {}
 }
 
+function refreshShortcutConflicts(host) {
+  const inputs = $$("[data-shortcut-key]", host);
+  const counts = {};
+  inputs.forEach((input) => {
+    const value = String(input.value || "").trim().toLowerCase();
+    if (value) counts[value] = (counts[value] || 0) + 1;
+  });
+  inputs.forEach((input) => {
+    const value = String(input.value || "").trim().toLowerCase();
+    input.classList.toggle("is-conflict", Boolean(value) && counts[value] > 1);
+  });
+  const duplicates = Object.keys(counts).filter((value) => counts[value] > 1);
+  const note = document.getElementById("shortcutConflict");
+  if (note) {
+    note.hidden = !duplicates.length;
+    note.textContent = duplicates.length
+      ? `These keys are assigned more than once: ${duplicates.map((value) => value.toUpperCase()).join(", ")}. Only the first action will run.`
+      : "";
+  }
+}
+
 function renderShortcutSettings() {
   const host = document.getElementById("shortcutSettings");
   if (!host) return;
   const map = shortcutMap();
-  host.innerHTML = `<div class="detail-list">${SHORTCUT_META.map(([key, label]) => `<div class="detail-row"><span>${esc(label)}</span><b><input class="input" maxlength="1" data-shortcut-key="${key}" value="${esc(map[key])}" aria-label="${esc(label)} shortcut" style="width:52px;text-align:center"></b></div>`).join("")}</div><div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn-secondary small" type="button" id="shortcutReset">Reset to defaults</button></div>`;
-  $$("[data-shortcut-key]", host).forEach((input) => input.addEventListener("change", () => {
-    const next = shortcutMap();
-    const value = String(input.value || "").trim();
-    if (value.length !== 1) { input.value = next[input.dataset.shortcutKey]; showToast("Use one character per shortcut", "error"); return; }
-    next[input.dataset.shortcutKey] = value.toLowerCase();
-    saveShortcutMap(next);
-    input.value = next[input.dataset.shortcutKey];
-    showToast("Shortcut saved");
-  }));
+  host.innerHTML = `<div class="pref-list shortcut-settings-list">${SHORTCUT_META.map(([key, label]) => `
+    <div class="pref-row">
+      <div class="pref-copy"><strong>${esc(label)}</strong></div>
+      <input class="shortcut-key-input" maxlength="1" data-shortcut-key="${key}" value="${esc(map[key])}" aria-label="${esc(label)} shortcut" autocomplete="off" spellcheck="false">
+    </div>`).join("")}</div>
+    <p class="shortcut-conflict" id="shortcutConflict" hidden></p>
+    <div class="settings-actions"><button class="btn-secondary small" type="button" id="shortcutReset">Reset to defaults</button></div>`;
+  $$("[data-shortcut-key]", host).forEach((input) => {
+    input.addEventListener("focus", () => input.select());
+    input.addEventListener("input", () => {
+      const key = input.dataset.shortcutKey;
+      const value = String(input.value || "").trim().toLowerCase();
+      if (value.length !== 1) {
+        input.value = shortcutMap()[key];
+        showToast("Use one character per shortcut", "error");
+        refreshShortcutConflicts(host);
+        return;
+      }
+      const next = shortcutMap();
+      next[key] = value;
+      saveShortcutMap(next);
+      input.value = value;
+      refreshShortcutConflicts(host);
+      showToast("Shortcut saved");
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); input.blur(); }
+      if (event.key === "Escape") { input.value = shortcutMap()[input.dataset.shortcutKey]; input.blur(); }
+    });
+  });
+  refreshShortcutConflicts(host);
   document.getElementById("shortcutReset")?.addEventListener("click", () => {
     try { localStorage.removeItem(SHORTCUTS_KEY); } catch {}
     renderShortcutSettings();
@@ -19713,23 +19778,35 @@ function ensureAISettingsUi() {
   panel.innerHTML = `
     <div class="settings-block">
       <div class="settings-block-head"><h3>Priority inbox</h3><p>Classify recent inbox mail into action, FYI, newsletter, spam-like and needs-reply. Auto-labelling follows the organization policy.</p></div>
-      <div class="setting-row"><div class="setting-copy"><strong>Recent inbox</strong><span>Triage the newest messages with your organization's AI provider.</span></div><button class="btn-secondary small" id="aiTriageRun" type="button"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Triage inbox</button></div>
-      <div id="aiTriageResults" class="settings-list"><div class="settings-note">Run a triage or open this tab to see saved results.</div></div>
+      <div class="settings-block-body">
+        <div class="setting-list">
+          <div class="setting-row"><div class="setting-copy"><strong>Recent inbox</strong><span>Triage the newest messages with your organization's AI provider.</span></div><button class="btn-secondary small" id="aiTriageRun" type="button"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg>Triage inbox</button></div>
+        </div>
+        <div id="aiTriageResults" class="settings-list"><div class="settings-note">Run a triage or open this tab to see saved results.</div></div>
+      </div>
     </div>
     <div class="settings-block">
       <div class="settings-block-head"><h3>Obligations ledger</h3><p>Promises, requests and deadlines extracted from conversations. Requests resolve when you reply.</p></div>
-      <div class="setting-row"><div class="setting-copy"><strong>Open obligations</strong><span>Turn an obligation into a task or dismiss it.</span></div><button class="btn-secondary small" id="aiObligationsRefresh" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh</button></div>
-      <div id="aiObligationList" class="settings-list"><div class="settings-note">No obligations loaded yet.</div></div>
+      <div class="settings-block-body">
+        <div class="setting-list">
+          <div class="setting-row"><div class="setting-copy"><strong>Open obligations</strong><span>Turn an obligation into a task or dismiss it.</span></div><button class="btn-secondary small" id="aiObligationsRefresh" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Refresh</button></div>
+        </div>
+        <div id="aiObligationList" class="settings-list"><div class="settings-note">No obligations loaded yet.</div></div>
+      </div>
     </div>
     <div class="settings-block">
       <div class="settings-block-head"><h3>Ask your mailbox</h3><p>Natural-language search over your own mail. Results are citations from your mailbox, never generated messages.</p></div>
-      <div class="field-row"><label class="field"><span>Question</span><input class="input" id="aiSearchQuery" placeholder="e.g. unread invoices from Alice last week" autocomplete="off"></label><button class="btn-secondary small" id="aiSearchRun" type="button"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>Search</button></div>
-      <div id="aiSearchResults" class="settings-list"></div>
+      <div class="settings-block-body">
+        <div class="field-row"><label class="field"><span>Question</span><input class="input" id="aiSearchQuery" placeholder="e.g. unread invoices from Alice last week" autocomplete="off"></label><button class="btn-secondary small" id="aiSearchRun" type="button"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>Search</button></div>
+        <div id="aiSearchResults" class="settings-list"></div>
+      </div>
     </div>
     <div class="settings-block">
       <div class="settings-block-head"><h3>Sender intelligence</h3><p>History, open obligations and attachments for one sender. Only your own mailbox is included.</p></div>
-      <div class="field-row"><label class="field"><span>Sender email</span><input class="input" id="aiSenderEmail" type="email" placeholder="name@example.com" autocomplete="off"></label><button class="btn-secondary small" id="aiSenderRun" type="button"><svg class="icon" aria-hidden="true"><use href="#i-user"/></svg>Profile</button></div>
-      <div id="aiSenderResult" class="settings-list"></div>
+      <div class="settings-block-body">
+        <div class="field-row"><label class="field"><span>Sender email</span><input class="input" id="aiSenderEmail" type="email" placeholder="name@example.com" autocomplete="off"></label><button class="btn-secondary small" id="aiSenderRun" type="button"><svg class="icon" aria-hidden="true"><use href="#i-user"/></svg>Profile</button></div>
+        <div id="aiSenderResult" class="settings-list"></div>
+      </div>
     </div>`;
   panelHost.appendChild(panel);
   document.getElementById("aiTriageRun")?.addEventListener("click", () => runAITriage());
@@ -19785,6 +19862,13 @@ function openAIThread(threadId) {
   ensureThreadLoaded(threadId).then((loaded) => { if (loaded) selectThread(threadId); }).catch(showError);
 }
 
+function aiUnavailableNotice(error, fallback) {
+  if (error && error.code === "LICENSE_FEATURE") {
+    return `<div class="settings-gate"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><div><strong>License required.</strong> ${esc(error.message || fallback)}</div></div>`;
+  }
+  return `<div class="settings-note">${esc((error && error.message) || fallback)}</div>`;
+}
+
 function renderAIWorkspace() {
   loadAITriageResults();
   loadAIObligations();
@@ -19811,7 +19895,7 @@ async function loadAITriageResults() {
     const items = data.items || [];
     host.innerHTML = items.length ? items.map(aiTriageCard).join("") : '<div class="settings-note">No triage results yet.</div>';
   } catch (error) {
-    host.innerHTML = `<div class="settings-note">${esc(error.message || "Triage results are unavailable.")}</div>`;
+    host.innerHTML = aiUnavailableNotice(error, "Triage results are unavailable.");
   }
 }
 
@@ -19854,7 +19938,7 @@ async function loadAIObligations() {
     const items = data.items || [];
     host.innerHTML = items.length ? items.map(aiObligationCard).join("") : '<div class="settings-note">No open obligations.</div>';
   } catch (error) {
-    host.innerHTML = `<div class="settings-note">${esc(error.message || "Obligations are unavailable.")}</div>`;
+    host.innerHTML = aiUnavailableNotice(error, "Obligations are unavailable.");
   }
 }
 
@@ -19884,7 +19968,7 @@ async function runAIMailboxSearch() {
       <div class="setting-control">${item.threadId ? `<button class="link-btn" type="button" data-ai-open-thread="${esc(item.threadId)}">Open</button>` : ""}</div>
     </div>`).join("") : '<div class="settings-note">No matching messages.</div>');
   } catch (error) {
-    host.innerHTML = `<div class="settings-note">${esc(error.message || "Search failed.")}</div>`;
+    host.innerHTML = aiUnavailableNotice(error, "Search failed.");
   }
 }
 
@@ -19908,7 +19992,7 @@ async function loadAISenderProfile() {
       ${obligations.length ? `<div class="settings-note"><strong>Open obligations</strong></div>` + obligations.map((item) => `<div class="setting-row"><div class="setting-copy"><span>${esc(item.text || "")}</span></div></div>`).join("") : ""}
       ${recent.map((item) => `<div class="setting-row"><div class="setting-copy"><strong>${esc(item.subject || "(no subject)")}</strong><span>${esc(formatListWhen(item.sentAt))} · ${esc(item.folder || "")}</span></div><div class="setting-control">${item.threadId ? `<button class="link-btn" type="button" data-ai-open-thread="${esc(item.threadId)}">Open</button>` : ""}</div></div>`).join("")}`;
   } catch (error) {
-    host.innerHTML = `<div class="settings-note">${esc(error.message || "Sender profile unavailable.")}</div>`;
+    host.innerHTML = aiUnavailableNotice(error, "Sender profile unavailable.");
   }
 }
 
@@ -20087,7 +20171,8 @@ function renderSettingsDynamic() {
   if (state.task !== "settings" && !["rules", "audit", "account", "accounts", "security", "regional", "autoreply", "identities"].includes(state.settingsTab)) return;
   if (state.settingsTab === "rules") renderRules();
   else if (state.settingsTab === "mail") { syncPreferencesUi(); renderSignatureLibrary(); renderLabelSettings(); loadSignatures(); }
-  else if (["appearance", "compose"].includes(state.settingsTab)) syncPreferencesUi();
+  else if (state.settingsTab === "appearance") { syncPreferencesUi(); renderFolderDensitySettings(); }
+  else if (state.settingsTab === "compose") syncPreferencesUi();
   else if (state.settingsTab === "notifications") { syncPreferencesUi(); syncPushUi(); refreshPushConfig(); }
   else if (state.settingsTab === "storage") renderStorageSettings();
   else if (state.settingsTab === "identities") { renderIdentities(); refreshIdentities(); loadForwardingSettings(); }
@@ -29419,8 +29504,11 @@ function bindEvents() {
     if (accentOption) { event.preventDefault(); setAccent(accentOption.getAttribute("data-set-accent"), true); return; }
     const densityOption = target.closest("[data-set-density]");
     if (densityOption) { event.preventDefault(); setDensity(densityOption.getAttribute("data-set-density"), true); return; }
-    if (target.matches("#highContrastToggle") || target.closest("#highContrastToggle")) {
-      setHighContrast(document.getElementById("highContrastToggle")?.checked);
+    const contrastToggle = target.closest("#highContrastToggle");
+    if (contrastToggle) {
+      event.preventDefault();
+      setHighContrast(contrastToggle.getAttribute("aria-checked") !== "true");
+      showToast("Preference saved");
       return;
     }
 

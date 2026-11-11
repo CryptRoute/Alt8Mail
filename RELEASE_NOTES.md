@@ -1,3 +1,32 @@
+# Alt8Mail 3.0.5
+
+Release date: 2026-11-11. Large-file scanning, settings UI and license-gate UX.
+
+## 3.0.5 large-file scans and settings polish
+
+- ClamAV scan limits are raised automatically to 320 MB (`StreamMaxLength`,
+  `MaxFileSize`, `MaxScanSize`) by the control-plane startup check, so a
+  169 MB Cabinet share no longer fails with “The file could not be scanned for
+  malware.” The scanner timeout is now ten minutes, and a scanner that still
+  rejects a file returns a specific `FILE_SCAN_LIMIT` message with the exact
+  limits to raise. `scripts/alt8mail-ensure-clamav-limits.sh` applies the same
+  change manually and restores the previous config if clamd fails to restart.
+- Keyboard shortcuts settings now use the settings-row design system with
+  styled key fields, duplicate-key highlighting and a proper reset action.
+- The AI workspace settings page uses consistent cards, list rows and form
+  fields for triage, obligations, mailbox search and sender intelligence.
+  License-gated AI capabilities render a dedicated notice instead of a bare
+  error string.
+- High contrast mode is a real on/off switch with `role="switch"`; per-folder
+  density is rendered and wired to folder changes (it previously had no render
+  call, so overrides never appeared).
+- The Rules page reaction-rule section is wrapped in a settings card with a
+  designed empty state and footer.
+- The admin Integrations, Compliance and Team inboxes pages now show a proper
+  “Upgrade to unlock …” license card with the feature key, copy action and
+  organization-settings link instead of a generic “Something went wrong” page.
+  Feature-gate errors now carry the missing feature key in the API payload.
+
 # Alt8Mail 3.0.4
 
 Release date: 2026-11-11. Large-file Cabinet uploads for the compose share flow.

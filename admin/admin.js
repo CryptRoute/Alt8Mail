@@ -344,8 +344,85 @@ function loading(title) {
   $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>${esc(title)}</h1><p>Loading administration data…</p></div></div><div class="card card-pad"><div class="empty">${icon("refresh")}<h3>Loading</h3><p>Reading from the Alt8Mail control plane.</p></div></div>`;
 }
 
+const ADMIN_FEATURE_LABELS = {
+  audit_export: "Audit export",
+  ediscovery: "eDiscovery",
+  shared_inbox: "Shared inboxes",
+  dlp_advanced: "Advanced data loss prevention",
+  file_governance: "File governance",
+  byok: "Customer-managed encryption keys",
+  crm_sync: "CRM sync",
+  analytics: "Analytics",
+  migration: "Mail migration",
+  ai_triage: "AI triage",
+  ai_obligations: "Obligation tracking",
+  ai_search: "Mailbox AI search",
+  ai_policy_assist: "AI policy assist",
+  mcp_governance: "MCP governance",
+  ai_budget: "AI budget",
+  security_awareness: "Security awareness",
+  support_ops: "Support operations"
+};
+const ADMIN_VIEW_LABELS = {
+  integrations: "Integrations",
+  compliance: "Compliance",
+  "team-inboxes": "Team inboxes",
+  audit: "Audit log",
+  addons: "Add-ons",
+  storage: "Storage",
+  ai: "AI assistant"
+};
+
+function adminFeatureLabel(feature) {
+  if (!feature) return "This capability";
+  if (ADMIN_FEATURE_LABELS[feature]) return ADMIN_FEATURE_LABELS[feature];
+  return feature.replace(/_/g, " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
+function licenseGateView(error) {
+  const message = String((error && error.message) || "");
+  const feature = (error && error.details && error.details.feature)
+    || (message.match(/\(([a-z0-9_]+)\)/i) || [])[1]
+    || (message.match(/\b([a-z]+(?:_[a-z0-9]+)+)\b/i) || [])[1]
+    || "";
+  const label = adminFeatureLabel(feature);
+  const page = ADMIN_VIEW_LABELS[state.view] || "This page";
+  $("#viewRoot").innerHTML = `
+    <div class="view-head">
+      <div><span class="eyebrow license-eyebrow">License required</span><h1>${esc(page)}</h1><p>The ${esc(label)} capability is not included in the active Alt8Mail license.</p></div>
+      <div class="view-actions"><button class="btn secondary" type="button" data-retry-view>${icon("refresh")}Refresh</button></div>
+    </div>
+    <div class="card license-gate-card">
+      <span class="license-gate-icon">${icon("lock")}</span>
+      <div class="license-gate-copy">
+        <h2>Upgrade to unlock ${esc(label)}</h2>
+        <p>The rest of the administration console is still available. Ask your Alt8Mail administrator or support to add the <code>${esc(feature || "required")}</code> entitlement to the license. This page unlocks as soon as the license is updated.</p>
+        <div class="license-gate-meta"><span>Feature key</span><code>${esc(feature || "unknown")}</code>${feature ? `<button class="btn secondary small" type="button" data-copy-feature>${icon("key")}Copy</button>` : ""}</div>
+        <div class="license-gate-actions"><button class="btn primary" type="button" data-go-settings>${icon("building")}Organization settings</button></div>
+      </div>
+    </div>`;
+  $("#viewRoot").querySelector("[data-retry-view]")?.addEventListener("click", () => route());
+  $("#viewRoot").querySelector("[data-go-settings]")?.addEventListener("click", () => { location.hash = "#/settings"; });
+  $("#viewRoot").querySelector("[data-copy-feature]")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(feature);
+      toast("Feature key copied");
+    } catch {
+      toast("Could not copy the feature key", "error");
+    }
+  });
+}
+
 function viewError(error) {
-  $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Something went wrong</h1><p>${esc(error.message)}</p></div></div><div class="card card-pad"><button class="btn primary" data-action="retry-view">Try again</button></div>`;
+  const code = error && error.code;
+  if (code === "LICENSE_FEATURE" || code === "FEATURE_REQUIRED") {
+    licenseGateView(error);
+    return;
+  }
+  $("#viewRoot").innerHTML = `
+    <div class="view-head"><div><span class="eyebrow">Administration</span><h1>Could not load this page</h1><p>${esc((error && error.message) || "The request could not be completed.")}</p></div><div class="view-actions"><button class="btn secondary" type="button" data-retry-view>${icon("refresh")}Try again</button></div></div>
+    <div class="error-panel"><span class="error-panel-icon">${icon("alert")}</span><div><strong>The control plane did not return this page.</strong><p>Check the admin service health and try again. No changes were made.</p></div></div>`;
+  $("#viewRoot").querySelector("[data-retry-view]")?.addEventListener("click", () => route());
 }
 
 /* ------------------------------------------------------------

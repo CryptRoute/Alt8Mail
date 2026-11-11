@@ -301,6 +301,17 @@ func (s *Server) publicFile(file fileRecord, user userRecord, sharedRaw []byte) 
 	}
 }
 
+func (s *Server) writeUploadScanError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errUploadInfected):
+		writeError(w, http.StatusUnprocessableEntity, "FILE_INFECTED", "The uploaded file failed the antivirus scan")
+	case errors.Is(err, errUploadScanLimit):
+		writeError(w, http.StatusUnprocessableEntity, "FILE_SCAN_LIMIT", "This file is larger than the antivirus scanner's limit. Ask an administrator to raise the ClamAV StreamMaxLength, MaxFileSize and MaxScanSize limits, then try again.")
+	default:
+		writeError(w, http.StatusServiceUnavailable, "FILE_SCAN", "The file could not be scanned for malware")
+	}
+}
+
 func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	var body fileCreateBody
@@ -329,11 +340,7 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.scanUpload(r.Context(), decoded); err != nil {
-			if errors.Is(err, errUploadInfected) {
-				writeError(w, http.StatusUnprocessableEntity, "FILE_INFECTED", "The uploaded file failed the antivirus scan")
-			} else {
-				writeError(w, http.StatusServiceUnavailable, "FILE_SCAN", "The file could not be scanned for malware")
-			}
+			s.writeUploadScanError(w, err)
 			return
 		}
 		data = decoded
@@ -725,11 +732,7 @@ func (s *Server) completeFileUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.scanUpload(r.Context(), data); err != nil {
-		if errors.Is(err, errUploadInfected) {
-			writeError(w, http.StatusUnprocessableEntity, "FILE_INFECTED", "The uploaded file failed the antivirus scan")
-		} else {
-			writeError(w, http.StatusServiceUnavailable, "FILE_SCAN", "The file could not be scanned for malware")
-		}
+		s.writeUploadScanError(w, err)
 		return
 	}
 	body := fileCreateBody{

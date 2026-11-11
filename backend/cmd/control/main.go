@@ -41,6 +41,11 @@ func main() {
 		if err := control.EnsureMailGuard(logger); err != nil {
 			logger.Warn("local-domain mail guard could not be installed", "err", err)
 		}
+	case "ensure-clamav-limits":
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		if err := control.EnsureClamAVLimits(logger); err != nil {
+			logger.Warn("ClamAV large-file scan limits could not be installed", "err", err)
+		}
 	case "notify":
 		notifyCommand()
 	case "version", "-version", "--version":
