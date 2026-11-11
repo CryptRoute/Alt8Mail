@@ -13,7 +13,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -305,20 +307,6 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeBody(w, r, &body, 140*1024*1024) {
 		return
 	}
-	providerID := body.ProviderID
-	if providerID == "" {
-		providerID = "a8m"
-	}
-	provider, ok := s.storageProvider(providerID)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "FILE_PROVIDER", "Choose a valid storage provider")
-		return
-	}
-	connected, err := s.storageConnected(r.Context(), sess.User.ID, providerID)
-	if err != nil || !connected {
-		writeError(w, http.StatusConflict, "PROVIDER_OFFLINE", provider.Name+" is not connected")
-		return
-	}
 	attachmentID := strings.TrimSpace(body.AttachmentID)
 	var attachmentName, attachmentMIME, storedName string
 	var data []byte
@@ -374,6 +362,24 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		writeError(w, http.StatusBadRequest, "FILE_CONTENT", "Upload a file before adding it to storage")
+		return
+	}
+	s.finishFileCreate(w, r, sess, body, data, attachmentID, attachmentName, attachmentMIME, storedName)
+}
+
+func (s *Server) finishFileCreate(w http.ResponseWriter, r *http.Request, sess *sessionRecord, body fileCreateBody, data []byte, attachmentID, attachmentName, attachmentMIME, storedName string) {
+	providerID := body.ProviderID
+	if providerID == "" {
+		providerID = "a8m"
+	}
+	provider, ok := s.storageProvider(providerID)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "FILE_PROVIDER", "Choose a valid storage provider")
+		return
+	}
+	connected, err := s.storageConnected(r.Context(), sess.User.ID, providerID)
+	if err != nil || !connected {
+		writeError(w, http.StatusConflict, "PROVIDER_OFFLINE", provider.Name+" is not connected")
 		return
 	}
 	name := safeFileName(attachmentName)
@@ -489,6 +495,266 @@ func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	s.recordWorkspaceAudit(r.Context(), sess, "file.created", name, "Added to "+provider.Name+" · "+formatBytes(int64(len(data))))
 	file, _ := s.loadFile(r.Context(), sess.User, id)
 	writeJSON(w, http.StatusCreated, map[string]any{"file": file})
+
+}
+
+const (
+	maxCabinetUploadBytes int64 = 300 * 1024 * 1024
+	maxCabinetUploadChunk int64 = 8 * 1024 * 1024
+)
+
+type cabinetUploadMeta struct {
+	ID              string    `json:"id"`
+	UserID          string    `json:"userId"`
+	TenantID        string    `json:"tenantId"`
+	Name            string    `json:"name"`
+	MIME            string    `json:"mime"`
+	SizeBytes       int64     `json:"sizeBytes"`
+	Path            string    `json:"path"`
+	FolderID        string    `json:"folderId"`
+	Description     string    `json:"description"`
+	ProviderID      string    `json:"providerId"`
+	ClientEncrypted bool      `json:"clientEncrypted"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+var cabinetUploadLocks sync.Map
+
+func cabinetUploadLock(id string) *sync.Mutex {
+	lock, _ := cabinetUploadLocks.LoadOrStore(id, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
+func (s *Server) cabinetUploadDir() string {
+	return filepath.Join(s.cfg.UploadDir, ".uploads")
+}
+
+func (s *Server) cabinetUploadPaths(id string) (string, string) {
+	base := s.cabinetUploadDir()
+	return filepath.Join(base, id+".json"), filepath.Join(base, id+".part")
+}
+
+func validCabinetUploadID(id string) bool {
+	return strings.HasPrefix(id, "fileupload_") && id == filepath.Base(id) && len(id) <= 80 && !strings.ContainsAny(id, `/\`)
+}
+
+func (s *Server) loadCabinetUpload(sess *sessionRecord, id string) (cabinetUploadMeta, string, error) {
+	var meta cabinetUploadMeta
+	if !validCabinetUploadID(id) {
+		return meta, "", os.ErrNotExist
+	}
+	metaPath, _ := s.cabinetUploadPaths(id)
+	raw, err := os.ReadFile(metaPath)
+	if err != nil {
+		return meta, metaPath, err
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return meta, metaPath, err
+	}
+	if meta.UserID != sess.User.ID || meta.TenantID != sess.User.TenantID || meta.ID != id {
+		return meta, metaPath, os.ErrNotExist
+	}
+	return meta, metaPath, nil
+}
+
+func (s *Server) pruneCabinetUploads() {
+	dir := s.cabinetUploadDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, entry := range entries {
+		info, infoErr := entry.Info()
+		if infoErr == nil && info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(dir, entry.Name()))
+		}
+	}
+}
+
+func (s *Server) startFileUpload(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	go s.pruneCabinetUploads()
+	var body fileCreateBody
+	if !s.decodeBody(w, r, &body, 64*1024) {
+		return
+	}
+	size := int64(body.SizeBytes)
+	if size <= 0 {
+		writeError(w, http.StatusBadRequest, "FILE_SIZE", "File size is required")
+		return
+	}
+	if size > maxCabinetUploadBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "Cabinet uploads are limited to 300 MB")
+		return
+	}
+	providerID := body.ProviderID
+	if providerID == "" {
+		providerID = "a8m"
+	}
+	provider, ok := s.storageProvider(providerID)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "FILE_PROVIDER", "Choose a valid storage provider")
+		return
+	}
+	connected, err := s.storageConnected(r.Context(), sess.User.ID, providerID)
+	if err != nil || !connected {
+		writeError(w, http.StatusConflict, "PROVIDER_OFFLINE", provider.Name+" is not connected")
+		return
+	}
+	name := safeFileName(body.Name)
+	if name == "" {
+		name = "Uploaded file"
+	}
+	id := newID("fileupload")
+	meta := cabinetUploadMeta{
+		ID: id, UserID: sess.User.ID, TenantID: sess.User.TenantID,
+		Name: name, MIME: body.MIME, SizeBytes: size, Path: body.Path, FolderID: body.FolderID,
+		Description: body.Description, ProviderID: providerID, ClientEncrypted: body.ClientEncrypted,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := os.MkdirAll(s.cabinetUploadDir(), 0o750); err != nil {
+		writeError(w, http.StatusInternalServerError, "UPLOAD_START", "Could not start the upload")
+		return
+	}
+	metaPath, partPath := s.cabinetUploadPaths(id)
+	raw, _ := json.Marshal(meta)
+	if err := os.WriteFile(metaPath, raw, 0o640); err != nil {
+		writeError(w, http.StatusInternalServerError, "UPLOAD_START", "Could not start the upload")
+		return
+	}
+	if err := os.WriteFile(partPath, nil, 0o640); err != nil {
+		_ = os.Remove(metaPath)
+		writeError(w, http.StatusInternalServerError, "UPLOAD_START", "Could not start the upload")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"uploadId": id, "chunkSize": maxCabinetUploadChunk})
+}
+
+func (s *Server) putFileUploadChunk(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	id := r.PathValue("id")
+	meta, _, err := s.loadCabinetUpload(sess, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "UPLOAD_NOT_FOUND", "This upload has expired or does not exist")
+		return
+	}
+	offset, parseErr := strconv.ParseInt(strings.TrimSpace(r.Header.Get("X-A8M-Upload-Offset")), 10, 64)
+	if parseErr != nil || offset < 0 {
+		writeError(w, http.StatusBadRequest, "UPLOAD_OFFSET", "The upload offset is missing")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxCabinetUploadChunk+1024*1024)
+	lock := cabinetUploadLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	_, partPath := s.cabinetUploadPaths(id)
+	info, statErr := os.Stat(partPath)
+	if statErr != nil {
+		writeError(w, http.StatusNotFound, "UPLOAD_NOT_FOUND", "This upload has expired or does not exist")
+		return
+	}
+	if info.Size() != offset {
+		writeError(w, http.StatusConflict, "UPLOAD_OFFSET", "The upload offset does not match the server")
+		return
+	}
+	chunk, readErr := io.ReadAll(r.Body)
+	if readErr != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, "UPLOAD_CHUNK", "The upload chunk is too large")
+		return
+	}
+	if len(chunk) == 0 {
+		writeError(w, http.StatusBadRequest, "UPLOAD_CHUNK", "The upload chunk is empty")
+		return
+	}
+	if int64(len(chunk)) > maxCabinetUploadChunk {
+		writeError(w, http.StatusRequestEntityTooLarge, "UPLOAD_CHUNK", "The upload chunk is too large")
+		return
+	}
+	next := offset + int64(len(chunk))
+	if next > meta.SizeBytes || next > maxCabinetUploadBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "FILE_TOO_LARGE", "Cabinet uploads are limited to 300 MB")
+		return
+	}
+	file, openErr := os.OpenFile(partPath, os.O_WRONLY|os.O_APPEND, 0o640)
+	if openErr != nil {
+		writeError(w, http.StatusInternalServerError, "UPLOAD_CHUNK", "Could not save the upload chunk")
+		return
+	}
+	_, writeErr := file.Write(chunk)
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		writeError(w, http.StatusInternalServerError, "UPLOAD_CHUNK", "Could not save the upload chunk")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"received": next})
+}
+
+func (s *Server) completeFileUpload(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	id := r.PathValue("id")
+	meta, metaPath, err := s.loadCabinetUpload(sess, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "UPLOAD_NOT_FOUND", "This upload has expired or does not exist")
+		return
+	}
+	lock := cabinetUploadLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	_, partPath := s.cabinetUploadPaths(id)
+	defer func() {
+		_ = os.Remove(partPath)
+		_ = os.Remove(metaPath)
+		cabinetUploadLocks.Delete(id)
+	}()
+	file, openErr := os.Open(partPath)
+	if openErr != nil {
+		writeError(w, http.StatusNotFound, "UPLOAD_NOT_FOUND", "This upload has expired or does not exist")
+		return
+	}
+	info, statErr := file.Stat()
+	if statErr != nil || info.Size() != meta.SizeBytes {
+		_ = file.Close()
+		writeError(w, http.StatusConflict, "UPLOAD_INCOMPLETE", "The upload is not complete")
+		return
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, maxCabinetUploadBytes+1))
+	_ = file.Close()
+	if readErr != nil || int64(len(data)) != meta.SizeBytes {
+		writeError(w, http.StatusConflict, "UPLOAD_INCOMPLETE", "The upload could not be completed")
+		return
+	}
+	if err := s.scanUpload(r.Context(), data); err != nil {
+		if errors.Is(err, errUploadInfected) {
+			writeError(w, http.StatusUnprocessableEntity, "FILE_INFECTED", "The uploaded file failed the antivirus scan")
+		} else {
+			writeError(w, http.StatusServiceUnavailable, "FILE_SCAN", "The file could not be scanned for malware")
+		}
+		return
+	}
+	body := fileCreateBody{
+		ProviderID: meta.ProviderID, Name: meta.Name, MIME: meta.MIME, SizeBytes: float64(meta.SizeBytes),
+		Path: meta.Path, FolderID: meta.FolderID, Description: meta.Description, ClientEncrypted: meta.ClientEncrypted,
+	}
+	s.finishFileCreate(w, r, sess, body, data, "", meta.Name, meta.MIME, "")
+}
+
+func (s *Server) cancelFileUpload(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	id := r.PathValue("id")
+	_, metaPath, err := s.loadCabinetUpload(sess, id)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	lock := cabinetUploadLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	_, partPath := s.cabinetUploadPaths(id)
+	_ = os.Remove(partPath)
+	_ = os.Remove(metaPath)
+	cabinetUploadLocks.Delete(id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) patchFile(w http.ResponseWriter, r *http.Request) {

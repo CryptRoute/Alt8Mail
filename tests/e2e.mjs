@@ -1855,10 +1855,12 @@ try {
   await page.waitFor(() => document.getElementById("composeShareStatus").textContent.includes("exact recipient email"), 3000);
   check(await page.eval("!document.getElementById('composeShareOverlay').hidden"), "share dialog keeps the form open on invalid input");
   await page.screenshot(path.join(artifacts, "25d2-compose-share-dialog.png"));
-  await page.eval("document.querySelector('[data-compose-share-close]').click()");
-  await sleep(200);
-  await page.click("#composeAttachClose");
-  await sleep(200);
+  await page.setValue("#composeShareRecipient", "elena.vasquez@a8m.example");
+  await page.click("#composeShareSubmit");
+  await page.waitFor(() => document.getElementById("composeShareOverlay").hidden, 20000);
+  check(await page.eval("document.getElementById('toast').textContent.includes('Secure Cabinet link inserted')"), "share dialog inserts the Cabinet link");
+  check(await page.eval(`(() => { const comp = [...document.querySelectorAll(".compose")].at(-1); const text = (comp?.querySelector('[data-compose-field="body"]')?.value || "") + " " + (comp?.querySelector('[data-compose-editor]')?.innerHTML || ""); return text.includes("Private link for elena.vasquez@a8m.example"); })()`), "inserted link keeps its private recipient");
+  check(await page.eval("document.getElementById('composeAttachOverlay').hidden"), "attachment picker closes after the link is inserted");
   await page.eval("window.__a8mAutoConfirm = true");
   await page.eval(`(() => { const comp = [...document.querySelectorAll(".compose")].at(-1); comp?.querySelector('[data-compose-action="discard"]')?.click(); })()`);
   await sleep(400);

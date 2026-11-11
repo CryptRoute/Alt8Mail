@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -143,6 +144,80 @@ func TestPhaseScopeCompletionIntegration(t *testing.T) {
 		}
 		if size != int64(len(raw)) || storageKey == "" {
 			t.Fatalf("direct upload size=%d key=%q", size, storageKey)
+		}
+	})
+
+	t.Run("chunked cabinet upload for share fallback", func(t *testing.T) {
+		raw := []byte(strings.Repeat("chunked-cabinet-upload-", 70000))
+		startBody, _ := json.Marshal(map[string]any{
+			"providerId": "a8m", "name": "large-chunked.bin", "mime": "application/octet-stream",
+			"sizeBytes": len(raw), "path": "Files",
+			"description": "Shared from compose after reaching the attachment limit",
+		})
+		request := httptest.NewRequest(http.MethodPost, "/api/files/uploads", strings.NewReader(string(startBody)))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		server.startFileUpload(recorder, withSession(request))
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("start chunked upload = %d %s", recorder.Code, recorder.Body.String())
+		}
+		var started struct {
+			UploadID  string `json:"uploadId"`
+			ChunkSize int64  `json:"chunkSize"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &started); err != nil || started.UploadID == "" || started.ChunkSize <= 0 {
+			t.Fatalf("start chunked upload payload = %s", recorder.Body.String())
+		}
+		bad := httptest.NewRequest(http.MethodPut, "/api/files/uploads/"+started.UploadID, strings.NewReader("short"))
+		bad.SetPathValue("id", started.UploadID)
+		bad.Header.Set("X-A8M-Upload-Offset", "9")
+		badRecorder := httptest.NewRecorder()
+		server.putFileUploadChunk(badRecorder, withSession(bad))
+		if badRecorder.Code != http.StatusConflict {
+			t.Fatalf("mismatched chunk offset = %d %s", badRecorder.Code, badRecorder.Body.String())
+		}
+		chunkSize := 512 * 1024
+		for offset := 0; offset < len(raw); offset += chunkSize {
+			end := offset + chunkSize
+			if end > len(raw) {
+				end = len(raw)
+			}
+			chunk := httptest.NewRequest(http.MethodPut, "/api/files/uploads/"+started.UploadID, bytes.NewReader(raw[offset:end]))
+			chunk.SetPathValue("id", started.UploadID)
+			chunk.Header.Set("X-A8M-Upload-Offset", fmt.Sprint(offset))
+			chunkRecorder := httptest.NewRecorder()
+			server.putFileUploadChunk(chunkRecorder, withSession(chunk))
+			if chunkRecorder.Code != http.StatusOK {
+				t.Fatalf("upload chunk at %d = %d %s", offset, chunkRecorder.Code, chunkRecorder.Body.String())
+			}
+		}
+		complete := httptest.NewRequest(http.MethodPost, "/api/files/uploads/"+started.UploadID+"/complete", strings.NewReader("{}"))
+		complete.SetPathValue("id", started.UploadID)
+		completeRecorder := httptest.NewRecorder()
+		server.completeFileUpload(completeRecorder, withSession(complete))
+		if completeRecorder.Code != http.StatusCreated {
+			t.Fatalf("complete chunked upload = %d %s", completeRecorder.Code, completeRecorder.Body.String())
+		}
+		var payload struct {
+			File map[string]any `json:"file"`
+		}
+		_ = json.Unmarshal(completeRecorder.Body.Bytes(), &payload)
+		fileID := fmt.Sprint(payload.File["id"])
+		var storageKey string
+		var size int64
+		if err := pool.QueryRow(ctx, `SELECT storage_key, size_bytes FROM public.files WHERE id=$1 AND user_id=$2`, fileID, userID).Scan(&storageKey, &size); err != nil {
+			t.Fatal(err)
+		}
+		if size != int64(len(raw)) || storageKey == "" {
+			t.Fatalf("chunked upload size=%d key=%q", size, storageKey)
+		}
+		oversized, _ := json.Marshal(map[string]any{"name": "too-big.bin", "sizeBytes": maxCabinetUploadBytes + 1})
+		bigRequest := httptest.NewRequest(http.MethodPost, "/api/files/uploads", strings.NewReader(string(oversized)))
+		bigRequest.Header.Set("Content-Type", "application/json")
+		bigRecorder := httptest.NewRecorder()
+		server.startFileUpload(bigRecorder, withSession(bigRequest))
+		if bigRecorder.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("oversized chunked upload = %d %s", bigRecorder.Code, bigRecorder.Body.String())
 		}
 	})
 

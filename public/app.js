@@ -8442,7 +8442,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.0.3";
+const MAIL_PROVIDER_ASSET_VERSION = "3.0.4";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -17124,6 +17124,94 @@ function setComposeShareBusy(busy) {
   button.classList.toggle("is-busy", Boolean(busy));
   const label = button.querySelector(".compose-share-submit-label");
   if (label) label.textContent = busy ? "Uploading…" : "Upload and insert link";
+  if (!busy) {
+    const wrap = document.getElementById("composeShareProgress");
+    const bar = document.getElementById("composeShareProgressBar");
+    if (wrap) wrap.hidden = true;
+    if (bar) bar.style.width = "0%";
+  }
+}
+
+
+function updateComposeShareProgress(fraction) {
+  const wrap = document.getElementById("composeShareProgress");
+  const bar = document.getElementById("composeShareProgressBar");
+  const percent = Math.max(0, Math.min(100, Math.round((Number(fraction) || 0) * 100)));
+  if (wrap) wrap.hidden = false;
+  if (bar) bar.style.width = `${percent}%`;
+  const label = document.querySelector(".compose-share-submit-label");
+  if (label) label.textContent = percent >= 100 ? "Creating secure link…" : `Uploading ${percent}%…`;
+}
+
+function uploadCabinetChunk(uploadId, chunk, offset, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", `/api/files/uploads/${encodeURIComponent(uploadId)}`);
+    xhr.withCredentials = true;
+    xhr.timeout = 300000;
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.setRequestHeader("X-A8M-Upload-Offset", String(offset));
+    if (!state.delegatedMode && state.activeAccountId) xhr.setRequestHeader("X-A8M-Account", state.activeAccountId);
+    const delegatedSession = state.delegatedSession;
+    if (delegatedSession?.token) xhr.setRequestHeader(DELEGATED_SESSION_HEADER, delegatedSession.token);
+    const csrf = delegatedSession?.csrf || state.csrf;
+    if (csrf) xhr.setRequestHeader("X-CSRF-Token", csrf);
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(offset + event.loaded);
+    });
+    xhr.addEventListener("load", () => {
+      setOffline(false);
+      let payload = null;
+      try { payload = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch { payload = null; }
+      if (xhr.status >= 200 && xhr.status < 300) { resolve(payload); return; }
+      if (xhr.status === 401) {
+        if (state.delegatedMode) {
+          const revoked = payload && payload.error ? payload.error.message : "";
+          expireDelegatedWindow(revoked || "Your primary Alt8Mail session ended. This delegated mailbox has been signed out.");
+        } else {
+          handleSessionExpired();
+        }
+      }
+      const detail = payload && payload.error ? payload.error : {};
+      reject(new Error(detail.message || `Request failed (${xhr.status})`));
+    });
+    xhr.addEventListener("error", () => {
+      setOffline(true);
+      reject(new Error("Cannot reach the mail server. Check your connection."));
+    });
+    xhr.addEventListener("timeout", () => reject(new Error("The upload timed out. Try again.")));
+    xhr.send(chunk);
+  });
+}
+
+async function uploadCabinetFileChunked(file, onProgress) {
+  const started = await api("/api/files/uploads", { method: "POST", body: {
+    name: file.name || "Uploaded file",
+    mime: file.type || "application/octet-stream",
+    sizeBytes: file.size,
+    path: "Files",
+    description: "Shared from compose after reaching the attachment limit"
+  } });
+  const uploadId = started?.uploadId;
+  if (!uploadId) throw new Error("The upload could not be started.");
+  const chunkSize = Math.max(1024 * 1024, Number(started.chunkSize) || 8 * 1024 * 1024);
+  let offset = 0;
+  try {
+    while (offset < file.size) {
+      const chunk = file.slice(offset, Math.min(offset + chunkSize, file.size));
+      await uploadCabinetChunk(uploadId, chunk, offset, (loaded) => {
+        onProgress?.(Math.min(1, loaded / Math.max(1, file.size)));
+      });
+      offset += chunk.size;
+      onProgress?.(Math.min(1, offset / Math.max(1, file.size)));
+    }
+    const completed = await api(`/api/files/uploads/${encodeURIComponent(uploadId)}/complete`, { method: "POST", body: {} });
+    return completed.file;
+  } catch (error) {
+    api(`/api/files/uploads/${encodeURIComponent(uploadId)}`, { method: "DELETE", body: {} }).catch(() => {});
+    throw error;
+  }
 }
 
 function ensureComposeShareOverlay() {
@@ -17172,7 +17260,7 @@ function ensureComposeShareOverlay() {
           <label class="compose-share-field" id="composeShareRecipientWrap" hidden><span>Recipient email</span><input class="compose-share-input" id="composeShareRecipient" type="email" placeholder="customer@example.com" autocomplete="email" spellcheck="false"><small>Only this exact address can open the file.</small></label>
         </section>
         <label class="compose-share-field"><span>Note in the message <em>optional</em></span><input class="compose-share-input" id="composeShareNote" maxlength="140" placeholder="Here is the document you asked for."><small id="composeSharePreview">A secure Cabinet link, open to anyone with the link, expires in 7 days.</small></label>
-        <p class="compose-share-status" id="composeShareStatus" role="alert" hidden></p>
+        <div class="compose-share-progress" id="composeShareProgress" hidden><span id="composeShareProgressBar"></span></div><p class="compose-share-status" id="composeShareStatus" role="alert" hidden></p>
       </div>
       <div class="compose-share-foot"><button class="btn-secondary" type="button" data-compose-share-close>Cancel</button><button class="btn-primary compose-share-submit" type="button" id="composeShareSubmit"><span class="compose-share-submit-label">Upload and insert link</span><span class="compose-share-spinner" aria-hidden="true"></span></button></div>
     </div>
@@ -17274,13 +17362,11 @@ async function submitComposeShareFallback() {
   try {
     let fileRecord = fallback.existingFile;
     if (!fileRecord) {
-      const dataBase64 = await fileToBase64(fallback.file);
-      const created = await api("/api/files", { method: "POST", body: {
-        providerId: "a8m", name: fallback.file.name, mime: fallback.file.type || "application/octet-stream",
-        dataBase64, path: "Files", description: "Shared from compose after reaching the attachment limit"
-      } });
-      fileRecord = created.file;
-      if (Array.isArray(created.files)) state.files = created.files;
+      fileRecord = await uploadCabinetFileChunked(fallback.file, updateComposeShareProgress);
+      if (fileRecord) state.files = [fileRecord, ...(state.files || []).filter((item) => item.id !== fileRecord.id)];
+    } else {
+      const label = document.querySelector(".compose-share-submit-label");
+      if (label) label.textContent = "Creating secure link…";
     }
     const shared = await api(`/api/files/${encodeURIComponent(fileRecord.id)}/share`, { method: "POST", body: {
       access: "view", expiresDays, recipientEmail

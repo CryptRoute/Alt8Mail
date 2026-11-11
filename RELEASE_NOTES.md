@@ -1,3 +1,23 @@
+# Alt8Mail 3.0.4
+
+Release date: 2026-11-11. Large-file Cabinet uploads for the compose share flow.
+
+## 3.0.4 chunked Cabinet uploads
+
+- Oversized compose attachments now upload to the Cabinet in 8 MB chunks, so a
+  169 MB file or larger no longer trips the reverse proxy's 25 MB request-body
+  limit with `Request failed (413)`.
+- The share dialog shows real upload progress (percentage, bar and button
+  state) before creating and inserting the secure link.
+- The Cabinet accepts uploads up to 300 MB through the resumable chunk API:
+  start, append at a verified offset, then complete. Incomplete or abandoned
+  uploads leave only a temp part file and can be cancelled.
+- The chunk API works through the existing `/api/` proxy rules, so upgrading
+  does not require an nginx body-size change.
+- Added an integration test for start/offset/chunk/complete and an end-to-end
+  compose share test that uploads an oversized file, validates a private link
+  and inserts it into the message.
+
 # Alt8Mail 3.0.3
 
 Release date: 2026-11-11. Compose attachment-limit redesign.

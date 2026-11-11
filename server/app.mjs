@@ -519,6 +519,18 @@ async function readJson(req, limit = MAX_JSON_BYTES) {
   }
 }
 
+
+async function readRawBody(req, limit) {
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new ApiError(413, "PAYLOAD_TOO_LARGE", "Request body is too large");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 function initialsFrom(name, email) {
   const source = String(name || email || "?").trim();
   const parts = source.split(/\s+/).filter(Boolean);
@@ -563,6 +575,7 @@ export async function createApp(options = {}) {
   const store = new DataStore({ file: dataFile, seed: seedDatabase });
   await store.load();
   const db = store.db;
+  const cabinetUploadSessions = new Map();
   if (Number.isFinite(options.outboundLimit)) db.user.outbound.limit = Number(options.outboundLimit);
   if (!db.attachments) db.attachments = {};
   if (!Array.isArray(db.tasks)) db.tasks = [];
@@ -3572,6 +3585,59 @@ export async function createApp(options = {}) {
         return;
       }
 
+      if (pathname === "/api/files/uploads" && req.method === "POST") {
+        const body = await readJson(req);
+        const sizeBytes = Math.max(0, Number(body.sizeBytes) || 0);
+        if (!sizeBytes) throw new ApiError(400, "FILE_SIZE", "File size is required");
+        if (sizeBytes > 300 * 1024 * 1024) throw new ApiError(413, "FILE_TOO_LARGE", "Cabinet uploads are limited to 300 MB");
+        const provider = providerById(String(body.providerId || "a8m"));
+        if (!provider) throw new ApiError(400, "FILE_PROVIDER", "Choose a valid storage provider");
+        if (!provider.connected) throw new ApiError(409, "PROVIDER_OFFLINE", `${provider.name} is not connected`);
+        const uploadId = "fileupload_" + randomBytes(12).toString("hex");
+        cabinetUploadSessions.set(uploadId, {
+          name: safeFileName(body.name || "Uploaded file"), mime: String(body.mime || "application/octet-stream"),
+          sizeBytes, path: String(body.path || "Files"), providerId: provider.id,
+          description: String(body.description || ""), received: 0
+        });
+        sendJson(res, 201, { uploadId, chunkSize: 8 * 1024 * 1024 });
+        return;
+      }
+      const uploadChunkMatch = pathname.match(/^\/api\/files\/uploads\/([A-Za-z0-9_-]{1,100})$/);
+      if (uploadChunkMatch && req.method === "PUT") {
+        const upload = cabinetUploadSessions.get(uploadChunkMatch[1]);
+        if (!upload) throw new ApiError(404, "UPLOAD_NOT_FOUND", "This upload has expired or does not exist");
+        const offset = Number(req.headers["x-a8m-upload-offset"]);
+        if (!Number.isFinite(offset) || offset < 0) throw new ApiError(400, "UPLOAD_OFFSET", "The upload offset is missing");
+        if (offset !== upload.received) throw new ApiError(409, "UPLOAD_OFFSET", "The upload offset does not match the server");
+        const chunk = await readRawBody(req, 9 * 1024 * 1024);
+        if (!chunk.length) throw new ApiError(400, "UPLOAD_CHUNK", "The upload chunk is empty");
+        if (upload.received + chunk.length > upload.sizeBytes) throw new ApiError(413, "FILE_TOO_LARGE", "Cabinet uploads are limited to 300 MB");
+        upload.received += chunk.length;
+        sendJson(res, 200, { received: upload.received });
+        return;
+      }
+      const uploadCompleteMatch = pathname.match(/^\/api\/files\/uploads\/([A-Za-z0-9_-]{1,100})\/complete$/);
+      if (uploadCompleteMatch && req.method === "POST") {
+        const upload = cabinetUploadSessions.get(uploadCompleteMatch[1]);
+        if (!upload) throw new ApiError(404, "UPLOAD_NOT_FOUND", "This upload has expired or does not exist");
+        if (upload.received !== upload.sizeBytes) throw new ApiError(409, "UPLOAD_INCOMPLETE", "The upload is not complete");
+        cabinetUploadSessions.delete(uploadCompleteMatch[1]);
+        const record = createFileRecord({
+          name: upload.name, type: attachmentBadgeType(upload.mime, upload.name), mime: upload.mime,
+          sizeBytes: upload.sizeBytes, providerId: upload.providerId, path: upload.path,
+          description: upload.description || "Shared from compose after reaching the attachment limit"
+        });
+        db.files.unshift(record);
+        addAudit(req, "file.created", record.name, `Added to ${providerById(upload.providerId)?.name || "Alt8Mail"} · ${formatBytes(record.sizeBytes)}`);
+        await store.save();
+        sendJson(res, 201, { file: record });
+        return;
+      }
+      if (uploadChunkMatch && req.method === "DELETE") {
+        cabinetUploadSessions.delete(uploadChunkMatch[1]);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
       if (pathname === "/api/files" && req.method === "GET") {
         const files = db.files.slice().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
         sendJson(res, 200, { count: files.length, files, providers: db.storageProviders });
