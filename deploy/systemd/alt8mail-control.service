@@ -16,6 +16,7 @@ ExecStart=/opt/alt8mail/bin/alt8mail-control serve
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=25
+TimeoutStartSec=180
 KillSignal=SIGTERM
 LimitNOFILE=65535
 ProtectSystem=full
