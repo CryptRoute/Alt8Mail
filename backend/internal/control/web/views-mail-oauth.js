@@ -1,5 +1,5 @@
 /* Mail OAuth: server-wide Gmail and Microsoft sign-in applications. */
-import * as ui from './ui.js?v=3.1.0';
+import * as ui from './ui.js?v=3.1.1';
 
 const esc = ui.esc;
 
@@ -19,6 +19,7 @@ const PROVIDER_META = {
       'Google may require OAuth verification before external users can grant the full <code>https://mail.google.com/</code> scope.',
       'Workspace administrators can restrict third-party app access; users may need approval in the Google Admin console.',
       'IMAP must be enabled for the mailbox. Google Workspace administrators can turn IMAP off for the whole organization or for individual users.',
+      'If you add the mail scope after a mailbox has already connected, remove Alt8Mail from the Google account at myaccount.google.com/permissions and reconnect so Google issues a fresh grant with the new scope.',
     ],
   },
   microsoft: {
@@ -37,6 +38,7 @@ const PROVIDER_META = {
       'Some Microsoft 365 tenants disable SMTP AUTH per mailbox; sending fails until the mailbox or tenant policy allows it.',
       'IMAP must be enabled for the mailbox. Microsoft 365 administrators can block IMAP for the tenant or for individual mailboxes.',
       'Application secrets expire. Add the replacement here before the old secret expires so refreshes and new connections keep working.',
+      'If you add API permissions after a mailbox has already connected, reconnect it so Microsoft records the new consent.',
     ],
   },
 };

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/netip"
@@ -207,6 +208,7 @@ type xoauth2IMAPClient struct {
 	username   string
 	token      string
 	challenged bool
+	challenge  []byte
 }
 
 func (client *xoauth2IMAPClient) Start() (string, []byte, error) {
@@ -217,9 +219,23 @@ func (client *xoauth2IMAPClient) Start() (string, []byte, error) {
 func (client *xoauth2IMAPClient) Next(challenge []byte) ([]byte, error) {
 	if !client.challenged {
 		client.challenged = true
+		// Gmail puts the required scope in this JSON challenge. Keep it so a
+		// failed login can explain whether the token or the mailbox is at fault.
+		client.challenge = append([]byte(nil), challenge...)
 		return []byte{}, nil
 	}
 	return nil, fmt.Errorf("the mail server rejected the OAuth token")
+}
+
+func xoauth2ChallengeDetail(challenge []byte) string {
+	var payload struct {
+		Status string `json:"status"`
+		Scope  string `json:"scope"`
+	}
+	if json.Unmarshal(challenge, &payload) != nil || strings.TrimSpace(payload.Scope) == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (the server requested scope %s)", strings.TrimSpace(payload.Scope))
 }
 
 // xoauth2SMTPAuth implements the net/smtp Auth interface for XOAUTH2.
@@ -312,7 +328,12 @@ func openExternalIMAPWithAuth(ctx context.Context, host string, port int, tlsMod
 	}
 	conn.Timeout = externalIMAPTimeout
 	if auth.oauth() {
-		err = conn.Authenticate(&xoauth2IMAPClient{username: auth.Username, token: auth.AccessToken})
+		oauthClient := &xoauth2IMAPClient{username: auth.Username, token: auth.AccessToken}
+		err = conn.Authenticate(oauthClient)
+		if err != nil {
+			_ = conn.Logout()
+			return nil, fmt.Errorf("IMAP login failed: %w%s", err, xoauth2ChallengeDetail(oauthClient.challenge))
+		}
 	} else {
 		err = conn.Login(auth.Username, auth.Password)
 	}

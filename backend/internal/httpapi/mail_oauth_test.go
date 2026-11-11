@@ -52,8 +52,12 @@ func TestXOAUTH2IMAPClient(t *testing.T) {
 	if string(initial) != want {
 		t.Fatalf("initial response = %q, want %q", initial, want)
 	}
-	if response, err := client.Next([]byte("error")); err != nil || len(response) != 0 {
+	challenge := []byte(`{"status":"400","schemes":"Bearer","scope":"https://mail.google.com/"}`)
+	if response, err := client.Next(challenge); err != nil || len(response) != 0 {
 		t.Fatalf("first challenge response = %q, %v", response, err)
+	}
+	if detail := xoauth2ChallengeDetail(client.challenge); !strings.Contains(detail, "https://mail.google.com/") {
+		t.Fatalf("challenge detail = %q", detail)
 	}
 	if _, err := client.Next([]byte("error")); err == nil {
 		t.Fatal("a second challenge must abort authentication")
@@ -147,6 +151,45 @@ func TestMailOAuthProviderErrorMessage(t *testing.T) {
 	}
 	if message = mailOAuthProviderErrorMessage("gmail", "server_error", "Please try again later", redirect); !strings.Contains(message, "Please try again later") {
 		t.Fatalf("description was not surfaced: %q", message)
+	}
+}
+
+func TestMailOAuthTokenHasScope(t *testing.T) {
+	googleScopes := "openid email profile https://mail.google.com/"
+	if !mailOAuthTokenHasScope(googleScopes, "https://mail.google.com/") {
+		t.Fatal("Gmail IMAP scope was not detected")
+	}
+	if !mailOAuthTokenHasScope("openid https://mail.google.com", "https://mail.google.com/") {
+		t.Fatal("scope without the trailing slash was not accepted")
+	}
+	if mailOAuthTokenHasScope("openid email profile", "https://mail.google.com/") {
+		t.Fatal("missing Gmail IMAP scope was reported as granted")
+	}
+	microsoft := "openid offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send"
+	if !mailOAuthTokenHasScope(microsoft, "https://outlook.office.com/IMAP.AccessAsUser.All") {
+		t.Fatal("Microsoft IMAP scope was not detected")
+	}
+	if mailOAuthTokenHasScope("openid offline_access", "https://outlook.office.com/IMAP.AccessAsUser.All") {
+		t.Fatal("missing Microsoft IMAP scope was reported as granted")
+	}
+	if mailOAuthTokenHasScope("", "https://mail.google.com/") {
+		t.Fatal("empty scope string matched a scope")
+	}
+}
+
+func TestMailOAuthScopeGuardGivesActionableErrors(t *testing.T) {
+	server := &Server{}
+	gmail := mailAccountRecord{Provider: "gmail", IMAPHost: "imap.gmail.com", IMAPPort: 993, IMAPTLS: "tls"}
+	err := server.verifyMailOAuthIMAP(context.Background(), gmail, "person@example.test",
+		oauthToken{AccessToken: "access", Scope: "openid email profile"})
+	if err == nil || !strings.Contains(err.Error(), "https://mail.google.com/") {
+		t.Fatalf("missing Gmail scope error = %v", err)
+	}
+	microsoft := mailAccountRecord{Provider: "microsoft", IMAPHost: "outlook.office365.com", IMAPPort: 993, IMAPTLS: "tls"}
+	err = server.verifyMailOAuthIMAP(context.Background(), microsoft, "person@example.test",
+		oauthToken{AccessToken: "access", Scope: "openid offline_access"})
+	if err == nil || !strings.Contains(err.Error(), "IMAP.AccessAsUser.All") {
+		t.Fatalf("missing Microsoft scope error = %v", err)
 	}
 }
 

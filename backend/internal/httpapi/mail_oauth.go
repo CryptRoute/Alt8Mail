@@ -262,10 +262,34 @@ func (s *Server) mailOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	s.mailOAuthResult(w, "connected", "", account.ID)
 }
 
-func (s *Server) verifyMailOAuthIMAP(ctx context.Context, account mailAccountRecord, email, accessToken string) error {
-	auth := externalMailAuth{Username: firstNonEmpty(email, account.Username), AccessToken: accessToken}
+func (s *Server) verifyMailOAuthIMAP(ctx context.Context, account mailAccountRecord, email string, token oauthToken) error {
+	username := firstNonEmpty(email, account.Username)
+	// The token endpoint returns the scopes that were actually granted, which
+	// is the only reliable way to tell a consent-screen problem from a mailbox
+	// policy problem. A token can be valid for userinfo while still lacking the
+	// mail scope, and Gmail then answers the IMAP XOAUTH2 login with the
+	// generic "Invalid credentials" failure.
+	if scopes := strings.TrimSpace(token.Scope); scopes != "" {
+		switch account.Provider {
+		case "gmail":
+			if !mailOAuthTokenHasScope(scopes, "https://mail.google.com/") {
+				return fmt.Errorf("Google signed in but did not grant the Gmail IMAP and SMTP permission (https://mail.google.com/). In Google Cloud Console → APIs & Services → OAuth consent screen, add that scope, then remove Alt8Mail from myaccount.google.com/permissions and reconnect the mailbox")
+			}
+		case "microsoft":
+			if !mailOAuthTokenHasScope(scopes, "https://outlook.office.com/IMAP.AccessAsUser.All") {
+				return fmt.Errorf("Microsoft signed in but did not grant the IMAP permission. In the app registration, add the delegated Office 365 Exchange Online permission IMAP.AccessAsUser.All, grant admin consent, then reconnect the mailbox")
+			}
+		}
+	}
+	auth := externalMailAuth{Username: username, AccessToken: token.AccessToken}
 	conn, err := openExternalIMAPWithAuth(ctx, account.IMAPHost, account.IMAPPort, account.IMAPTLS, auth)
 	if err != nil {
+		switch account.Provider {
+		case "gmail":
+			return fmt.Errorf("the provider account could not open IMAP: %w. Gmail accepted the sign-in, so check that the OAuth consent screen includes https://mail.google.com/, that Gmail is enabled for this account, and that IMAP is turned on in Gmail Settings → Forwarding and POP/IMAP (or ask your Google Workspace administrator to allow IMAP)", err)
+		case "microsoft":
+			return fmt.Errorf("the provider account could not open IMAP: %w. Microsoft accepted the sign-in, so check that IMAP is enabled for the mailbox and that the app has delegated IMAP.AccessAsUser.All permission with admin consent", err)
+		}
 		return fmt.Errorf("the provider account could not open IMAP: %w", err)
 	}
 	_, listErr := listIMAPMailboxes(conn)
@@ -274,6 +298,19 @@ func (s *Server) verifyMailOAuthIMAP(ctx context.Context, account mailAccountRec
 		return fmt.Errorf("the provider account could not list mail folders")
 	}
 	return nil
+}
+
+func mailOAuthTokenHasScope(raw, wanted string) bool {
+	wanted = strings.TrimSuffix(strings.TrimSpace(wanted), "/")
+	if wanted == "" {
+		return false
+	}
+	for _, scope := range strings.Fields(raw) {
+		if strings.EqualFold(strings.TrimSuffix(scope, "/"), wanted) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) saveMailOAuthAccount(ctx context.Context, user userRecord, config mailOAuthProvider, email, displayName, reconnectID string, token oauthToken) (mailAccountRecord, error) {
@@ -315,7 +352,7 @@ func (s *Server) saveMailOAuthAccount(ctx context.Context, user userRecord, conf
 		if !strings.EqualFold(existing.Email, email) {
 			return mailAccountRecord{}, fmt.Errorf("sign in with %s to reconnect this account", existing.Email)
 		}
-		if err := s.verifyMailOAuthIMAP(ctx, existing, email, token.AccessToken); err != nil {
+		if err := s.verifyMailOAuthIMAP(ctx, existing, email, token); err != nil {
 			return mailAccountRecord{}, err
 		}
 		if _, err := s.store.DB.Exec(ctx, `
@@ -339,7 +376,7 @@ func (s *Server) saveMailOAuthAccount(ctx context.Context, user userRecord, conf
 		if existingErr != nil {
 			return mailAccountRecord{}, fmt.Errorf("mail account not found")
 		}
-		if err := s.verifyMailOAuthIMAP(ctx, existing, email, token.AccessToken); err != nil {
+		if err := s.verifyMailOAuthIMAP(ctx, existing, email, token); err != nil {
 			return mailAccountRecord{}, err
 		}
 		if _, err := s.store.DB.Exec(ctx, `
@@ -374,7 +411,7 @@ func (s *Server) saveMailOAuthAccount(ctx context.Context, user userRecord, conf
 	}
 	// Verify the fresh token against IMAP before creating the account. SMTP
 	// availability is provider-tenant controlled and is reported when sending.
-	if err := s.verifyMailOAuthIMAP(ctx, account, email, token.AccessToken); err != nil {
+	if err := s.verifyMailOAuthIMAP(ctx, account, email, token); err != nil {
 		return mailAccountRecord{}, err
 	}
 	if _, err := s.store.DB.Exec(ctx, `

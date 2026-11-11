@@ -1,3 +1,26 @@
+# Alt8Mail 3.1.1
+
+Release date: 2026-11-11. Gmail IMAP OAuth diagnostics.
+
+## 3.1.1 explain Gmail and Outlook IMAP sign-in failures
+
+- A successful Google/Microsoft sign-in can still fail at IMAP when the token
+  did not receive the mail scope or the mailbox has IMAP disabled. The callback
+  now checks the scopes returned by the token endpoint before opening IMAP:
+  - Google must grant `https://mail.google.com/`.
+  - Microsoft must grant `https://outlook.office.com/IMAP.AccessAsUser.All`.
+  A missing scope now names the exact console setting and how to force a fresh
+  grant instead of showing a generic “Invalid credentials” message.
+- When the token has the scope, the error explains that Gmail accepted the
+  sign-in but IMAP was refused, with the Gmail/Workspace IMAP and Microsoft
+  365 IMAP/permission checks to perform.
+- The IMAP XOAUTH2 client now captures Gmail's JSON authentication challenge
+  and includes the server-requested scope in the error detail, distinguishing a
+  consent/scope problem from a mailbox policy problem.
+- The Mail OAuth page notes that adding a scope or API permission after a
+  mailbox already connected requires reconnecting that mailbox so the provider
+  records the new consent.
+
 # Alt8Mail 3.1.0
 
 Release date: 2026-11-11. Gmail and Outlook OAuth from System Control.
