@@ -8898,6 +8898,9 @@ function openAddMailAccountDialog(account = null) {
     if (step === 2 && selected?.oauth && mode === "oauth") {
       const oauthLabel = reauth ? "Reconnect with" : "Continue with";
       if (!mailOAuthProviderAvailable(selected.oauth)) {
+        if (selected.id === "gmail") {
+          return `<div class="mailbox-actions">${back}<span class="mailbox-actions-spacer"></span>${cancel}<button class="btn-primary mailbox-btn" type="button" data-gmail-password>${icon("i-key")}<span>Use an app password instead</span></button></div>`;
+        }
         return `<div class="mailbox-actions">${back}<span class="mailbox-actions-spacer"></span>${cancel}<button class="btn-primary mailbox-btn mailbox-oauth-btn" type="button" disabled>${icon("i-alert")}<span>${esc(selected.name)} sign-in unavailable</span></button></div>`;
       }
       return `<div class="mailbox-actions">${back}<span class="mailbox-actions-spacer"></span>${cancel}<button class="btn-primary mailbox-btn mailbox-oauth-btn" type="button" data-account-action="oauth">${providerLogo()}<span>${oauthLabel} ${esc(selected.name)}</span>${icon("i-chevron-right")}</button></div>`;
