@@ -286,7 +286,7 @@ func (s *Server) verifyMailOAuthIMAP(ctx context.Context, account mailAccountRec
 	if err != nil {
 		switch account.Provider {
 		case "gmail":
-			return fmt.Errorf("the provider account could not open IMAP: %w. Gmail accepted the sign-in, so check that the OAuth consent screen includes https://mail.google.com/, that Gmail is enabled for this account, and that IMAP is turned on in Gmail Settings → Forwarding and POP/IMAP (or ask your Google Workspace administrator to allow IMAP)", err)
+			return fmt.Errorf("the provider account could not open IMAP: %w. Gmail accepted the sign-in. Personal Gmail always has IMAP on, so check that Gmail is enabled for this account and that the OAuth consent screen includes https://mail.google.com/. For Google Workspace, an administrator must allow IMAP in Admin console → Apps → Google Workspace → Gmail → End User Access → POP and IMAP access", err)
 		case "microsoft":
 			return fmt.Errorf("the provider account could not open IMAP: %w. Microsoft accepted the sign-in, so check that IMAP is enabled for the mailbox and that the app has delegated IMAP.AccessAsUser.All permission with admin consent", err)
 		}

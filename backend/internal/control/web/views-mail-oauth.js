@@ -18,7 +18,7 @@ const PROVIDER_META = {
     notes: [
       'Google may require OAuth verification before external users can grant the full <code>https://mail.google.com/</code> scope.',
       'Workspace administrators can restrict third-party app access; users may need approval in the Google Admin console.',
-      'IMAP must be enabled for the mailbox. Google Workspace administrators can turn IMAP off for the whole organization or for individual users.',
+      'IMAP access is always on for personal Gmail. Google Workspace administrators control it in Admin console → Apps → Google Workspace → Gmail → End User Access → POP and IMAP access.',
       'If you add the mail scope after a mailbox has already connected, remove Alt8Mail from the Google account at myaccount.google.com/permissions and reconnect so Google issues a fresh grant with the new scope.',
     ],
   },
