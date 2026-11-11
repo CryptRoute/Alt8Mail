@@ -8442,7 +8442,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.0.2";
+const MAIL_PROVIDER_ASSET_VERSION = "3.0.3";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -17073,38 +17073,174 @@ function composeAttachmentBytes(session) {
   return (session?.files || []).reduce((sum, file) => sum + Math.max(0, Number(file.sizeBytes) || 0), 0);
 }
 
+let composeShareReturnFocus = null;
+
+function syncComposeShareDays(value) {
+  const days = Number(value) || 0;
+  document.querySelectorAll("[data-compose-share-days]").forEach((chip) => {
+    const active = Number(chip.getAttribute("data-compose-share-days")) === days;
+    chip.classList.toggle("is-active", active);
+    chip.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function syncComposeSharePrivacy(focusRecipient = false) {
+  const privacy = document.querySelector("input[name='composeSharePrivacy']:checked")?.value || "public";
+  document.querySelectorAll("[data-compose-share-choice]").forEach((choice) => {
+    choice.classList.toggle("is-active", choice.getAttribute("data-compose-share-choice") === privacy);
+  });
+  const wrap = document.getElementById("composeShareRecipientWrap");
+  if (wrap) wrap.hidden = privacy !== "private";
+  if (privacy === "private" && focusRecipient) {
+    setTimeout(() => document.getElementById("composeShareRecipient")?.focus(), 40);
+  }
+  updateComposeSharePreview();
+}
+
+function updateComposeSharePreview() {
+  const preview = document.getElementById("composeSharePreview");
+  if (!preview) return;
+  const days = Math.max(1, Math.min(90, Number(document.getElementById("composeShareExpiry")?.value) || 7));
+  const privacy = document.querySelector("input[name='composeSharePrivacy']:checked")?.value || "public";
+  const recipient = privacy === "private" ? document.getElementById("composeShareRecipient")?.value.trim() || "" : "";
+  const audience = privacy === "private"
+    ? recipient ? `only ${recipient}` : "only the recipient's exact email"
+    : "anyone with the link";
+  preview.textContent = `A secure Cabinet link, open to ${audience}, expires in ${days} day${days === 1 ? "" : "s"}.`;
+}
+
+function setComposeShareStatus(message = "", tone = "") {
+  const status = document.getElementById("composeShareStatus");
+  if (!status) return;
+  status.hidden = !message;
+  status.textContent = message;
+  status.classList.toggle("is-error", tone === "error");
+}
+
+function setComposeShareBusy(busy) {
+  const button = document.getElementById("composeShareSubmit");
+  if (!button) return;
+  button.disabled = Boolean(busy);
+  button.classList.toggle("is-busy", Boolean(busy));
+  const label = button.querySelector(".compose-share-submit-label");
+  if (label) label.textContent = busy ? "Uploading…" : "Upload and insert link";
+}
+
 function ensureComposeShareOverlay() {
   let overlay = document.getElementById("composeShareOverlay");
   if (overlay) return overlay;
-  document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="composeShareOverlay" hidden><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="composeShareTitle"><div class="dialog-head"><div><p class="eyebrow">Attachment limit</p><h2 id="composeShareTitle">Share this file instead</h2><p class="dialog-note" id="composeShareReason">This file exceeds the compose attachment limit. Upload it to the Cabinet and insert a secure link in your message.</p></div><button class="icon-btn" type="button" data-compose-share-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="dialog-body"><div class="detail-list"><div class="detail-row"><span>File</span><b id="composeShareFileName">—</b></div><div class="detail-row"><span>Size</span><b id="composeShareFileSize">—</b></div></div><div class="field-row"><label class="field"><span>Link expires in</span><input id="composeShareExpiry" type="number" min="1" max="90" value="7"></label><label class="field"><span>Confidentiality</span><select id="composeSharePrivacy"><option value="public">Anyone with the link</option><option value="private">Private — exact recipient only</option></select></label></div><label class="field" id="composeShareRecipientWrap" hidden><span>Recipient email</span><input id="composeShareRecipient" type="email" placeholder="customer@example.com"><small class="field-hint">The link asks for this exact address before the file opens.</small></label><label class="field"><span>Note in the message <em>optional</em></span><input id="composeShareNote" placeholder="Large file shared securely"></label><p class="dialog-note" id="composeShareStatus" hidden></p></div><div class="dialog-foot"><button class="btn-secondary" type="button" data-compose-share-close>Cancel</button><button class="btn-primary" type="button" id="composeShareSubmit">Upload and insert link</button></div></div></div>`);
+  document.body.insertAdjacentHTML("beforeend", `<div class="overlay compose-share-overlay" id="composeShareOverlay" hidden>
+    <div class="dialog compose-share-dialog" role="dialog" aria-modal="true" aria-labelledby="composeShareTitle" aria-describedby="composeShareReason">
+      <div class="compose-share-head">
+        <span class="compose-share-head-icon" aria-hidden="true"><svg class="icon"><use href="#i-link"/></svg></span>
+        <div class="compose-share-head-copy"><p class="eyebrow">Attachment limit</p><h2 id="composeShareTitle">Share this file instead</h2></div>
+        <button class="icon-btn" type="button" data-compose-share-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="compose-share-body">
+        <div class="compose-share-reason"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><p id="composeShareReason">This file exceeds the compose attachment limit. Upload it to the Cabinet and insert a secure link instead.</p></div>
+        <div class="compose-share-file">
+          <span class="compose-share-file-icon" id="composeShareFileExt">FILE</span>
+          <div class="compose-share-file-copy"><strong id="composeShareFileName">—</strong><span><b id="composeShareFileSize">—</b> · sent as a Cabinet link, not an attachment</span></div>
+          <span class="compose-share-badge"><svg class="icon" aria-hidden="true"><use href="#i-shield-check"/></svg>Secure link</span>
+        </div>
+        <section class="compose-share-section">
+          <div class="compose-share-section-head"><span>Link expires</span><small>Then the link stops working</small></div>
+          <div class="compose-share-days" role="group" aria-label="Link expiry">
+            <button class="compose-share-day" type="button" data-compose-share-days="1" aria-pressed="false">1 day</button>
+            <button class="compose-share-day is-active" type="button" data-compose-share-days="7" aria-pressed="true">7 days</button>
+            <button class="compose-share-day" type="button" data-compose-share-days="14" aria-pressed="false">14 days</button>
+            <button class="compose-share-day" type="button" data-compose-share-days="30" aria-pressed="false">30 days</button>
+            <label class="compose-share-custom"><input id="composeShareExpiry" type="number" min="1" max="90" value="7" aria-label="Custom expiry in days"><span>days</span></label>
+          </div>
+        </section>
+        <section class="compose-share-section">
+          <div class="compose-share-section-head"><span>Who can open it</span><small>Confidentiality</small></div>
+          <div class="compose-share-privacy">
+            <label class="compose-share-choice is-active" data-compose-share-choice="public">
+              <input type="radio" name="composeSharePrivacy" value="public" checked>
+              <span class="compose-share-choice-icon"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg></span>
+              <span><strong>Anyone with the link</strong><small>No sign-in needed</small></span>
+              <svg class="icon compose-share-check" aria-hidden="true"><use href="#i-check"/></svg>
+            </label>
+            <label class="compose-share-choice" data-compose-share-choice="private">
+              <input type="radio" name="composeSharePrivacy" value="private">
+              <span class="compose-share-choice-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span>
+              <span><strong>Private link</strong><small>Recipient email required</small></span>
+              <svg class="icon compose-share-check" aria-hidden="true"><use href="#i-check"/></svg>
+            </label>
+          </div>
+          <label class="compose-share-field" id="composeShareRecipientWrap" hidden><span>Recipient email</span><input class="compose-share-input" id="composeShareRecipient" type="email" placeholder="customer@example.com" autocomplete="email" spellcheck="false"><small>Only this exact address can open the file.</small></label>
+        </section>
+        <label class="compose-share-field"><span>Note in the message <em>optional</em></span><input class="compose-share-input" id="composeShareNote" maxlength="140" placeholder="Here is the document you asked for."><small id="composeSharePreview">A secure Cabinet link, open to anyone with the link, expires in 7 days.</small></label>
+        <p class="compose-share-status" id="composeShareStatus" role="alert" hidden></p>
+      </div>
+      <div class="compose-share-foot"><button class="btn-secondary" type="button" data-compose-share-close>Cancel</button><button class="btn-primary compose-share-submit" type="button" id="composeShareSubmit"><span class="compose-share-submit-label">Upload and insert link</span><span class="compose-share-spinner" aria-hidden="true"></span></button></div>
+    </div>
+  </div>`);
   overlay = document.getElementById("composeShareOverlay");
   overlay.addEventListener("click", (event) => {
     if (event.target === overlay || event.target.closest("[data-compose-share-close]")) closeComposeShareDialog(false);
   });
-  document.getElementById("composeSharePrivacy")?.addEventListener("change", (event) => {
-    const wrap = document.getElementById("composeShareRecipientWrap");
-    if (wrap) wrap.hidden = event.target.value !== "private";
+  overlay.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeComposeShareDialog(false); }
+    if (event.key === "Enter" && event.target.classList.contains("compose-share-input")) {
+      event.preventDefault();
+      submitComposeShareFallback();
+    }
   });
+  document.querySelectorAll("[data-compose-share-days]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const days = Math.max(1, Math.min(90, Number(chip.getAttribute("data-compose-share-days")) || 7));
+      const input = document.getElementById("composeShareExpiry");
+      if (input) input.value = String(days);
+      syncComposeShareDays(days);
+      updateComposeSharePreview();
+    });
+  });
+  document.getElementById("composeShareExpiry")?.addEventListener("input", (event) => {
+    const raw = Number(event.target.value) || 7;
+    syncComposeShareDays(raw);
+    updateComposeSharePreview();
+  });
+  document.querySelectorAll("input[name='composeSharePrivacy']").forEach((radio) => {
+    radio.addEventListener("change", () => syncComposeSharePrivacy(true));
+  });
+  document.getElementById("composeShareRecipient")?.addEventListener("input", updateComposeSharePreview);
+  document.getElementById("composeShareNote")?.addEventListener("input", updateComposeSharePreview);
   document.getElementById("composeShareSubmit")?.addEventListener("click", () => submitComposeShareFallback());
   return overlay;
 }
 
 function openComposeShareDialog(session, file, { existingFile = null, reason = "" } = {}) {
   const overlay = ensureComposeShareOverlay();
+  composeShareReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   state.composeShareFallback = { sessionId: session.id, file, existingFile, resolve: null };
   const promise = new Promise((resolve) => { state.composeShareFallback.resolve = resolve; });
-  document.getElementById("composeShareReason").textContent = reason || "This file exceeds the compose attachment limit. Upload it to the Cabinet and insert a secure link in your message.";
-  document.getElementById("composeShareFileName").textContent = file.name || existingFile?.name || "File";
+  const name = file.name || existingFile?.name || "File";
+  const nameNode = document.getElementById("composeShareFileName");
+  if (nameNode) { nameNode.textContent = name; nameNode.title = name; }
+  const extNode = document.getElementById("composeShareFileExt");
+  const extension = /\.([a-z0-9]{1,5})$/i.exec(name);
+  if (extNode) extNode.textContent = extension ? extension[1].toUpperCase() : "FILE";
+  document.getElementById("composeShareReason").textContent = reason || "This file exceeds the compose attachment limit. Upload it to the Cabinet and insert a secure link instead.";
   document.getElementById("composeShareFileSize").textContent = formatBytes(Number(file.size || existingFile?.sizeBytes || 0));
   document.getElementById("composeShareExpiry").value = "7";
-  document.getElementById("composeSharePrivacy").value = "public";
+  syncComposeShareDays(7);
+  const publicChoice = document.querySelector("input[name='composeSharePrivacy'][value='public']");
+  if (publicChoice) publicChoice.checked = true;
+  syncComposeSharePrivacy(false);
   document.getElementById("composeShareRecipientWrap").hidden = true;
   document.getElementById("composeShareRecipient").value = "";
   document.getElementById("composeShareNote").value = "";
-  const status = document.getElementById("composeShareStatus");
-  if (status) { status.hidden = true; status.textContent = ""; }
+  setComposeShareStatus("");
+  setComposeShareBusy(false);
+  updateComposeSharePreview();
   overlay.hidden = false;
-  setTimeout(() => document.getElementById("composeShareExpiry")?.focus(), 30);
+  setTimeout(() => {
+    const input = document.getElementById("composeShareExpiry");
+    input?.focus();
+    input?.select?.();
+  }, 40);
   return promise;
 }
 
@@ -17113,6 +17249,10 @@ function closeComposeShareDialog(result = false) {
   const overlay = document.getElementById("composeShareOverlay");
   if (overlay) overlay.hidden = true;
   state.composeShareFallback = null;
+  setComposeShareBusy(false);
+  const returnFocus = composeShareReturnFocus;
+  composeShareReturnFocus = null;
+  if (returnFocus && returnFocus.isConnected) returnFocus.focus();
   if (fallback?.resolve) fallback.resolve(result);
 }
 
@@ -17120,17 +17260,17 @@ async function submitComposeShareFallback() {
   const fallback = state.composeShareFallback;
   const session = sessionById(fallback?.sessionId);
   if (!fallback || !session) { closeComposeShareDialog(false); return; }
-  const privacy = document.getElementById("composeSharePrivacy").value;
+  const privacy = document.querySelector("input[name='composeSharePrivacy']:checked")?.value || "public";
   const recipientEmail = privacy === "private" ? document.getElementById("composeShareRecipient").value.trim().toLowerCase() : "";
   const expiresDays = Math.max(1, Math.min(90, Number(document.getElementById("composeShareExpiry").value) || 7));
   const note = document.getElementById("composeShareNote").value.trim();
-  const status = document.getElementById("composeShareStatus");
-  const button = document.getElementById("composeShareSubmit");
   if (privacy === "private" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
-    if (status) { status.hidden = false; status.textContent = "Enter the exact recipient email for a private link."; }
+    setComposeShareStatus("Enter the exact recipient email for a private link.", "error");
+    document.getElementById("composeShareRecipient")?.focus();
     return;
   }
-  if (button) button.disabled = true;
+  setComposeShareStatus("");
+  setComposeShareBusy(true);
   try {
     let fileRecord = fallback.existingFile;
     if (!fileRecord) {
@@ -17146,23 +17286,24 @@ async function submitComposeShareFallback() {
       access: "view", expiresDays, recipientEmail
     } });
     if (shared.pendingApproval) {
-      if (status) { status.hidden = false; status.textContent = "The link is waiting for administrator approval. Insert it after approval from the Cabinet."; }
+      setComposeShareStatus("The link is waiting for administrator approval. Insert it after approval from the Cabinet.");
       return;
     }
     const share = shared.share || {};
     insertComposeShareLink(session, { name: fallback.file?.name || fileRecord.name || "Shared file", url: share.url, expiresAt: share.expiresAt, recipientEmail, note });
     closeComposeShareDialog(true);
+    if (!composeAttachOverlay.hidden) closeComposeAttach();
     showToast("Secure Cabinet link inserted");
   } catch (error) {
-    if (status) { status.hidden = false; status.textContent = error.message || "The file could not be shared."; }
+    setComposeShareStatus(error.message || "The file could not be shared.", "error");
   } finally {
-    if (button) button.disabled = false;
+    setComposeShareBusy(false);
   }
 }
 
 function insertComposeShareLink(session, { name, url, expiresAt, recipientEmail, note }) {
   if (!session || !url) return;
-  const expiry = expiresAt ? formatDate(expiresAt) : "";
+  const expiry = expiresAt ? formatDateOnly(expiresAt) : "";
   const privacy = recipientEmail ? `Private link for ${recipientEmail}` : "Anyone with the link";
   const intro = note || "Large file shared securely";
   const text = `${intro}

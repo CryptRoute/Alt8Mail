@@ -1822,6 +1822,47 @@ try {
   await page.click(`${suggestSel} [data-compose-action="discard"]`);
   await sleep(500);
 
+  console.log("\n[9n2] Compose attachment limit share dialog");
+  await page.click(".rail-btn[data-task='mail']");
+  await sleep(200);
+  await page.click("[data-folder='inbox']");
+  await sleep(300);
+  await page.click("#cmdCompose");
+  await sleep(350);
+  await page.eval(`(() => { const comp = [...document.querySelectorAll(".compose")].at(-1); comp?.querySelector('[data-compose-action="attach"]')?.click(); })()`);
+  await page.waitFor(() => !document.getElementById("composeAttachOverlay").hidden, 5000);
+  await page.eval(`(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(9 * 1024 * 1024)], "Board-pack-Q4.pdf", { type: "application/pdf" }));
+    const input = document.getElementById("attachInput");
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await page.waitFor(() => !document.getElementById("composeShareOverlay")?.hidden, 6000);
+  const shareLayers = await page.eval(`(() => ({
+    attach: Number(getComputedStyle(document.getElementById("composeAttachOverlay")).zIndex) || 0,
+    share: Number(getComputedStyle(document.getElementById("composeShareOverlay")).zIndex) || 0
+  }))()`);
+  check(shareLayers.share > shareLayers.attach, "attachment share dialog layers above the compose attachment picker");
+  check(await page.eval("document.getElementById('composeShareFileName').textContent === 'Board-pack-Q4.pdf'"), "share dialog names the oversized file");
+  check(await page.eval("document.getElementById('composeShareFileExt').textContent === 'PDF'"), "share dialog shows the file type");
+  check(await page.eval("document.querySelector(\"input[name='composeSharePrivacy']:checked\").value === 'public'"), "share dialog defaults to a public link");
+  check(await page.eval("document.getElementById('composeSharePreview').textContent.includes('anyone with the link')"), "share dialog previews the link audience");
+  await page.click("[data-compose-share-choice='private']");
+  await page.waitFor(() => !document.getElementById("composeShareRecipientWrap").hidden, 3000);
+  check(await page.eval("document.getElementById('composeSharePreview').textContent.includes(\"recipient's exact email\")"), "private links require the recipient email");
+  await page.click("#composeShareSubmit");
+  await page.waitFor(() => document.getElementById("composeShareStatus").textContent.includes("exact recipient email"), 3000);
+  check(await page.eval("!document.getElementById('composeShareOverlay').hidden"), "share dialog keeps the form open on invalid input");
+  await page.screenshot(path.join(artifacts, "25d2-compose-share-dialog.png"));
+  await page.eval("document.querySelector('[data-compose-share-close]').click()");
+  await sleep(200);
+  await page.click("#composeAttachClose");
+  await sleep(200);
+  await page.eval("window.__a8mAutoConfirm = true");
+  await page.eval(`(() => { const comp = [...document.querySelectorAll(".compose")].at(-1); comp?.querySelector('[data-compose-action="discard"]')?.click(); })()`);
+  await sleep(400);
+
   console.log("\n[9o] Year in review and reaction rules");
   await openSettings(page);
   await openSettingsTab(page, "account");

@@ -1,3 +1,20 @@
+# Alt8Mail 3.0.3
+
+Release date: 2026-11-11. Compose attachment-limit redesign.
+
+## 3.0.3 compose share dialog
+
+- Replaced the bare attachment-limit prompt with an interactive Cabinet-link
+  flow: a clear oversized-file summary, one-tap expiry presets plus a custom
+  day count, selectable public/private link cards, a conditional recipient
+  email field, an optional message note, a live link summary and a busy state
+  while the file is uploaded and shared.
+- The share dialog now layers above the Compose attachments picker instead of
+  behind it, returns focus when dismissed, validates private links inline, and
+  closes the picker after the link is inserted so the message is visible.
+- Fixed the share insertion using an undefined date formatter, which previously
+  failed after the Cabinet link was created.
+
 # Alt8Mail 3.0.2
 
 Release date: 2026-11-11. Branding and shell-cache patch.
