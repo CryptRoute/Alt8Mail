@@ -6734,7 +6734,8 @@ async function openTeamTemplatePicker(session) {
             message: "Fill in the template variable for this message.",
             label: `{{${name}}}`,
             placeholder: `Value for ${name}`,
-            confirmLabel: "Continue"
+            confirmLabel: "Continue",
+            required: false
           });
           if (value == null) return;
           variables[name] = value;
@@ -20059,7 +20060,8 @@ function ensureAISettingsUi() {
             { value: "needs_reply", label: "Needs reply" }
           ],
           value: card?.getAttribute("data-ai-triage-category") || "",
-          confirmLabel: "Submit feedback"
+          confirmLabel: "Submit feedback",
+          required: false
         });
         if (answer === null) return;
         category = answer.trim().toLowerCase();
