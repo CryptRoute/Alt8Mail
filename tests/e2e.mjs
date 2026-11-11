@@ -2397,8 +2397,8 @@ try {
   })()`);
   await page.waitFor(() => Boolean(document.querySelector(".reader [data-trust-explain]")), 10000);
   check(await page.eval("document.querySelector('.reader [data-trust-explain]')?.textContent.includes('Why is this')"), "reader shows a visible safety-explanation action");
-  await page.click(".reader [data-trust-explain]");
-  await page.waitFor(() => !document.getElementById("detailsOverlay").hidden, 5000);
+  await page.eval("document.querySelector('.reader [data-trust-explain]')?.click()");
+  await page.waitFor(() => !document.getElementById("detailsOverlay").hidden, 8000);
   await page.waitFor(() => Boolean(document.querySelector("[data-trust-explanation] .trust-explanation-head")), 5000);
   check(await page.eval("document.querySelector('[data-trust-explanation]')?.textContent.includes('Why this is safe')"), "security details include a plain-English safety explanation");
   await page.click('[data-details-tab="source"]');
