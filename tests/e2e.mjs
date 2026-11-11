@@ -2390,7 +2390,10 @@ try {
     });
   })()`);
   await page.click('[data-folder="inbox"]');
-  await page.waitFor(() => [...document.querySelectorAll(".msg")].some((item) => item.textContent.includes("HTML reply fixture")), 8000);
+  // The app's new-mail poll runs on a 15-second timer. Clicking Inbox is a
+  // no-op when it is already the active folder, so a CI runner whose last poll
+  // just ran can legitimately take longer than the old 8-second window.
+  await page.waitFor(() => [...document.querySelectorAll(".msg")].some((item) => item.textContent.includes("HTML reply fixture")), 25000);
   await page.eval(`(() => {
     const row = [...document.querySelectorAll('.msg')].find((item) => item.textContent.includes('HTML reply fixture'));
     if (row) row.click();
