@@ -2067,6 +2067,16 @@ try {
   check(noteServer.links.some((link) => link.type === "thread") && noteServer.links.some((link) => link.type === "event") && noteServer.links.some((link) => link.type === "file"), "threads, events and files persist on the note");
   equal(noteServer.color, "pink", "note color persists");
   await page.click("#stickyListHost [data-sticky-dismiss-toggle]");
+  const stickyMenuOpen = () => {
+    const menu = document.querySelector("#stickyListHost [data-sticky-dismiss-menu]");
+    return Boolean(menu && !menu.hidden && menu.querySelector("[data-sticky-unpin]"));
+  };
+  try {
+    await page.waitFor(stickyMenuOpen, 2000);
+  } catch {
+    await page.eval("document.querySelector('#stickyListHost [data-sticky-dismiss-toggle]')?.click()");
+    await page.waitFor(stickyMenuOpen, 2000);
+  }
   await page.click("#stickyListHost [data-sticky-unpin]");
   await page.waitFor(() => !document.querySelector('#stickyListHost [data-sticky-note]'), 4000);
   check(await page.eval("Boolean(document.querySelector('#stickyListHost .sticky-desk-launcher'))"), "removing the Inbox pin leaves every note in the Notes desk");
