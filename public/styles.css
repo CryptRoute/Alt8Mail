@@ -4299,3 +4299,4 @@ button.agenda-event:hover { border-color: var(--brand); }
 .form-field textarea { resize: vertical; }
 .form-field input:focus, .form-field select:focus, .form-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .form-field small { color: var(--text-3); font-size: 0.625rem; line-height: 1.4; }
+.prompt-dialog .field { flex: none; }
