@@ -401,9 +401,11 @@ func (s *Server) exchangeMailOAuthCode(ctx context.Context, config mailOAuthProv
 		"client_secret": {clientSecret},
 		"redirect_uri":  {s.mailOAuthRedirectURL(provider)},
 		"code_verifier": {verifier},
-		// Microsoft expects the granted scopes repeated at the token endpoint;
-		// Google accepts the same field, and both fall back to the grant.
-		"scope": {config.Scope},
+	}
+	if config.ID == "microsoft" {
+		// Microsoft expects the granted scopes repeated at the token endpoint.
+		// Google's authorization-code exchange does not take a scope here.
+		form.Set("scope", config.Scope)
 	}
 	return s.mailOAuthTokenRequest(ctx, config.Token, form)
 }

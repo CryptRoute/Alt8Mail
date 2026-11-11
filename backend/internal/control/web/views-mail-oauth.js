@@ -18,6 +18,7 @@ const PROVIDER_META = {
     notes: [
       'Google may require OAuth verification before external users can grant the full <code>https://mail.google.com/</code> scope.',
       'Workspace administrators can restrict third-party app access; users may need approval in the Google Admin console.',
+      'IMAP must be enabled for the mailbox. Google Workspace administrators can turn IMAP off for the whole organization or for individual users.',
     ],
   },
   microsoft: {
@@ -34,6 +35,7 @@ const PROVIDER_META = {
     ],
     notes: [
       'Some Microsoft 365 tenants disable SMTP AUTH per mailbox; sending fails until the mailbox or tenant policy allows it.',
+      'IMAP must be enabled for the mailbox. Microsoft 365 administrators can block IMAP for the tenant or for individual mailboxes.',
       'Application secrets expire. Add the replacement here before the old secret expires so refreshes and new connections keep working.',
     ],
   },
@@ -99,7 +101,7 @@ function providerCard(provider, canManage) {
         name: `${provider.provider}Enabled`,
         checked: Boolean(provider.enabled),
         disabled: !canManage,
-        help: `When this is off, the webmail hides ${provider.provider === 'microsoft' ? 'Outlook and Hotmail' : 'Gmail'} OAuth and refuses to start a sign-in request. Existing tokens keep syncing until they expire.`,
+        help: `When this is off, the webmail hides ${provider.provider === 'microsoft' ? 'Outlook and Hotmail' : 'Gmail'} OAuth and refuses to start a sign-in request. Existing connections keep syncing only until their current access token expires.`,
       })}
       ${provider.secretError ? `<div class="mt-3">${ui.inlineNotice('critical', 'Client secret cannot be read', provider.secretError)}</div>` : ''}
       <div class="form-grid mt-3">
@@ -179,11 +181,12 @@ export async function renderMailOAuth(ctx) {
   const providers = Array.isArray(data.providers) ? data.providers : [];
   const warnings = Array.isArray(data.warnings) ? data.warnings : [];
   const enabledCount = providers.filter((provider) => provider.enabled && provider.clientId && provider.hasSecret).length;
+  const lastApplied = providers.map((provider) => provider.appliedAt).filter(Boolean).sort().pop() || '';
   const publicLabel = data.publicUrl ? data.publicUrl : 'Not configured';
   const actionButtons = canManage
     ? `<button class="btn btn-secondary" type="button" id="mail-oauth-test">${ui.icon('plug', 15)} Test configuration</button>
        <button class="btn btn-secondary" type="button" id="mail-oauth-save">${ui.icon('check', 15)} Save draft</button>
-       <button class="btn btn-primary" type="button" id="mail-oauth-apply"${data.appEnvReadable ? '' : ' disabled title="app.env is not readable"'}>${ui.icon('rotate', 15)} Apply to webmail</button>`
+       <button class="btn btn-primary" type="button" id="mail-oauth-apply"${data.applyReady ? '' : ' disabled title="Set a public HTTPS webmail URL in app.env first"'}>${ui.icon('rotate', 15)} Apply to webmail</button>`
     : '';
   ctx.root.innerHTML = `${ui.pageHeader({
     eyebrow: 'Mail',
@@ -208,12 +211,13 @@ export async function renderMailOAuth(ctx) {
     </div>
     <div class="stack">
       <section class="card">
-        <header class="card-head"><div><h3>Deployment</h3><p>What the webmail services read at startup.</p></div>${ui.badge(data.appEnvReadable ? 'app.env ready' : 'app.env unreadable', data.appEnvReadable ? 'good' : 'critical', data.appEnvReadable ? 'check-circle' : 'alert')}</header>
+        <header class="card-head"><div><h3>Deployment</h3><p>What the webmail services read at startup.</p></div>${ui.badge(data.applyReady ? 'Ready to apply' : 'Apply blocked', data.applyReady ? 'good' : 'warning', data.applyReady ? 'check-circle' : 'alert')}</header>
         <div class="card-body">
           <div class="tile-link"><span>${ui.icon('globe', 15)} Public webmail URL</span><span class="value mono">${esc(publicLabel)}</span></div>
           <div class="tile-link"><span>${ui.icon('layers', 15)} Redirect source</span><span class="value">${esc(data.publicUrlSource || 'Not set')}</span></div>
           <div class="tile-link"><span>${ui.icon('file-code', 15)} Environment file</span><span class="value mono">${esc(data.appEnvPath || 'Not configured')}</span></div>
           <div class="tile-link"><span>${ui.icon('plug', 15)} Providers ready</span><span class="value">${enabledCount} of ${providers.length}</span></div>
+          <div class="tile-link"><span>${ui.icon('clock', 15)} Last applied</span><span class="value">${esc(lastApplied ? ui.dateTime(lastApplied) : 'Never')}</span></div>
           <div class="notice tone-info mt-3">${ui.icon('info', 15)}<div><strong>Applying restarts the webmail services</strong><p>Saving a draft does not affect users. Apply writes the Google and Microsoft credentials to app.env, restarts both application services and waits for their health checks. Open sign-in windows and mailbox sync pause for a few seconds.</p></div></div>
           <div class="notice tone-warning mt-3">${ui.icon('alert', 15)}<div><strong>Changing the webmail hostname breaks sign-in</strong><p>Registered redirect URIs are tied to the exact webmail origin. If you change it under Web Net, update the same callback URLs in the Google and Microsoft consoles before the next sign-in.</p></div></div>
           <div class="notice tone-info mt-3">${ui.icon('key', 15)}<div><strong>Changing the OAuth application affects existing accounts</strong><p>Refresh tokens belong to the client application that issued them. After replacing a client ID, existing Gmail or Outlook accounts may be prompted to reconnect. Rotating only the client secret keeps the accounts signed in.</p></div></div>

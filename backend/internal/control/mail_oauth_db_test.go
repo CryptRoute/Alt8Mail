@@ -96,6 +96,9 @@ func TestMailOAuthDraftRoundTrip(t *testing.T) {
 	if get.Code != http.StatusOK {
 		t.Fatalf("get status = %d: %s", get.Code, get.Body.String())
 	}
+	if strings.Contains(get.Body.String(), "google-secret") {
+		t.Fatal("the API response leaked the client secret")
+	}
 	var payload struct {
 		Providers []struct {
 			Provider    string `json:"provider"`
@@ -104,13 +107,17 @@ func TestMailOAuthDraftRoundTrip(t *testing.T) {
 			Pending     bool   `json:"pending"`
 			RedirectURI string `json:"redirectUri"`
 		} `json:"providers"`
-		PublicURL string `json:"publicUrl"`
+		PublicURL  string `json:"publicUrl"`
+		ApplyReady bool   `json:"applyReady"`
 	}
 	if err := json.Unmarshal(get.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
 	if payload.PublicURL != "https://mail.example.test" {
 		t.Fatalf("public URL = %q", payload.PublicURL)
+	}
+	if !payload.ApplyReady {
+		t.Fatal("applyReady should be true with a public HTTPS app.env URL")
 	}
 	if len(payload.Providers) != 2 {
 		t.Fatalf("providers = %#v", payload.Providers)

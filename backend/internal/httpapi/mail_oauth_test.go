@@ -189,6 +189,35 @@ func TestMailOAuthTokenRequest(t *testing.T) {
 	}
 }
 
+func TestExchangeMailOAuthCodeScope(t *testing.T) {
+	var received url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		received = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access-1","refresh_token":"refresh-1","expires_in":3600}`))
+	}))
+	defer server.Close()
+	api := &Server{cfg: config.Config{PublicURL: "https://mail.example.test"}}
+	google := mailOAuthProvider{ID: "gmail", Token: server.URL, Scope: "openid email https://mail.google.com/"}
+	if _, err := api.exchangeMailOAuthCode(context.Background(), google, "google-id", "google-secret", "gmail", "code-1", "verifier-1"); err != nil {
+		t.Fatal(err)
+	}
+	if received.Get("scope") != "" {
+		t.Fatalf("Google token exchange included scope = %q", received.Get("scope"))
+	}
+	if received.Get("redirect_uri") != "https://mail.example.test/api/mail/oauth/gmail/callback" {
+		t.Fatalf("redirect URI = %q", received.Get("redirect_uri"))
+	}
+	microsoft := mailOAuthProvider{ID: "microsoft", Token: server.URL, Scope: "openid offline_access https://outlook.office.com/IMAP.AccessAsUser.All"}
+	if _, err := api.exchangeMailOAuthCode(context.Background(), microsoft, "microsoft-id", "microsoft-secret", "microsoft", "code-2", "verifier-2"); err != nil {
+		t.Fatal(err)
+	}
+	if received.Get("scope") != microsoft.Scope {
+		t.Fatalf("Microsoft token exchange scope = %q", received.Get("scope"))
+	}
+}
+
 func TestMailOAuthUserInfo(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer access-1" {

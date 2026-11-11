@@ -145,6 +145,33 @@ func TestMailOAuthApplyValuesRequiresSecret(t *testing.T) {
 	}
 }
 
+func TestMailOAuthDisabledProviderIgnoresUnreadableSecret(t *testing.T) {
+	server := testMailOAuthServer(t)
+	gmail, _ := mailOAuthDefinition(mailOAuthProviderGmail)
+	other, err := newSecretBox(strings.Repeat("different-secret-key-", 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := other.Seal("unreadable-here")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]mailOAuthProviderRow{
+		gmail.Provider: {
+			Provider: gmail.Provider, Enabled: false, ClientID: "google-id",
+			SecretSealed: sealed, DraftSaved: true,
+		},
+	}
+	values, err := server.mailOAuthApplyValues(rows, map[string]string{})
+	if err != nil {
+		t.Fatalf("a disabled provider must not block apply: %v", err)
+	}
+	if values["ALT8MAIL_GOOGLE_MAIL_OAUTH_ENABLED"] != "false" ||
+		values["ALT8MAIL_GOOGLE_MAIL_CLIENT_ID"] != "" {
+		t.Fatalf("disabled provider values = %#v", values)
+	}
+}
+
 func TestMailOAuthApplyValuesImportsEnvironmentSecret(t *testing.T) {
 	server := testMailOAuthServer(t)
 	gmail, _ := mailOAuthDefinition(mailOAuthProviderGmail)

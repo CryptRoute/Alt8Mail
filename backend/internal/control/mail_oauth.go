@@ -401,6 +401,7 @@ func (s *Server) handleMailOAuth(w http.ResponseWriter, r *http.Request, sess *s
 	}
 	envURL := strings.TrimRight(strings.TrimSpace(env.Values["ALT8MAIL_PUBLIC_URL"]), "/")
 	settingURL := strings.TrimRight(strings.TrimSpace(s.settingString(ctx, "server.webmail_url", s.cfg.WebmailURL)), "/")
+	applyReady := env.Readable && envURL != "" && validMailOAuthRedirectURI(mailOAuthRedirectURI(envURL, mailOAuthProviderGmail))
 	if envURL != "" && settingURL != "" && envURL != settingURL {
 		warnings = append(warnings, fmt.Sprintf("Web Net's webmail URL (%s) differs from ALT8MAIL_PUBLIC_URL in app.env (%s). Sign-in uses app.env, so the redirect URI below may not match the address users open.", settingURL, envURL))
 	}
@@ -414,6 +415,7 @@ func (s *Server) handleMailOAuth(w http.ResponseWriter, r *http.Request, sess *s
 		"webmailUrl":      settingURL,
 		"appEnvPath":      s.cfg.AppEnvFile,
 		"appEnvReadable":  env.Readable,
+		"applyReady":      applyReady,
 		"pending":         pendingAny,
 		"warnings":        warnings,
 	})
@@ -538,7 +540,7 @@ func (s *Server) mailOAuthApplyValues(rowsByProvider map[string]mailOAuthProvide
 		row := rowsByProvider[definition.Provider]
 		applied := mailOAuthAppliedFor(definition, envValues)
 		draft := s.mailOAuthDraftFor(definition, row, applied)
-		if draft.SecretError != "" {
+		if draft.Enabled && draft.SecretError != "" {
 			return nil, fmt.Errorf("%s: %s", definition.Label, draft.SecretError)
 		}
 		if draft.Enabled {
