@@ -31,7 +31,7 @@ func TestMailOAuthAppliedPrefersDedicatedCredentials(t *testing.T) {
 	if !applied.Enabled || applied.ClientID != "mail-id" || applied.Secret != "mail-secret" {
 		t.Fatalf("dedicated credentials were not preferred: %#v", applied)
 	}
-	if applied.SecretSource != "mail" {
+	if applied.SecretSource != "environment" {
 		t.Fatalf("secret source = %q", applied.SecretSource)
 	}
 }

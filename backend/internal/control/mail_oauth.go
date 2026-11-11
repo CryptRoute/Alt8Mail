@@ -232,7 +232,7 @@ func (s *Server) readMailOAuthEnv() mailOAuthEnv {
 func mailOAuthAppliedFor(definition mailOAuthProviderDefinition, envValues map[string]string) mailOAuthApplied {
 	clientID := strings.TrimSpace(envValues[definition.ClientIDEnv])
 	secret := strings.TrimSpace(envValues[definition.ClientSecretEnv])
-	secretSource := "mail"
+	secretSource := "environment"
 	if secret == "" {
 		secret = strings.TrimSpace(envValues[definition.SharedSecretEnv])
 		if secret != "" {

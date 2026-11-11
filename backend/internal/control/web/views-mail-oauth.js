@@ -181,7 +181,7 @@ export async function renderMailOAuth(ctx) {
   const enabledCount = providers.filter((provider) => provider.enabled && provider.clientId && provider.hasSecret).length;
   const publicLabel = data.publicUrl ? data.publicUrl : 'Not configured';
   const actionButtons = canManage
-    ? `<button class="btn btn-secondary" type="button" id="mail-oauth-test">${ui.icon('plug', 15)} Test connection</button>
+    ? `<button class="btn btn-secondary" type="button" id="mail-oauth-test">${ui.icon('plug', 15)} Test configuration</button>
        <button class="btn btn-secondary" type="button" id="mail-oauth-save">${ui.icon('check', 15)} Save draft</button>
        <button class="btn btn-primary" type="button" id="mail-oauth-apply"${data.appEnvReadable ? '' : ' disabled title="app.env is not readable"'}>${ui.icon('rotate', 15)} Apply to webmail</button>`
     : '';
