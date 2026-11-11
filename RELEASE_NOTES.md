@@ -1,3 +1,29 @@
+# Alt8Mail 3.0.2
+
+Release date: 2026-11-11. Branding and shell-cache patch.
+
+## 3.0.2 branding and cache fix
+
+- The webmail service worker now versions its cache with the release, requests
+  all shell assets with the current version, and serves CSS/JS network-first
+  with an offline cache fallback. Previously the worker and every asset URL
+  were unchanged across releases, so returning browsers kept the old
+  stylesheet and script while loading the new HTML. That mix rendered the new
+  logo images at intrinsic size and injected the old `AL` initials tile.
+- Every brand image now declares its rendered width and height, so a stale or
+  missing stylesheet can never let a 512 px logo cover the header.
+- Generated initial tiles (`AL`/`A8`) are removed from the app shell, tenant
+  row, passkey prompt and onboarding rail; those marks now use the supplied
+  icon artwork. White-label tenants show their product name without a
+  generated monogram.
+- The customer admin app ships its own brand assets under `/brand/` and no
+  longer requests webmail icon paths from the admin host. Brand images that
+  fail to load hide cleanly instead of showing the browser's broken-image
+  glyph.
+- CI and `npm run test:all` verify that `VERSION`, `package.json`, the shell
+  asset query string, the service-worker cache version and the control-plane
+  version stay in sync.
+
 # Alt8Mail 3.0.1
 
 Release date: 2026-11-11. Security and release-gate patch for 3.0.0.

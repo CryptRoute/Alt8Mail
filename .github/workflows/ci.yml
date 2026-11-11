@@ -72,7 +72,7 @@ jobs:
           CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: |
           set -o pipefail
-          for step in "node tools/check-locales.mjs" "node --test tests/api.test.mjs" "node tests/e2e.mjs"; do
+          for step in "node tools/check-version.mjs" "node tools/check-locales.mjs" "node --test tests/api.test.mjs" "node tests/e2e.mjs"; do
             echo "::group::$step"
             if ! bash -c "$step" 2>&1 | tee /tmp/web-step.log; then
               { echo "### Web test failed: $step"; echo '```'; tail -120 /tmp/web-step.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

@@ -42,7 +42,9 @@ body.onboarding-active { overflow: hidden; }
   background: linear-gradient(145deg, #f8fbff, #c9e8ff); color: #0c2b46;
   font-size: 11px; font-weight: 850; letter-spacing: -.03em;
   box-shadow: 0 8px 22px rgba(3, 13, 27, .32);
+  overflow: hidden;
 }
+.onboarding-mark img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; }
 .onboarding-brand strong { display: block; font-family: var(--font-display); font-size: 15px; letter-spacing: -.02em; }
 .onboarding-brand span { display: block; margin-top: 1px; color: #91aecb; font-size: 10.5px; letter-spacing: .03em; }
 .onboarding-rail-copy .eyebrow { color: #7fc2e8; font-size: 10px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }

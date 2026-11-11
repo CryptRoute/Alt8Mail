@@ -1,6 +1,6 @@
 {
   "name": "alt8mail-webmail",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "private": true,
   "type": "module",
   "description": "Enterprise webmail template: 2FA, threaded mail, instant search, scheduled send, tasks, files, attachment preview, Sieve and sender trust.",
@@ -15,7 +15,7 @@
     "test:a11y": "npm run test:a11y:audit && npm run test:a11y:keyboard",
     "test:a11y:audit": "node tests/a11y-baseline.mjs",
     "test:a11y:keyboard": "node tests/a11y-keyboard.mjs",
-    "test:all": "node tools/check-locales.mjs && node --test tests/api.test.mjs && node tests/e2e.mjs",
+    "test:all": "node tools/check-version.mjs && node tools/check-locales.mjs && node --test tests/api.test.mjs && node tests/e2e.mjs",
     "icons": "node tools/make-icons.mjs",
     "test:i18n": "node tools/check-locales.mjs"
   }

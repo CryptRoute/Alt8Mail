@@ -1128,7 +1128,9 @@ svg.icon {
   font-weight: 700;
   letter-spacing: -0.02em;
   box-shadow: var(--shadow);
+  overflow: hidden;
 }
+.tenant-mark img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; }
 .tenant-id { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .tenant-id strong {
   font-size: 0.8125rem;

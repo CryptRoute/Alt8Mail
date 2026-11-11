@@ -1,5 +1,5 @@
 /* Alt8Mail System Control — application shell, authentication and core views. */
-import * as ui from './ui.js?v=0.11.46-control';
+import * as ui from './ui.js?v=3.0.2';
 import {
   renderDomains, renderDomainDetail, renderMailboxes, renderMailboxDetail,
   renderAliases, renderImports,
@@ -15,14 +15,23 @@ import { renderWebPush } from './views-push.js';
 import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
 import { renderLicense } from './views-license.js';
-import { renderAddons } from './views-addons.js?v=0.11.46-control';
-import { renderOffice } from './views-office.js?v=0.11.46-control';
+import { renderAddons } from './views-addons.js?v=3.0.2';
+import { renderOffice } from './views-office.js?v=3.0.2';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '3.0.1';
+const APP_VERSION = '3.0.2';
+
+// A stale admin binary can lack the embedded brand artwork. Hide the broken
+// image rather than letting the browser paint a missing-image glyph.
+document.addEventListener('error', (event) => {
+  const target = event.target;
+  if (target instanceof HTMLImageElement && target.closest('.brand-mark')) {
+    target.hidden = true;
+  }
+}, true);
 
 const state = {
   csrf: '',
@@ -318,7 +327,7 @@ function loginHTML() {
   return `<div class="login-page">
     <aside class="login-aside">
       <a class="login-brand" href="#/dashboard">
-        <span class="brand-mark"><img src="/assets/brand/icon-512.png" alt=""></span>
+        <span class="brand-mark"><img src="/assets/brand/icon-512.png" alt="" width="34" height="34"></span>
         <span><strong>Alt8Mail</strong><span>System Control</span></span>
       </a>
       <div class="login-hero">
@@ -342,7 +351,7 @@ function loginHTML() {
     <main class="login-main">
       <div class="login-main-inner">
         <div class="login-mobile-brand">
-          <span class="brand-mark"><img src="/assets/brand/icon-512.png" alt=""></span>
+          <span class="brand-mark"><img src="/assets/brand/icon-512.png" alt="" width="34" height="34"></span>
           <span class="brand-copy"><strong>Alt8Mail</strong><span>System Control</span></span>
           <span class="env-chip" style="margin-left:auto"><span class="dot"></span>${esc(state.env || 'staging')}</span>
         </div>
@@ -544,7 +553,7 @@ function renderShell() {
   app.innerHTML = `<div class="shell">
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="#/dashboard" aria-label="Alt8Mail System Control dashboard">
-        <span class="brand-mark"><img src="/assets/brand/icon-512.png" alt=""></span>
+        <span class="brand-mark"><img src="/assets/brand/icon-512.png" alt="" width="34" height="34"></span>
         <span class="brand-copy"><strong>Alt8Mail</strong><span>System Control</span></span>
       </a>
       <nav class="sidebar-nav" id="sidebar-nav" aria-label="System Control sections">${navMarkup()}</nav>
@@ -1700,7 +1709,7 @@ async function boot() {
       renderLogin(session);
     }
   } catch (error) {
-    document.getElementById('app').innerHTML = `<div class="login-page"><div class="login-main"><div class="login-main-inner"><div class="login-mobile-brand"><span class="brand-mark"><img src="/assets/brand/icon-512.png" alt=""></span><span class="brand-copy"><strong>Alt8Mail</strong><span>System Control</span></span></div><div class="login-card"><h2>Control plane unavailable</h2><p>The browser could not reach the System Control service.</p><div class="notice tone-critical" style="margin-top:16px">${ui.icon('alert-circle', 17)}<div><strong>Connection failed</strong><p>${esc(errorDetail(error))}</p></div></div><button class="btn btn-primary" style="margin-top:16px" type="button" id="boot-retry">Try again</button></div></div></div></div>`;
+    document.getElementById('app').innerHTML = `<div class="login-page"><div class="login-main"><div class="login-main-inner"><div class="login-mobile-brand"><span class="brand-mark"><img src="/assets/brand/icon-512.png" alt="" width="34" height="34"></span><span class="brand-copy"><strong>Alt8Mail</strong><span>System Control</span></span></div><div class="login-card"><h2>Control plane unavailable</h2><p>The browser could not reach the System Control service.</p><div class="notice tone-critical" style="margin-top:16px">${ui.icon('alert-circle', 17)}<div><strong>Connection failed</strong><p>${esc(errorDetail(error))}</p></div></div><button class="btn btn-primary" style="margin-top:16px" type="button" id="boot-retry">Try again</button></div></div></div></div>`;
     document.getElementById('boot-retry')?.addEventListener('click', () => boot());
   }
 }

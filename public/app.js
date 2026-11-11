@@ -3252,12 +3252,6 @@ function updateDocumentTitle() {
   if (document.title !== title) document.title = title;
 }
 
-function brandInitials(name) {
-  const words = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (words.length > 1) return words.slice(0, 2).map((word) => word[0]).join("").toUpperCase();
-  return String(name || "A8").slice(0, 2).toUpperCase() || "A8";
-}
-
 function applyTenantBranding(branding) {
   if (!branding || typeof branding !== "object") return;
   const name = String(branding.productName || "").trim().slice(0, 60) || "Alt8Mail";
@@ -3269,18 +3263,14 @@ function applyTenantBranding(branding) {
     document.documentElement.style.setProperty("--accent", color);
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", color);
   }
-  const initials = brandInitials(name);
   const customName = name !== "Alt8Mail";
-  document.querySelectorAll(".brand-name, .login-brand-top strong, .login-heading > .eyebrow").forEach((node) => { node.textContent = name; });
+  document.querySelectorAll(".brand-name, .login-brand-top strong, .login-heading > .eyebrow, .tenant-id strong, .onboarding-brand strong").forEach((node) => { node.textContent = name; });
   document.querySelectorAll(".brand-name").forEach((node) => { node.hidden = !customName; });
   document.querySelectorAll(".brand-logo, .login-wordmark").forEach((node) => { node.hidden = customName; });
-  document.querySelectorAll(".brand-mark, .login-mark, .login-watermark").forEach((node) => {
-    // Keep the supplied icon artwork; only fill text fallbacks.
-    if (node.querySelector("img")) {
-      node.setAttribute("aria-label", initials);
-      return;
-    }
-    node.textContent = initials;
+  // Never paint generated initials over the supplied brand artwork. A custom
+  // white-label tenant shows its name as text instead of a fake icon.
+  document.querySelectorAll(".brand-mark, .login-mark, .login-watermark, .tenant-mark, .onboarding-mark, .passkey-brand > span").forEach((node) => {
+    node.hidden = customName;
   });
   document.querySelectorAll(".login-demo, .login-legal").forEach((node) => {
     if (node.textContent.includes("Alt8Mail")) node.textContent = node.textContent.replaceAll("Alt8Mail", name);
@@ -8452,7 +8442,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "0.37.0";
+const MAIL_PROVIDER_ASSET_VERSION = "3.0.2";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -28233,7 +28223,10 @@ function toggleNotify() {
    ============================================================ */
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("/sw.js").then(() => {
+  navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((registration) => {
+    // Revalidate the worker on every load so a shell deploy is never pinned
+    // behind an older cache-first script.
+    registration.update().catch(() => {});
     updateServiceWorkerUi();
   }).catch(() => {
     updateServiceWorkerUi();

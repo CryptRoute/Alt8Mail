@@ -8,6 +8,13 @@ const esc = (value) => String(value == null ? "" : value)
 const icon = (name, cls = "") => `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Hide the browser's broken-image glyph if a deployment is missing a brand
+// file; the text lockup remains legible.
+document.addEventListener("error", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLImageElement && target.closest(".brand-mark, .brand-lockup")) target.hidden = true;
+}, true);
+
 class ApiError extends Error {
   constructor(message, status, code, details) {
     super(message);
