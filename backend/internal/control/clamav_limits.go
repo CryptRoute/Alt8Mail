@@ -16,7 +16,13 @@ const (
 	clamavLimitBytes = int64(320 * 1024 * 1024)
 )
 
-var clamavLimitKeys = []string{"StreamMaxLength", "MaxFileSize", "MaxScanSize"}
+var clamavLimitKeys = []string{"StreamMaxLength", "MaxFileSize", "MaxScanSize", "MaxScanTime"}
+var clamavLimitValues = map[string]string{
+	"StreamMaxLength": "320M",
+	"MaxFileSize":     "320M",
+	"MaxScanSize":     "320M",
+	"MaxScanTime":     "600000",
+}
 
 // EnsureClamAVLimits raises clamd's stream and file scan limits so Cabinet
 // uploads up to 300 MB can be scanned. It is idempotent, runs as root from the
@@ -51,13 +57,17 @@ func EnsureClamAVLimits(logger *slog.Logger) error {
 				continue
 			}
 			found = true
-			if !clamavLimitSufficient(fields[1]) {
-				updated[index] = key + " 320M"
+			sufficient := clamavLimitSufficient(fields[1])
+			if key == "MaxScanTime" {
+				sufficient = clamavNumericSufficient(fields[1], 600000)
+			}
+			if !sufficient {
+				updated[index] = key + " " + clamavLimitValues[key]
 				changed = true
 			}
 		}
 		if !found {
-			updated = append(updated, key+" 320M")
+			updated = append(updated, key+" "+clamavLimitValues[key])
 			changed = true
 		}
 	}
@@ -80,9 +90,14 @@ func EnsureClamAVLimits(logger *slog.Logger) error {
 		return err
 	}
 	if logger != nil {
-		logger.Info("raised ClamAV large-file scan limits", "streamMaxLength", "320M", "maxFileSize", "320M", "maxScanSize", "320M")
+		logger.Info("raised ClamAV large-file scan limits", "streamMaxLength", "320M", "maxFileSize", "320M", "maxScanSize", "320M", "maxScanTime", "600000")
 	}
 	return nil
+}
+
+func clamavNumericSufficient(value string, minimum int64) bool {
+	number, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	return err == nil && number >= minimum
 }
 
 func clamavLimitSufficient(value string) bool {

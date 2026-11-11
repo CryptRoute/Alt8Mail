@@ -5,12 +5,13 @@ Release date: 2026-11-11. Large-file scanning, settings UI and license-gate UX.
 ## 3.0.5 large-file scans and settings polish
 
 - ClamAV scan limits are raised automatically to 320 MB (`StreamMaxLength`,
-  `MaxFileSize`, `MaxScanSize`) by the control-plane startup check, so a
-  169 MB Cabinet share no longer fails with “The file could not be scanned for
-  malware.” The scanner timeout is now ten minutes, and a scanner that still
-  rejects a file returns a specific `FILE_SCAN_LIMIT` message with the exact
-  limits to raise. `scripts/alt8mail-ensure-clamav-limits.sh` applies the same
-  change manually and restores the previous config if clamd fails to restart.
+  `MaxFileSize`, `MaxScanSize`) with a ten-minute `MaxScanTime` by the
+  control-plane startup check, so a 169 MB Cabinet share no longer fails with
+  “The file could not be scanned for malware.” The scanner connection timeout
+  is now ten minutes, and a scanner that still rejects a file returns a specific
+  `FILE_SCAN_LIMIT` message with the exact limits to raise.
+  `scripts/alt8mail-ensure-clamav-limits.sh` applies the same change manually
+  and restores the previous config if clamd fails to restart.
 - Keyboard shortcuts settings now use the settings-row design system with
   styled key fields, duplicate-key highlighting and a proper reset action.
 - The AI workspace settings page uses consistent cards, list rows and form
