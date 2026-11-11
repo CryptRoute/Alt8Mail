@@ -1829,6 +1829,9 @@ try {
   await sleep(300);
   await page.click("#cmdCompose");
   await sleep(350);
+  const outlineComposeId = await page.eval("[...document.querySelectorAll('.compose')].at(-1).getAttribute('data-compose-id')");
+  await page.click(`[data-compose-id="${outlineComposeId}"] [data-compose-editor]`);
+  check(await page.eval(`getComputedStyle(document.querySelector('[data-compose-id="${outlineComposeId}"] [data-compose-editor]')).outlineStyle === 'none'`), "clicking the compose editor does not draw an outline");
   await page.eval(`(() => { const comp = [...document.querySelectorAll(".compose")].at(-1); comp?.querySelector('[data-compose-action="attach"]')?.click(); })()`);
   await page.waitFor(() => !document.getElementById("composeAttachOverlay").hidden, 5000);
   await page.eval(`(() => {
