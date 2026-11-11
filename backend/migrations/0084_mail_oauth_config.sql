@@ -19,4 +19,7 @@ ON CONFLICT (provider) DO NOTHING;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON control.mail_oauth_providers TO alt8mail_control;
 
+INSERT INTO schema_migrations (version) VALUES ('0084_mail_oauth_config')
+ON CONFLICT DO NOTHING;
+
 COMMIT;
