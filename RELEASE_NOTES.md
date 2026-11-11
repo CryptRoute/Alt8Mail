@@ -4,6 +4,9 @@ Release date: 2026-11-11. Large-file scanning, settings UI and license-gate UX.
 
 ## 3.0.5 large-file scans and settings polish
 
+- Go is updated to `1.26.11`, fixing the `net/http` `MaxBytesReader`
+  header-race crash (GO-2026-6859). The CI vulnerability gate now passes with
+  only the reviewed `GO-2026-6909` SAML advisory allowlisted.
 - ClamAV scan limits are raised automatically to 320 MB (`StreamMaxLength`,
   `MaxFileSize`, `MaxScanSize`) with a ten-minute `MaxScanTime` by the
   control-plane startup check, so a 169 MB Cabinet share no longer fails with
