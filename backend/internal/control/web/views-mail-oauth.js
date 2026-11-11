@@ -10,7 +10,7 @@ const PROVIDER_META = {
     sourceLabel: 'Google Cloud Console',
     steps: [
       'Open <strong>Google Cloud Console → APIs &amp; Services → Credentials</strong> and choose or create the project that will own Alt8Mail sign-in.',
-      'Configure the <strong>OAuth consent screen</strong>. Add the scopes <code>openid</code>, <code>email</code>, <code>profile</code> and <code>https://mail.google.com/</code>. While the app is in Testing, add each mailbox as a test user; publish the app when everyone should connect.',
+      'Configure the <strong>OAuth consent screen</strong>. Add the webmail domain under <strong>Authorized domains</strong>, then add the scopes <code>openid</code>, <code>email</code>, <code>profile</code> and <code>https://mail.google.com/</code>. While the app is in Testing, add each mailbox as a test user; publish the app when everyone should connect.',
       'Choose <strong>Create credentials → OAuth client ID</strong>, application type <strong>Web application</strong>.',
       'Under <strong>Authorized redirect URIs</strong>, paste the redirect URI from this page exactly.',
       'Copy the client ID and client secret into this page, save the draft, then apply it.',
