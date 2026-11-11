@@ -24,17 +24,18 @@ restore() {
 trap 'rm -f "$backup"' EXIT
 
 set_value() {
-  local key="$1"
+  local key="$1" value="$2"
   if grep -qE "^[[:space:]]*${key}[[:space:]]" "$CONF"; then
-    sed -i -E "s|^[[:space:]]*${key}[[:space:]].*$|${key} ${LIMIT}|" "$CONF"
+    sed -i -E "s|^[[:space:]]*${key}[[:space:]].*$|${key} ${value}|" "$CONF"
   else
-    printf '\n%s %s\n' "$key" "$LIMIT" >> "$CONF"
+    printf '\n%s %s\n' "$key" "$value" >> "$CONF"
   fi
 }
 
-set_value StreamMaxLength
-set_value MaxFileSize
-set_value MaxScanSize
+set_value StreamMaxLength "$LIMIT"
+set_value MaxFileSize "$LIMIT"
+set_value MaxScanSize "$LIMIT"
+set_value MaxScanTime 600000
 
 if ! systemctl restart clamav-daemon; then
   restore
