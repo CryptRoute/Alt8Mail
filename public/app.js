@@ -17291,8 +17291,9 @@ async function submitComposeShareFallback() {
     }
     const share = shared.share || {};
     insertComposeShareLink(session, { name: fallback.file?.name || fileRecord.name || "Shared file", url: share.url, expiresAt: share.expiresAt, recipientEmail, note });
-    closeComposeShareDialog(true);
     if (!composeAttachOverlay.hidden) closeComposeAttach();
+    composeShareReturnFocus = null;
+    closeComposeShareDialog(true);
     showToast("Secure Cabinet link inserted");
   } catch (error) {
     setComposeShareStatus(error.message || "The file could not be shared.", "error");
