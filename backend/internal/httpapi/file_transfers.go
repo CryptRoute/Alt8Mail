@@ -44,6 +44,7 @@ type uploadProgressBody struct {
 	Size     int64  `json:"size"`
 	Progress int    `json:"progress"`
 	Status   string `json:"status"`
+	FileID   string `json:"fileId"`
 }
 
 func (s *Server) uploadSessionPublic(row uploadSessionRecord, rawToken string) map[string]any {
@@ -199,7 +200,7 @@ func (s *Server) deleteUploadSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (s *Server) updateUploadProgress(ctx context.Context, token, uploadID, name string, size int64, progress int, status string) error {
+func (s *Server) updateUploadProgress(ctx context.Context, token, uploadID, name string, size int64, progress int, status, fileID string) error {
 	row, _, _, _, err := s.loadUploadSessionByToken(ctx, token)
 	if err != nil || row.Revoked != nil || !row.ExpiresAt.After(time.Now()) {
 		return errors.New("upload session is no longer active")
@@ -244,17 +245,24 @@ func (s *Server) updateUploadProgress(ctx context.Context, token, uploadID, name
 			item["sizeBytes"] = size
 			item["progress"] = progress
 			item["status"] = status
+			if fileID != "" {
+				item["fileId"] = truncate(fileID, 120)
+			}
 			item["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
 			found = true
 			break
 		}
 	}
 	if !found {
-		uploads = append([]map[string]any{{
+		created := map[string]any{
 			"id": uploadID, "name": truncate(name, 240), "sizeBytes": size,
 			"progress": progress, "status": status, "startedAt": time.Now().UTC().Format(time.RFC3339),
 			"updatedAt": time.Now().UTC().Format(time.RFC3339),
-		}}, uploads...)
+		}
+		if fileID != "" {
+			created["fileId"] = truncate(fileID, 120)
+		}
+		uploads = append([]map[string]any{created}, uploads...)
 	}
 	if len(uploads) > 50 {
 		uploads = uploads[:50]
@@ -272,7 +280,7 @@ func (s *Server) publicUploadProgress(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeBody(w, r, &body, 32*1024) {
 		return
 	}
-	if err := s.updateUploadProgress(r.Context(), r.PathValue("token"), body.UploadID, body.Name, body.Size, body.Progress, body.Status); err != nil {
+	if err := s.updateUploadProgress(r.Context(), r.PathValue("token"), body.UploadID, body.Name, body.Size, body.Progress, body.Status, body.FileID); err != nil {
 		writeError(w, http.StatusGone, "UPLOAD_SESSION", err.Error())
 		return
 	}
@@ -371,7 +379,11 @@ func (s *Server) publicUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	_ = s.updateUploadProgress(r.Context(), r.PathValue("token"), uploadID, name, int64(len(data)), 100, "done")
+	fileID := ""
+	if id, ok := fileRecord["id"].(string); ok {
+		fileID = id
+	}
+	_ = s.updateUploadProgress(r.Context(), r.PathValue("token"), uploadID, name, int64(len(data)), 100, "done", fileID)
 	sess := &sessionRecord{User: owner}
 	s.recordWorkspaceAudit(r.Context(), sess, "file.mobile_upload", name, fmt.Sprintf("%s · mobile upload session", formatBytes(int64(len(data)))))
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "uploadId": uploadID, "file": fileRecord})

@@ -49,6 +49,7 @@
       const form = new FormData();
       form.append("file", file, file.name);
       form.append("uploadId", id);
+      let uploadedFileId = "";
       await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", "/api/public/upload/" + encodeURIComponent(token));
@@ -66,8 +67,12 @@
         xhr.onload = () => {
           let payload = {};
           try { payload = JSON.parse(xhr.responseText || "{}"); } catch {}
-          if (xhr.status >= 200 && xhr.status < 300) resolve(payload);
-          else reject(new Error(payload.error && payload.error.message || "Upload failed"));
+          if (xhr.status >= 200 && xhr.status < 300) {
+            uploadedFileId = payload.file && payload.file.id || "";
+            resolve(payload);
+          } else {
+            reject(new Error(payload.error && payload.error.message || "Upload failed"));
+          }
         };
         xhr.onerror = () => reject(new Error("Network error"));
         xhr.send(form);
@@ -77,7 +82,7 @@
       ui.left.textContent = "Uploaded";
       ui.el.style.borderColor = "var(--brand)";
       post("/api/public/upload/" + encodeURIComponent(token) + "/progress", {
-        uploadId: id, name: file.name, size: file.size, progress: 100, status: "done"
+        uploadId: id, name: file.name, size: file.size, progress: 100, status: "done", fileId: uploadedFileId
       }).catch(() => {});
     } catch (error) {
       ui.left.textContent = error.message || "Upload failed";

@@ -1,3 +1,29 @@
+# Alt8Mail 3.3.0
+
+Release date: 2026-11-12. Office window, open dialog and email-to-task.
+
+## 3.3.0 an Office window that behaves like the desktop app
+
+- The Office editor header has a centered search field (also **Ctrl K**). It
+  searches only the file type of the open editor — documents, spreadsheets or
+  presentations — across Cabinet names and email attachments, including
+  server-side attachment filename search beyond the loaded mailbox page. Results
+  show in a grouped dropdown; choosing one opens it in the shared Office window
+  and docks the previously active document.
+- The Office window can be moved by dragging its header and resized from its
+  bottom-right grip, with the size and position remembered per user. Double-click
+  the header to maximize or restore. Mobile keeps the full-screen editor.
+- A new **Open** button beside Versions opens a moveable Open window with three
+  columns: matching Cabinet files, matching email attachments and a device
+  column. The device column browses the local PC or shows a QR code for a phone
+  upload. A file uploaded from the phone lands in Cabinet and opens in the
+  Office window automatically; the upload session now reports the created file
+  id so the desktop can open the exact file.
+- Emails can now be turned into tasks. The reader toolbar has an **Add to task**
+  action and the message menu has **Add to task** as well. The task editor shows
+  the linked email, pre-fills the title, sender and snippet, and saves the task
+  with `linkedThreadId` / `linkedSubject` so the conversation stays attached.
+
 # Alt8Mail 3.2.2
 
 Release date: 2026-11-12. Compose regression fix.

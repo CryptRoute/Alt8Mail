@@ -1104,6 +1104,7 @@ const state = {
   taskFilter: "all",
   selectedTaskId: null,
   editingTaskId: null,
+  taskDraftLink: null,
   fileFilter: "all",
   fileProvider: "all",
   selectedFileId: null,
@@ -8712,7 +8713,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.2.2";
+const MAIL_PROVIDER_ASSET_VERSION = "3.3.0";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -14881,6 +14882,7 @@ function messageMenuMarkup() {
     ${menuButton(pinned ? "unpin" : "pin", "i-pin", pinned ? "Unpin" : "Pin")}
     <div class="message-menu-sub"><button type="button" data-message-submenu="category"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg><span>Categorize</span><span class="menu-chevron">›</span></button></div>
     ${menuButton(flagged ? "unflag" : "flag", "i-flag", flagged ? "Clear follow-up flag" : "Flag")}
+    ${menuButton("createTask", "i-task", "Add to task")}
     <div class="message-menu-sub"><button type="button" data-message-submenu="snooze"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Snooze</span><span class="menu-chevron">›</span></button></div>
     ${menuButton("rules", "i-sliders", "Rules")}
     ${menuButton("quickActions", "i-grid", "Set quick actions")}
@@ -15237,6 +15239,7 @@ async function messageMenuCommand(command, button) {
     return;
   }
   if (command === "rules") { openRuleForThread(thread); return; }
+  if (command === "createTask") { addThreadToTask(thread); return; }
   if (command === "quickActions") { openQuickActionsDialog(); return; }
   if (command === "reportJunk") { performBulkAction("spam", "", { threads, anchorThreadId: thread.id }); return; }
   if (command === "reportPhishing") {
@@ -15516,6 +15519,7 @@ function readerAction(action, trigger = null) {
   if (action === "delete") return performBulkAction("delete");
   if (action === "mark-unread") return markThreadUnread(thread);
   if (action === "flag") return toggleThreadFlag(thread);
+  if (action === "task") return addThreadToTask(thread);
   if (action === "pin") return toggleThreadPin(thread);
   if (action === "spam") return performBulkAction(thread.messages.some((message) => message.folder === "spam") ? "notSpam" : "spam");
   if (action === "report") return openReportDialog(thread);
@@ -21989,12 +21993,14 @@ function renderTaskDetail() {
   if (state.editingTaskId) {
     const task = state.tasks.find((item) => item.id === state.editingTaskId) || null;
     const editing = Boolean(task);
+    const draftLink = editing ? null : state.taskDraftLink;
     const assigneeOptions = [{ name: state.user.name, email: state.user.email, initials: state.user.initials, color: state.user.color }, ...state.people]
       .map((person) => `<option value="${esc(person.email)}"${task && task.assignee && normalizeEmail(task.assignee.email) === normalizeEmail(person.email) ? " selected" : ""}>${esc(person.name)}</option>`).join("");
     taskDetail.innerHTML = `<form class="task-editor" id="taskEditorForm">
-      <div class="task-detail-head"><button class="icon-btn task-detail-back" data-task-back type="button" aria-label="Back to tasks"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg></button><div><span class="eyebrow">${editing ? "Edit task" : "New task"}</span><h2>${editing ? "Update the details" : "Plan the work"}</h2></div><button class="icon-btn" data-task-editor-close type="button" aria-label="Close editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
-      <label class="form-field"><span>Title</span><input id="taskTitleInput" type="text" value="${esc(task ? task.title : "")}" placeholder="What needs to happen?" maxlength="200" required></label>
-      <label class="form-field"><span>Notes</span><textarea id="taskNotesInput" rows="4" placeholder="Context, links or acceptance criteria">${esc(task ? task.notes : "")}</textarea></label>
+      <div class="task-detail-head"><button class="icon-btn task-detail-back" data-task-back type="button" aria-label="Back to tasks"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg></button><div><span class="eyebrow">${editing ? "Edit task" : "New task"}</span><h2>${editing ? "Update the details" : draftLink ? "Turn this email into work" : "Plan the work"}</h2></div><button class="icon-btn" data-task-editor-close type="button" aria-label="Close editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      ${draftLink ? `<div class="task-linked-card task-linked-draft"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><div><strong>Linked email</strong><span>${esc(draftLink.subject)}</span></div><button class="link-btn" data-task-clear-link type="button">Remove</button></div>` : ""}
+      <label class="form-field"><span>Title</span><input id="taskTitleInput" type="text" value="${esc(task ? task.title : (draftLink?.subject || ""))}" placeholder="What needs to happen?" maxlength="200" required></label>
+      <label class="form-field"><span>Notes</span><textarea id="taskNotesInput" rows="4" placeholder="Context, links or acceptance criteria">${esc(task ? task.notes : (draftLink?.note || ""))}</textarea></label>
       <div class="form-row">
         <label class="form-field"><span>Due date</span><input id="taskDueInput" type="date" value="${esc(task ? task.due : "")}"></label>
         <label class="form-field"><span>Due time</span><input id="taskDueTimeInput" type="time" value="${esc(task ? task.dueTime : "")}"></label>
@@ -22065,6 +22071,16 @@ async function saveTaskForm(event) {
     reminderAt: document.getElementById("taskReminderInput").value ? new Date(document.getElementById("taskReminderInput").value).toISOString() : "",
     tags: document.getElementById("taskTagsInput").value.split(",").map((tag) => tag.trim()).filter(Boolean)
   };
+  const existingTask = state.editingTaskId && state.editingTaskId !== "new"
+    ? state.tasks.find((item) => item.id === state.editingTaskId) || null
+    : null;
+  if (existingTask?.linkedThreadId) {
+    payload.linkedThreadId = existingTask.linkedThreadId;
+    payload.linkedSubject = existingTask.linkedSubject || "";
+  } else if (state.taskDraftLink) {
+    payload.linkedThreadId = state.taskDraftLink.threadId;
+    payload.linkedSubject = state.taskDraftLink.subject;
+  }
   try {
     if (state.editingTaskId && state.editingTaskId !== "new") {
       const data = await api(`/api/tasks/${encodeURIComponent(state.editingTaskId)}`, { method: "PATCH", body: payload });
@@ -22079,6 +22095,7 @@ async function saveTaskForm(event) {
       showToast("Task created");
     }
     state.editingTaskId = null;
+    state.taskDraftLink = null;
     renderTasks();
   } catch (error) {
     if (error.code === "NETWORK" || !navigator.onLine) {
@@ -22096,6 +22113,7 @@ async function saveTaskForm(event) {
         showToast("Offline — task queued");
       }
       state.editingTaskId = null;
+      state.taskDraftLink = null;
       renderTasks();
       return;
     }
@@ -22163,6 +22181,30 @@ async function refreshTasks() {
   } catch (error) {
     showError(error);
   }
+}
+
+function addThreadToTask(thread) {
+  if (!thread) return;
+  const message = thread.messages.find((item) => item.folder !== "sent" && item.folder !== "drafts") || thread.latest;
+  const subject = String(threadSubject(thread) || "(no subject)").slice(0, 200);
+  const senderName = message?.from?.name && message.from.name !== message.from.email
+    ? `${message.from.name} <${message.from.email}>`
+    : (message?.from?.email || "Unknown sender");
+  const received = message?.date ? formatDateTimeFull(message.date) : "";
+  const snippet = String(message?.snippet || message?.bodyText || stripHtml(message?.bodyHtml || "") || "").trim().slice(0, 1600);
+  state.taskDraftLink = {
+    threadId: thread.id,
+    subject,
+    accountId: state.activeAccountId && state.activeAccountId !== "all" ? state.activeAccountId : "",
+    note: [`From: ${senderName}`, received ? `Received: ${received}` : "", "", snippet].filter((line, index) => line || index === 2).join("\n")
+  };
+  state.editingTaskId = "new";
+  state.selectedTaskId = null;
+  state.taskFilter = "all";
+  setTask("tasks");
+  if (isMobile()) document.body.classList.add("task-detail-open");
+  renderTasks();
+  showToast("Email ready to turn into a task");
 }
 
 function openTaskFromEmail(threadId, accountId = "") {
@@ -23071,12 +23113,135 @@ const OFFICE_HUB_META = {
   slide: { label: "PowerPoint presentations", singular: "presentation", format: "pptx", icon: "i-office-slides", kicker: "Presentations", description: "Create decks, pitches and reports, with recent work and relevant mail ready to reopen." },
 };
 
+function officeTypeNoun(type) {
+  return OFFICE_HUB_META[type]?.singular || "document";
+}
+
+function officeTypePlural(type) {
+  return (OFFICE_HUB_META[type]?.label || "documents").toLowerCase();
+}
+
+function officeFilesOfType(type) {
+  return (state.files || [])
+    .filter((file) => file.kind !== "folder" && officeMetaForFile(file)?.documentType === type)
+    .slice()
+    .sort((a, b) => Date.parse(b.modifiedAt || b.updatedAt || b.createdAt || 0) - Date.parse(a.modifiedAt || a.updatedAt || a.createdAt || 0));
+}
+
+function officeMailFilesOfType(type) {
+  const rows = [];
+  for (const message of state.messages || []) {
+    if (message.delegatedOwnerId) continue;
+    for (const attachment of message.attachments || []) {
+      if (officeMetaForName(attachment.name)?.documentType === type) rows.push({ message, attachment });
+    }
+  }
+  return rows.sort((a, b) => Date.parse(b.message.date || 0) - Date.parse(a.message.date || 0));
+}
+
 let officeHubType = "word";
 let officeHubOffset = { x: 0, y: 0 };
+let officeOpenType = "word";
+let officeOpenOffset = { x: 0, y: 0 };
+let officeOpenMobile = { session: null, seen: new Map(), poll: null, qr: "", qrSession: "" };
+let officeEditorWindow = null;
+let officeSearchTimer = null;
+let officeSearchSeq = 0;
+const OFFICE_EDITOR_MIN_WIDTH = 560;
+const OFFICE_EDITOR_MIN_HEIGHT = 360;
 const OFFICE_DOCK_KEY_PREFIX = "a8m.officeDock.v1";
 
 function officeDockStorageKey() {
   return `${OFFICE_DOCK_KEY_PREFIX}.${normalizeEmail(state.user?.email || "guest")}`;
+}
+
+function officeEditorWindowStorageKey() {
+  return `a8m.officeWindow.v1.${normalizeEmail(state.user?.email || "guest")}`;
+}
+
+function readOfficeEditorWindowState() {
+  if (officeEditorWindow) return officeEditorWindow;
+  try {
+    const raw = localStorage.getItem(officeEditorWindowStorageKey());
+    officeEditorWindow = raw ? JSON.parse(raw) : {};
+  } catch {
+    officeEditorWindow = {};
+  }
+  if (!officeEditorWindow || typeof officeEditorWindow !== "object") officeEditorWindow = {};
+  return officeEditorWindow;
+}
+
+function storeOfficeEditorWindowState() {
+  if (!officeEditorWindow) return;
+  try { localStorage.setItem(officeEditorWindowStorageKey(), JSON.stringify(officeEditorWindow)); } catch {}
+}
+
+function officeEditorIsCompact() {
+  return window.matchMedia("(max-width: 720px)").matches;
+}
+
+function applyOfficeEditorGeometry() {
+  const overlay = document.getElementById("officeEditorOverlay");
+  const shell = document.getElementById("officeEditorShell");
+  if (!overlay || !shell || overlay.hidden) return;
+  if (officeEditorIsCompact()) {
+    shell.style.left = "";
+    shell.style.top = "";
+    shell.style.width = "";
+    shell.style.height = "";
+    return;
+  }
+  const state_ = readOfficeEditorWindowState();
+  if (state_.maximized) {
+    overlay.classList.add("is-maximized");
+    shell.style.left = "";
+    shell.style.top = "";
+    shell.style.width = "";
+    shell.style.height = "";
+    return;
+  }
+  overlay.classList.remove("is-maximized");
+  const margin = 18;
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const maxWidth = Math.max(OFFICE_EDITOR_MIN_WIDTH, viewportWidth - margin * 2);
+  const maxHeight = Math.max(OFFICE_EDITOR_MIN_HEIGHT, viewportHeight - margin * 2);
+  const width = Math.min(maxWidth, Math.max(OFFICE_EDITOR_MIN_WIDTH, Number(state_.width) || maxWidth));
+  const height = Math.min(maxHeight, Math.max(OFFICE_EDITOR_MIN_HEIGHT, Number(state_.height) || maxHeight));
+  const maxLeft = Math.max(0, viewportWidth - Math.min(220, width));
+  const maxTop = Math.max(0, viewportHeight - 54);
+  const left = Number.isFinite(Number(state_.left)) && state_.left !== null
+    ? Math.min(maxLeft, Math.max(-(width - 220), Number(state_.left)))
+    : margin;
+  const top = Number.isFinite(Number(state_.top)) && state_.top !== null
+    ? Math.min(maxTop, Math.max(0, Number(state_.top)))
+    : margin;
+  shell.style.left = `${left}px`;
+  shell.style.top = `${top}px`;
+  shell.style.width = `${width}px`;
+  shell.style.height = `${height}px`;
+}
+
+function setOfficeEditorMaximized(maximized) {
+  const overlay = document.getElementById("officeEditorOverlay");
+  const shell = document.getElementById("officeEditorShell");
+  const button = document.getElementById("officeEditorMaximize");
+  const state_ = readOfficeEditorWindowState();
+  state_.maximized = Boolean(maximized);
+  storeOfficeEditorWindowState();
+  overlay?.classList.toggle("is-maximized", Boolean(maximized));
+  if (maximized && shell) {
+    shell.style.left = "";
+    shell.style.top = "";
+    shell.style.width = "";
+    shell.style.height = "";
+  }
+  if (button) {
+    button.querySelector("use")?.setAttribute("href", maximized ? "#i-window-restore" : "#i-window-maximize");
+    button.setAttribute("aria-label", maximized ? "Restore editor" : "Maximize editor");
+    button.title = maximized ? "Restore editor" : "Maximize editor";
+  }
+  if (!maximized && shell) applyOfficeEditorGeometry();
 }
 
 function normalizeOfficeDockTab(value) {
@@ -23213,6 +23378,13 @@ function updateOfficeEditorChrome(tab) {
   if (title) title.textContent = tab.name || "Document";
   if (metaText) metaText.textContent = `${officeTypeLabel(tab.documentType)} · Alt8Mail Office`;
   if (mark) mark.setAttribute("href", `#${officeTypeIcon(tab.documentType)}`);
+  const search = document.getElementById("officeEditorSearch");
+  if (search) {
+    search.value = "";
+    search.placeholder = `Search ${officeTypePlural(tab.documentType)}`;
+    search.setAttribute("aria-label", `Search ${officeTypePlural(tab.documentType)}`);
+  }
+  closeOfficeEditorSearch();
 }
 
 function activateOfficeTab(tabId, { focus = true } = {}) {
@@ -23234,18 +23406,11 @@ function activateOfficeTab(tabId, { focus = true } = {}) {
   setTimeout(() => {
     try { frame.contentWindow?.dispatchEvent(new Event("resize")); } catch {}
   }, 60);
-  if (wasHidden) {
-    overlay.classList.remove("is-maximized");
-    const maximizeButton = document.getElementById("officeEditorMaximize");
-    maximizeButton?.querySelector("use")?.setAttribute("href", "#i-window-maximize");
-    if (maximizeButton) {
-      maximizeButton.setAttribute("aria-label", "Maximize editor");
-      maximizeButton.title = "Maximize editor";
-    }
-  }
+  if (wasHidden) setOfficeEditorMaximized(false);
   updateOfficeEditorChrome(tab);
   overlay.hidden = false;
   document.body.classList.add("office-editor-open");
+  applyOfficeEditorGeometry();
   writeOfficeDockStorage();
   renderOfficeDock();
   syncOfficeEditorTheme();
@@ -23353,27 +23518,27 @@ function officeHubAccept(type) {
   }[type] || ".doc,.docx,.xls,.xlsx,.ppt,.pptx";
 }
 
-async function uploadOfficeFileFromPC(file) {
-  if (!file) return;
+async function uploadOfficeFileToCabinet(file, expectedType, { folderId = null } = {}) {
+  if (!file) return null;
   if (!state.office.ready) {
     showToast("Office is not enabled or healthy for this workspace yet", null, null, { duration: 5000 });
-    return;
+    return null;
   }
   if (officeDockTabs.length >= OFFICE_DOCK_LIMIT) {
     showToast(`The Office dock can hold ${OFFICE_DOCK_LIMIT} documents. Close one before uploading another.`, null, null, { duration: 6000 });
-    return;
+    return null;
   }
+  const type = OFFICE_HUB_META[expectedType] ? expectedType : officeHubUploadType;
   const meta = officeMetaForName(file.name);
-  if (!meta || meta.documentType !== officeHubUploadType) {
-    showToast(`Choose a ${OFFICE_HUB_META[officeHubUploadType]?.singular || "document"} file for this Office home`, null, null, { duration: 5000 });
-    return;
+  if (!meta || meta.documentType !== type) {
+    showToast(`Choose a ${officeTypeNoun(type)} file for this Office window`, null, null, { duration: 5000 });
+    return null;
   }
   const max = state.attachmentMaxBytes || 8 * 1024 * 1024;
   if (file.size > max) {
     showToast(`${file.name} is larger than ${formatBytes(max)}`, null, null, { duration: 5000 });
-    return;
+    return null;
   }
-  closeOfficeHub();
   try {
     showToast(`Uploading ${file.name} to Cabinet…`);
     const dataBase64 = await fileToBase64(file);
@@ -23384,17 +23549,26 @@ async function uploadOfficeFileFromPC(file) {
     });
     const created = await api("/api/files", {
       method: "POST",
-      body: { providerId: "a8m", attachmentId: uploaded.attachment.id, folderId: state.fileFolderId || "" },
+      body: { providerId: "a8m", attachmentId: uploaded.attachment.id, folderId: folderId ?? (state.fileFolderId || "") },
     });
     if (!created.file) throw new Error("The uploaded file could not be added to Cabinet");
     state.files = [created.file, ...(state.files || []).filter((item) => item.id !== created.file.id)];
     await refreshCabinet();
-    const cabinetFile = (state.files || []).find((item) => item.id === created.file.id) || created.file;
-    showToast(`${cabinetFile.name} uploaded — opening in Office`);
-    openOfficeEditor(cabinetFile);
+    return (state.files || []).find((item) => item.id === created.file.id) || created.file;
   } catch (error) {
     showError(error);
+    return null;
   }
+}
+
+async function uploadOfficeFileFromPC(file) {
+  if (!file) return;
+  const type = officeHubUploadType;
+  closeOfficeHub();
+  const cabinetFile = await uploadOfficeFileToCabinet(file, type);
+  if (!cabinetFile) return;
+  showToast(`${cabinetFile.name} uploaded — opening in Office`);
+  openOfficeEditor(cabinetFile);
 }
 
 function openOfficeHub(type) {
@@ -23533,6 +23707,258 @@ function openOfficeEditor(file) {
     tab.documentType = meta.documentType;
   }
   activateOfficeTab(tab.id);
+}
+
+function closeOfficeEditorSearch() {
+  const results = document.getElementById("officeEditorSearchResults");
+  const input = document.getElementById("officeEditorSearch");
+  if (results) results.hidden = true;
+  if (input) input.setAttribute("aria-expanded", "false");
+}
+
+function renderOfficeEditorSearch() {
+  const input = document.getElementById("officeEditorSearch");
+  const results = document.getElementById("officeEditorSearchResults");
+  const tab = officeTabById(officeDockActiveId);
+  if (!input || !results || !tab || document.getElementById("officeEditorOverlay")?.hidden) return;
+  const type = tab.documentType || "word";
+  const query = String(input.value || "").trim().toLowerCase();
+  const matches = (values) => !query || values.some((value) => String(value || "").toLowerCase().includes(query));
+  const files = officeFilesOfType(type)
+    .filter((file) => matches([file.name, file.path, file.description]))
+    .slice(0, query ? 6 : 5);
+  const mails = officeMailFilesOfType(type)
+    .filter(({ message, attachment }) => matches([attachment.name, message.subject, message.fromName, message.fromEmail]))
+    .slice(0, query ? 5 : 3);
+  const fileRows = files.map((file) => `<button class="office-search-row" type="button" role="option" data-office-search-file="${esc(file.id)}">
+    <span class="office-search-row-icon ${officeTypeClass(type)}"><svg class="icon" aria-hidden="true"><use href="#${officeTypeIcon(type)}"/></svg></span>
+    <span class="office-search-row-copy"><strong>${esc(file.name)}</strong><span>${esc(file.path || "Cabinet")} · ${esc(formatDateOnly(file.modifiedAt || file.updatedAt || file.createdAt) || "Recently updated")}</span></span>
+    <span class="office-search-row-go">Open</span>
+  </button>`).join("");
+  const mailRows = mails.map(({ message, attachment }) => `<button class="office-search-row" type="button" role="option" data-office-search-attachment="${esc(attachment.id)}" data-office-search-name="${esc(attachment.name || "Attachment")}" data-office-search-message="${esc(message.id)}">
+    <span class="office-search-row-icon office-search-row-mail"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg></span>
+    <span class="office-search-row-copy"><strong>${esc(attachment.name || "Attachment")}</strong><span>${esc(message.subject || "(no subject)")} · ${esc(message.fromName || message.fromEmail || "Email")}</span></span>
+    <span class="office-search-row-go">Open</span>
+  </button>`).join("");
+  const total = files.length + mails.length;
+  results.innerHTML = `<div class="office-search-head"><span>${query ? "Search results" : `Recent ${esc(officeTypePlural(type))}`}</span><span>${total} match${total === 1 ? "" : "es"}</span></div>
+    ${fileRows ? `<div class="office-search-group"><span class="office-search-group-label">Cabinet</span>${fileRows}</div>` : ""}
+    ${mailRows ? `<div class="office-search-group"><span class="office-search-group-label">Email attachments</span>${mailRows}</div>` : ""}
+    ${!total ? `<div class="office-search-empty"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><strong>No ${esc(officeTypePlural(type))} found</strong><span>Try another name, or browse Cabinet and email from the Open window.</span></div>` : ""}
+    <div class="office-search-foot"><button type="button" data-office-open-folder><svg class="icon" aria-hidden="true"><use href="#i-folder-open"/></svg>Browse all ${esc(officeTypePlural(type))}</button></div>`;
+  results.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
+
+function scheduleOfficeSearchRemote(query) {
+  clearTimeout(officeSearchTimer);
+  const value = String(query || "").trim();
+  if (value.length < 2) return;
+  const sequence = ++officeSearchSeq;
+  officeSearchTimer = setTimeout(async () => {
+    try {
+      const data = await api(`/api/search?q=${encodeURIComponent("attachment:" + value)}`);
+      if (sequence !== officeSearchSeq) return;
+      mergeSearchMessages(data.messages || []);
+      renderOfficeEditorSearch();
+    } catch {}
+  }, 260);
+}
+
+async function loadOfficeMailContext() {
+  try {
+    const data = await api("/api/search?q=has:attachment");
+    mergeSearchMessages(data.messages || []);
+    renderOfficeOpenDialog();
+  } catch {}
+}
+
+function openOfficeSearchFile(fileId) {
+  closeOfficeEditorSearch();
+  openOfficeEditorById(fileId).catch(showError);
+}
+
+function openOfficeSearchAttachment(button) {
+  closeOfficeEditorSearch();
+  editMailAttachmentInOffice(
+    button.getAttribute("data-office-search-attachment") || "",
+    button.getAttribute("data-office-search-name") || "Attachment",
+    button.getAttribute("data-office-search-message") || ""
+  ).catch(showError);
+}
+
+function renderOfficeOpenMobile() {
+  const host = document.getElementById("officeOpenQr");
+  const note = document.getElementById("officeOpenMobileNote");
+  const copy = document.getElementById("officeOpenCopyLink");
+  const list = document.getElementById("officeOpenMobileList");
+  const session = officeOpenMobile.session;
+  if (!host) return;
+  if (!session?.active) {
+    host.innerHTML = `<div class="office-open-qr-expired"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><strong>Link expired</strong><span>Generate a new QR to keep receiving files.</span></div>`;
+    if (note) note.textContent = "Generate a fresh QR code to receive a file from your phone.";
+    if (copy) copy.hidden = true;
+  } else {
+    renderOfficeOpenQr(host, session);
+    if (note) note.textContent = `Connected · expires ${formatRelativeTime(session.expiresAt)} · uploads open automatically.`;
+    if (copy) copy.hidden = false;
+  }
+  const uploads = session?.uploads || [];
+  if (list) {
+    list.hidden = !uploads.length;
+    list.innerHTML = uploads.slice(0, 4).map((item) => `<div class="office-open-mobile-item is-${esc(item.status || "uploading")}">
+      <span class="office-open-mobile-item-icon"><svg class="icon" aria-hidden="true"><use href="#${item.status === "done" ? "i-check" : "i-upload"}"/></svg></span>
+      <div><strong>${esc(item.name || "Mobile upload")}</strong><span>${item.status === "done" ? "Ready to open" : `${Math.max(0, Math.min(100, Number(item.progress) || 0))}% · ${esc(item.status || "uploading")}`}</span></div>
+    </div>`).join("");
+  }
+}
+
+function renderOfficeOpenQr(host, session) {
+  if (!session?.url) return;
+  if (officeOpenMobile.qrSession === session.id && host.querySelector("canvas, img")) return;
+  host.innerHTML = "";
+  if (!window.QRCode) {
+    host.innerHTML = `<a class="upload-qr-fallback" href="${esc(session.url)}" target="_blank" rel="noopener">Open upload page</a>`;
+    return;
+  }
+  try {
+    new window.QRCode(host, {
+      text: session.url, width: 148, height: 148, correctLevel: window.QRCode.CorrectLevel.M,
+      colorDark: "#0b1a2a", colorLight: "#ffffff"
+    });
+    officeOpenMobile.qrSession = session.id;
+  } catch {
+    host.innerHTML = `<a class="upload-qr-fallback" href="${esc(session.url)}" target="_blank" rel="noopener">Open upload page</a>`;
+  }
+}
+
+async function ensureOfficeOpenMobileSession(force = false) {
+  const host = document.getElementById("officeOpenQr");
+  if (!host) return;
+  if (force && officeOpenMobile.session?.id) {
+    await api(`/api/upload-sessions/${encodeURIComponent(officeOpenMobile.session.id)}`, { method: "DELETE" }).catch(() => {});
+    officeOpenMobile.session = null;
+  }
+  if (!officeOpenMobile.session?.active) {
+    const data = await api("/api/upload-sessions", { method: "POST", body: { folderId: state.fileFolderId || "" } });
+    officeOpenMobile.session = data.session;
+    officeOpenMobile.seen = new Map();
+    officeOpenMobile.qrSession = "";
+  }
+  startOfficeOpenMobilePoll();
+  renderOfficeOpenMobile();
+}
+
+function startOfficeOpenMobilePoll() {
+  if (officeOpenMobile.poll) clearInterval(officeOpenMobile.poll);
+  officeOpenMobile.poll = setInterval(() => refreshOfficeOpenMobile().catch(() => {}), 2400);
+}
+
+async function refreshOfficeOpenMobile() {
+  const overlay = document.getElementById("officeOpenOverlay");
+  const session = officeOpenMobile.session;
+  if (!overlay || overlay.hidden || !session?.id) return;
+  let data;
+  try {
+    data = await api(`/api/upload-sessions/${encodeURIComponent(session.id)}`);
+  } catch {
+    return;
+  }
+  officeOpenMobile.session = data.session;
+  const completed = [];
+  for (const item of data.session?.uploads || []) {
+    const previous = officeOpenMobile.seen.get(item.id);
+    officeOpenMobile.seen.set(item.id, item.status);
+    if (item.status === "done" && previous !== "done") completed.push(item);
+  }
+  renderOfficeOpenMobile();
+  if (completed.length) {
+    await refreshCabinet().catch(() => {});
+    for (const item of completed) {
+      const file = (state.files || []).find((entry) => item.fileId && entry.id === item.fileId)
+        || (state.files || []).find((entry) => entry.name === item.name);
+      if (!file) continue;
+      const meta = officeMetaForFile(file);
+      if (!meta || meta.documentType !== officeOpenType) {
+        showToast(`${file.name} reached Cabinet, but only ${officeTypePlural(officeOpenType)} open in this editor`);
+        continue;
+      }
+      closeOfficeOpenDialog();
+      showToast(`Opening ${file.name} from your phone`);
+      openOfficeEditor(file);
+      return;
+    }
+  }
+  if (!data.session?.active) {
+    clearInterval(officeOpenMobile.poll);
+    officeOpenMobile.poll = null;
+    renderOfficeOpenMobile();
+  }
+}
+
+function renderOfficeOpenDialog() {
+  const meta = OFFICE_HUB_META[officeOpenType] || OFFICE_HUB_META.word;
+  const mark = document.getElementById("officeOpenMark");
+  const kind = document.getElementById("officeOpenKind");
+  const title = document.getElementById("officeOpenTitle");
+  const subtitle = document.getElementById("officeOpenSubtitle");
+  const browseHint = document.getElementById("officeOpenBrowseHint");
+  const typeNote = document.getElementById("officeOpenTypeNote");
+  if (mark) mark.innerHTML = `<svg class="icon" aria-hidden="true"><use href="#${meta.icon}"/></svg>`;
+  if (kind) kind.textContent = officeTypeLabel(officeOpenType);
+  if (title) title.textContent = `Open a ${meta.singular}`;
+  if (subtitle) subtitle.textContent = `Files from Cabinet, email and your phone that open in this ${meta.singular} editor.`;
+  if (browseHint) browseHint.textContent = `Choose a ${meta.singular} from this device`;
+  if (typeNote) typeNote.textContent = `Only ${officeTypePlural(officeOpenType)} can open in this editor.`;
+  const files = officeFilesOfType(officeOpenType);
+  const cabinetCount = document.getElementById("officeOpenCabinetCount");
+  const cabinetList = document.getElementById("officeOpenCabinetList");
+  if (cabinetCount) cabinetCount.textContent = `${files.length} ${files.length === 1 ? "file" : "files"} available`;
+  if (cabinetList) {
+    cabinetList.innerHTML = files.length ? files.map((file) => `<button class="office-open-row" type="button" data-office-open-file="${esc(file.id)}">
+      <span class="office-open-row-icon ${officeTypeClass(officeOpenType)}"><svg class="icon" aria-hidden="true"><use href="#${officeTypeIcon(officeOpenType)}"/></svg></span>
+      <span class="office-open-row-copy"><strong>${esc(file.name)}</strong><span>${esc(file.path || "Cabinet")} · ${esc(formatDateOnly(file.modifiedAt || file.updatedAt || file.createdAt) || "Recently updated")}</span></span>
+      <span class="office-open-row-go">Open</span>
+    </button>`).join("") : `<div class="office-open-empty"><svg class="icon" aria-hidden="true"><use href="#${meta.icon}"/></svg><strong>No ${esc(officeTypePlural(officeOpenType))} in Cabinet</strong><span>Upload one from this device or your phone.</span></div>`;
+  }
+  const mails = officeMailFilesOfType(officeOpenType);
+  const mailCount = document.getElementById("officeOpenMailCount");
+  const mailList = document.getElementById("officeOpenMailList");
+  if (mailCount) mailCount.textContent = `${mails.length} attachment${mails.length === 1 ? "" : "s"} found`;
+  if (mailList) {
+    mailList.innerHTML = mails.length ? mails.map(({ message, attachment }) => `<button class="office-open-row" type="button" data-office-open-attachment="${esc(attachment.id)}" data-office-open-attachment-name="${esc(attachment.name || "Attachment")}" data-office-open-message="${esc(message.id)}">
+      <span class="office-open-row-icon office-open-row-mail"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg></span>
+      <span class="office-open-row-copy"><strong>${esc(attachment.name || "Attachment")}</strong><span>${esc(message.subject || "(no subject)")} · ${esc(message.fromName || message.fromEmail || "Email")}</span></span>
+      <span class="office-open-row-go">Open</span>
+    </button>`).join("") : `<div class="office-open-empty"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><strong>No email ${esc(officeTypePlural(officeOpenType))}</strong><span>Messages with matching attachments will appear here.</span></div>`;
+  }
+  renderOfficeOpenMobile();
+}
+
+function openOfficeOpenDialog() {
+  const tab = officeTabById(officeDockActiveId);
+  if (!tab) return;
+  officeOpenType = tab.documentType || "word";
+  officeOpenOffset = { x: 0, y: 0 };
+  const overlay = document.getElementById("officeOpenOverlay");
+  const windowEl = document.getElementById("officeOpenWindow");
+  if (!overlay || !windowEl) return;
+  windowEl.style.transform = "translate(0px, 0px)";
+  overlay.hidden = false;
+  renderOfficeOpenDialog();
+  refreshCabinet().then(() => { if (!overlay.hidden) renderOfficeOpenDialog(); }).catch(() => {});
+  loadOfficeMailContext();
+  ensureOfficeOpenMobileSession().catch(showError);
+  setTimeout(() => document.getElementById("officeOpenClose")?.focus(), 40);
+}
+
+function closeOfficeOpenDialog() {
+  const overlay = document.getElementById("officeOpenOverlay");
+  if (overlay) overlay.hidden = true;
+  if (officeOpenMobile.poll) {
+    clearInterval(officeOpenMobile.poll);
+    officeOpenMobile.poll = null;
+  }
 }
 
 async function editComposeAttachmentInOffice(sessionId, index) {
@@ -24028,13 +24454,7 @@ function setupOfficeUi() {
     if (target.closest("#officeEditorMaximize")) {
       event.preventDefault();
       const overlay = document.getElementById("officeEditorOverlay");
-      const button = target.closest("#officeEditorMaximize");
-      const use = button.querySelector("use");
-      const maximized = !overlay.classList.contains("is-maximized");
-      overlay.classList.toggle("is-maximized", maximized);
-      if (use) use.setAttribute("href", maximized ? "#i-window-restore" : "#i-window-maximize");
-      button.setAttribute("aria-label", maximized ? "Restore editor size" : "Maximize editor");
-      button.title = maximized ? "Restore editor size" : "Maximize editor";
+      setOfficeEditorMaximized(!overlay.classList.contains("is-maximized"));
       return;
     }
     const hubUpload = target.closest("[data-office-hub-upload]");
@@ -24224,6 +24644,8 @@ function setupOfficeUi() {
     if (newDialog && !newDialog.hidden) { closeOfficeNewDialog(); return; }
     const versionsDialog = document.getElementById("officeVersionsOverlay");
     if (versionsDialog && !versionsDialog.hidden) { versionsDialog.hidden = true; return; }
+    const openDialog = document.getElementById("officeOpenOverlay");
+    if (openDialog && !openDialog.hidden) { closeOfficeOpenDialog(); return; }
     const hubDialog = document.getElementById("officeHubOverlay");
     if (hubDialog && !hubDialog.hidden) closeOfficeHub();
   });
@@ -24238,6 +24660,7 @@ function setupOfficeUi() {
       else if (target?.kind === "mail") refreshMailAttachmentAfterOffice(target).catch(() => {});
     }
   });
+  wireOfficeEditorEnhancements();
 }
 
 function setupCabinetInteractions() {
@@ -29377,6 +29800,7 @@ function handleFeatureClick(event) {
     event.preventDefault();
     state.editingTaskId = "new";
     state.selectedTaskId = null;
+    state.taskDraftLink = null;
     state.taskFilter = "all";
     state.query = "";
     searchInput.value = "";
@@ -29400,6 +29824,7 @@ function handleFeatureClick(event) {
     event.preventDefault();
     state.selectedTaskId = taskEdit.getAttribute("data-task-edit");
     state.editingTaskId = state.selectedTaskId;
+    state.taskDraftLink = null;
     renderTasks();
     return true;
   }
@@ -29410,6 +29835,13 @@ function handleFeatureClick(event) {
   if (target.closest("[data-task-editor-close]")) {
     event.preventDefault();
     state.editingTaskId = null;
+    state.taskDraftLink = null;
+    renderTasks();
+    return true;
+  }
+  if (target.closest("[data-task-clear-link]")) {
+    event.preventDefault();
+    state.taskDraftLink = null;
     renderTasks();
     return true;
   }
@@ -29418,6 +29850,7 @@ function handleFeatureClick(event) {
     event.preventDefault();
     state.selectedTaskId = taskRow.getAttribute("data-task-id");
     state.editingTaskId = null;
+    state.taskDraftLink = null;
     if (isMobile()) document.body.classList.add("task-detail-open");
     renderTasks();
     return true;
@@ -29773,6 +30206,216 @@ function wireHtmlSourceDialog() {
   htmlSourceOverlay?.addEventListener("click", (event) => {
     if (event.target === htmlSourceOverlay) closeHtmlSource();
   });
+}
+
+function setupOfficeEditorWindowControls() {
+  const head = document.getElementById("officeEditorHead");
+  const shell = document.getElementById("officeEditorShell");
+  const resize = document.getElementById("officeEditorResize");
+  if (!head || !shell) return;
+  let drag = null;
+  head.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || officeEditorIsCompact()) return;
+    if (event.target.closest("button, input, select, kbd, .office-editor-search, .office-editor-actions")) return;
+    const overlay = document.getElementById("officeEditorOverlay");
+    if (!overlay || overlay.hidden || overlay.classList.contains("is-maximized")) return;
+    const rect = shell.getBoundingClientRect();
+    shell.style.left = `${rect.left}px`;
+    shell.style.top = `${rect.top}px`;
+    shell.style.width = `${rect.width}px`;
+    shell.style.height = `${rect.height}px`;
+    drag = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
+    head.classList.add("is-dragging");
+    try { head.setPointerCapture?.(event.pointerId); } catch {}
+    event.preventDefault();
+  });
+  head.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    const width = shell.offsetWidth;
+    const height = shell.offsetHeight;
+    const left = Math.max(0, Math.min(window.innerWidth - 220, drag.left + event.clientX - drag.x));
+    const top = Math.max(0, Math.min(window.innerHeight - 54, drag.top + event.clientY - drag.y));
+    shell.style.left = `${left}px`;
+    shell.style.top = `${top}px`;
+    officeEditorWindow = { ...readOfficeEditorWindowState(), left, top, width, height, maximized: false };
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    drag = null;
+    head.classList.remove("is-dragging");
+    storeOfficeEditorWindowState();
+  };
+  head.addEventListener("pointerup", endDrag);
+  head.addEventListener("pointercancel", endDrag);
+  head.addEventListener("dblclick", (event) => {
+    if (event.target.closest("button, input, select, kbd, .office-editor-search, .office-editor-actions")) return;
+    document.getElementById("officeEditorMaximize")?.click();
+  });
+  let resizing = null;
+  resize?.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || officeEditorIsCompact()) return;
+    const overlay = document.getElementById("officeEditorOverlay");
+    if (!overlay || overlay.hidden || overlay.classList.contains("is-maximized")) return;
+    const rect = shell.getBoundingClientRect();
+    shell.style.left = `${rect.left}px`;
+    shell.style.top = `${rect.top}px`;
+    shell.style.width = `${rect.width}px`;
+    shell.style.height = `${rect.height}px`;
+    resizing = { x: event.clientX, y: event.clientY, width: rect.width, height: rect.height, left: rect.left, top: rect.top };
+    try { resize.setPointerCapture?.(event.pointerId); } catch {}
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  resize?.addEventListener("pointermove", (event) => {
+    if (!resizing) return;
+    const width = Math.max(OFFICE_EDITOR_MIN_WIDTH, Math.min(window.innerWidth - resizing.left, resizing.width + event.clientX - resizing.x));
+    const height = Math.max(OFFICE_EDITOR_MIN_HEIGHT, Math.min(window.innerHeight - resizing.top, resizing.height + event.clientY - resizing.y));
+    shell.style.width = `${width}px`;
+    shell.style.height = `${height}px`;
+    officeEditorWindow = { ...readOfficeEditorWindowState(), left: resizing.left, top: resizing.top, width, height, maximized: false };
+  });
+  const endResize = () => {
+    if (!resizing) return;
+    resizing = null;
+    storeOfficeEditorWindowState();
+  };
+  resize?.addEventListener("pointerup", endResize);
+  resize?.addEventListener("pointercancel", endResize);
+  window.addEventListener("resize", () => {
+    if (!document.getElementById("officeEditorOverlay")?.hidden) applyOfficeEditorGeometry();
+  });
+}
+
+function wireOfficeEditorEnhancements() {
+  setupOfficeEditorWindowControls();
+  const search = document.getElementById("officeEditorSearch");
+  const results = document.getElementById("officeEditorSearchResults");
+  search?.addEventListener("input", () => {
+    renderOfficeEditorSearch();
+    scheduleOfficeSearchRemote(search.value);
+  });
+  search?.addEventListener("focus", () => {
+    if (!document.getElementById("officeEditorOverlay")?.hidden) renderOfficeEditorSearch();
+  });
+  search?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeOfficeEditorSearch();
+      search.blur();
+      return;
+    }
+    if (event.key === "Enter") {
+      const row = results?.querySelector(".office-search-row");
+      if (row) {
+        event.preventDefault();
+        row.click();
+      }
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      const row = results?.querySelector(".office-search-row");
+      if (row) {
+        event.preventDefault();
+        row.focus();
+      }
+    }
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (results && !results.hidden && !event.target.closest("#officeEditorSearchWrap")) closeOfficeEditorSearch();
+  });
+  results?.addEventListener("click", (event) => {
+    const file = event.target.closest("[data-office-search-file]");
+    if (file) {
+      openOfficeSearchFile(file.getAttribute("data-office-search-file") || "");
+      return;
+    }
+    const attachment = event.target.closest("[data-office-search-attachment]");
+    if (attachment) {
+      openOfficeSearchAttachment(attachment);
+      return;
+    }
+    if (event.target.closest("[data-office-open-folder]")) {
+      closeOfficeEditorSearch();
+      openOfficeOpenDialog();
+    }
+  });
+
+  document.getElementById("officeEditorOpenFolder")?.addEventListener("click", openOfficeOpenDialog);
+  document.getElementById("officeOpenClose")?.addEventListener("click", closeOfficeOpenDialog);
+  const openOverlay = document.getElementById("officeOpenOverlay");
+  if (openOverlay) openOverlay.addEventListener("click", (event) => { if (event.target === openOverlay) closeOfficeOpenDialog(); });
+  const openWindow = document.getElementById("officeOpenWindow");
+  openWindow?.addEventListener("click", (event) => {
+    const file = event.target.closest("[data-office-open-file]");
+    if (file) {
+      const fileId = file.getAttribute("data-office-open-file") || "";
+      closeOfficeOpenDialog();
+      openOfficeEditorById(fileId).catch(showError);
+      return;
+    }
+    const attachment = event.target.closest("[data-office-open-attachment]");
+    if (attachment) {
+      const id = attachment.getAttribute("data-office-open-attachment") || "";
+      const name = attachment.getAttribute("data-office-open-attachment-name") || "Attachment";
+      const messageId = attachment.getAttribute("data-office-open-message") || "";
+      closeOfficeOpenDialog();
+      editMailAttachmentInOffice(id, name, messageId).catch(showError);
+      return;
+    }
+    if (event.target.closest("#officeOpenBrowse")) {
+      const input = document.getElementById("officeOpenFileInput");
+      if (input) {
+        input.accept = officeHubAccept(officeOpenType);
+        input.click();
+      }
+      return;
+    }
+    if (event.target.closest("#officeOpenNewQr")) {
+      ensureOfficeOpenMobileSession(true).catch(showError);
+      return;
+    }
+    if (event.target.closest("#officeOpenCopyLink")) {
+      const url = officeOpenMobile.session?.url;
+      if (url) copyText(url);
+      return;
+    }
+  });
+  document.getElementById("officeOpenFileInput")?.addEventListener("change", async (event) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0] || null;
+    input.value = "";
+    if (!file) return;
+    const type = officeOpenType;
+    const cabinetFile = await uploadOfficeFileToCabinet(file, type);
+    if (!cabinetFile) return;
+    closeOfficeOpenDialog();
+    showToast(`${cabinetFile.name} uploaded — opening in Office`);
+    openOfficeEditor(cabinetFile);
+  });
+  if (openWindow && document.getElementById("officeOpenHead")) {
+    const head = document.getElementById("officeOpenHead");
+    let drag = null;
+    head.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || event.target.closest("button")) return;
+      if (window.matchMedia("(max-width: 760px)").matches) return;
+      drag = { x: event.clientX, y: event.clientY, originX: officeOpenOffset.x, originY: officeOpenOffset.y };
+      head.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+    head.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      const limitX = Math.max(0, (window.innerWidth - openWindow.offsetWidth) / 2 - 30);
+      const limitY = Math.max(0, (window.innerHeight - openWindow.offsetHeight) / 2 - 30);
+      officeOpenOffset = {
+        x: Math.max(-limitX, Math.min(limitX, drag.originX + event.clientX - drag.x)),
+        y: Math.max(-limitY, Math.min(limitY, drag.originY + event.clientY - drag.y)),
+      };
+      openWindow.style.transform = `translate(${officeOpenOffset.x}px, ${officeOpenOffset.y}px)`;
+    });
+    const endDrag = () => { drag = null; };
+    head.addEventListener("pointerup", endDrag);
+    head.addEventListener("pointercancel", endDrag);
+  }
 }
 
 function bindEvents() {
@@ -31808,6 +32451,11 @@ function bindEvents() {
     if (!previewOverlay.hidden && !typing && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       event.preventDefault();
       navigatePreview(event.key === "ArrowLeft" ? -1 : 1);
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && !document.getElementById("officeEditorOverlay")?.hidden) {
+      event.preventDefault();
+      document.getElementById("officeEditorSearch")?.focus();
       return;
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
