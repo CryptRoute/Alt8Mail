@@ -1278,6 +1278,23 @@ try {
   check(await page.eval("document.querySelector('#officeEditorFrames iframe:not([hidden])')?.getAttribute('src').startsWith('/office-editor?file=')"), "editor host loads the isolated Office page");
   await page.waitFor(() => document.querySelector('#officeEditorFrames iframe:not([hidden])')?.contentDocument?.readyState === "complete", 5000);
   check(await page.eval("document.querySelector('#officeEditorFrames iframe:not([hidden])')?.contentDocument?.body.textContent.includes('Office editor preview')"), "Office editor host renders inside the Cabinet");
+  const officeChrome = await page.eval(`(() => {
+    const overlay = document.getElementById("officeEditorOverlay");
+    const shell = document.getElementById("officeEditorShell").getBoundingClientRect();
+    const controls = document.querySelector(".office-window-controls-edge").getBoundingClientRect();
+    const overlayStyle = getComputedStyle(overlay);
+    return {
+      background: overlayStyle.backgroundColor,
+      pointer: overlayStyle.pointerEvents,
+      width: shell.width,
+      shellRight: shell.right,
+      controlsRight: controls.right,
+      viewportWidth: window.innerWidth
+    };
+  })()`);
+  check(officeChrome.background === "rgba(0, 0, 0, 0)" && officeChrome.pointer === "none", "Office window floats without a page scrim");
+  check(officeChrome.width < officeChrome.viewportWidth - 100, "a new Office window opens at a focused size instead of filling the page");
+  check(officeChrome.controlsRight > officeChrome.shellRight - 32, "Office window controls sit at the far right edge");
   await page.click("#officeEditorMinimize");
   await sleep(250);
   check(await page.eval("document.getElementById('officeEditorOverlay').hidden === true"), "Office editor minimizes out of the workspace");
@@ -1315,6 +1332,11 @@ try {
   await page.setValue("#officeEditorSearch", "Product");
   await page.waitFor(() => document.querySelectorAll("#officeEditorSearchResults [data-office-search-file]").length > 0, 8000);
   check(await page.eval("document.querySelector('#officeEditorSearchResults [data-office-search-file]').textContent.includes('Product-offsite-plan')"), "Office search finds a Cabinet document by name");
+  await page.eval("document.getElementById('officeEditorTitle').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))");
+  await sleep(150);
+  check(await page.eval("document.getElementById('officeEditorSearchResults').hidden"), "Office search closes when the header is clicked");
+  await page.click("#officeEditorSearch");
+  await page.waitFor(() => document.querySelectorAll("#officeEditorSearchResults [data-office-search-file]").length > 0, 8000);
   await page.eval("document.querySelector('#officeEditorSearchResults [data-office-search-file]')?.click()");
   await sleep(700);
   check(await page.eval("document.getElementById('officeEditorTitle').textContent.includes('Product-offsite-plan')"), "a search result opens in the shared Office window");
@@ -2402,6 +2424,14 @@ try {
   await mobile.click("#readerBack");
   await sleep(250);
   check(await mobile.eval("!document.body.classList.contains('reader-open')"), "mobile back returns to the list");
+  check(await mobile.eval("Boolean(document.querySelector('#mobileDrawerBtn use[href=\"#i-apps\"]'))"), "mobile footer replaces Settings with the apps menu");
+  check(await mobile.eval("!document.querySelector('.mobile-tab[data-task=\"settings\"]')"), "Settings is removed from the mobile footer");
+  await mobile.click("#mobileDrawerBtn");
+  await sleep(250);
+  check(await mobile.eval("document.body.classList.contains('drawer-open')"), "mobile apps button opens the mailbox drawer");
+  await mobile.click("#drawerClose");
+  await sleep(250);
+  check(await mobile.eval("!document.body.classList.contains('drawer-open')"), "mobile drawer closes from its close button");
   await mobile.click("#folderToggle");
   await sleep(250);
   check(await mobile.eval("document.body.classList.contains('drawer-open')"), "mobile folder drawer opens");

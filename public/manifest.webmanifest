@@ -1,7 +1,7 @@
 {
   "name": "Alt8Mail",
   "short_name": "Alt8Mail",
-  "description": "Enterprise webmail template with two-factor sign-in, threaded conversations, scheduled send, tasks, files and attachment preview.",
+  "description": "AI-powered enterprise email with workspace for business email, calendar, files, tasks, office and AI.",
   "id": "/",
   "start_url": "/?source=pwa",
   "scope": "/",

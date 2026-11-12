@@ -30,6 +30,21 @@
     else reloadWithTheme();
   }
   applyHostTheme();
+  function notifyParentGesture(type) {
+    try { window.parent.postMessage({ type: type }, window.location.origin); } catch (_error) {}
+  }
+  document.addEventListener("pointerdown", function () {
+    notifyParentGesture("a8m-office-pointerdown");
+  }, true);
+  document.addEventListener("focusout", function () {
+    window.setTimeout(function () {
+      var active = document.activeElement;
+      if (active && active.tagName === "IFRAME") notifyParentGesture("a8m-office-pointerdown");
+    }, 0);
+  }, true);
+  window.addEventListener("blur", function () {
+    notifyParentGesture("a8m-office-blur");
+  });
   window.addEventListener("message", function (event) {
     if (event.origin !== window.location.origin) return;
     var data = event.data || {};

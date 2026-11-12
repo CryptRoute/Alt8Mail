@@ -8713,7 +8713,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.3.0";
+const MAIL_PROVIDER_ASSET_VERSION = "3.3.1";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -23147,6 +23147,7 @@ let officeOpenMobile = { session: null, seen: new Map(), poll: null, qr: "", qrS
 let officeEditorWindow = null;
 let officeSearchTimer = null;
 let officeSearchSeq = 0;
+let officeWindowPersistTimer = null;
 const OFFICE_EDITOR_MIN_WIDTH = 560;
 const OFFICE_EDITOR_MIN_HEIGHT = 360;
 const OFFICE_DOCK_KEY_PREFIX = "a8m.officeDock.v1";
@@ -23156,24 +23157,61 @@ function officeDockStorageKey() {
 }
 
 function officeEditorWindowStorageKey() {
-  return `a8m.officeWindow.v1.${normalizeEmail(state.user?.email || "guest")}`;
+  return `a8m.officeWindow.v2.${normalizeEmail(state.user?.email || "guest")}`;
+}
+
+function officeEditorWindowSnapshot() {
+  const state_ = officeEditorWindow || {};
+  const snapshot = { maximized: Boolean(state_.maximized), updatedAt: Date.now() };
+  for (const key of ["left", "top", "width", "height"]) {
+    const value = Number(state_[key]);
+    if (state_[key] !== null && state_[key] !== undefined && state_[key] !== "" && Number.isFinite(value)) {
+      snapshot[key] = Math.round(value);
+    }
+  }
+  return snapshot;
+}
+
+function persistOfficeWindowPreference(value) {
+  if (!state.user || !state.csrf) return;
+  clearTimeout(officeWindowPersistTimer);
+  officeWindowPersistTimer = setTimeout(async () => {
+    try {
+      const data = await api("/api/preferences", { method: "PATCH", body: { officeWindow: value } });
+      if (!data?.preferences) return;
+      state.preferences = { ...state.preferences, ...data.preferences };
+      if (state.user) state.user.preferences = state.preferences;
+    } catch {}
+  }, 500);
 }
 
 function readOfficeEditorWindowState() {
   if (officeEditorWindow) return officeEditorWindow;
+  let local = null;
   try {
     const raw = localStorage.getItem(officeEditorWindowStorageKey());
-    officeEditorWindow = raw ? JSON.parse(raw) : {};
+    local = raw ? JSON.parse(raw) : null;
   } catch {
-    officeEditorWindow = {};
+    local = null;
   }
-  if (!officeEditorWindow || typeof officeEditorWindow !== "object") officeEditorWindow = {};
+  const server = state.user?.preferences?.officeWindow;
+  const localHasGeometry = local && typeof local === "object"
+    && (Number(local.width) > 0 || Number(local.left) > 0 || local.maximized === true);
+  const localStamp = Number(local?.updatedAt || 0);
+  const serverStamp = Number(server?.updatedAt || 0);
+  const candidate = server && typeof server === "object" && serverStamp > localStamp
+    ? server
+    : (localHasGeometry ? local : (server && typeof server === "object" ? server : {}));
+  officeEditorWindow = { ...candidate };
   return officeEditorWindow;
 }
 
 function storeOfficeEditorWindowState() {
   if (!officeEditorWindow) return;
-  try { localStorage.setItem(officeEditorWindowStorageKey(), JSON.stringify(officeEditorWindow)); } catch {}
+  const snapshot = officeEditorWindowSnapshot();
+  officeEditorWindow = snapshot;
+  try { localStorage.setItem(officeEditorWindowStorageKey(), JSON.stringify(snapshot)); } catch {}
+  persistOfficeWindowPreference(snapshot);
 }
 
 function officeEditorIsCompact() {
@@ -23206,16 +23244,24 @@ function applyOfficeEditorGeometry() {
   const viewportHeight = window.innerHeight;
   const maxWidth = Math.max(OFFICE_EDITOR_MIN_WIDTH, viewportWidth - margin * 2);
   const maxHeight = Math.max(OFFICE_EDITOR_MIN_HEIGHT, viewportHeight - margin * 2);
-  const width = Math.min(maxWidth, Math.max(OFFICE_EDITOR_MIN_WIDTH, Number(state_.width) || maxWidth));
-  const height = Math.min(maxHeight, Math.max(OFFICE_EDITOR_MIN_HEIGHT, Number(state_.height) || maxHeight));
+  const preferredWidth = Math.min(maxWidth, Math.max(Math.min(820, maxWidth), Math.round(viewportWidth * 0.78)));
+  const preferredHeight = Math.min(maxHeight, Math.max(Math.min(520, maxHeight), Math.round(viewportHeight * 0.82)));
+  const width = Number(state_.width) > 0
+    ? Math.min(maxWidth, Math.max(OFFICE_EDITOR_MIN_WIDTH, Number(state_.width)))
+    : preferredWidth;
+  const height = Number(state_.height) > 0
+    ? Math.min(maxHeight, Math.max(OFFICE_EDITOR_MIN_HEIGHT, Number(state_.height)))
+    : preferredHeight;
   const maxLeft = Math.max(0, viewportWidth - Math.min(220, width));
   const maxTop = Math.max(0, viewportHeight - 54);
-  const left = Number.isFinite(Number(state_.left)) && state_.left !== null
-    ? Math.min(maxLeft, Math.max(-(width - 220), Number(state_.left)))
-    : margin;
-  const top = Number.isFinite(Number(state_.top)) && state_.top !== null
+  const hasLeft = state_.left !== null && state_.left !== undefined && Number.isFinite(Number(state_.left));
+  const hasTop = state_.top !== null && state_.top !== undefined && Number.isFinite(Number(state_.top));
+  const left = hasLeft
+    ? Math.min(maxLeft, Math.max(0, Number(state_.left)))
+    : Math.round((viewportWidth - width) / 2);
+  const top = hasTop
     ? Math.min(maxTop, Math.max(0, Number(state_.top)))
-    : margin;
+    : Math.round((viewportHeight - height) / 2);
   shell.style.left = `${left}px`;
   shell.style.top = `${top}px`;
   shell.style.width = `${width}px`;
@@ -23352,6 +23398,11 @@ function officeFrameFor(tab) {
   frame.dataset.officeTabId = tab.id;
   frame.src = `/office-editor?file=${encodeURIComponent(tab.id)}&theme=${effectiveTheme() === "dark" ? "dark" : "light"}`;
   frame.hidden = true;
+  frame.addEventListener("load", () => {
+    try {
+      frame.contentDocument?.addEventListener("pointerdown", () => closeOfficeEditorSearch(), true);
+    } catch {}
+  });
   container.appendChild(frame);
   officeFrames.set(tab.id, frame);
   return frame;
@@ -23449,6 +23500,9 @@ function parkOfficeEditorForSignOut() {
   officeDockTabs = [];
   officeDockActiveId = "";
   officeAttachmentTargets.clear();
+  officeEditorWindow = null;
+  if (officeOpenMobile.poll) clearInterval(officeOpenMobile.poll);
+  officeOpenMobile = { session: null, seen: new Map(), poll: null, qr: "", qrSession: "" };
   renderOfficeDock();
 }
 
@@ -24653,6 +24707,7 @@ function setupOfficeUi() {
     if (event.origin !== window.location.origin) return;
     const data = event.data || {};
     if (data.type === "a8m-office-error") showToast(data.detail || "Office could not open the document.");
+    if (data.type === "a8m-office-pointerdown" || data.type === "a8m-office-blur") closeOfficeEditorSearch();
     if (data.type === "a8m-office-ready") syncOfficeEditorTheme();
     if (data.type === "a8m-office-saved" && data.detail) {
       const target = officeAttachmentTargets.get(String(data.detail));
@@ -30211,12 +30266,11 @@ function wireHtmlSourceDialog() {
 function setupOfficeEditorWindowControls() {
   const head = document.getElementById("officeEditorHead");
   const shell = document.getElementById("officeEditorShell");
-  const resize = document.getElementById("officeEditorResize");
   if (!head || !shell) return;
   let drag = null;
   head.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || officeEditorIsCompact()) return;
-    if (event.target.closest("button, input, select, kbd, .office-editor-search, .office-editor-actions")) return;
+    if (event.target.closest("button, input, select, kbd, .office-editor-search, .office-editor-tools, .office-window-controls")) return;
     const overlay = document.getElementById("officeEditorOverlay");
     if (!overlay || overlay.hidden || overlay.classList.contains("is-maximized")) return;
     const rect = shell.getBoundingClientRect();
@@ -30248,42 +30302,73 @@ function setupOfficeEditorWindowControls() {
   head.addEventListener("pointerup", endDrag);
   head.addEventListener("pointercancel", endDrag);
   head.addEventListener("dblclick", (event) => {
-    if (event.target.closest("button, input, select, kbd, .office-editor-search, .office-editor-actions")) return;
+    if (event.target.closest("button, input, select, kbd, .office-editor-search, .office-editor-tools, .office-window-controls")) return;
     document.getElementById("officeEditorMaximize")?.click();
   });
-  let resizing = null;
-  resize?.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || officeEditorIsCompact()) return;
-    const overlay = document.getElementById("officeEditorOverlay");
-    if (!overlay || overlay.hidden || overlay.classList.contains("is-maximized")) return;
-    const rect = shell.getBoundingClientRect();
-    shell.style.left = `${rect.left}px`;
-    shell.style.top = `${rect.top}px`;
-    shell.style.width = `${rect.width}px`;
-    shell.style.height = `${rect.height}px`;
-    resizing = { x: event.clientX, y: event.clientY, width: rect.width, height: rect.height, left: rect.left, top: rect.top };
-    try { resize.setPointerCapture?.(event.pointerId); } catch {}
-    event.preventDefault();
-    event.stopPropagation();
-  });
-  resize?.addEventListener("pointermove", (event) => {
-    if (!resizing) return;
-    const width = Math.max(OFFICE_EDITOR_MIN_WIDTH, Math.min(window.innerWidth - resizing.left, resizing.width + event.clientX - resizing.x));
-    const height = Math.max(OFFICE_EDITOR_MIN_HEIGHT, Math.min(window.innerHeight - resizing.top, resizing.height + event.clientY - resizing.y));
-    shell.style.width = `${width}px`;
-    shell.style.height = `${height}px`;
-    officeEditorWindow = { ...readOfficeEditorWindowState(), left: resizing.left, top: resizing.top, width, height, maximized: false };
-  });
-  const endResize = () => {
-    if (!resizing) return;
-    resizing = null;
-    storeOfficeEditorWindowState();
-  };
-  resize?.addEventListener("pointerup", endResize);
-  resize?.addEventListener("pointercancel", endResize);
+  for (const handle of document.querySelectorAll("[data-office-resize]")) {
+    handle.addEventListener("pointerdown", (event) => beginOfficeEditorResize(event, handle.getAttribute("data-office-resize") || "se", shell, handle));
+  }
   window.addEventListener("resize", () => {
     if (!document.getElementById("officeEditorOverlay")?.hidden) applyOfficeEditorGeometry();
   });
+}
+
+function beginOfficeEditorResize(event, direction, shell, handle) {
+  if (event.button !== 0 || officeEditorIsCompact()) return;
+  const overlay = document.getElementById("officeEditorOverlay");
+  if (!overlay || overlay.hidden || overlay.classList.contains("is-maximized")) return;
+  const rect = shell.getBoundingClientRect();
+  shell.style.left = `${rect.left}px`;
+  shell.style.top = `${rect.top}px`;
+  shell.style.width = `${rect.width}px`;
+  shell.style.height = `${rect.height}px`;
+  const start = { x: event.clientX, y: event.clientY, width: rect.width, height: rect.height, left: rect.left, top: rect.top };
+  const dir = direction || "se";
+  try { handle.setPointerCapture?.(event.pointerId); } catch {}
+  event.preventDefault();
+  event.stopPropagation();
+  const onMove = (moveEvent) => {
+    const dx = moveEvent.clientX - start.x;
+    const dy = moveEvent.clientY - start.y;
+    let left = start.left;
+    let top = start.top;
+    let width = start.width;
+    let height = start.height;
+    if (dir.includes("e")) width = start.width + dx;
+    if (dir.includes("s")) height = start.height + dy;
+    if (dir.includes("w")) { left = start.left + dx; width = start.width - dx; }
+    if (dir.includes("n")) { top = start.top + dy; height = start.height - dy; }
+    if (width < OFFICE_EDITOR_MIN_WIDTH) {
+      if (dir.includes("w")) left -= OFFICE_EDITOR_MIN_WIDTH - width;
+      width = OFFICE_EDITOR_MIN_WIDTH;
+    }
+    if (height < OFFICE_EDITOR_MIN_HEIGHT) {
+      if (dir.includes("n")) top -= OFFICE_EDITOR_MIN_HEIGHT - height;
+      height = OFFICE_EDITOR_MIN_HEIGHT;
+    }
+    if (left < 0) { width += left; left = 0; }
+    if (top < 0) { height += top; top = 0; }
+    width = Math.min(width, window.innerWidth - left);
+    height = Math.min(height, window.innerHeight - top);
+    shell.style.left = `${Math.round(left)}px`;
+    shell.style.top = `${Math.round(top)}px`;
+    shell.style.width = `${Math.round(width)}px`;
+    shell.style.height = `${Math.round(height)}px`;
+    officeEditorWindow = {
+      ...readOfficeEditorWindowState(),
+      left: Math.round(left), top: Math.round(top),
+      width: Math.round(width), height: Math.round(height), maximized: false
+    };
+  };
+  const onEnd = () => {
+    handle.removeEventListener("pointermove", onMove);
+    handle.removeEventListener("pointerup", onEnd);
+    handle.removeEventListener("pointercancel", onEnd);
+    storeOfficeEditorWindowState();
+  };
+  handle.addEventListener("pointermove", onMove);
+  handle.addEventListener("pointerup", onEnd);
+  handle.addEventListener("pointercancel", onEnd);
 }
 
 function wireOfficeEditorEnhancements() {
@@ -30297,6 +30382,7 @@ function wireOfficeEditorEnhancements() {
   search?.addEventListener("focus", () => {
     if (!document.getElementById("officeEditorOverlay")?.hidden) renderOfficeEditorSearch();
   });
+  search?.addEventListener("click", renderOfficeEditorSearch);
   search?.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -30322,6 +30408,11 @@ function wireOfficeEditorEnhancements() {
   });
   document.addEventListener("pointerdown", (event) => {
     if (results && !results.hidden && !event.target.closest("#officeEditorSearchWrap")) closeOfficeEditorSearch();
+  }, true);
+  search?.addEventListener("blur", () => {
+    setTimeout(() => {
+      if (!document.activeElement?.closest?.("#officeEditorSearchWrap")) closeOfficeEditorSearch();
+    }, 120);
   });
   results?.addEventListener("click", (event) => {
     const file = event.target.closest("[data-office-search-file]");
@@ -31081,6 +31172,7 @@ function bindEvents() {
     if (event.target.closest("#folderEditorSave")) saveFolderEditor();
   });
   document.getElementById("folderToggle").addEventListener("click", openDrawer);
+  document.getElementById("mobileDrawerBtn")?.addEventListener("click", openDrawer);
   document.getElementById("drawerClose").addEventListener("click", closeDrawer);
   document.getElementById("cmdCompose").addEventListener("click", () => openCompose());
   document.getElementById("drawerCompose").addEventListener("click", () => { closeDrawer(); openCompose(); });

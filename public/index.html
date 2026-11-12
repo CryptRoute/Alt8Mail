@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Alt8Mail: Secure, AI-Powered Email that thinks with you !</title>
-<meta name="description" content="Alt8Mail — an enterprise webmail template with two-factor sign-in, threaded conversations, instant search, scheduled send, tasks, files, attachment preview and sender trust.">
+<meta name="description" content="AI-powered enterprise email with workspace for business email, calendar, files, tasks, office and AI.">
 <meta name="theme-color" content="#093256">
 <meta name="color-scheme" content="light dark">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -12,14 +12,14 @@
 <link rel="icon" href="/icons/favicon-48.png" sizes="48x48" type="image/png">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=3.3.0">
-<link rel="stylesheet" href="/features.css?v=3.3.0">
-<link rel="stylesheet" href="/workspace.css?v=3.3.0">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=3.3.0">
-<link rel="stylesheet" href="/features-0.7.css?v=3.3.0">
-<link rel="stylesheet" href="/onboarding.css?v=3.3.0">
-<link rel="stylesheet" href="/email-ui.css?v=3.3.0">
-<link rel="stylesheet" href="/selects.css?v=3.3.0">
+<link rel="stylesheet" href="/styles.css?v=3.3.1">
+<link rel="stylesheet" href="/features.css?v=3.3.1">
+<link rel="stylesheet" href="/workspace.css?v=3.3.1">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=3.3.1">
+<link rel="stylesheet" href="/features-0.7.css?v=3.3.1">
+<link rel="stylesheet" href="/onboarding.css?v=3.3.1">
+<link rel="stylesheet" href="/email-ui.css?v=3.3.1">
+<link rel="stylesheet" href="/selects.css?v=3.3.1">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -77,6 +77,7 @@
     <symbol id="i-location" viewBox="0 0 24 24"><path d="M12 21s7-5.2 7-11a7 7 0 1 0-14 0c0 5.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.5"/></symbol>
     <symbol id="i-tag" viewBox="0 0 24 24"><path d="M4 4.5h6.5L20 14l-6 6L4.5 10.5Z"/><circle cx="8.5" cy="8.5" r="1.2"/></symbol>
     <symbol id="i-grid" viewBox="0 0 24 24"><circle cx="6" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="6" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="6" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="18" cy="18" r="1.4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-apps" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.7"/><rect x="13" y="4" width="7" height="7" rx="1.7"/><rect x="4" y="13" width="7" height="7" rx="1.7"/><rect x="13" y="13" width="7" height="7" rx="1.7"/></symbol>
     <symbol id="i-expand" viewBox="0 0 24 24"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></symbol>
     <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M17 7 7 17"/><path d="M16 17H7V8"/></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h7M15 17h5"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="13" cy="17" r="2"/></symbol>
@@ -2055,8 +2056,8 @@
     <button class="mobile-tab" data-task="files" type="button">
       <svg class="icon" aria-hidden="true"><use href="#i-cabinet"/></svg><span data-i18n="nav.files">Cabinet</span>
     </button>
-    <button class="mobile-tab" data-task="settings" type="button">
-      <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span data-i18n="nav.settings">Settings</span>
+    <button class="mobile-tab" id="mobileDrawerBtn" type="button" aria-label="Mailboxes and folders">
+      <svg class="icon" aria-hidden="true"><use href="#i-apps"/></svg><span>Menu</span>
     </button>
   </nav>
 </div>
@@ -3291,20 +3292,27 @@
         <kbd class="office-search-kbd" aria-hidden="true">Ctrl K</kbd>
         <div class="office-editor-search-results" id="officeEditorSearchResults" role="listbox" aria-label="Search results" hidden></div>
       </div>
-      <div class="office-editor-actions">
+      <div class="office-editor-tools">
         <button class="btn-secondary btn-small office-open-folder-btn" id="officeEditorOpenFolder" type="button" title="Open a document" aria-label="Open a document"><svg class="icon" aria-hidden="true"><use href="#i-folder-open"/></svg><span>Open</span></button>
         <button class="btn-secondary btn-small" id="officeEditorVersions" type="button"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg>Versions</button>
-        <div class="office-window-controls" role="group" aria-label="Window controls">
-          <button class="icon-btn office-window-btn" id="officeEditorMinimize" type="button" aria-label="Minimize to dock" title="Minimize to dock"><svg class="icon" aria-hidden="true"><use href="#i-minimize"/></svg></button>
-          <button class="icon-btn office-window-btn" id="officeEditorMaximize" type="button" aria-label="Maximize editor" title="Maximize editor"><svg class="icon" aria-hidden="true"><use href="#i-window-maximize"/></svg></button>
-          <button class="icon-btn office-window-btn office-window-close" id="officeEditorClose" type="button" aria-label="Close editor" title="Close editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
-        </div>
+      </div>
+      <div class="office-window-controls office-window-controls-edge" role="group" aria-label="Window controls">
+        <button class="icon-btn office-window-btn" id="officeEditorMinimize" type="button" aria-label="Minimize to dock" title="Minimize to dock"><svg class="icon" aria-hidden="true"><use href="#i-minimize"/></svg></button>
+        <button class="icon-btn office-window-btn" id="officeEditorMaximize" type="button" aria-label="Maximize editor" title="Maximize editor"><svg class="icon" aria-hidden="true"><use href="#i-window-maximize"/></svg></button>
+        <button class="icon-btn office-window-btn office-window-close" id="officeEditorClose" type="button" aria-label="Close editor" title="Close editor"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
       </div>
     </header>
     <div class="office-editor-body" id="officeEditorBody">
       <div class="office-editor-frames" id="officeEditorFrames"></div>
     </div>
-    <span class="office-editor-resize" id="officeEditorResize" aria-hidden="true"></span>
+    <span class="office-resize-handle" data-office-resize="n" aria-hidden="true"></span>
+    <span class="office-resize-handle" data-office-resize="e" aria-hidden="true"></span>
+    <span class="office-resize-handle" data-office-resize="s" aria-hidden="true"></span>
+    <span class="office-resize-handle" data-office-resize="w" aria-hidden="true"></span>
+    <span class="office-resize-handle" data-office-resize="ne" aria-hidden="true"></span>
+    <span class="office-resize-handle" data-office-resize="nw" aria-hidden="true"></span>
+    <span class="office-resize-handle office-editor-resize office-resize-se" id="officeEditorResize" data-office-resize="se" aria-hidden="true"></span>
+    <span class="office-resize-handle" data-office-resize="sw" aria-hidden="true"></span>
   </div>
 </div>
 
@@ -3452,7 +3460,7 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script src="/sw-update.js?v=3.3.0"></script>
-<script type="module" src="/app.js?v=3.3.0"></script>
+<script src="/sw-update.js?v=3.3.1"></script>
+<script type="module" src="/app.js?v=3.3.1"></script>
 </body>
 </html>

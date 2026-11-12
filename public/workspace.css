@@ -1919,11 +1919,12 @@ body.popout .overlay { z-index: 120; }
   inset: 0;
   z-index: 100;
   display: block;
-  background: color-mix(in srgb, #07101c 72%, transparent);
+  background: transparent;
   padding: 0;
+  pointer-events: none;
 }
-body.office-editor-open { overflow: hidden; }
 .office-editor-shell {
+  pointer-events: auto;
   position: absolute;
   left: 18px;
   top: 18px;
@@ -1951,7 +1952,7 @@ body.office-editor-open { overflow: hidden; }
 }
 .office-editor-head {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(260px, 560px) minmax(190px, 1fr);
+  grid-template-columns: minmax(150px, 1fr) minmax(260px, 560px) auto minmax(104px, 1fr);
   align-items: center;
   gap: 14px;
   padding: 10px 14px;
@@ -1960,6 +1961,8 @@ body.office-editor-open { overflow: hidden; }
   cursor: grab;
   user-select: none;
 }
+.office-editor-tools { display: flex; align-items: center; gap: 8px; justify-self: start; }
+.office-window-controls-edge { justify-self: end; }
 .office-editor-head.is-dragging { cursor: grabbing; }
 .office-editor-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .office-editor-title > div { display: flex; flex-direction: column; min-width: 0; }
@@ -1976,21 +1979,38 @@ body.office-editor-open { overflow: hidden; }
   color: var(--accent-ink);
 }
 .office-editor-mark svg { width: 15px; height: 15px; }
-.office-editor-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .office-editor-body { flex: 1; min-height: 0; position: relative; background: var(--surface); }
 .office-editor-frames { position: absolute; inset: 0; }
 .office-editor-body iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--surface); }
 .office-editor-body iframe[hidden] { display: none; }
-.office-editor-resize {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  z-index: 6;
-  width: 18px;
-  height: 18px;
-  cursor: nwse-resize;
-  opacity: .55;
-}
+.office-resize-handle { position: absolute; z-index: 6; opacity: .55; }
+.office-resize-handle::after { content: ""; position: absolute; opacity: 0; background: var(--accent); border-radius: 2px; transition: opacity .15s; }
+.office-resize-handle:hover::after { opacity: .45; }
+.office-resize-handle[data-office-resize="n"],
+.office-resize-handle[data-office-resize="s"] { left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+.office-resize-handle[data-office-resize="n"] { top: 0; }
+.office-resize-handle[data-office-resize="s"] { bottom: 0; }
+.office-resize-handle[data-office-resize="n"]::after,
+.office-resize-handle[data-office-resize="s"]::after { left: 50%; transform: translateX(-50%); width: 46px; height: 2px; }
+.office-resize-handle[data-office-resize="n"]::after { top: 1px; }
+.office-resize-handle[data-office-resize="s"]::after { bottom: 1px; }
+.office-resize-handle[data-office-resize="e"],
+.office-resize-handle[data-office-resize="w"] { top: 12px; bottom: 12px; width: 6px; cursor: ew-resize; }
+.office-resize-handle[data-office-resize="e"] { right: 0; }
+.office-resize-handle[data-office-resize="w"] { left: 0; }
+.office-resize-handle[data-office-resize="e"]::after,
+.office-resize-handle[data-office-resize="w"]::after { top: 50%; transform: translateY(-50%); width: 2px; height: 46px; }
+.office-resize-handle[data-office-resize="e"]::after { right: 1px; }
+.office-resize-handle[data-office-resize="w"]::after { left: 1px; }
+.office-resize-handle[data-office-resize="ne"],
+.office-resize-handle[data-office-resize="nw"],
+.office-resize-handle[data-office-resize="se"],
+.office-resize-handle[data-office-resize="sw"] { width: 14px; height: 14px; }
+.office-resize-handle[data-office-resize="ne"] { top: 0; right: 0; cursor: nesw-resize; }
+.office-resize-handle[data-office-resize="nw"] { top: 0; left: 0; cursor: nwse-resize; }
+.office-resize-handle[data-office-resize="se"] { bottom: 0; right: 0; cursor: nwse-resize; }
+.office-resize-handle[data-office-resize="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
+.office-editor-resize { right: 2px; bottom: 2px; width: 18px; height: 18px; }
 .office-editor-resize::before,
 .office-editor-resize::after {
   content: "";
@@ -2003,7 +2023,8 @@ body.office-editor-open { overflow: hidden; }
   border-bottom: 2px solid var(--text-3);
 }
 .office-editor-resize::after { width: 10px; height: 10px; opacity: .6; }
-.office-editor-overlay.is-maximized .office-editor-resize { display: none; }
+.office-editor-resize:hover::after { opacity: .75; }
+.office-editor-overlay.is-maximized .office-resize-handle { display: none; }
 
 .office-editor-search {
   position: relative;
@@ -2159,7 +2180,7 @@ body.office-editor-open { overflow: hidden; }
   .office-editor-overlay { padding: 0; }
   .office-editor-shell { border: 0; border-radius: 0; }
   .office-editor-head { padding: 9px 10px; }
-  .office-editor-actions .btn-small span { display: none; }
+  .office-editor-tools .btn-small span { display: none; }
   .office-version-row { flex-wrap: wrap; }
   .office-version-actions { width: 100%; justify-content: flex-end; }
 }
@@ -2298,7 +2319,7 @@ body.office-editor-open { overflow: hidden; }
 }
 @media (max-width: 980px) {
   .office-search-kbd { display: none; }
-  .office-editor-head { grid-template-columns: minmax(120px, .8fr) minmax(180px, 1.4fr) auto; }
+  .office-editor-head { grid-template-columns: minmax(120px, .8fr) minmax(180px, 1.4fr) auto auto; }
 }
 @media (max-width: 720px) {
   .office-editor-shell {
@@ -2313,8 +2334,8 @@ body.office-editor-open { overflow: hidden; }
   }
   .office-editor-head { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
   .office-editor-search { order: 3; flex: 1 1 100%; height: 34px; }
-  .office-editor-actions { margin-left: auto; }
-  .office-editor-resize { display: none; }
+  .office-window-controls-edge { margin-left: auto; }
+  .office-resize-handle { display: none; }
 }
 #officeVersionsOverlay { z-index: 105; }
 .overlay.is-office-confirm { z-index: 1400; }
@@ -2482,8 +2503,8 @@ body.office-editor-open { overflow: hidden; }
   .office-window-btn { width: 28px; }
 }
 @media (max-width: 520px) {
-  .office-editor-actions { gap: 5px; }
-  .office-editor-actions .btn-small { padding-left: 8px; padding-right: 8px; }
+  .office-editor-tools { gap: 5px; }
+  .office-editor-tools .btn-small { padding-left: 8px; padding-right: 8px; }
 }
 
 /* ---------- inline selection translation ---------- */

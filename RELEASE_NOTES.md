@@ -1,3 +1,40 @@
+# Alt8Mail 3.3.1
+
+Release date: 2026-11-12. Office window polish and Reply-To delivery fix.
+
+## 3.3.1 a calmer Office window and a Reply-To that reaches the recipient
+
+- The Office minimize, maximize and close controls now sit at the far right edge
+  of the header, matching the compose window. **Open** and **Versions** keep
+  their place next to the centered search.
+- The dark page scrim is gone. The Office window floats over the workspace like a
+  compose window, so the underlying page stays visible and interactive while the
+  editor is open.
+- Window position and size are stored locally and in the user's server
+  preferences (`officeWindow`). Last-write-wins timestamps keep both copies in
+  step, so signing in on another system restores the remembered geometry for
+  every Office type.
+- A new Office window opens at a focused, centered 78% × 82% size rather than
+  almost filling the viewport. All four edges and corners are draggable resize
+  handles, alongside the visible bottom-right grip. Double-clicking the header
+  still maximizes and restores.
+- The recent-documents dropdown now closes on any click outside the search
+  field: elsewhere in the header, another part of the Office chrome, the page
+  behind the window, or inside the ONLYOFFICE editor.
+- PWA install screenshots were refreshed at the manifest's exact sizes
+  (1440x1000 wide, 390x844 narrow) with the current Alt8Mail icon and logo.
+  The manifest and page description now read “AI-powered enterprise email with
+  workspace for business email, calendar, files, tasks, office and AI.”
+- The mobile footer's Settings tab is replaced by a four-square **Menu** icon
+  that opens the mailbox and folder drawer, matching the mobile folder control.
+- **Reply-To delivery fix**: the normalized `outbox` table did not carry
+  `reply_to`. The send handler stored the value in the state document, but the
+  delivery worker rebuilds the queue from the outbox table and therefore dropped
+  it before building the MIME message. Migration `0087_outbox_reply_to.sql` adds
+  the column, persistence and loading now include it, and delivery resolves the
+  identity reply-to from the database as a fallback for older queued items. An
+  integration test asserts the submitted message contains the Reply-To header.
+
 # Alt8Mail 3.3.0
 
 Release date: 2026-11-12. Office window, open dialog and email-to-task.

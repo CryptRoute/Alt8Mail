@@ -1,9 +1,9 @@
 {
   "name": "alt8mail-webmail",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "private": true,
   "type": "module",
-  "description": "Enterprise webmail template: 2FA, threaded mail, instant search, scheduled send, tasks, files, attachment preview, Sieve and sender trust.",
+  "description": "AI-powered enterprise email with workspace for business email, calendar, files, tasks, office and AI.",
   "engines": {
     "node": ">=22"
   },

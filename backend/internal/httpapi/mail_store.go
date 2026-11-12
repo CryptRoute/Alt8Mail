@@ -724,7 +724,8 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 		       thread_id, COALESCE(in_reply_to,''), priority, receipt, delivery, save_copy, scheduled,
 		       send_at, queued_at, hold_ms, status, delivery_state, delivery_claimed_at, retry_at,
 		       attempts, last_error, mime_message_id, draft_snapshot, ip, user_agent,
-		       compose_kind, source_message_id, classification, dlp_warnings, COALESCE(account_id,'')
+		       compose_kind, source_message_id, classification, dlp_warnings, COALESCE(account_id,''),
+		       COALESCE(reply_to::text,'')
 		FROM outbox WHERE user_id=$1 ORDER BY send_at ASC
 	`, userID)
 	if err != nil {
@@ -733,7 +734,7 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, draftID, threadID, inReplyTo, priority, status, deliveryState, lastError, mimeMessageID, ip, userAgent, composeKind, sourceMessageID, classification, accountID string
+		var id, draftID, threadID, inReplyTo, priority, status, deliveryState, lastError, mimeMessageID, ip, userAgent, composeKind, sourceMessageID, classification, accountID, replyTo string
 		var subject, bodyText, bodyHTML string
 		var fromJSON, toJSON, ccJSON, bccJSON, attachmentsJSON, draftSnapshotJSON, dlpWarningsJSON []byte
 		var receipt, delivery, saveCopy, scheduled bool
@@ -744,7 +745,7 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 			&attachmentsJSON, &threadID, &inReplyTo, &priority, &receipt, &delivery, &saveCopy,
 			&scheduled, &sendAt, &queuedAt, &holdMs, &status, &deliveryState, &claimedAt, &retryAt,
 			&attempts, &lastError, &mimeMessageID, &draftSnapshotJSON, &ip, &userAgent,
-			&composeKind, &sourceMessageID, &classification, &dlpWarningsJSON, &accountID); err != nil {
+			&composeKind, &sourceMessageID, &classification, &dlpWarningsJSON, &accountID, &replyTo); err != nil {
 			continue
 		}
 		item := map[string]any{
@@ -761,7 +762,7 @@ func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[strin
 			"composeKind": composeKind, "sourceMessageId": sourceMessageID,
 			"classification": firstNonEmpty(classification, "Internal"),
 			"dlpWarnings":    decodeJSONAny(dlpWarningsJSON, []any{}),
-			"accountId":      accountID,
+			"accountId":      accountID, "replyTo": replyTo,
 		}
 		if inReplyTo != "" {
 			item["inReplyTo"] = inReplyTo
@@ -1069,10 +1070,11 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 			body_text, body_html, attachments, thread_id, in_reply_to, priority, receipt, delivery,
 			save_copy, scheduled, send_at, queued_at, hold_ms, status, delivery_state, delivery_claimed_at,
 			retry_at, attempts, last_error, mime_message_id, draft_snapshot, ip, user_agent,
-			compose_kind, source_message_id, classification, dlp_warnings, created_at, updated_at, account_id
+			compose_kind, source_message_id, classification, dlp_warnings, created_at, updated_at, account_id,
+			reply_to
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),$15,$16,$17,$18,$19,$20,
-			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,now(),NULLIF($38,'')
+			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,now(),NULLIF($38,''),NULLIF($39,'')
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			draft_id=EXCLUDED.draft_id, from_json=EXCLUDED.from_json, to_json=EXCLUDED.to_json,
@@ -1089,7 +1091,7 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 			ip=EXCLUDED.ip, user_agent=EXCLUDED.user_agent,
 			compose_kind=EXCLUDED.compose_kind, source_message_id=EXCLUDED.source_message_id,
 			classification=EXCLUDED.classification, dlp_warnings=EXCLUDED.dlp_warnings,
-			account_id=EXCLUDED.account_id, updated_at=now()
+			account_id=EXCLUDED.account_id, reply_to=EXCLUDED.reply_to, updated_at=now()
 	`, id, user.TenantID, user.ID, sanitizeMailText(stateString(item, "draftId")), fromJSON, toJSON, ccJSON, bccJSON,
 		truncate(sanitizeMailText(stateString(item, "subject")), 500), sanitizeMailText(stateString(item, "bodyText")),
 		sanitizeMailText(stateString(item, "bodyHtml")), attachmentsJSON,
@@ -1104,7 +1106,7 @@ func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRe
 		truncate(sanitizeMailText(stateString(item, "userAgent")), 300),
 		truncate(sanitizeMailText(stateString(item, "composeKind")), 24),
 		truncate(sanitizeMailText(stateString(item, "sourceMessageId")), 120),
-		classification, dlpWarningsJSON, queuedAt, accountID)
+		classification, dlpWarningsJSON, queuedAt, accountID, sanitizeMailText(stateString(item, "replyTo")))
 	return err
 }
 

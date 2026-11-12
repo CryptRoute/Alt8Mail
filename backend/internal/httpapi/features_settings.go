@@ -450,6 +450,50 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if value, ok := patch["officeWindow"]; ok {
+			if value == nil {
+				assign("officeWindow", nil)
+			} else {
+				raw, valid := value.(map[string]any)
+				if !valid {
+					return fail(http.StatusBadRequest, "PREFERENCES", "Office window must be an object or null")
+				}
+				number := func(key string) (float64, bool) {
+					value, ok := raw[key]
+					if !ok {
+						return 0, false
+					}
+					parsed, ok := value.(float64)
+					return parsed, ok
+				}
+				clamp := func(value, low, high float64) float64 {
+					if value < low {
+						return low
+					}
+					if value > high {
+						return high
+					}
+					return value
+				}
+				window := map[string]any{"maximized": raw["maximized"] == true}
+				if width, ok := number("width"); ok && width > 0 {
+					window["width"] = clamp(width, 320, 20000)
+				}
+				if height, ok := number("height"); ok && height > 0 {
+					window["height"] = clamp(height, 240, 20000)
+				}
+				if left, ok := number("left"); ok {
+					window["left"] = clamp(left, -20000, 20000)
+				}
+				if top, ok := number("top"); ok {
+					window["top"] = clamp(top, -20000, 20000)
+				}
+				if stamp, ok := number("updatedAt"); ok && stamp > 0 {
+					window["updatedAt"] = clamp(stamp, 0, 1e15)
+				}
+				assign("officeWindow", window)
+			}
+		}
 		if value, ok := patch["composePosition"]; ok {
 			position := fmt.Sprint(value)
 			if position != "center" && position != "bottom-right" && position != "bottom-left" {
@@ -464,7 +508,9 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 		}
 		encoded = payload
 		_, dockOnly := patch["officeDock"]
-		if !dockOnly || len(patch) != 1 {
+		_, windowOnly := patch["officeWindow"]
+		chromeOnly := len(patch) == 1 && (dockOnly || windowOnly)
+		if !chromeOnly {
 			appendStateAudit(state, "preferences.updated", "Workspace preferences", sess.User.Name,
 				"Updated "+strings.Join(changed, ", "), clientIP(r), sanitizeUserAgent(r.UserAgent()))
 		}
@@ -485,6 +531,7 @@ func (s *Server) resetPreferencesState(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
 	defaults := preferencesFor(userRecord{})
 	defaults["officeDock"] = nil
+	defaults["officeWindow"] = nil
 	var result map[string]any
 	err := s.withState(sess.User.ID, sess.User.TenantID, func(state map[string]any) error {
 		ensureStateCollections(state)

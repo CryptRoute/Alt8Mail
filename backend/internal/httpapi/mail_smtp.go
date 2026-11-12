@@ -98,6 +98,15 @@ func (s *Server) processOutboxItem(ctx context.Context, userID, tenantID, itemID
 		s.markDeliveryRetry(userID, tenantID, itemID, err)
 		return nil, err
 	}
+	// Older queued messages and any send path that did not enrich the item at
+	// enqueue still need the identity reply-to. Resolve it from the database at
+	// delivery time so a stored reply-to always becomes a Reply-To header.
+	if account.Kind == mailAccountKindNative && strings.TrimSpace(stateString(itemCopy, "replyTo")) == "" {
+		fromIdentity, _ := itemCopy["from"].(map[string]any)
+		if replyTo := s.identityReplyTo(ctx, userID, stateString(fromIdentity, "email")); replyTo != "" {
+			itemCopy["replyTo"] = replyTo
+		}
+	}
 	if account.Kind == mailAccountKindNative && !s.mailDeliveryConfigured() {
 		sentID, err := s.finalizeOutboxItem(userID, tenantID, itemID, "", nil)
 		if err != nil {
