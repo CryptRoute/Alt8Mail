@@ -1,3 +1,56 @@
+# Alt8Mail 3.4.0
+
+Release date: 2026-11-13. Managed mail storage, capacity protection and a rebuilt
+Disk Management console.
+
+## 3.4.0 mail storage you can see, place and change safely
+
+- **Storage-aware Dovecot homes.** The managed userdb query now returns
+  `mail_home` when a mailbox has one and falls back to the legacy
+  `/var/vmail/<domain>/<local-part>` path for existing mail. The storage doctor
+  backs up, validates and reloads the query and verifies a mailbox before
+  placement is unlocked. Upgrading an existing host does not move mail.
+- **Managed volume registry and placement.** The Control Plane registers
+  ext4, XFS and NFS mail volumes and records their mount path, UUID, device,
+  fstab block, reboot verification and health. New mailboxes resolve placement
+  by mailbox override, then domain default, then global default, then the legacy
+  root. Changing a default never moves existing mail.
+- **Reviewed host operations.** Add, adopt, extend, retire and wipe volumes run
+  through plan and execute steps, a typed confirmation, a root storage runner
+  and a replay-resistant plan token. The runner revalidates the device, serial
+  or WWN, mount state and filesystem before writing. fstab edits use marked
+  blocks and restore the original when validation fails.
+- **Verified mailbox moves.** Moves copy, verify and switch mailbox homes while
+  retaining the source for a configurable grace window. Operators can roll back
+  or finalize from the live operation console; progress, step state, logs and
+  per-mailbox results are retained.
+- **Capacity policy and protection.** Configurable advisory through emergency
+  thresholds, reserve and minimum free space, a 14-day linear forecast,
+  projected-full alerts, alert re-arming, low-I/O usage scans and mailbox-level
+  rebalance recommendations. At critical or emergency capacity the storage guard
+  holds new inbound mail with SMTP `4.3.1` and webmail/Cabinet uploads with HTTP
+  `507` while existing mail stays readable.
+- **Hardware awareness.** Physical disk inventory now includes SMART health,
+  topology detection for LVM, RAID, LUKS and multipath, clear protection reasons
+  and safe candidates. Mounted NFS filesystems can be adopted without changing
+  the export. Growth that cannot be performed safely, such as thin-LVM or
+  LVM-RAID extension, is refused with an explanation.
+- **Rebuilt Disk Management UI.** OS-style drive cards show capacity, path, type
+  and health; status filtering covers online, attention, offline, retired and
+  wiped volumes; clicking a volume opens full identity, health, forecast and
+  action details. Capacity outlook moves directly below the KPI cards, capacity
+  policy lives in a confirmed modal with a before/after change review, and
+  storage operations paginate ten per page with sortable Operation, Target,
+  Mailboxes and Status columns.
+- **Scalable move picker.** The move wizard searches and pages the mailbox
+  directory on the server, shows user, quota, used bytes, usage and current
+  volume, and keeps checkbox selection while paging. It is validated against a
+  5,120-mailbox directory. A single individually selected move is limited to 500
+  mailboxes by the planner; larger batches use a whole-domain move or multiple
+  jobs.
+- Migrations `0088_storage_volumes` through `0094_storage_forecast_alert` and
+  the new `a8m-storage-runner` binary ship in this release.
+
 # Alt8Mail 3.3.1
 
 Release date: 2026-11-12. Office window polish and Reply-To delivery fix.
