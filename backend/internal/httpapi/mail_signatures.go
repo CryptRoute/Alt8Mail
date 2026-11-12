@@ -260,6 +260,17 @@ func (s *Server) deleteSignature(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "SIGNATURE_NOT_FOUND", "Signature not found")
 		return
 	}
+	// Identities that pointed at this signature fall back to no signature
+	// instead of keeping a stale copy of its content.
+	_, _ = s.store.DB.Exec(r.Context(), `
+		UPDATE mail_identities SET signature_id='', signature='', signature_html='', updated_at=now()
+		WHERE user_id=$1 AND signature_id=$2
+	`, sess.User.ID, r.PathValue("id"))
+	_, _ = s.store.DB.Exec(r.Context(), `
+		UPDATE mail_identity_signatures
+		SET signature_id='', body_text='', body_html='', updated_at=now()
+		WHERE user_id=$1 AND signature_id=$2
+	`, sess.User.ID, r.PathValue("id"))
 	s.auditRequest(r, sess, "signature.deleted", name, "Deleted a named signature")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

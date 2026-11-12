@@ -1,6 +1,6 @@
 {
   "name": "alt8mail-webmail",
-  "version": "3.1.2",
+  "version": "3.2.0",
   "private": true,
   "type": "module",
   "description": "Enterprise webmail template: 2FA, threaded mail, instant search, scheduled send, tasks, files, attachment preview, Sieve and sender trust.",

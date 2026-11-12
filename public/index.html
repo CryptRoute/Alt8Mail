@@ -12,14 +12,14 @@
 <link rel="icon" href="/icons/favicon-48.png" sizes="48x48" type="image/png">
 <link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="/styles.css?v=3.1.2">
-<link rel="stylesheet" href="/features.css?v=3.1.2">
-<link rel="stylesheet" href="/workspace.css?v=3.1.2">
-<link rel="stylesheet" href="/cabinet-calendar.css?v=3.1.2">
-<link rel="stylesheet" href="/features-0.7.css?v=3.1.2">
-<link rel="stylesheet" href="/onboarding.css?v=3.1.2">
-<link rel="stylesheet" href="/email-ui.css?v=3.1.2">
-<link rel="stylesheet" href="/selects.css?v=3.1.2">
+<link rel="stylesheet" href="/styles.css?v=3.2.0">
+<link rel="stylesheet" href="/features.css?v=3.2.0">
+<link rel="stylesheet" href="/workspace.css?v=3.2.0">
+<link rel="stylesheet" href="/cabinet-calendar.css?v=3.2.0">
+<link rel="stylesheet" href="/features-0.7.css?v=3.2.0">
+<link rel="stylesheet" href="/onboarding.css?v=3.2.0">
+<link rel="stylesheet" href="/email-ui.css?v=3.2.0">
+<link rel="stylesheet" href="/selects.css?v=3.2.0">
 </head>
 <body>
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -1335,33 +1335,49 @@
                     <div class="identity-list" id="identityList"><div class="settings-note">Loading identities…</div></div>
                     <p class="settings-note" id="identityNote" style="margin:10px 0 0">External addresses receive a verification email before they can send.</p>
                   </div>
-                  <div class="settings-block">
+                  <div class="settings-block forwarding-block">
                     <div class="settings-block-head">
                       <h3>Mail forwarding</h3>
                       <p>Forward incoming mail to another address. Forwarding is applied by Alt8Mail iqScan before your other rules.</p>
                     </div>
-                    <div class="setting-list">
-                      <div class="setting-row">
-                        <div class="setting-copy"><strong>Enable forwarding</strong><span>Send a copy of incoming mail to the address below.</span></div>
+                    <div class="forwarding-panel" id="forwardingPanel">
+                      <div class="forwarding-enable-row">
+                        <span class="forwarding-glyph"><svg class="icon" aria-hidden="true"><use href="#i-forward"/></svg></span>
+                        <div class="forwarding-enable-copy"><strong>Forward incoming mail</strong><span>Send a copy of every new message to another address.</span></div>
                         <button class="switch" id="forwardingEnabled" type="button" role="switch" aria-checked="false" aria-label="Enable mail forwarding"><span></span></button>
                       </div>
-                      <label class="form-field"><span>Forward to</span><input id="forwardingTarget" type="email" placeholder="archive@example.com"></label>
-                      <div class="setting-row">
-                        <div class="setting-copy"><strong>Permanent</strong><span>Keep forwarding until you turn it off.</span></div>
-                        <button class="switch" id="forwardingPermanent" type="button" role="switch" aria-checked="true" aria-label="Permanent forwarding"><span></span></button>
+                      <div class="forwarding-target-field">
+                        <div class="forwarding-field-head"><label for="forwardingTarget">Forward to</label><span>One address at a time</span></div>
+                        <div class="recipient-field" id="forwardingTargetWrap">
+                          <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>
+                          <input id="forwardingTarget" type="email" placeholder="name@example.com" autocomplete="email" spellcheck="false">
+                          <button class="recipient-field-clear" id="forwardingTargetClear" type="button" aria-label="Clear forwarding address" hidden><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+                        </div>
+                        <div class="forwarding-recipient-preview" id="forwardingRecipientPreview" hidden>
+                          <span class="forwarding-recipient-avatar" id="forwardingRecipientAvatar" aria-hidden="true">A</span>
+                          <span class="forwarding-recipient-copy"><strong id="forwardingRecipientName"></strong><small>Receives a copy of incoming mail</small></span>
+                          <span class="forwarding-recipient-state" id="forwardingRecipientState">Ready</span>
+                        </div>
+                        <p class="forwarding-field-error" id="forwardingTargetError" hidden></p>
                       </div>
-                      <div class="forwarding-date-grid" id="forwardingDates" hidden>
-                        <label class="form-field"><span>Start date <small class="muted">DD/MM/YYYY</small></span><input id="forwardingStart" inputmode="numeric" placeholder="31/10/2026"></label>
-                        <label class="form-field"><span>End date <small class="muted">DD/MM/YYYY</small></span><input id="forwardingEnd" inputmode="numeric" placeholder="31/12/2026"></label>
+                      <div class="forwarding-options" id="forwardingOptions">
+                        <div class="setting-row">
+                          <div class="setting-copy"><strong>Permanent</strong><span>Keep forwarding until you turn it off.</span></div>
+                          <button class="switch" id="forwardingPermanent" type="button" role="switch" aria-checked="true" aria-label="Permanent forwarding"><span></span></button>
+                        </div>
+                        <div class="forwarding-date-grid" id="forwardingDates" hidden>
+                          <label class="form-field"><span>Start date <small class="muted">DD/MM/YYYY</small></span><input id="forwardingStart" inputmode="numeric" placeholder="31/10/2026"></label>
+                          <label class="form-field"><span>End date <small class="muted">DD/MM/YYYY</small></span><input id="forwardingEnd" inputmode="numeric" placeholder="31/12/2026"></label>
+                        </div>
+                        <div class="setting-row">
+                          <div class="setting-copy"><strong>Keep a copy in this mailbox</strong><span>When off, forwarded mail leaves no copy in the inbox or other folders.</span></div>
+                          <button class="switch" id="forwardingKeepCopy" type="button" role="switch" aria-checked="true" aria-label="Keep a copy when forwarding"><span></span></button>
+                        </div>
                       </div>
-                      <div class="setting-row">
-                        <div class="setting-copy"><strong>Keep a copy in this mailbox</strong><span>When off, forwarded mail leaves no copy in the inbox or other folders.</span></div>
-                        <button class="switch" id="forwardingKeepCopy" type="button" role="switch" aria-checked="true" aria-label="Keep a copy when forwarding"><span></span></button>
+                      <div class="forwarding-actions">
+                        <button class="btn-primary" id="saveForwardingBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save forwarding</button>
+                        <span class="settings-note" id="forwardingNote">Policy-controlled by your organization.</span>
                       </div>
-                    </div>
-                    <div class="settings-actions">
-                      <button class="btn-primary" id="saveForwardingBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Save forwarding</button>
-                      <span class="settings-note" id="forwardingNote">Policy-controlled by your organization.</span>
                     </div>
                   </div>
                 </section>
@@ -3178,30 +3194,19 @@
         <label class="form-field"><span>Display name</span><input id="identityEditorName" maxlength="120" placeholder="Avery Chen · Product"></label>
         <label class="form-field"><span>Email address</span><input id="identityEditorEmail" type="email" placeholder="you@partner.com"></label>
       </div>
-      <label class="form-field"><span>Reply-to <small class="muted">optional</small></span><input id="identityEditorReplyTo" type="email" placeholder="replies@partner.com"></label>
-      <div class="signature-mode-row"><span>Signature</span><div class="onboarding-segments compact" role="group" aria-label="Identity signature format"><button type="button" data-identity-signature-mode="rich">Rich HTML</button><button type="button" data-identity-signature-mode="plain">Plain text</button></div></div>
-      <div class="signature-rich-wrap" id="identitySignatureRichWrap">
-        <div class="signature-editor-toolbar" role="toolbar" aria-label="Identity signature formatting">
-          <button type="button" data-identity-signature-cmd="undo" title="Undo">↶</button><button type="button" data-identity-signature-cmd="redo" title="Redo">↷</button>
-          <select data-identity-signature-font aria-label="Font family" title="Font family"><option value="">Font</option><option value="Arial, Helvetica, sans-serif">Arial</option><option value="'Segoe UI', Tahoma, sans-serif">Segoe UI</option><option value="Calibri, Candara, sans-serif">Calibri</option><option value="'Helvetica Neue', Helvetica, Arial, sans-serif">Helvetica</option><option value="Verdana, Geneva, sans-serif">Verdana</option><option value="Tahoma, Verdana, sans-serif">Tahoma</option><option value="'Trebuchet MS', Helvetica, sans-serif">Trebuchet MS</option><option value="Georgia, 'Times New Roman', serif">Georgia</option><option value="'Times New Roman', Times, serif">Times New Roman</option><option value="Garamond, Georgia, serif">Garamond</option><option value="'Courier New', Courier, monospace">Courier New</option></select>
-          <select data-identity-signature-size aria-label="Font size" title="Font size"><option value="">Size</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="15">15</option><option value="17">17</option><option value="20">20</option><option value="24">24</option><option value="32">32</option></select>
-          <span class="editor-sep"></span>
-          <button type="button" data-identity-signature-cmd="bold" title="Bold"><strong>B</strong></button><button type="button" data-identity-signature-cmd="italic" title="Italic"><em>I</em></button><button type="button" data-identity-signature-cmd="underline" title="Underline"><u>U</u></button><button type="button" data-identity-signature-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
-          <span class="editor-sep"></span>
-          <button type="button" data-identity-signature-block="p" title="Normal text">¶</button><button type="button" data-identity-signature-block="h1" title="Heading 1">H1</button><button type="button" data-identity-signature-block="h2" title="Heading 2">H2</button><button type="button" data-identity-signature-block="blockquote" title="Quote">❝</button>
-          <span class="editor-sep"></span>
-          <button type="button" data-identity-signature-cmd="insertUnorderedList" title="Bulleted list">•</button><button type="button" data-identity-signature-cmd="insertOrderedList" title="Numbered list">1.</button><button type="button" data-identity-signature-cmd="createLink" title="Insert link">🔗</button><button type="button" data-identity-signature-cmd="unlink" title="Remove link">⛓</button>
-          <button type="button" data-identity-signature-cmd="justifyLeft" title="Align left">⇤</button><button type="button" data-identity-signature-cmd="justifyCenter" title="Align center">↔</button><button type="button" data-identity-signature-cmd="justifyRight" title="Align right">⇥</button>
-          <span class="editor-sep"></span>
-          <label class="editor-color-wrap" title="Text color"><span class="editor-color-glyph">A</span><input type="color" data-identity-signature-color value="#172230" title="Text color" aria-label="Text color"></label>
-          <label class="editor-color-wrap" title="Highlight color"><span class="editor-color-glyph editor-highlight-glyph">▮</span><input type="color" data-identity-signature-highlight value="#fff2a8" title="Highlight color" aria-label="Highlight color"></label>
-          <button type="button" data-identity-signature-cmd="removeFormat" title="Clear formatting">Tx</button>
-          <button type="button" data-identity-signature-source title="Edit HTML source" aria-label="Edit HTML source">&lt;&gt;</button>
-        </div>
-        <div class="signature-rich-editor" id="identityEditorSignature" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" data-placeholder="Signature used when this identity is the From address"></div>
+      <label class="form-field"><span>Reply-to <small class="muted">optional</small></span><input id="identityEditorReplyTo" type="email" placeholder="replies@partner.com"><small>Replies to messages sent from this identity go to this address.</small></label>
+      <div class="identity-default-row">
+        <span class="identity-default-glyph"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></span>
+        <div class="identity-default-copy"><strong>Default sending identity</strong><span>New messages start from this address. Only one identity can be the default.</span></div>
+        <button class="switch" id="identityEditorDefault" type="button" role="switch" aria-checked="false" aria-label="Use as the default sending identity"><span></span></button>
       </div>
-      <textarea id="identityEditorSignaturePlain" class="signature-plain-editor" rows="6" spellcheck="true" placeholder="Signature used when this identity is the From address"></textarea>
-      <p class="settings-note">The identity signature is inserted automatically when this address is selected in Compose.</p>
+      <div class="identity-signature-field">
+        <div class="identity-signature-head">
+          <div><span class="identity-field-label">Signature</span><p>Inserted automatically when this address is selected in Compose.</p></div>
+          <button class="btn-secondary btn-small" id="identitySignatureNew" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New signature</button>
+        </div>
+        <div class="identity-signature-picker" id="identitySignaturePicker" role="radiogroup" aria-label="Signature for this identity"><div class="settings-note">Loading signatures…</div></div>
+      </div>
       <p class="onboarding-inline-error" id="identityEditorError" hidden></p>
     </div>
     <div class="dialog-foot"><button type="button" class="btn-secondary" id="identityEditorCancel">Cancel</button><button type="button" class="btn-primary" id="identityEditorSave">Save identity</button></div>
@@ -3373,7 +3378,7 @@
 <input type="file" id="attachInput" multiple hidden>
 <script src="/vendor/typo.js"></script>
 <script src="/vendor/qrcode.min.js"></script>
-<script src="/sw-update.js?v=3.1.2"></script>
-<script type="module" src="/app.js?v=3.1.2"></script>
+<script src="/sw-update.js?v=3.2.0"></script>
+<script type="module" src="/app.js?v=3.2.0"></script>
 </body>
 </html>

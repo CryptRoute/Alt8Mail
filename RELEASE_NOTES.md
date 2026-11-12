@@ -1,3 +1,42 @@
+# Alt8Mail 3.2.0
+
+Release date: 2026-11-12. Identity signatures, defaults and forwarding polish.
+
+## 3.2.0 sending identity settings that behave like they look
+
+- **Edit sending identity** now edits the From display name, reply-to and the
+  signature in one place. Display name and reply-to work for organization
+  aliases, including the primary account, not just self-service identities.
+  Outgoing mail uses the edited From name, and a configured reply-to is written
+  as a `Reply-To` header when the message leaves the server.
+- The identity editor no longer embeds its own rich-text signature pad. It shows
+  the signature library from **Settings → Mail & reading → Signatures** as a
+  selectable list with a preview and its automatic-use chips. **New signature**
+  opens the existing signature editor on top of the identity dialog; a saved
+  signature is selected immediately and available on every identity.
+- A **Default sending identity** switch sets the identity used for new messages.
+  Turning it on clears the previous default, so exactly one identity is the
+  default; the identity list shows a `Default` badge. An identity must be
+  verified before it can become the default, and the last default cannot be
+  switched off.
+- The identity list now shows the signature actually attached to each address
+  (`Signature · Sales follow-up`) or `No signature`, plus the reply-to and the
+  default badge. Compose inserts the selected identity signature when that From
+  address is chosen, including when switching identity inside an open message.
+- Identities now reference a named signature from the library, so editing a
+  signature updates every identity that uses it. Deleting a signature clears it
+  from those identities. Legacy per-identity signatures are preserved as a
+  `Current signature` choice until they are replaced.
+- **Mail forwarding** is rebuilt as a focused card: a forwarding switch, a
+  recipient-style **Forward to** field with a clear control and a live resolved
+  address chip, and options that dim while forwarding is off. Invalid and
+  self-forwarding addresses are explained inline before anything is saved.
+- The **Attached to this message** side of the compose attachment manager is now
+  a vertical list like the Cabinet column instead of a horizontal card strip, so
+  long file names are readable and many attachments stay scannable.
+- Migration `0086_identity_signature_choices.sql` adds the named-signature link
+  and the per-address display-name and reply-to overrides.
+
 # Alt8Mail 3.1.2
 
 Release date: 2026-11-11. OAuth popup and transient IMAP recovery.

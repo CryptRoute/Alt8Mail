@@ -103,6 +103,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		var fromPerson map[string]any
+		replyTo := ""
 		if account.Kind == mailAccountKindExternal {
 			if !strings.EqualFold(strings.TrimSpace(fromEmail), account.Email) {
 				return fail(http.StatusForbidden, "BAD_FROM", "Choose the connected account address as the From identity")
@@ -121,6 +122,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			fromPerson = aliasPerson(alias)
+			replyTo = s.identityReplyTo(r.Context(), sess.User.ID, fromEmail)
 		}
 		to, invalid := parseRecipients(body.To, state)
 		if len(invalid) > 0 {
@@ -288,6 +290,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		item := map[string]any{
 			"id": newID("send"), "draftId": body.DraftID, "accountId": account.ID, "from": fromPerson,
+			"replyTo": replyTo,
 			"to": to, "cc": cc, "bcc": bcc, "subject": subject,
 			"bodyText": bodyText, "bodyHtml": bodyHTML,
 			"attachments": attachments, "mentions": sanitizeMentionInput(body.Mentions),

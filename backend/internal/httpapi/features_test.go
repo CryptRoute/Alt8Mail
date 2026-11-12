@@ -81,6 +81,31 @@ func TestBuildMIMEMessage(t *testing.T) {
 	}
 }
 
+func TestBuildMIMEMessageReplyTo(t *testing.T) {
+	item := map[string]any{
+		"from":    map[string]any{"name": "Avery Chen", "email": "avery.chen@a8m.test"},
+		"replyTo": "replies@partner.com",
+		"to":      []any{map[string]any{"name": "Nora Patel", "email": "nora.patel@a8m.test"}},
+		"cc":      []any{}, "bcc": []any{},
+		"subject": "Quarterly plan", "bodyText": "Hello Nora.",
+	}
+	raw, err := buildMIMEMessage(item, "<reply-to@a8m.test>", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "Reply-To: <replies@partner.com>") {
+		t.Fatalf("message missing Reply-To header:\n%s", raw)
+	}
+	item["replyTo"] = "avery.chen@a8m.test"
+	raw, err = buildMIMEMessage(item, "<reply-to-same@a8m.test>", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "Reply-To:") {
+		t.Fatalf("Reply-To equal to From must be omitted:\n%s", raw)
+	}
+}
+
 func TestDecodeHeaderWindows1252(t *testing.T) {
 	got := decodeHeader("=?Windows-1252?Q?Je_suis_vraiment_d=E9sol=E9_mon_amour?=")
 	if got != "Je suis vraiment désolé mon amour" {

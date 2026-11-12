@@ -382,6 +382,9 @@ func buildMIMEMessage(item map[string]any, messageID string, attachments []outbo
 	}
 	var buffer bytes.Buffer
 	writeHeaderLine(&buffer, "From", formatMailbox(fromName, fromEmail))
+	if replyTo := strings.TrimSpace(stateString(item, "replyTo")); replyTo != "" && !strings.EqualFold(replyTo, fromEmail) {
+		writeHeaderLine(&buffer, "Reply-To", formatMailbox("", replyTo))
+	}
 	if len(toPeople) > 0 {
 		writeHeaderLine(&buffer, "To", formatPeopleHeader(toPeople))
 	}

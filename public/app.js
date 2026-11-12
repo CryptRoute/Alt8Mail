@@ -540,7 +540,7 @@ function handleEditorHistoryShortcut(event) {
   const redo = key === "y" || (key === "z" && event.shiftKey);
   const undo = key === "z" && !event.shiftKey;
   if (!undo && !redo) return false;
-  const editor = event.target?.closest?.('[data-compose-editor], .compose-text, #signatureEditorBody, #signatureEditorPlain, #identityEditorSignature, #identityEditorSignaturePlain');
+  const editor = event.target?.closest?.('[data-compose-editor], .compose-text, #signatureEditorBody, #signatureEditorPlain');
   if (!editor) return false;
   event.preventDefault();
   editor.focus();
@@ -8703,7 +8703,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.1.2";
+const MAIL_PROVIDER_ASSET_VERSION = "3.2.0";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -20858,22 +20858,28 @@ function renderIdentities() {
     holder.innerHTML = `<div class="settings-note">No sending identities are available.</div>`;
     return;
   }
+  const defaultEmail = normalizeEmail(state.preferences.defaultFrom || "");
   holder.innerHTML = identities.map((item) => {
     const pending = item.status === "pending" || (!item.canSend && item.source === "identity");
     const custom = item.source === "identity";
     const status = pending ? "Pending verification" : item.canSend ? "Verified" : esc(item.reason || "Read only");
-    const hasSignature = Boolean(String(item.signature || "").trim() || String(item.signatureHtml || "").trim());
+    const signatureName = String(item.signatureName || "").trim();
+    const hasSignature = Boolean(signatureName || String(item.signature || "").trim() || String(item.signatureHtml || "").trim());
+    const signatureLabel = hasSignature
+      ? `<span class="identity-signature-state has-signature">${signatureName ? `Signature · ${esc(signatureName)}` : "Custom signature"}</span>`
+      : `<span class="identity-signature-state">No signature</span>`;
+    const isDefault = item.canSend && normalizeEmail(item.email) === defaultEmail;
     const actions = [
-      `<button class="link-btn" data-edit-identity="${esc(item.id)}" data-identity-email="${esc(item.email)}" type="button">Edit signature</button>`,
+      `<button class="link-btn" data-edit-identity="${esc(item.id)}" data-identity-email="${esc(item.email)}" type="button">Edit</button>`,
       pending ? `<button class="link-btn" data-resend-identity="${esc(item.id)}" type="button">Resend verification</button>` : "",
       custom ? `<button class="link-btn" data-delete-identity="${esc(item.id)}" type="button">Remove</button>` : ""
     ].join("");
-    return `<div class="identity-card${pending ? " is-pending" : ""}">
+    return `<div class="identity-card${pending ? " is-pending" : ""}${isDefault ? " is-default" : ""}">
       <span class="identity-art"><svg class="icon" aria-hidden="true"><use href="#${item.kind === "shared" ? "i-people" : item.kind === "identity" ? "i-key" : "i-mail"}"/></svg></span>
       <div class="identity-copy">
-        <strong>${esc(item.label || item.email)}</strong>
+        <strong>${esc(item.label || item.email)}${isDefault ? `<span class="identity-default-badge"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg>Default</span>` : ""}</strong>
         <span>${esc(item.email)}${item.replyTo ? ` · reply-to ${esc(item.replyTo)}` : ""}</span>
-        <span>${esc(item.kind === "primary" ? "Primary account" : item.kind === "alias" ? "Organization alias" : item.kind === "shared" ? "Shared mailbox · read only" : "Personal sending identity")} · <span class="identity-signature-state${hasSignature ? " has-signature" : ""}">${hasSignature ? "Signature set" : "No signature"}</span></span>
+        <span>${esc(item.kind === "primary" ? "Primary account" : item.kind === "alias" ? "Organization alias" : item.kind === "shared" ? "Shared mailbox · read only" : "Personal sending identity")} · ${signatureLabel}</span>
       </div>
       <div class="identity-actions"><span class="identity-status${pending ? " pending" : ""}">${status}</span>${actions}</div>
     </div>`;
@@ -20883,79 +20889,121 @@ function renderIdentities() {
 /* ============================================================
    Sending identity editor
    ============================================================ */
-function identityEditorFormatPayload() {
-  const format = state.identityEditor?.format === "plain" ? "plain" : "rich";
-  const editor = document.getElementById("identityEditorSignature");
-  const plain = document.getElementById("identityEditorSignaturePlain");
-  if (format === "plain") {
-    const bodyText = String(plain?.value || "").trim();
-    return { signature: bodyText, signatureHtml: "" };
-  }
-  const bodyHtml = sanitizeEditorHTML(restoreEditorImageSources(editor?.innerHTML || ""));
-  const bodyText = editorPlainText(bodyHtml) || htmlToText(bodyHtml);
-  return { signature: bodyText, signatureHtml: bodyHtml };
+function identityLegacySignature(identity) {
+  const text = String(identity?.signature || "").trim();
+  const html = String(identity?.signatureHtml || "").trim();
+  return text || html ? { text, html } : null;
 }
 
-function setIdentitySignatureMode(mode) {
-  if (!state.identityEditor) return;
-  const next = mode === "plain" ? "plain" : "rich";
-  const previous = state.identityEditor.format;
-  const editor = document.getElementById("identityEditorSignature");
-  const plain = document.getElementById("identityEditorSignaturePlain");
-  if (previous === "rich" && next === "plain" && plain) {
-    plain.value = editorPlainText(editor?.innerHTML || "");
-  }
-  if (previous === "plain" && next === "rich" && editor) {
-    editor.innerHTML = textToEditorHTML(plain?.value || "");
-  }
-  state.identityEditor.format = next;
-  document.getElementById("identitySignatureRichWrap").hidden = next !== "rich";
-  if (plain) plain.hidden = next !== "plain";
-  $$("[data-identity-signature-mode]").forEach((button) => button.classList.toggle("is-active", button.getAttribute("data-identity-signature-mode") === next));
+function identitySignatureSelection(editorState) {
+  if (!editorState) return "";
+  if (editorState.signatureChoice != null) return editorState.signatureChoice;
+  if (editorState.signatureId) return editorState.signatureId;
+  return identityLegacySignature(editorState.legacySignature) ? "__custom" : "";
 }
 
-function openIdentityEditor(identity = null) {
+function renderIdentitySignaturePicker() {
+  const holder = document.getElementById("identitySignaturePicker");
+  const editorState = state.identityEditor;
+  if (!holder || !editorState) return;
+  const selected = identitySignatureSelection(editorState);
+  const legacy = (!editorState.signatureId || editorState.signatureChoice === "__custom")
+    ? identityLegacySignature(editorState.legacySignature)
+    : null;
+  const options = [];
+  if (legacy) {
+    options.push({ id: "__custom", name: "Current signature", preview: legacy.text || htmlToText(legacy.html) || "Saved signature", badge: "Custom" });
+  }
+  options.push({ id: "", name: "No signature", preview: "Send from this identity without a signature.", badge: "" });
+  for (const signature of state.signatures || []) {
+    const preview = signaturePlainValue(signature).replace(/\s+/g, " ").trim();
+    const badge = [signature.defaultNew ? "New" : "", signature.defaultReply ? "Reply" : "", signature.defaultForward ? "Forward" : ""].filter(Boolean).join(" · ");
+    options.push({ id: signature.id, name: signature.name, preview: preview || "Empty signature", badge });
+  }
+  holder.innerHTML = options.map((option) => `<button class="identity-signature-option${option.id === selected ? " is-selected" : ""}" type="button" role="radio" aria-checked="${option.id === selected ? "true" : "false"}" data-identity-signature-option="${esc(option.id)}"><span class="identity-signature-radio" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span><span class="identity-signature-option-copy"><strong>${esc(option.name)}</strong><small>${esc(String(option.preview || "").slice(0, 140))}</small></span>${option.badge ? `<span class="identity-signature-badge">${esc(option.badge)}</span>` : ""}</button>`).join("");
+  if (!(state.signatures || []).length) {
+    holder.insertAdjacentHTML("beforeend", `<div class="identity-signature-empty"><span class="signature-empty-mark"><svg class="icon" aria-hidden="true"><use href="#i-mark"/></svg></span><div><strong>No signatures yet</strong><p>Create one signature and reuse it for this identity and every message.</p></div><button class="btn-secondary btn-small" id="identitySignatureCreate" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Create signature</button></div>`);
+  }
+}
+
+async function openIdentityEditor(identity = null) {
   const existing = identity || null;
-  state.identityEditor = {
+  const defaultEmail = normalizeEmail(state.preferences.defaultFrom || "");
+  const editorState = {
     mode: existing ? "edit" : "create",
     id: existing?.id || "",
     source: existing?.source || "identity",
     email: existing?.email || "",
-    format: existing?.signatureHtml ? "rich" : "plain"
+    signatureId: existing?.signatureId || "",
+    signatureChoice: null,
+    legacySignature: existing ? { signature: existing.signature || "", signatureHtml: existing.signatureHtml || "" } : null
   };
+  state.identityEditor = editorState;
   const title = document.getElementById("identityEditorTitle");
   const subtitle = document.getElementById("identityEditorSubtitle");
   const name = document.getElementById("identityEditorName");
   const email = document.getElementById("identityEditorEmail");
   const replyTo = document.getElementById("identityEditorReplyTo");
-  const editor = document.getElementById("identityEditorSignature");
-  const plain = document.getElementById("identityEditorSignaturePlain");
   const error = document.getElementById("identityEditorError");
   const managed = existing && existing.source !== "identity";
   title.textContent = existing ? "Edit sending identity" : "New sending identity";
   subtitle.textContent = existing
-    ? (managed ? "This address is managed by IT. You can give it its own signature." : "Update the From name, reply-to and signature for this identity.")
-    : "Verify an external address and give it its own From name and signature.";
+    ? (managed ? "Set the From name, reply-to and signature for this address." : "Update the From name, reply-to, signature and default status.")
+    : "Verify an external address and choose how it signs your mail.";
   name.value = existing?.label || "";
-  name.disabled = Boolean(managed);
+  name.disabled = false;
   email.value = existing?.email || "";
   email.disabled = Boolean(existing);
   replyTo.value = existing?.replyTo || "";
-  replyTo.disabled = Boolean(managed);
-  const signatureHtml = existing?.signatureHtml || "";
-  const signatureText = existing?.signature || "";
-  editor.innerHTML = sanitizeEditorHTML(signatureHtml || (signatureText ? textToEditorHTML(signatureText) : ""));
-  normalizeEditorImageSources(editor);
-  plain.value = signatureText || (signatureHtml ? htmlToText(signatureHtml) : "");
+  replyTo.disabled = false;
+  switchToggle(document.getElementById("identityEditorDefault"), Boolean(existing) && normalizeEmail(existing.email) === defaultEmail);
   error.hidden = true;
-  setIdentitySignatureMode(state.identityEditor.format);
+  error.textContent = "";
+  renderIdentitySignaturePicker();
   identityEditorOverlay.hidden = false;
-  setTimeout(() => (existing ? editor : name).focus(), 80);
+  setTimeout(() => name.focus(), 80);
+  await loadSignatures();
+  if (state.identityEditor === editorState) renderIdentitySignaturePicker();
+}
+
+function openIdentitySignatureCreator() {
+  if (!state.identityEditor) return;
+  openSignatureEditor(null, {
+    stacked: true,
+    onSaved: (signature) => {
+      if (!state.identityEditor) return;
+      state.identityEditor.signatureChoice = signature.id;
+      state.identityEditor.signatureId = signature.id;
+      renderIdentitySignaturePicker();
+    }
+  });
 }
 
 function closeIdentityEditor() {
   identityEditorOverlay.hidden = true;
   state.identityEditor = null;
+}
+
+async function applyIdentityDefault(email, wantsDefault, wasDefault) {
+  if (wantsDefault === wasDefault) return "unchanged";
+  if (wantsDefault) {
+    const target = (state.identities || []).find((item) => normalizeEmail(item.email) === normalizeEmail(email));
+    if (!target || !target.canSend) {
+      showToast("Verify this address before making it the default");
+      return "blocked";
+    }
+    const saved = await patchPreferences({ defaultFrom: target.email }, "");
+    renderIdentities();
+    return saved ? "applied" : "failed";
+  }
+  const fallback = (state.identities || []).find((item) => item.canSend && normalizeEmail(item.email) !== normalizeEmail(email));
+  if (!fallback) {
+    showToast("Keep at least one identity as the default");
+    return "blocked";
+  }
+  const saved = await patchPreferences({ defaultFrom: fallback.email }, "");
+  renderIdentities();
+  return saved ? "applied" : "failed";
 }
 
 async function saveIdentityEditor() {
@@ -20965,6 +21013,7 @@ async function saveIdentityEditor() {
   const name = document.getElementById("identityEditorName");
   const emailInput = document.getElementById("identityEditorEmail");
   const replyTo = document.getElementById("identityEditorReplyTo");
+  const defaultToggle = document.getElementById("identityEditorDefault");
   const button = document.getElementById("identityEditorSave");
   error.hidden = true;
   const email = String(emailInput.value || "").trim().toLowerCase();
@@ -20974,36 +21023,48 @@ async function saveIdentityEditor() {
     emailInput.focus();
     return;
   }
+  const replyToValue = String(replyTo.value || "").trim().toLowerCase();
+  if (replyToValue && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(replyToValue)) {
+    error.textContent = "Reply-to must be a valid email address.";
+    error.hidden = false;
+    replyTo.focus();
+    return;
+  }
+  const selection = identitySignatureSelection(data);
+  const payload = { name: name.value.trim(), replyTo: replyToValue };
+  if (selection === "__custom") {
+    payload.signature = String(data.legacySignature?.signature || "");
+    payload.signatureHtml = String(data.legacySignature?.signatureHtml || "");
+    payload.signatureId = "";
+  } else {
+    payload.signatureId = selection || "";
+  }
+  const wantsDefault = defaultToggle?.getAttribute("aria-checked") === "true";
+  const wasDefault = normalizeEmail(state.preferences.defaultFrom || "") === normalizeEmail(data.email || email);
   button.disabled = true;
   button.textContent = "Saving…";
   try {
-    const signature = identityEditorFormatPayload();
     if (data.mode === "create") {
-      const result = await api("/api/identities", {
-        method: "POST",
-        body: { name: name.value.trim(), email, replyTo: replyTo.value.trim(), ...signature }
-      });
+      const result = await api("/api/identities", { method: "POST", body: { email, ...payload } });
       closeIdentityEditor();
       await refreshIdentities();
       if (result.verified) showToast("Sending identity added");
       else if (result.delivery === "sent") showToast("Verification email sent — check the external inbox");
       else showToast(result.message || "Identity saved. Use Resend verification in a moment.");
+      await applyIdentityDefault(email, wantsDefault, false);
       return;
     }
     if (data.source === "identity") {
-      await api(`/api/identities/${encodeURIComponent(data.id)}`, {
-        method: "PATCH",
-        body: { name: name.value.trim(), replyTo: replyTo.value.trim(), ...signature }
-      });
+      await api(`/api/identities/${encodeURIComponent(data.id)}`, { method: "PATCH", body: payload });
     } else {
-      await api("/api/identities/signature", {
-        method: "PUT",
-        body: { email: data.email, ...signature }
-      });
+      await api("/api/identities/signature", { method: "PUT", body: { email: data.email, ...payload } });
     }
     closeIdentityEditor();
     await refreshIdentities();
-    showToast(data.source === "identity" ? "Sending identity updated" : "Identity signature saved");
+    const defaultStatus = await applyIdentityDefault(data.email, wantsDefault, wasDefault);
+    if (defaultStatus !== "blocked") {
+      showToast(data.source === "identity" ? "Sending identity updated" : "Identity settings saved");
+    }
   } catch (saveError) {
     error.textContent = saveError.message || "Could not save the sending identity.";
     error.hidden = false;
@@ -21105,12 +21166,13 @@ function setSignatureEditorMode(mode) {
   $$("[data-signature-mode]").forEach((button) => button.classList.toggle("is-active", button.getAttribute("data-signature-mode") === next));
 }
 
-function openSignatureEditor(signature = null, { onSaved = null } = {}) {
+function openSignatureEditor(signature = null, { onSaved = null, stacked = false } = {}) {
   state.signatureEditor = {
     id: signature?.id || "",
     format: signature?.bodyHtml ? "rich" : (signature ? "plain" : "rich"),
     onSaved
   };
+  signatureEditorOverlay.classList.toggle("is-stacked", Boolean(stacked));
   document.getElementById("signatureEditorTitle").textContent = signature ? "Edit signature" : "New signature";
   document.getElementById("signatureEditorSubtitle").textContent = signature
     ? "Update the name, content and automatic uses for this signature."
@@ -21145,6 +21207,7 @@ function applySignatureEditorLight(enabled) {
 
 function closeSignatureEditor() {
   signatureEditorOverlay.hidden = true;
+  signatureEditorOverlay.classList.remove("is-stacked");
   state.signatureEditor = null;
 }
 
@@ -21346,6 +21409,44 @@ async function loadForwardingSettings() {
   }
 }
 
+function updateForwardingTargetPreview() {
+  const input = document.getElementById("forwardingTarget");
+  const clear = document.getElementById("forwardingTargetClear");
+  const preview = document.getElementById("forwardingRecipientPreview");
+  const value = String(input?.value || "").trim().toLowerCase();
+  if (clear) clear.hidden = !value;
+  if (!preview) return;
+  if (!value) {
+    preview.hidden = true;
+    preview.classList.remove("is-invalid");
+    return;
+  }
+  const valid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value);
+  const own = normalizeEmail(state.user?.email || "");
+  const avatar = document.getElementById("forwardingRecipientAvatar");
+  const name = document.getElementById("forwardingRecipientName");
+  const status = document.getElementById("forwardingRecipientState");
+  preview.hidden = false;
+  preview.classList.toggle("is-invalid", !valid || value === own);
+  if (avatar) avatar.textContent = (value.match(/[a-z0-9]/i)?.[0] || "?").toUpperCase();
+  if (name) name.textContent = value;
+  if (status) status.textContent = !valid ? "Check address" : value === own ? "This mailbox" : "Ready";
+}
+
+function setForwardingFieldError(message) {
+  const error = document.getElementById("forwardingTargetError");
+  if (!error) return;
+  error.textContent = message || "";
+  error.hidden = !message;
+  const wrap = document.getElementById("forwardingTargetWrap");
+  if (wrap) wrap.classList.toggle("is-error", Boolean(message));
+  const input = document.getElementById("forwardingTarget");
+  if (input) {
+    if (message) input.setAttribute("aria-invalid", "true");
+    else input.removeAttribute("aria-invalid");
+  }
+}
+
 function renderForwardingSettings() {
   const forwarding = state.forwarding || { enabled: false, target: "", keepCopy: true, permanent: true, start: "", end: "" };
   const enabled = document.getElementById("forwardingEnabled");
@@ -21362,6 +21463,10 @@ function renderForwardingSettings() {
   if (end) end.value = isoToDisplayDate(forwarding.end || "");
   const dates = document.getElementById("forwardingDates");
   if (dates) dates.hidden = forwarding.permanent !== false;
+  const panel = document.getElementById("forwardingPanel");
+  if (panel) panel.classList.toggle("is-off", !forwarding.enabled);
+  setForwardingFieldError("");
+  updateForwardingTargetPreview();
   const policy = state.forwardingPolicy || {};
   const blocked = policy.autoForwarding === false;
   if (enabled) enabled.disabled = blocked;
@@ -21384,12 +21489,20 @@ async function saveForwardingSettings() {
   const endText = document.getElementById("forwardingEnd")?.value || "";
   const start = displayDateToISO(startText);
   const end = displayDateToISO(endText);
+  setForwardingFieldError("");
   if (enabled && permanent === false && (!start || !end)) {
     showToast("Use DD/MM/YYYY for the forwarding period");
+    document.getElementById("forwardingStart")?.focus();
     return;
   }
-  if (enabled && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(target?.value.trim() || "")) {
-    showToast("Enter a valid forwarding address");
+  const address = String(target?.value || "").trim().toLowerCase();
+  if (enabled && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) {
+    setForwardingFieldError("Enter a valid forwarding address, like name@example.com.");
+    target?.focus();
+    return;
+  }
+  if (enabled && address === normalizeEmail(state.user?.email || "")) {
+    setForwardingFieldError("A mailbox cannot forward to itself. Choose another address.");
     target?.focus();
     return;
   }
@@ -21398,14 +21511,19 @@ async function saveForwardingSettings() {
   try {
     const data = await api("/api/forwarding", {
       method: "PUT",
-      body: { enabled, target: target?.value.trim() || "", permanent, keepCopy, start, end }
+      body: { enabled, target: address, permanent, keepCopy, start, end }
     });
     state.forwarding = data.forwarding;
     if (state.sieve) state.sieve.forwarding = data.forwarding;
     renderForwardingSettings();
     showToast(enabled ? "Mail forwarding saved" : "Mail forwarding disabled");
   } catch (error) {
-    showError(error);
+    if (error.code === "FORWARDING_VALIDATION" || error.code === "FORWARDING_SELF") {
+      setForwardingFieldError(error.message || "Check the forwarding address.");
+      target?.focus();
+    } else {
+      showError(error);
+    }
   } finally {
     if (button) button.disabled = false;
   }
@@ -29189,6 +29307,14 @@ function handleFeatureClick(event) {
   const pickSignatureButton = target.closest("[data-insert-signature]");
   if (pickSignatureButton) { event.preventDefault(); insertPickedSignature(pickSignatureButton.getAttribute("data-insert-signature")); return true; }
   if (target.closest("#forwardingEnabled")) { event.preventDefault(); toggleSwitch(target.closest("#forwardingEnabled")); return true; }
+  if (target.closest("#forwardingTargetClear")) {
+    event.preventDefault();
+    const input = document.getElementById("forwardingTarget");
+    if (input) { input.value = ""; input.focus(); }
+    setForwardingFieldError("");
+    updateForwardingTargetPreview();
+    return true;
+  }
   if (target.closest("#forwardingPermanent")) {
     event.preventDefault();
     const button = target.closest("#forwardingPermanent");
@@ -29576,7 +29702,6 @@ function htmlSourceEditor(target) {
   if (target.kind === "compose") {
     return sessionById(target.sessionId)?.el?.querySelector("[data-compose-editor]") || null;
   }
-  if (target.kind === "identity") return document.getElementById("identityEditorSignature");
   return document.getElementById("signatureEditorBody");
 }
 
@@ -29643,6 +29768,12 @@ function wireHtmlSourceDialog() {
 function bindEvents() {
   document.addEventListener("pointerdown", () => { document.documentElement.dataset.input = "pointer"; }, true);
   document.addEventListener("keydown", () => { document.documentElement.dataset.input = "keyboard"; }, true);
+  document.addEventListener("input", (event) => {
+    if (event.target?.id === "forwardingTarget") {
+      setForwardingFieldError("");
+      updateForwardingTargetPreview();
+    }
+  });
   bindStickyNoteEvents(document);
   bindStickyEditorEvents();
   document.addEventListener("click", (event) => {
@@ -31320,7 +31451,7 @@ function bindEvents() {
       return;
     }
     const richEditor = element?.closest?.('[contenteditable="true"]');
-    if (richEditor && (richEditor.id === "signatureEditorBody" || richEditor.id === "identityEditorSignature")) {
+    if (richEditor && richEditor.id === "signatureEditorBody") {
       rememberEditorRange(richEditor);
     }
   });
@@ -31508,36 +31639,28 @@ function bindEvents() {
       return;
     }
   });
-  identityEditorOverlay?.addEventListener("mousedown", (event) => {
-    if (event.target.closest(".signature-editor-toolbar button")) event.preventDefault();
-  });
-  identityEditorOverlay?.addEventListener("paste", (event) => {
-    const editor = event.target.closest("#identityEditorSignature");
-    if (editor) handleRichEditorPaste(event, editor);
-  });
   identityEditorOverlay?.addEventListener("click", (event) => {
     if (event.target === identityEditorOverlay || event.target.closest("#identityEditorClose") || event.target.closest("#identityEditorCancel")) {
       closeIdentityEditor();
       return;
     }
-    const mode = event.target.closest("[data-identity-signature-mode]");
-    if (mode) { setIdentitySignatureMode(mode.getAttribute("data-identity-signature-mode")); return; }
-    const command = event.target.closest("[data-identity-signature-cmd]");
-    if (command) { applySignatureRichCommand(document.getElementById("identityEditorSignature"), command.getAttribute("data-identity-signature-cmd")); return; }
-    const block = event.target.closest("[data-identity-signature-block]");
-    if (block) { applySignatureRichCommand(document.getElementById("identityEditorSignature"), "formatBlock", block.getAttribute("data-identity-signature-block")); return; }
-    if (event.target.closest("[data-identity-signature-source]")) { openHtmlSource({ kind: "identity" }); return; }
+    if (event.target.closest("#identityEditorDefault")) {
+      toggleSwitch(document.getElementById("identityEditorDefault"));
+      return;
+    }
+    const signatureOption = event.target.closest("[data-identity-signature-option]");
+    if (signatureOption && state.identityEditor) {
+      const value = signatureOption.getAttribute("data-identity-signature-option") || "";
+      state.identityEditor.signatureChoice = value;
+      state.identityEditor.signatureId = value === "__custom" ? "" : value;
+      renderIdentitySignaturePicker();
+      return;
+    }
+    if (event.target.closest("#identitySignatureNew") || event.target.closest("#identitySignatureCreate")) {
+      openIdentitySignatureCreator();
+      return;
+    }
     if (event.target.closest("#identityEditorSave")) { saveIdentityEditor(); return; }
-  });
-  identityEditorOverlay?.addEventListener("change", (event) => {
-    const editor = document.getElementById("identityEditorSignature");
-    if (event.target.matches("[data-identity-signature-font]")) { applyRichFontFamily(editor, event.target.value); return; }
-    if (event.target.matches("[data-identity-signature-size]")) { applyRichFontSize(editor, event.target.value); return; }
-  });
-  identityEditorOverlay?.addEventListener("input", (event) => {
-    const editor = document.getElementById("identityEditorSignature");
-    if (event.target.matches("[data-identity-signature-color]")) { applyRichInlineStyle(editor, { color: event.target.value }); return; }
-    if (event.target.matches("[data-identity-signature-highlight]")) { applyRichInlineStyle(editor, { backgroundColor: event.target.value }); }
   });
   for (const [id, kind] of [["signatureDefaultNew", "new"], ["signatureDefaultReply", "reply"], ["signatureDefaultForward", "forward"]]) {
     document.getElementById(id)?.addEventListener("change", (event) => { setSignatureDefault(kind, event.target.value); });
