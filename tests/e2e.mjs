@@ -2390,10 +2390,11 @@ try {
     });
   })()`);
   await page.click('[data-folder="inbox"]');
-  // The app's new-mail poll runs on a 15-second timer. Clicking Inbox is a
-  // no-op when it is already the active folder, so a CI runner whose last poll
-  // just ran can legitimately take longer than the old 8-second window.
-  await page.waitFor(() => [...document.querySelectorAll(".msg")].some((item) => item.textContent.includes("HTML reply fixture")), 25000);
+  // Headless CI browsers throttle the 15-second new-mail poll, and clicking
+  // Inbox is a no-op when it is already the active folder. Refresh explicitly
+  // instead of waiting on the timer.
+  await page.click("#cmdRefresh");
+  await page.waitFor(() => [...document.querySelectorAll(".msg")].some((item) => item.textContent.includes("HTML reply fixture")), 15000);
   await page.eval(`(() => {
     const row = [...document.querySelectorAll('.msg')].find((item) => item.textContent.includes('HTML reply fixture'));
     if (row) row.click();

@@ -1,3 +1,14 @@
+# Alt8Mail 3.2.1
+
+Release date: 2026-11-12. CI reliability for the 3.2.0 line.
+
+## 3.2.1 deterministic mail refresh in the HTML reply fixture test
+
+- The end-to-end HTML reply fixture no longer waits on the webmail's
+  15-second new-mail poll. Headless CI browsers throttle that timer, so the
+  test now clicks the toolbar **Refresh** button and waits for the injected
+  message to render. Application behavior is unchanged from 3.2.0.
+
 # Alt8Mail 3.2.0
 
 Release date: 2026-11-12. Identity signatures, defaults and forwarding polish.
