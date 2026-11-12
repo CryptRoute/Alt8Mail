@@ -314,6 +314,10 @@ func (s *Server) writeUploadScanError(w http.ResponseWriter, err error) {
 
 func (s *Server) createFile(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if blocked, reason := s.storageUploadGuard(r.Context(), sess.User.Email); blocked {
+		writeError(w, http.StatusInsufficientStorage, "STORAGE_GUARD", reason)
+		return
+	}
 	var body fileCreateBody
 	if !s.decodeBody(w, r, &body, 140*1024*1024) {
 		return
@@ -581,6 +585,10 @@ func (s *Server) pruneCabinetUploads() {
 
 func (s *Server) startFileUpload(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if blocked, reason := s.storageUploadGuard(r.Context(), sess.User.Email); blocked {
+		writeError(w, http.StatusInsufficientStorage, "STORAGE_GUARD", reason)
+		return
+	}
 	go s.pruneCabinetUploads()
 	var body fileCreateBody
 	if !s.decodeBody(w, r, &body, 64*1024) {
@@ -699,6 +707,10 @@ func (s *Server) putFileUploadChunk(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) completeFileUpload(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if blocked, reason := s.storageUploadGuard(r.Context(), sess.User.Email); blocked {
+		writeError(w, http.StatusInsufficientStorage, "STORAGE_GUARD", reason)
+		return
+	}
 	id := r.PathValue("id")
 	meta, metaPath, err := s.loadCabinetUpload(sess, id)
 	if err != nil {
@@ -1274,6 +1286,10 @@ func jsonUnmarshal(data []byte, target any) error {
 
 func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request) {
 	sess := s.requireSessionFromContext(r)
+	if blocked, reason := s.storageUploadGuard(r.Context(), sess.User.Email); blocked {
+		writeError(w, http.StatusInsufficientStorage, "STORAGE_GUARD", reason)
+		return
+	}
 	var body attachmentUploadBody
 	if !s.decodeBody(w, r, &body, 36*1024*1024) {
 		return

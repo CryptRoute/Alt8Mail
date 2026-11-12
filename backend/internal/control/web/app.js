@@ -17,6 +17,7 @@ import { renderSystem } from './views-system.js';
 import { renderLicense } from './views-license.js';
 import { renderAddons } from './views-addons.js?v=3.3.1';
 import { renderOffice } from './views-office.js?v=3.3.1';
+import { renderStorage } from './views-storage.js?v=3.3.1';
 import { renderMailOAuth } from './views-mail-oauth.js?v=3.3.1';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
@@ -93,6 +94,7 @@ const NAV_GROUPS = [
     { key: 'addons', label: 'Add-ons', icon: 'plug', href: '#/addons', perm: 'server.read', desc: 'System-wide first-party connector catalog' },
     { key: 'office', label: 'Office', icon: 'file-code', href: '#/office', perm: 'server.read', desc: 'OnlyOffice lifecycle and webmail Office feature flag' },
     { key: 'services', label: 'Services', icon: 'server', href: '#/services', perm: 'services.read', desc: 'systemd health and lifecycle actions' },
+    { key: 'storage', label: 'Disk Management', icon: 'disk', href: '#/storage', perm: 'storage.read', desc: 'Mail volume capacity, placement and disk operations' },
     { key: 'updates', label: 'Software updates', icon: 'download', href: '#/updates', perm: 'server.read', desc: 'OS package updates with live command output' },
     { key: 'terminal', label: 'Terminal', icon: 'terminal', href: '#/terminal', perm: 'server.manage', desc: 'Authenticated SSH shell on this host' },
     { key: 'ports', label: 'Mail listeners', icon: 'plug', href: '#/ports', perm: 'services.read', desc: 'SMTP, IMAP and POP3 listener ports' },
@@ -130,6 +132,7 @@ const ROUTE_DEFS = {
   notifications: { title: 'Notifications', crumb: 'Security', nav: 'notifications', perm: 'notifications.read', render: renderNotifications },
   'web-push': { title: 'Web push', crumb: 'Security', nav: 'web-push', perm: 'notifications.read', render: renderWebPush },
   services: { title: 'Services', crumb: 'Infrastructure', nav: 'services', perm: 'services.read', render: renderServices },
+  storage: { title: 'Disk Management', crumb: 'Infrastructure', nav: 'storage', perm: 'storage.read', render: renderStorage },
   system: { title: 'System', crumb: 'Infrastructure', nav: 'system', perm: 'server.read', render: renderSystem },
   license: { title: 'License', crumb: 'Infrastructure', nav: 'license', perm: 'settings.write', render: renderLicense },
   addons: { title: 'Add-ons', crumb: 'Infrastructure', nav: 'addons', perm: 'server.read', render: renderAddons },

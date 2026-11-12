@@ -15,6 +15,7 @@ func (s *Server) Start(ctx context.Context) {
 	s.seedServerIdentity(ctx)
 	s.reconcileRebootState(ctx)
 	s.reconcileAppUpdateJobs(ctx)
+	s.reconcileStorageOperations(ctx)
 	go s.reconcileWebNetAtStartup(ctx)
 	go s.ensurePublicNginxRoutes(ctx)
 
@@ -30,6 +31,10 @@ func (s *Server) Start(ctx context.Context) {
 		}
 	}
 
+	go s.runStorageSampler(ctx)
+	go s.runStorageFinalizer(ctx)
+	go s.runStorageUsageScheduler(ctx)
+	go s.runStorageForecastMonitor(ctx)
 	go s.runServiceMonitor(ctx)
 	go s.runAppUpdateMonitor(ctx)
 	go s.runHostBroadcast(ctx)

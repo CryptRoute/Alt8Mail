@@ -630,6 +630,23 @@ export async function renderMailboxes(ctx) {
       return;
     }
     if (!domains.length) { ui.toast('Create a managed domain before adding a mailbox.', 'warning'); return; }
+    let storageVolumes = [];
+    let storageReady = false;
+    if (ctx.can('storage.manage')) {
+      try {
+        const placement = await ctx.api('/control/api/storage/placements');
+        storageVolumes = Array.isArray(placement.volumes) ? placement.volumes : [];
+        storageReady = Boolean(placement.doctor?.userdbReady);
+      } catch { /* storage is optional for legacy mailbox creation */ }
+    }
+    const storageField = storageVolumes.length
+      ? ui.field({
+        label: 'Storage volume', name: 'storageVolumeId', type: 'select',
+        options: [{ value: '', label: 'Inherit the domain or global default' }, ...storageVolumes.map((volume) => ({ value: volume.id, label: `${volume.name}${volume.legacy ? ' (legacy)' : ''}` }))],
+        help: storageReady ? 'Optional override for this new mailbox. Changing it never moves existing mail.' : 'Placement on another volume is locked until the Dovecot userdb is updated. The inherited default is safe.',
+        disabled: !storageReady,
+      })
+      : '';
     const modal = ctx.modal({
       title: 'Create mailbox', subtitle: 'The account is provisioned in Dovecot with a generated or supplied password.',
       size: 'medium',
@@ -639,6 +656,7 @@ export async function renderMailboxes(ctx) {
           ${ui.field({ label: 'Domain', name: 'domainId', type: 'select', required: true, options: domains.map((domain) => ({ value: domain.id, label: domain.domain })) })}
           ${ui.field({ label: 'Local part', name: 'localPart', placeholder: 'ada', required: true, help: 'The address becomes <local-part>@<domain>.' })}
           ${ui.field({ label: 'Quota (GB)', name: 'quotaGb', type: 'number', value: '5', min: '0.25', step: '0.25', help: 'Between 0.25 GB and 1 TB.' })}
+          ${storageField ? `<div class="span-2">${storageField}</div>` : ''}
           <div class="span-2">${ui.field({ label: 'Password (optional)', name: 'password', type: 'password', help: 'Leave blank to generate a temporary password. Minimum 12 characters if supplied.', autocomplete: 'new-password' })}</div>
           <div class="span-2">${ui.field({ label: 'Email the temporary password to', name: 'sendTo', type: 'email', placeholder: 'alternate@example.com', help: 'Optional alternate address. The password is never stored in clear text.' })}</div>
         </div>
@@ -660,6 +678,7 @@ export async function renderMailboxes(ctx) {
             name: values.name, localPart: values.localPart, domainId: values.domainId,
             quotaBytes: Math.round(quotaGb * 1024 * 1024 * 1024),
             password: values.password || '', sendTo: values.sendTo || '',
+            storageVolumeId: values.storageVolumeId || '',
           },
         });
         modal.close();
@@ -762,6 +781,8 @@ export async function renderMailboxDetail(ctx) {
               <div class="divider"></div>
               ${ui.kv([
                 ['Provision status', ui.badge(ui.humanTitle(mailbox.provisionStatus), mailbox.provisionStatus === 'ready' ? 'good' : mailbox.provisionStatus === 'error' ? 'critical' : 'warning')],
+                ['Volume', mailbox.storageLegacy ? ui.badge('Legacy root', 'neutral', 'disk') : ui.badge(mailbox.storageVolume || 'Assigned volume', 'info', 'disk')],
+                ['Mail home', `<span class="mono break-all">${esc(mailbox.mailHome || (mailbox.storageLegacy ? 'Resolved by the legacy Dovecot query' : '—'))}</span>`],
                 ['Maildir', `<span class="mono break-all">${esc(mailbox.maildir || '—')}</span>`],
                 ['Created', esc(fmt.dateTime(mailbox.createdAt))],
                 ['Last sign-in', esc(fmt.dateTime(mailbox.lastLoginAt))],
@@ -772,6 +793,7 @@ export async function renderMailboxDetail(ctx) {
               <div class="tile-link"><span>${ui.icon('globe', 15)} Domain</span><a class="value" href="#/domains/${esc(mailbox.domain)}">${esc(mailbox.domain)}</a></div>
               <div class="tile-link"><span>${ui.icon('filter', 15)} Sieve rules</span><button class="value link-btn" type="button" data-mailbox-tab="sieve">Open</button></div>
               <div class="tile-link"><span>${ui.icon('clock', 15)} Mail history</span><button class="value link-btn" type="button" data-mailbox-tab="history">Open</button></div>
+              <div class="tile-link"><span>${ui.icon('disk', 15)} Storage &amp; moves</span><a class="value" href="#/storage">Disk Management</a></div>
             </div></section>
           </div>
         </div>

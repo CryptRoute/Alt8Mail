@@ -206,13 +206,14 @@ func reversePrimaryOrder(order string) string {
 
 func (s *Server) handleMailboxCreate(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	var body struct {
-		Name       string `json:"name"`
-		LocalPart  string `json:"localPart"`
-		DomainID   string `json:"domainId"`
-		Domain     string `json:"domain"`
-		Password   string `json:"password"`
-		QuotaBytes int64  `json:"quotaBytes"`
-		SendTo     string `json:"sendTo"`
+		Name            string `json:"name"`
+		LocalPart       string `json:"localPart"`
+		DomainID        string `json:"domainId"`
+		Domain          string `json:"domain"`
+		Password        string `json:"password"`
+		QuotaBytes      int64  `json:"quotaBytes"`
+		SendTo          string `json:"sendTo"`
+		StorageVolumeID string `json:"storageVolumeId"`
 	}
 	if err := decodeJSON(w, r, &body, 64<<10); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
@@ -245,6 +246,23 @@ func (s *Server) handleMailboxCreate(w http.ResponseWriter, r *http.Request, ses
 	if conflict > 0 {
 		writeError(w, http.StatusConflict, "MAILBOX", "That address already exists as a mailbox or alias")
 		return
+	}
+	if strings.TrimSpace(body.StorageVolumeID) != "" && !sess.User.PermSet.Has("storage.manage") {
+		writeError(w, http.StatusForbidden, "STORAGE_PERMISSION", "Your panel role cannot choose a storage volume for a new mailbox")
+		return
+	}
+	placement, err := s.placementForDomain(r.Context(), domain, body.StorageVolumeID)
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	home := filepath.Join(placement.MountPath, domain, local)
+	maildir := filepath.Join(home, "Maildir")
+	mailHome := ""
+	storageVolumeID := ""
+	if !placement.Legacy {
+		mailHome = home
+		storageVolumeID = placement.VolumeID
 	}
 	if body.Name == "" {
 		body.Name = titleWords(strings.ReplaceAll(local, ".", " "))
@@ -279,7 +297,6 @@ func (s *Server) handleMailboxCreate(w http.ResponseWriter, r *http.Request, ses
 		writeError(w, http.StatusBadGateway, "MAIL_PASSWORD", "Could not create a Dovecot password hash: "+err.Error())
 		return
 	}
-	maildir := s.maildirPath(domain, local)
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeFromError(w, err)
@@ -310,9 +327,11 @@ func (s *Server) handleMailboxCreate(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	err = tx.QueryRow(r.Context(), `
-		INSERT INTO public.mailboxes (tenant_id,user_id,email,domain,local_part,maildir_path,active,provision_status)
-		VALUES ($1,$2,$3,$4,$5,$6,true,'pending') RETURNING id::text
-	`, tenantID, userID, email, domain, local, maildir).Scan(&mailboxID)
+		INSERT INTO public.mailboxes
+		  (tenant_id,user_id,email,domain,local_part,maildir_path,mail_home,storage_volume_id,active,provision_status)
+		VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,'')::uuid,true,'pending')
+		RETURNING id::text
+	`, tenantID, userID, email, domain, local, maildir, mailHome, storageVolumeID).Scan(&mailboxID)
 	if err != nil {
 		writeFromError(w, err)
 		return
@@ -321,7 +340,7 @@ func (s *Server) handleMailboxCreate(w http.ResponseWriter, r *http.Request, ses
 		writeFromError(w, err)
 		return
 	}
-	path, err := s.ensureMaildir(domain, local)
+	path, err := s.ensureMailHome(placement.MountPath, home)
 	if err == nil {
 		_, _ = s.db.Exec(r.Context(), `UPDATE public.mailboxes SET maildir_path=$2, provision_status='ready', provisioned_at=now() WHERE id=$1`, mailboxID, path)
 		maildir = path
@@ -338,11 +357,15 @@ func (s *Server) handleMailboxCreate(w http.ResponseWriter, r *http.Request, ses
 			"A mailbox has been created for "+email+".\r\n\r\nTemporary password: "+temporary+"\r\n\r\nChange it after your first sign-in.")
 		emailed = sent.Err == nil
 	}
-	s.actorAudit(r, sess, "mail.mailbox_created", email, "Created a mailbox account", map[string]any{"quotaBytes": body.QuotaBytes, "provisionError": err != nil})
+	s.actorAudit(r, sess, "mail.mailbox_created", email, "Created a mailbox account", map[string]any{
+		"quotaBytes": body.QuotaBytes, "provisionError": err != nil,
+		"storageVolumeId": storageVolumeID, "mailHome": mailHome,
+	})
 	s.notifyEvent(r.Context(), "user.created", map[string]any{"email": email, "name": body.Name})
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"ok": true, "id": mailboxID, "userId": userID, "email": email,
 		"temporaryPassword": temporary, "emailed": emailed, "maildir": maildir,
+		"mailHome": mailHome, "storageVolumeId": storageVolumeID,
 		"message": "Copy the temporary password now. It is not stored in clear text.",
 	})
 }
@@ -371,6 +394,7 @@ func (s *Server) ensureUserState(ctx context.Context, email string) error {
 func (s *Server) handleMailboxDetail(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	id := pathID(r)
 	var mailboxID, email, name, status, provision, domain, local, maildir, userID string
+	var mailHome, storageVolumeID, storageVolumeName, storageMountPath string
 	var active bool
 	var quota, used int64
 	var createdAt time.Time
@@ -378,16 +402,19 @@ func (s *Server) handleMailboxDetail(w http.ResponseWriter, r *http.Request, ses
 	err := s.db.QueryRow(r.Context(), `
 		SELECT m.id::text,m.email::text,u.name,u.status,m.provision_status,m.domain::text,m.local_part::text,
 		       m.maildir_path,u.quota_bytes,mb.used_bytes,m.active,m.created_at,u.last_login_at,
-		       m.user_id::text
+		       m.user_id::text, COALESCE(m.mail_home, ''), COALESCE(m.storage_volume_id::text, ''),
+		       COALESCE(v.name, ''), COALESCE(v.mount_path, '')
 		FROM public.mailboxes m
 		JOIN public.users u ON u.id=m.user_id
+		LEFT JOIN control.storage_volumes v ON v.id = m.storage_volume_id
 		LEFT JOIN LATERAL (
 		  SELECT GREATEST(u.used_bytes, COALESCE(SUM(mm.size_bytes)::bigint, 0)) AS used_bytes
 		  FROM public.mail_messages mm WHERE mm.user_id=u.id
 		) mb ON true
 		WHERE m.id=$1
 	`, id).Scan(&mailboxID, &email, &name, &status, &provision, &domain, &local, &maildir,
-		&quota, &used, &active, &createdAt, &lastLogin, &userID)
+		&quota, &used, &active, &createdAt, &lastLogin, &userID, &mailHome, &storageVolumeID,
+		&storageVolumeName, &storageMountPath)
 	if err != nil {
 		writeFromError(w, err)
 		return
@@ -396,7 +423,9 @@ func (s *Server) handleMailboxDetail(w http.ResponseWriter, r *http.Request, ses
 		"id": mailboxID, "email": email, "name": name, "status": status, "active": active,
 		"provisionStatus": provision, "domain": domain, "localPart": local, "maildir": maildir,
 		"quotaBytes": quota, "usedBytes": used, "createdAt": createdAt.UTC().Format(time.RFC3339),
-		"userId": userID,
+		"userId": userID, "mailHome": mailHome, "storageVolumeId": storageVolumeID,
+		"storageVolume": storageVolumeName, "storageMountPath": storageMountPath,
+		"storageLegacy": storageVolumeID == "",
 	}
 	if lastLogin != nil {
 		item["lastLoginAt"] = lastLogin.UTC().Format(time.RFC3339)
@@ -494,11 +523,14 @@ func (s *Server) handleMailboxDelete(w http.ResponseWriter, r *http.Request, ses
 		writeError(w, http.StatusBadRequest, "BAD_JSON", err.Error())
 		return
 	}
-	var email, userID, domain, local string
+	var email, userID, domain, local, mailHome, volumeMount string
 	if err := s.db.QueryRow(r.Context(), `
-		SELECT m.email::text, m.user_id::text, m.domain::text, m.local_part::text
-		FROM public.mailboxes m WHERE m.id=$1
-	`, id).Scan(&email, &userID, &domain, &local); err != nil {
+		SELECT m.email::text, m.user_id::text, m.domain::text, m.local_part::text,
+		       COALESCE(m.mail_home, ''), COALESCE(v.mount_path, '')
+		FROM public.mailboxes m
+		LEFT JOIN control.storage_volumes v ON v.id = m.storage_volume_id
+		WHERE m.id=$1
+	`, id).Scan(&email, &userID, &domain, &local, &mailHome, &volumeMount); err != nil {
 		writeFromError(w, err)
 		return
 	}
@@ -507,19 +539,30 @@ func (s *Server) handleMailboxDelete(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	archive := ""
-	maildir := s.maildirPath(domain, local)
-	if pathExists(maildir) {
+	home := strings.TrimSpace(mailHome)
+	if home == "" {
+		root := strings.TrimSpace(volumeMount)
+		if root == "" {
+			root = s.cfg.VmailRoot
+		}
+		home = filepath.Join(root, domain, local)
+	}
+	if !s.isMailboxHomePath(r.Context(), home) {
+		writeError(w, http.StatusConflict, "MAILDIR", "The mailbox home is outside the managed storage volumes")
+		return
+	}
+	if pathExists(home) {
 		archiveDir := filepath.Join(s.cfg.BackupDir, "deleted-mailboxes")
 		_ = os.MkdirAll(archiveDir, 0o700)
 		archive = filepath.Join(archiveDir, strings.ReplaceAll(email, "@", "_")+"-"+time.Now().UTC().Format("20060102-150405"))
-		if err := movePath(r.Context(), filepath.Dir(maildir), archive); err != nil {
+		if err := movePath(r.Context(), home, archive); err != nil {
 			writeError(w, http.StatusInternalServerError, "ARCHIVE", "Could not archive the mailbox: "+err.Error())
 			return
 		}
 	}
 	if _, err := s.db.Exec(r.Context(), `DELETE FROM public.users WHERE id=$1`, userID); err != nil {
 		if archive != "" {
-			_ = movePath(context.Background(), archive, filepath.Dir(maildir))
+			_ = movePath(context.Background(), archive, home)
 		}
 		writeFromError(w, err)
 		return

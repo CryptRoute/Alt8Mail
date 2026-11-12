@@ -134,6 +134,30 @@ func splitMailAddress(value string) (string, string) {
 	return value[:index], value[index+1:]
 }
 
+func (s *Server) maildirSourceForAddress(ctx context.Context, address string) (string, bool) {
+	email := normalizeEmailAddress(address)
+	var home, maildir string
+	var err error
+	if s.db != nil {
+		err = s.db.QueryRow(ctx, `
+			SELECT COALESCE(mail_home, ''), COALESCE(maildir_path, '')
+			FROM public.mailboxes WHERE email = $1 AND active = true LIMIT 1
+		`, email).Scan(&home, &maildir)
+	}
+	if s.db != nil && err == nil {
+		clean := filepath.Clean(strings.TrimSpace(maildir))
+		if strings.TrimSpace(home) != "" {
+			clean = filepath.Join(filepath.Clean(strings.TrimSpace(home)), "Maildir")
+		}
+		if clean != "" && s.isManagedMailPath(ctx, clean) {
+			if info, statErr := os.Stat(clean); statErr == nil && info.IsDir() {
+				return clean, true
+			}
+		}
+	}
+	return safeMaildirCandidate(s.cfg.VmailRoot, address)
+}
+
 func (s *Server) findMaildirMessageSource(ctx context.Context, event mailEventSourceEvent) (string, string, bool) {
 	type sourceCandidate struct {
 		address string
@@ -161,7 +185,7 @@ func (s *Server) findMaildirMessageSource(ctx context.Context, event mailEventSo
 	}
 	recent := []recentCandidate{}
 	for _, candidate := range candidates {
-		maildir, ok := safeMaildirCandidate(s.cfg.VmailRoot, candidate.address)
+		maildir, ok := s.maildirSourceForAddress(ctx, candidate.address)
 		if !ok {
 			continue
 		}

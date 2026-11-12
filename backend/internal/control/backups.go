@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -179,7 +180,51 @@ func (s *Server) runBackup(id, path string, contents []string) {
 				return
 			}
 		case "maildirs":
-			if err := addDirectoryToTar(tw, s.cfg.VmailRoot, "mail/vmail"); err != nil {
+			volumes, volumeErr := s.storageVolumeRows(ctx)
+			if volumeErr != nil {
+				fail(fmt.Errorf("storage volume lookup: %w", volumeErr))
+				return
+			}
+			if len(volumes) == 0 {
+				volumes = []storageVolume{{Name: "legacy", MountPath: s.cfg.VmailRoot, Role: "mail"}}
+			}
+			seenMounts := map[string]bool{}
+			manifest := make([]map[string]any, 0, len(volumes))
+			for _, volume := range volumes {
+				if volume.Role != "mail" || strings.TrimSpace(volume.MountPath) == "" {
+					continue
+				}
+				mountPath := filepath.Clean(volume.MountPath)
+				if seenMounts[mountPath] {
+					continue
+				}
+				seenMounts[mountPath] = true
+				info, statErr := os.Stat(mountPath)
+				if statErr != nil || !info.IsDir() {
+					fail(fmt.Errorf("mail volume %s is not readable at %s", volume.Name, mountPath))
+					return
+				}
+				// Every mailbox is archived under the logical mail/vmail prefix,
+				// so old archives and mailbox restore keep working regardless of
+				// which physical volume a mailbox lives on.
+				if err := addDirectoryToTar(tw, mountPath, "mail/vmail"); err != nil {
+					fail(err)
+					return
+				}
+				manifest = append(manifest, map[string]any{
+					"id": volume.ID, "name": volume.Name, "mountPath": mountPath,
+					"fsUuid": volume.FSUUID, "role": volume.Role,
+				})
+			}
+			rawManifest, _ := json.MarshalIndent(map[string]any{
+				"version": 1, "volumes": manifest, "createdAt": nowRFC3339(),
+			}, "", "  ")
+			manifestPath := filepath.Join(tempDir, "mail-volumes.json")
+			if err := os.WriteFile(manifestPath, rawManifest, 0o600); err != nil {
+				fail(err)
+				return
+			}
+			if err := addPathToTar(tw, manifestPath, "mail/volumes.json"); err != nil {
 				fail(err)
 				return
 			}
@@ -455,13 +500,13 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request, ses
 		replaced = append(replaced, fmt.Sprintf("%d certificate files", count))
 	}
 	if selected["maildirs"] {
-		count, err := copyTree(filepath.Join(stage, "mail/vmail"), s.cfg.VmailRoot)
+		count, err := s.restoreMaildirTrees(r.Context(), stage)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "RESTORE", "Maildir restore failed: "+err.Error())
 			return
 		}
 		counts["maildirs"] = count
-		replaced = append(replaced, fmt.Sprintf("%d Maildir files", count))
+		replaced = append(replaced, fmt.Sprintf("%d Maildir files across registered volumes", count))
 	}
 	_ = reloadPostfix(r.Context())
 	_, _ = runCommand(r.Context(), 30*time.Second, "systemctl", "reload", "dovecot")

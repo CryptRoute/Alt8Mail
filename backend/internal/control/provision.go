@@ -84,6 +84,8 @@ func (s *Server) maildirPath(domain, localPart string) string {
 	return filepath.Join(s.cfg.VmailRoot, domain, localPart, "Maildir")
 }
 
+var mailOwnerLookup = vmailOwner
+
 func vmailOwner() (int, int, error) {
 	entry, err := user.Lookup("vmail")
 	if err != nil {
@@ -106,34 +108,57 @@ func (s *Server) ensureMaildir(domain, localPart string) (string, error) {
 	if !validDomain(domain) || !validLocalPart(localPart) {
 		return "", fmt.Errorf("unsafe mailbox path component")
 	}
-	uid, gid, err := vmailOwner()
+	return s.ensureMailHome(s.cfg.VmailRoot, filepath.Join(s.cfg.VmailRoot, domain, localPart))
+}
+
+// ensureMailHome creates the mail home and its Maildir tree on a registered
+// volume. The caller resolves the volume; this function still enforces that the
+// home is inside the supplied root and never follows a symlink.
+func (s *Server) ensureMailHome(root, home string) (string, error) {
+	root = filepath.Clean(strings.TrimSpace(root))
+	home = filepath.Clean(strings.TrimSpace(home))
+	if root == "" || home == "" || !filepath.IsAbs(root) || !filepath.IsAbs(home) {
+		return "", fmt.Errorf("mail home must be an absolute path")
+	}
+	if !pathWithin(root, home) || sameStoragePath(root, home) {
+		return "", fmt.Errorf("mail home escapes the storage volume")
+	}
+	domain := normalizeDomain(filepath.Base(filepath.Dir(home)))
+	localPart := normalizeLocal(filepath.Base(home))
+	if !validDomain(domain) || !validLocalPart(localPart) {
+		return "", fmt.Errorf("unsafe mailbox path component")
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf("storage volume root is not readable: %s", root)
+	}
+	uid, gid, err := mailOwnerLookup()
 	if err != nil {
 		return "", fmt.Errorf("vmail account: %w", err)
 	}
-	base := filepath.Clean(s.cfg.VmailRoot)
-	userDir := filepath.Join(base, domain, localPart)
-	maildir := filepath.Join(userDir, "Maildir")
-	if !strings.HasPrefix(maildir, base+string(os.PathSeparator)) {
-		return "", fmt.Errorf("mailbox path escapes the mail root")
+	domainDir := filepath.Dir(home)
+	if sameStoragePath(root, domainDir) || !pathWithin(root, domainDir) {
+		return "", fmt.Errorf("mail home must live under a domain directory")
 	}
-	directories := []string{
-		filepath.Join(base, domain), userDir, maildir,
-		filepath.Join(maildir, "cur"), filepath.Join(maildir, "new"), filepath.Join(maildir, "tmp"),
-	}
+	maildir := filepath.Join(home, "Maildir")
+	directories := []string{domainDir, home, maildir,
+		filepath.Join(maildir, "cur"), filepath.Join(maildir, "new"), filepath.Join(maildir, "tmp")}
 	for _, folder := range []string{"Sent", "Drafts", "Archive", "Junk", "Trash"} {
 		folderDir := filepath.Join(maildir, "."+folder)
 		directories = append(directories, folderDir,
 			filepath.Join(folderDir, "cur"), filepath.Join(folderDir, "new"), filepath.Join(folderDir, "tmp"))
 	}
 	for _, directory := range directories {
-		if info, statErr := os.Lstat(directory); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		if existing, statErr := os.Lstat(directory); statErr == nil && existing.Mode()&os.ModeSymlink != 0 {
 			return "", fmt.Errorf("mailbox path contains a symlink")
 		}
 		if err := os.MkdirAll(directory, 0o750); err != nil {
 			return "", err
 		}
-		if err := os.Chown(directory, uid, gid); err != nil {
-			return "", err
+		if uid >= 0 {
+			if err := os.Chown(directory, uid, gid); err != nil {
+				return "", err
+			}
 		}
 		if err := os.Chmod(directory, 0o750); err != nil {
 			return "", err
@@ -294,9 +319,20 @@ func (s *Server) createPostmaster(ctx context.Context, tenantID, domain string) 
 	if err != nil {
 		return err
 	}
-	maildir, err := s.ensureMaildir(domain, "postmaster")
+	placement, err := s.placementForDomain(ctx, domain, "")
 	if err != nil {
 		return err
+	}
+	mailHome := filepath.Join(placement.MountPath, domain, "postmaster")
+	maildir, err := s.ensureMailHome(placement.MountPath, mailHome)
+	if err != nil {
+		return err
+	}
+	storedHome := ""
+	storageVolumeID := ""
+	if !placement.Legacy {
+		storedHome = mailHome
+		storageVolumeID = placement.VolumeID
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -314,9 +350,10 @@ func (s *Server) createPostmaster(ctx context.Context, tenantID, domain string) 
 		return err
 	}
 	_, err = tx.Exec(ctx, `
-		INSERT INTO public.mailboxes (tenant_id, user_id, email, domain, local_part, maildir_path, active, provision_status, provisioned_at)
-		VALUES ($1,$2,$3,$4,'postmaster',$5,true,'ready',now())
-	`, tenantID, userID, email, domain, maildir)
+		INSERT INTO public.mailboxes
+		  (tenant_id, user_id, email, domain, local_part, maildir_path, mail_home, storage_volume_id, active, provision_status, provisioned_at)
+		VALUES ($1,$2,$3,$4,'postmaster',$5,NULLIF($6,''),NULLIF($7,'')::uuid,true,'ready',now())
+	`, tenantID, userID, email, domain, maildir, storedHome, storageVolumeID)
 	if err != nil {
 		return err
 	}

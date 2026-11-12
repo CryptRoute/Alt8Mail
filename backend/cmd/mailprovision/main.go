@@ -20,7 +20,7 @@ import (
 var pathPartPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+=-]{0,127}$`)
 
 type mailboxRow struct {
-	id, domain, localPart, maildirPath, status string
+	id, domain, localPart, maildirPath, status, mailHome, volumeID, volumeMount string
 }
 
 func main() {
@@ -47,10 +47,13 @@ func main() {
 		os.Exit(1)
 	}
 	query := `
-		SELECT m.id::text, m.domain::text, m.local_part::text, m.maildir_path, m.provision_status
+		SELECT m.id::text, m.domain::text, m.local_part::text, m.maildir_path, m.provision_status,
+		       COALESCE(m.mail_home, ''), COALESCE(m.storage_volume_id::text, ''),
+		       COALESCE(v.mount_path, '')
 		FROM mailboxes m
 		JOIN users u ON u.id = m.user_id
 		JOIN tenants t ON t.id = m.tenant_id
+		LEFT JOIN control.storage_volumes v ON v.id = m.storage_volume_id
 		WHERE m.active = true AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'`
 	if !*verifyAll {
 		query += ` AND m.provision_status <> 'ready'`
@@ -64,7 +67,8 @@ func main() {
 	boxes := []mailboxRow{}
 	for rows.Next() {
 		var box mailboxRow
-		if rows.Scan(&box.id, &box.domain, &box.localPart, &box.maildirPath, &box.status) == nil {
+		if rows.Scan(&box.id, &box.domain, &box.localPart, &box.maildirPath, &box.status,
+			&box.mailHome, &box.volumeID, &box.volumeMount) == nil {
 			boxes = append(boxes, box)
 		}
 	}
@@ -72,7 +76,27 @@ func main() {
 
 	ready, failed := 0, 0
 	for _, box := range boxes {
-		path, err := provisionMaildir(cfg.MaildirBase, box.domain, box.localPart, uid, gid)
+		home := strings.TrimSpace(box.mailHome)
+		volumeRoot := strings.TrimSpace(box.volumeMount)
+		if home == "" {
+			if volumeRoot != "" {
+				home = filepath.Join(volumeRoot, box.domain, box.localPart)
+			} else {
+				home = filepath.Join(cfg.MaildirBase, box.domain, box.localPart)
+			}
+		}
+		// A database path is not trusted on its own. A placed home must be
+		// inside the mount path of the volume it claims to belong to.
+		if volumeRoot != "" && !pathInside(volumeRoot, home) {
+			failed++
+			_, _ = st.DB.Exec(ctx, `
+				UPDATE mailboxes SET provision_status = 'error', provision_attempts = provision_attempts + 1,
+				       provision_error = $2 WHERE id = $1
+			`, box.id, "mail home is outside its registered volume")
+			logger.Warn("mailbox provisioning rejected an out-of-volume path", "id", box.id, "home", home, "volume", volumeRoot)
+			continue
+		}
+		path, err := provisionMailHome(home, uid, gid)
 		if err != nil {
 			failed++
 			_, _ = st.DB.Exec(ctx, `
@@ -82,11 +106,16 @@ func main() {
 			logger.Warn("mailbox provisioning failed", "id", box.id, "domain", box.domain, "local", box.localPart, "err", err)
 			continue
 		}
+		persistHome := ""
+		if strings.TrimSpace(box.mailHome) != "" || (volumeRoot != "" && filepath.Clean(volumeRoot) != filepath.Clean(cfg.MaildirBase)) {
+			persistHome = home
+		}
 		if _, err := st.DB.Exec(ctx, `
 			UPDATE mailboxes SET maildir_path = $2, provision_status = 'ready', provisioned_at = now(),
-			       provision_attempts = provision_attempts + 1, provision_error = ''
+			       provision_attempts = provision_attempts + 1, provision_error = '',
+			       mail_home = CASE WHEN $3 <> '' THEN COALESCE(NULLIF(mail_home, ''), $3) ELSE mail_home END
 			WHERE id = $1
-		`, box.id, path); err != nil {
+		`, box.id, path, persistHome); err != nil {
 			failed++
 			logger.Warn("mailbox state update failed", "id", box.id, "err", err)
 			continue
@@ -117,13 +146,23 @@ func provisionMaildir(base, domain, localPart string, uid, gid int) (string, err
 		return "", fmt.Errorf("unsafe mailbox path component")
 	}
 	base = filepath.Clean(base)
-	root := filepath.Join(base, domain)
-	userDir := filepath.Join(root, localPart)
-	maildir := filepath.Join(userDir, "Maildir")
-	if !strings.HasPrefix(maildir, base+string(os.PathSeparator)) {
-		return "", fmt.Errorf("mailbox path escapes the mail root")
+	return provisionMailHome(filepath.Join(base, domain, localPart), uid, gid)
+}
+
+func provisionMailHome(home string, uid, gid int) (string, error) {
+	home = filepath.Clean(home)
+	if home == "" || !filepath.IsAbs(home) {
+		return "", fmt.Errorf("mail home must be an absolute path")
 	}
-	for _, directory := range []string{filepath.Join(base, domain), userDir, maildir} {
+	domainDir := filepath.Dir(home)
+	if domainDir == string(os.PathSeparator) || filepath.Dir(domainDir) == domainDir {
+		return "", fmt.Errorf("mail home must live under a domain directory")
+	}
+	if !pathPartPattern.MatchString(filepath.Base(domainDir)) || !pathPartPattern.MatchString(filepath.Base(home)) {
+		return "", fmt.Errorf("unsafe mailbox path component")
+	}
+	maildir := filepath.Join(home, "Maildir")
+	for _, directory := range []string{domainDir, home, maildir} {
 		info, err := os.Lstat(directory)
 		if err == nil && info.Mode()&os.ModeSymlink != 0 {
 			return "", fmt.Errorf("mailbox path contains a symlink")
@@ -132,7 +171,7 @@ func provisionMaildir(base, domain, localPart string, uid, gid int) (string, err
 			return "", err
 		}
 	}
-	for _, directory := range []string{root, userDir, maildir,
+	for _, directory := range []string{domainDir, home, maildir,
 		filepath.Join(maildir, "cur"), filepath.Join(maildir, "new"), filepath.Join(maildir, "tmp")} {
 		if err := os.MkdirAll(directory, 0o750); err != nil {
 			return "", err
@@ -170,6 +209,16 @@ func provisionMaildir(base, domain, localPart string, uid, gid int) (string, err
 		}
 	}
 	return maildir, nil
+}
+
+func pathInside(root, child string) bool {
+	root = filepath.Clean(root)
+	child = filepath.Clean(child)
+	rel, err := filepath.Rel(root, child)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func truncate(value string, limit int) string {

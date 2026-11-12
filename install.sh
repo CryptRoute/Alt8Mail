@@ -209,7 +209,7 @@ if [[ "$SKIP_PACKAGES" -eq 0 ]]; then
     postgresql postgresql-contrib postgresql-client redis-server redis-tools \
     dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-managesieved \
     dovecot-sieve dovecot-pgsql postfix postfix-pgsql rspamd clamav clamav-daemon \
-    clamav-freshclam nginx certbot
+    clamav-freshclam nginx certbot rsync gdisk xfsprogs smartmontools cloud-guest-utils lvm2
 fi
 
 # Go is required for source installs and for the tag-based updater.
@@ -266,6 +266,7 @@ install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$SECRETS_DIR" "$INSTAL
 install -d -m 0755 "$RELEASES_DIR" "$CONFIG_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT/bin"
 install -d -m 0700 /var/backups/alt8mail /etc/ssl/alt8mail /etc/cron.d
 install -d -m 0750 -o vmail -g vmail /var/vmail
+install -d -m 0750 -o root -g vmail /srv/a8m-storage
 install -d -m 0755 /var/www/certbot /etc/letsencrypt /var/lib/letsencrypt
 
 rand_hex() { openssl rand -hex "$1"; }
@@ -634,6 +635,8 @@ CONTROL_MAIL_HOSTNAME=$MAIL_HOSTNAME
 CONTROL_DNS_RESOLVER=1.1.1.1:53
 CONTROL_MAIL_LOG=/var/log/mail.log
 CONTROL_VMAIL_ROOT=/var/vmail
+CONTROL_STORAGE_ROOT=/srv/a8m-storage
+CONTROL_STORAGE_RUNNER=/opt/a8m/current/bin/a8m-storage-runner
 CONTROL_DKIM_DIR=/var/lib/rspamd/dkim
 CONTROL_POSTFIX_DIR=/etc/postfix
 CONTROL_DOVECOT_DIR=/etc/dovecot

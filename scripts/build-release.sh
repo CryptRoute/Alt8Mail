@@ -62,6 +62,7 @@ echo "building Alt8Mail $VERSION for $GOOS_TARGET/$GOARCH_TARGET"
   go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/a8m-admin" ./cmd/admin
   go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/a8m-inituser" ./cmd/inituser
   go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/a8m-mailprovision" ./cmd/mailprovision
+  go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/a8m-storage-runner" ./cmd/storagerunner
   go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/a8m-dkimprovision" ./cmd/dkimprovision
   go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$STAGE/bin/alt8mail-control" ./cmd/control
   go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$STAGE/bin/a8m-addon-relay" ./cmd/addonrelay
@@ -92,6 +93,8 @@ CONTROL_MAIL_HOSTNAME=mail.example.com
 CONTROL_DNS_RESOLVER=1.1.1.1:53
 CONTROL_MAIL_LOG=/var/log/mail.log
 CONTROL_VMAIL_ROOT=/var/vmail
+CONTROL_STORAGE_ROOT=/srv/a8m-storage
+CONTROL_STORAGE_RUNNER=/opt/a8m/current/bin/a8m-storage-runner
 CONTROL_DKIM_DIR=/var/lib/rspamd/dkim
 CONTROL_POSTFIX_DIR=/etc/postfix
 CONTROL_DOVECOT_DIR=/etc/dovecot

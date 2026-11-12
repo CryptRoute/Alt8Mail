@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type restoreImportFunc func(context.Context, string, string, string, string) (commandResult, error)
@@ -149,17 +151,12 @@ func (s *Server) resolveMailboxRestoreTarget(ctx context.Context, req mailboxRes
 	if live == "" {
 		live = filepath.Join(s.cfg.VmailRoot, target.Domain, target.Local, "Maildir")
 	}
-	root, err := filepath.Abs(s.cfg.VmailRoot)
-	if err != nil {
-		return target, err
-	}
 	resolved, err := filepath.Abs(live)
 	if err != nil {
 		return target, err
 	}
-	rel, err := filepath.Rel(root, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return target, errors.New("mailbox path is outside the managed Maildir root")
+	if !s.isManagedMailPath(ctx, resolved) {
+		return target, errors.New("mailbox path is outside the managed mail volumes")
 	}
 	target.MaildirPath = resolved
 	target.Folder = folder
@@ -305,6 +302,140 @@ func (s *Server) previewMailboxRestore(ctx context.Context, backupID string, req
 	}
 	preview, err := s.scanMailboxArchive(archivePath, target, since, until)
 	return preview, target, name, err
+}
+
+func (s *Server) managedMailRoots(ctx context.Context) []string {
+	roots := []string{}
+	seen := map[string]bool{}
+	add := func(root string) {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "" || root == "." || seen[root] {
+			return
+		}
+		seen[root] = true
+		roots = append(roots, root)
+	}
+	add(s.cfg.VmailRoot)
+	if volumes, err := s.storageVolumeRows(ctx); err == nil {
+		for _, volume := range volumes {
+			if volume.Role == "mail" {
+				add(volume.MountPath)
+			}
+		}
+	}
+	return roots
+}
+
+func (s *Server) isManagedMailPath(ctx context.Context, path string) bool {
+	for _, root := range s.managedMailRoots(ctx) {
+		if pathWithin(root, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// isMailboxHomePath rejects the volume root itself. A home must be at least
+// <volume>/<domain>/<local>; a malformed database path must never let a move,
+// delete or restore operate on the whole mount.
+func (s *Server) isMailboxHomePath(ctx context.Context, path string) bool {
+	for _, root := range s.managedMailRoots(ctx) {
+		if pathWithin(root, path) && !sameStoragePath(root, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) restoreMaildirTrees(ctx context.Context, stage string) (int, error) {
+	sourceRoot := filepath.Join(stage, "mail", "vmail")
+	if !pathExists(sourceRoot) {
+		return 0, nil
+	}
+	uid, gid, err := mailOwnerLookup()
+	if err != nil {
+		return 0, fmt.Errorf("vmail account: %w", err)
+	}
+	domains, err := os.ReadDir(sourceRoot)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, domainEntry := range domains {
+		if !domainEntry.IsDir() {
+			continue
+		}
+		domain := normalizeDomain(domainEntry.Name())
+		if !validDomain(domain) {
+			continue
+		}
+		locals, err := os.ReadDir(filepath.Join(sourceRoot, domainEntry.Name()))
+		if err != nil {
+			return total, err
+		}
+		for _, localEntry := range locals {
+			if !localEntry.IsDir() {
+				continue
+			}
+			local := normalizeLocal(localEntry.Name())
+			if !validLocalPart(local) {
+				continue
+			}
+			sourceHome := filepath.Join(sourceRoot, domainEntry.Name(), localEntry.Name())
+			targetHome, err := s.restoreHomeForMailbox(ctx, domain, local)
+			if err != nil {
+				return total, err
+			}
+			if !s.isMailboxHomePath(ctx, targetHome) {
+				return total, fmt.Errorf("restore target %s is outside the managed mail volumes", targetHome)
+			}
+			count, err := copyTree(sourceHome, targetHome)
+			if err != nil {
+				return total, err
+			}
+			if count > 0 {
+				if err := chownTree(targetHome, uid, gid); err != nil {
+					return total, err
+				}
+			}
+			total += count
+		}
+	}
+	return total, nil
+}
+
+func (s *Server) restoreHomeForMailbox(ctx context.Context, domain, local string) (string, error) {
+	email := local + "@" + domain
+	var home, maildir string
+	err := s.db.QueryRow(ctx, `
+		SELECT COALESCE(mail_home, ''), COALESCE(maildir_path, '')
+		FROM public.mailboxes WHERE email = $1 LIMIT 1
+	`, email).Scan(&home, &maildir)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	if strings.TrimSpace(home) != "" {
+		return filepath.Clean(home), nil
+	}
+	if strings.TrimSpace(maildir) != "" {
+		return filepath.Dir(filepath.Clean(maildir)), nil
+	}
+	return filepath.Join(s.cfg.VmailRoot, domain, local), nil
+}
+
+func chownTree(root string, uid, gid int) error {
+	if uid < 0 {
+		return nil
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		return os.Chown(path, uid, gid)
+	})
 }
 
 func (s *Server) extractMaildirArchive(archivePath string, target mailboxRestoreTarget, stage string, since, until *time.Time) (int, error) {

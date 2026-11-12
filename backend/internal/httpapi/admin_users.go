@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/CryptRoute/Alt8Mail/backend/internal/auth"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/mailstorage"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/stateinit"
 	"github.com/jackc/pgx/v5"
 )
@@ -498,11 +499,25 @@ func provisionUserTx(ctx context.Context, tx pgx.Tx, tenantID, name, email, role
 			return "", err
 		}
 	}
-	maildir := fmt.Sprintf("%s/%s/%s/Maildir", strings.TrimRight(maildirBase, "/"), domain, localPart)
+	placement, err := mailstorage.ResolveDomain(ctx, tx, domain, maildirBase)
+	if err != nil {
+		return "", fmt.Errorf("resolve mailbox storage: %w", err)
+	}
+	if placement.State != "" && placement.State != "online" {
+		return "", fmt.Errorf("the storage volume for %s is not online", domain)
+	}
+	home, maildir := placement.Home(domain, localPart)
+	mailHome := ""
+	storageVolumeID := ""
+	if !placement.Legacy {
+		mailHome = home
+		storageVolumeID = placement.VolumeID
+	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO mailboxes (tenant_id, user_id, email, domain, local_part, maildir_path, active)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, tenantID, userID, email, domain, localPart, maildir, status == "active"); err != nil {
+		INSERT INTO mailboxes
+		  (tenant_id, user_id, email, domain, local_part, maildir_path, mail_home, storage_volume_id, active)
+		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, '')::uuid, $9)
+	`, tenantID, userID, email, domain, localPart, maildir, mailHome, storageVolumeID, status == "active"); err != nil {
 		return "", err
 	}
 	return userID, nil

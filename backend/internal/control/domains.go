@@ -347,39 +347,159 @@ func (s *Server) handleDomainUpdate(w http.ResponseWriter, r *http.Request, sess
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "domain": oldDomain})
 }
 
+type domainMailboxHome struct {
+	Local      string
+	OldHome    string
+	NewHome    string
+	VolumeRoot string
+}
+
+func (s *Server) domainMailboxHomes(ctx context.Context, domain string) ([]domainMailboxHome, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT m.local_part::text, COALESCE(m.mail_home, ''), COALESCE(v.mount_path, '')
+		FROM public.mailboxes m
+		LEFT JOIN control.storage_volumes v ON v.id = m.storage_volume_id
+		WHERE m.domain = $1
+		ORDER BY m.local_part
+	`, domain)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	homes := []domainMailboxHome{}
+	for rows.Next() {
+		var local, home, volumeRoot string
+		if err := rows.Scan(&local, &home, &volumeRoot); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(volumeRoot) == "" {
+			volumeRoot = s.cfg.VmailRoot
+		}
+		homes = append(homes, domainMailboxHome{
+			Local: local, OldHome: home, VolumeRoot: filepath.Clean(volumeRoot),
+		})
+	}
+	return homes, rows.Err()
+}
+
+func (s *Server) renameDomainHomes(homes []domainMailboxHome, oldDomain, newDomain string) ([]domainMailboxHome, error) {
+	type move struct {
+		index    int
+		from, to string
+	}
+	moves := []move{}
+	for i := range homes {
+		if strings.TrimSpace(homes[i].OldHome) == "" {
+			homes[i].OldHome = filepath.Join(homes[i].VolumeRoot, oldDomain, homes[i].Local)
+		}
+		homes[i].OldHome = filepath.Clean(homes[i].OldHome)
+		homes[i].NewHome = filepath.Join(homes[i].VolumeRoot, newDomain, homes[i].Local)
+		if !pathWithin(homes[i].VolumeRoot, homes[i].OldHome) || !pathWithin(homes[i].VolumeRoot, homes[i].NewHome) {
+			return nil, fail(500, "MAILDIR", "A mailbox home is outside its registered volume")
+		}
+		info, err := os.Lstat(homes[i].OldHome)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, fail(500, "MAILDIR", "Could not inspect the mailbox home: "+err.Error())
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return nil, fail(409, "MAILDIR", "A mailbox home is not a real directory")
+		}
+		if _, err := os.Lstat(homes[i].NewHome); err == nil {
+			return nil, fail(409, "MAILDIR", "The target mailbox directory already exists: "+homes[i].NewHome)
+		}
+		moves = append(moves, move{index: i, from: homes[i].OldHome, to: homes[i].NewHome})
+	}
+	uid, gid, err := mailOwnerLookup()
+	if err != nil {
+		return nil, fail(500, "MAILDIR", "Could not resolve the vmail account: "+err.Error())
+	}
+	created := map[string]bool{}
+	done := []move{}
+	rollback := func() {
+		for i := len(done) - 1; i >= 0; i-- {
+			_ = os.Rename(done[i].to, done[i].from)
+		}
+	}
+	for _, item := range moves {
+		parent := filepath.Dir(item.to)
+		if !created[parent] {
+			if info, err := os.Lstat(parent); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				rollback()
+				return nil, fail(409, "MAILDIR", "The target domain path contains a symlink")
+			}
+			if err := os.MkdirAll(parent, 0o750); err != nil {
+				rollback()
+				return nil, fail(500, "MAILDIR", "Could not create the target domain directory: "+err.Error())
+			}
+			if uid >= 0 {
+				if err := os.Chown(parent, uid, gid); err != nil {
+					rollback()
+					return nil, fail(500, "MAILDIR", "Could not own the target domain directory: "+err.Error())
+				}
+			}
+			if err := os.Chmod(parent, 0o750); err != nil {
+				rollback()
+				return nil, fail(500, "MAILDIR", "Could not set the target domain mode: "+err.Error())
+			}
+			created[parent] = true
+		}
+		if err := os.Rename(item.from, item.to); err != nil {
+			rollback()
+			return nil, fail(500, "MAILDIR", "Could not rename a mailbox home: "+err.Error())
+		}
+		done = append(done, item)
+	}
+	movedHomes := make([]domainMailboxHome, 0, len(done))
+	for _, item := range done {
+		movedHomes = append(movedHomes, homes[item.index])
+	}
+	return movedHomes, nil
+}
+
+func (s *Server) rollbackDomainHomes(homes []domainMailboxHome) {
+	for i := len(homes) - 1; i >= 0; i-- {
+		if homes[i].OldHome == "" || homes[i].NewHome == "" {
+			continue
+		}
+		if _, err := os.Lstat(homes[i].NewHome); err == nil {
+			_ = os.Rename(homes[i].NewHome, homes[i].OldHome)
+		}
+	}
+}
+
 func (s *Server) renameDomain(ctx context.Context, id, oldDomain, newDomain string) (map[string]any, error) {
 	var existing int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM public.mail_domains WHERE domain=$1 AND id<>$2`, newDomain, id).Scan(&existing)
 	if existing > 0 {
 		return nil, fail(409, "DOMAIN", "The new domain already exists")
 	}
-	oldPath := filepath.Join(s.cfg.VmailRoot, oldDomain)
-	newPath := filepath.Join(s.cfg.VmailRoot, newDomain)
-	if _, err := os.Stat(newPath); err == nil {
-		return nil, fail(409, "MAILDIR", "The target Maildir domain directory already exists")
-	}
-	tx, err := s.db.Begin(ctx)
+	homes, err := s.domainMailboxHomes(ctx, oldDomain)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
-	renamedDir := false
-	if _, statErr := os.Stat(oldPath); statErr == nil {
-		if err := os.Rename(oldPath, newPath); err != nil {
-			return nil, fail(500, "MAILDIR", "Could not rename the domain Maildir: "+err.Error())
-		}
-		renamedDir = true
+	moved, err := s.renameDomainHomes(homes, oldDomain, newDomain)
+	if err != nil {
+		return nil, err
 	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		s.rollbackDomainHomes(moved)
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
 	rollbackDir := func() {
-		if renamedDir {
-			_ = os.Rename(newPath, oldPath)
-		}
+		s.rollbackDomainHomes(moved)
 	}
 	// Update child tables first so no unique conflict remains on the domain row.
 	if _, err := tx.Exec(ctx, `
 		UPDATE public.mailboxes SET
 		  domain=$2::text,
 		  email = lower(local_part::text) || '@' || $2::text,
+		  mail_home = CASE WHEN mail_home IS NULL THEN NULL
+		                   ELSE replace(mail_home, '/' || $1::text || '/', '/' || $2::text || '/') END,
 		  maildir_path = replace(maildir_path, '/' || $1::text || '/', '/' || $2::text || '/'),
 		  provision_status='ready', provisioned_at=now()
 		WHERE domain=$1::text
@@ -434,7 +554,7 @@ func (s *Server) renameDomain(ctx context.Context, id, oldDomain, newDomain stri
 	var mailboxes, aliases int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM public.mailboxes WHERE domain=$1`, newDomain).Scan(&mailboxes)
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM control.mail_aliases WHERE domain=$1`, newDomain).Scan(&aliases)
-	return map[string]any{"mailboxes": mailboxes, "aliases": aliases, "maildirRenamed": renamedDir}, nil
+	return map[string]any{"mailboxes": mailboxes, "aliases": aliases, "maildirRenamed": len(moved) > 0, "homesMoved": len(moved)}, nil
 }
 
 func (s *Server) handleDomainPrimary(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
@@ -485,6 +605,67 @@ func (s *Server) handleDomainDKIM(w http.ResponseWriter, r *http.Request, sess *
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "selector": selector, "record": record})
 }
 
+type domainArchiveMove struct {
+	From, To string
+	Orphan   bool
+}
+
+func (s *Server) archiveDomainHomes(ctx context.Context, domain string) (string, []domainArchiveMove, error) {
+	homes, err := s.domainMailboxHomes(ctx, domain)
+	if err != nil {
+		return "", nil, err
+	}
+	backupDir := filepath.Join(s.cfg.BackupDir, "deleted-domains")
+	if err := os.MkdirAll(backupDir, 0o700); err != nil {
+		return "", nil, err
+	}
+	archive, err := os.MkdirTemp(backupDir, domain+"-")
+	if err != nil {
+		return "", nil, err
+	}
+	moves := []domainArchiveMove{}
+	for _, home := range homes {
+		source := strings.TrimSpace(home.OldHome)
+		if source == "" {
+			source = filepath.Join(home.VolumeRoot, domain, home.Local)
+		}
+		source = filepath.Clean(source)
+		if !pathWithin(home.VolumeRoot, source) || sameStoragePath(home.VolumeRoot, source) {
+			_ = os.RemoveAll(archive)
+			s.rollbackArchiveMoves(moves)
+			return "", nil, fmt.Errorf("mailbox home %s is outside its registered volume", source)
+		}
+		if !pathExists(source) {
+			continue
+		}
+		volumeName := "legacy"
+		if !sameStoragePath(home.VolumeRoot, s.cfg.VmailRoot) {
+			volumeName = storageNameFromPath(home.VolumeRoot)
+		}
+		destination := filepath.Join(archive, volumeName, home.Local)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			s.rollbackArchiveMoves(moves)
+			_ = os.RemoveAll(archive)
+			return "", nil, err
+		}
+		if err := movePath(ctx, source, destination); err != nil {
+			s.rollbackArchiveMoves(moves)
+			_ = os.RemoveAll(archive)
+			return "", nil, err
+		}
+		moves = append(moves, domainArchiveMove{From: source, To: destination})
+	}
+	return archive, moves, nil
+}
+
+func (s *Server) rollbackArchiveMoves(moves []domainArchiveMove) {
+	for i := len(moves) - 1; i >= 0; i-- {
+		if pathExists(moves[i].To) {
+			_ = movePath(context.Background(), moves[i].To, moves[i].From)
+		}
+	}
+}
+
 func (s *Server) handleDomainDeletePreview(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	id := pathID(r)
 	var domain string
@@ -505,10 +686,19 @@ func (s *Server) handleDomainDeletePreview(w http.ResponseWriter, r *http.Reques
 	`, domain).Scan(&messages)
 	path := filepath.Join(s.cfg.VmailRoot, domain)
 	maildirBytes := int64(0)
-	if result, err := runCommand(r.Context(), 15*time.Second, "du", "-sb", path); err == nil {
-		fields := strings.Fields(result.Stdout)
-		if len(fields) > 0 {
-			fmt.Sscan(fields[0], &maildirBytes)
+	homes, _ := s.domainMailboxHomes(r.Context(), domain)
+	roots := map[string]bool{filepath.Clean(s.cfg.VmailRoot): true}
+	for _, home := range homes {
+		roots[home.VolumeRoot] = true
+	}
+	for root := range roots {
+		if result, err := runCommand(r.Context(), 15*time.Second, "du", "-sb", filepath.Join(root, domain)); err == nil {
+			fields := strings.Fields(result.Stdout)
+			if len(fields) > 0 {
+				var bytes int64
+				fmt.Sscan(fields[0], &bytes)
+				maildirBytes += bytes
+			}
 		}
 	}
 	keys, _ := filepath.Glob(filepath.Join(s.cfg.DKIMDir, domain+".*.key"))
@@ -545,8 +735,14 @@ func (s *Server) handleDomainDelete(w http.ResponseWriter, r *http.Request, sess
 		writeError(w, http.StatusForbidden, "CONFIRM", "Refresh the delete preview and try again")
 		return
 	}
+	archive, archivedMoves, err := s.archiveDomainHomes(r.Context(), domain)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ARCHIVE", "Could not archive the domain mail: "+err.Error())
+		return
+	}
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
+		s.rollbackArchiveMoves(archivedMoves)
 		writeFromError(w, err)
 		return
 	}
@@ -554,6 +750,7 @@ func (s *Server) handleDomainDelete(w http.ResponseWriter, r *http.Request, sess
 	if _, err := tx.Exec(r.Context(), `
 		DELETE FROM public.users WHERE email::text ILIKE '%@'||$1 AND deleted_at IS NULL
 	`, domain); err != nil {
+		s.rollbackArchiveMoves(archivedMoves)
 		writeFromError(w, err)
 		return
 	}
@@ -561,21 +758,19 @@ func (s *Server) handleDomainDelete(w http.ResponseWriter, r *http.Request, sess
 	_, _ = tx.Exec(r.Context(), `DELETE FROM control.mail_aliases WHERE domain=$1`, domain)
 	tag, err := tx.Exec(r.Context(), `DELETE FROM public.mail_domains WHERE id=$1`, id)
 	if err != nil || tag.RowsAffected() == 0 {
+		s.rollbackArchiveMoves(archivedMoves)
 		writeError(w, http.StatusNotFound, "DOMAIN", "Domain not found")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
+		s.rollbackArchiveMoves(archivedMoves)
 		writeFromError(w, err)
 		return
 	}
-	archive := ""
-	if oldPath := filepath.Join(s.cfg.VmailRoot, domain); pathExists(oldPath) {
-		archiveDir := filepath.Join(s.cfg.BackupDir, "deleted-domains")
-		_ = os.MkdirAll(archiveDir, 0o700)
-		archive = filepath.Join(archiveDir, domain+"-"+time.Now().UTC().Format("20060102-150405"))
-		if err := movePath(r.Context(), oldPath, archive); err != nil {
-			s.logger.Warn("domain maildir archive failed", "domain", domain, "err", err)
-			archive = ""
+	// The archive move leaves empty domain directories behind on each volume.
+	for _, move := range archivedMoves {
+		if !move.Orphan {
+			_ = os.Remove(filepath.Dir(move.From))
 		}
 	}
 	keys, _ := filepath.Glob(filepath.Join(s.cfg.DKIMDir, domain+".*.key"))

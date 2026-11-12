@@ -63,5 +63,8 @@ GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO a8m_app;
 -- meter and pre-send check match the Postfix policy daemon.
 GRANT USAGE ON SCHEMA control TO a8m_app;
 GRANT SELECT ON control.domain_settings TO a8m_app;
+-- The webmail and customer-admin services resolve the effective mail volume
+-- when they create a mailbox. They never write the volume registry.
+GRANT SELECT ON control.storage_volumes, control.storage_policy TO a8m_app;
 
 COMMIT;

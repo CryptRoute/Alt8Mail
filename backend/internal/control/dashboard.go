@@ -215,6 +215,32 @@ func (s *Server) RunDoctor(ctx context.Context) []diagnosticCheck {
 	} else {
 		add("disk", "Disk capacity", "pass", fmt.Sprintf("Root filesystem is %.1f%% full", host.DiskPercent), "")
 	}
+	if volumes, err := s.storageVolumeRows(ctx); err == nil {
+		warning, critical := 85.0, 95.0
+		if policy, policyErr := s.storagePolicyRow(ctx); policyErr == nil {
+			warning, critical = float64(policy.WarningPercent), float64(policy.CriticalPercent)
+		}
+		for _, volume := range volumes {
+			id := "storage_" + storageNameFromPath(volume.Name)
+			stat, statErr := filesystemStatLookup(volume.MountPath)
+			if statErr != nil {
+				if volume.State == "retiring" {
+					add(id, "Storage volume "+volume.Name, "warn", fmt.Sprintf("%s is not readable", volume.MountPath), "Finish evacuating and retire the volume, or restore the mount")
+				} else {
+					add(id, "Storage volume "+volume.Name, "fail", fmt.Sprintf("%s is not readable", volume.MountPath), "Restore the mount before mail delivery or IMAP access fails")
+				}
+				continue
+			}
+			switch {
+			case stat.UsedPercent >= critical:
+				add(id, "Storage volume "+volume.Name, "fail", fmt.Sprintf("%.1f%% full at %s", stat.UsedPercent, volume.MountPath), "Move mail or expand the volume before the filesystem fills")
+			case stat.UsedPercent >= warning:
+				add(id, "Storage volume "+volume.Name, "warn", fmt.Sprintf("%.1f%% full at %s", stat.UsedPercent, volume.MountPath), "Plan a mailbox move or add capacity")
+			default:
+				add(id, "Storage volume "+volume.Name, "pass", fmt.Sprintf("%.1f%% full at %s", stat.UsedPercent, volume.MountPath), "")
+			}
+		}
+	}
 	if host.MemoryPercent >= 95 {
 		add("memory", "Memory pressure", "fail", fmt.Sprintf("Memory is %.1f%% used", host.MemoryPercent), "Find the leaking service before delivery degrades")
 	} else if host.MemoryPercent >= 85 {

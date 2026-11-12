@@ -95,6 +95,9 @@ func (s *Server) policyDecision(ctx context.Context, attrs map[string]string) st
 	} else if err != nil {
 		s.logger.Warn("security report policy lookup failed", "err", err)
 	}
+	if blocked, reason := s.storageGuardForEmail(ctx, recipient); blocked {
+		return "action=DEFER 4.3.1 " + reason
+	}
 	clientIP := net.ParseIP(attrs["client_address"])
 	authenticated := strings.TrimSpace(attrs["sasl_username"]) != ""
 	localClient := clientIP != nil && (clientIP.IsLoopback() || clientIP.IsPrivate())
@@ -102,6 +105,9 @@ func (s *Server) policyDecision(ctx context.Context, attrs map[string]string) st
 		// An unauthenticated external inbound transaction must never consume a
 		// customer's outbound allowance.
 		return "action=DUNNO"
+	}
+	if blocked, reason := s.storageGuardForEmail(ctx, sender); blocked {
+		return "action=DEFER 4.3.1 " + reason
 	}
 	var managed int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM public.mail_domains WHERE domain=$1`, domain).Scan(&managed)

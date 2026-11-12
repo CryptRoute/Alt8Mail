@@ -172,23 +172,37 @@ func (s *Server) performConfigSync(ctx context.Context, actorID, trigger string)
 
 	mailboxes := 0
 	rows, err = s.db.Query(ctx, `
-		SELECT id::text, domain::text, local_part::text FROM public.mailboxes WHERE active ORDER BY domain, local_part
+		SELECT m.id::text, m.domain::text, m.local_part::text,
+		       COALESCE(m.mail_home, ''), COALESCE(v.mount_path, '')
+		FROM public.mailboxes m
+		LEFT JOIN control.storage_volumes v ON v.id = m.storage_volume_id
+		WHERE m.active ORDER BY m.domain, m.local_part
 	`)
 	if err != nil {
 		s.finishSyncFailure(ctx, runID, err)
 		return nil, err
 	}
-	type mailboxRow struct{ id, domain, local string }
+	type mailboxRow struct{ id, domain, local, home, volumeRoot string }
 	boxes := []mailboxRow{}
 	for rows.Next() {
 		var box mailboxRow
-		if rows.Scan(&box.id, &box.domain, &box.local) == nil {
+		if rows.Scan(&box.id, &box.domain, &box.local, &box.home, &box.volumeRoot) == nil {
 			boxes = append(boxes, box)
 		}
 	}
 	rows.Close()
 	for _, box := range boxes {
-		path, err := s.ensureMaildir(box.domain, box.local)
+		var path string
+		var err error
+		if strings.TrimSpace(box.home) != "" {
+			if strings.TrimSpace(box.volumeRoot) == "" {
+				err = fmt.Errorf("placed mailbox has no readable volume mount")
+			} else {
+				path, err = s.ensureMailHome(box.volumeRoot, box.home)
+			}
+		} else {
+			path, err = s.ensureMaildir(box.domain, box.local)
+		}
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s@%s: Maildir provisioning failed: %v", box.local, box.domain, err))
 			_, _ = s.db.Exec(ctx, `UPDATE public.mailboxes SET provision_status='error', provision_attempts=provision_attempts+1, provision_error=$2 WHERE id=$1`, box.id, truncateText(err.Error(), 500))
@@ -350,45 +364,73 @@ func (s *Server) handleConfigImportPreview(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) maildirImportPreview(ctx context.Context) ([]map[string]any, error) {
 	entries := []map[string]any{}
-	domains, err := os.ReadDir(s.cfg.VmailRoot)
-	if err != nil {
-		return entries, err
+	seen := map[string]bool{}
+	type importRoot struct {
+		Path, VolumeID, VolumeName string
+		Legacy                     bool
 	}
-	for _, domainEntry := range domains {
-		if !domainEntry.IsDir() {
-			continue
+	roots := []importRoot{{Path: s.cfg.VmailRoot, VolumeName: "legacy", Legacy: true}}
+	if volumes, err := s.storageVolumeRows(ctx); err == nil {
+		for _, volume := range volumes {
+			if volume.Role != "mail" || sameStoragePath(volume.MountPath, s.cfg.VmailRoot) {
+				continue
+			}
+			roots = append(roots, importRoot{Path: volume.MountPath, VolumeID: volume.ID, VolumeName: volume.Name})
 		}
-		domain := normalizeDomain(domainEntry.Name())
-		if !validDomain(domain) {
-			continue
-		}
-		users, err := os.ReadDir(filepath.Join(s.cfg.VmailRoot, domain))
+	}
+	for _, root := range roots {
+		domains, err := os.ReadDir(root.Path)
 		if err != nil {
 			continue
 		}
-		for _, userEntry := range users {
-			if !userEntry.IsDir() {
+		for _, domainEntry := range domains {
+			if !domainEntry.IsDir() {
 				continue
 			}
-			local := normalizeLocal(userEntry.Name())
-			if !validLocalPart(local) {
+			domain := normalizeDomain(domainEntry.Name())
+			if !validDomain(domain) {
 				continue
 			}
-			maildir := filepath.Join(s.cfg.VmailRoot, domain, local, "Maildir")
-			info, err := os.Stat(maildir)
-			if err != nil || !info.IsDir() {
+			users, err := os.ReadDir(filepath.Join(root.Path, domain))
+			if err != nil {
 				continue
 			}
-			count := countMaildirMessages(maildir)
-			email := local + "@" + domain
-			var existing int
-			_ = s.db.QueryRow(ctx, `SELECT count(*) FROM public.mailboxes WHERE email=$1`, email).Scan(&existing)
-			entries = append(entries, map[string]any{
-				"email": email, "domain": domain, "localPart": local, "path": maildir,
-				"messages": count, "exists": existing > 0,
-			})
-			if len(entries) >= 5000 {
-				return entries, nil
+			for _, userEntry := range users {
+				if !userEntry.IsDir() {
+					continue
+				}
+				local := normalizeLocal(userEntry.Name())
+				if !validLocalPart(local) {
+					continue
+				}
+				home := filepath.Join(root.Path, domain, local)
+				maildir := filepath.Join(home, "Maildir")
+				info, err := os.Stat(maildir)
+				if err != nil || !info.IsDir() {
+					continue
+				}
+				email := local + "@" + domain
+				if seen[email] {
+					continue
+				}
+				seen[email] = true
+				count := countMaildirMessages(maildir)
+				var existing int
+				_ = s.db.QueryRow(ctx, `SELECT count(*) FROM public.mailboxes WHERE email=$1`, email).Scan(&existing)
+				mailHome := ""
+				volumeID := ""
+				if !root.Legacy {
+					mailHome = home
+					volumeID = root.VolumeID
+				}
+				entries = append(entries, map[string]any{
+					"email": email, "domain": domain, "localPart": local, "path": maildir,
+					"mailHome": mailHome, "volumeId": volumeID, "volumeName": root.VolumeName,
+					"volumeRoot": root.Path, "messages": count, "exists": existing > 0,
+				})
+				if len(entries) >= 5000 {
+					return entries, nil
+				}
 			}
 		}
 	}
@@ -446,7 +488,8 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request, sess
 			warnings = append(warnings, email+": domain is not managed by the panel")
 			continue
 		}
-		if err := s.importShellMailbox(r.Context(), tenantID, domain, local); err != nil {
+		if err := s.importShellMailbox(r.Context(), tenantID, domain, local,
+			fmt.Sprint(item["mailHome"]), fmt.Sprint(item["volumeId"]), fmt.Sprint(item["volumeRoot"])); err != nil {
 			warnings = append(warnings, email+": "+err.Error())
 			continue
 		}
@@ -457,7 +500,7 @@ func (s *Server) handleConfigImport(w http.ResponseWriter, r *http.Request, sess
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "created": created, "warnings": warnings})
 }
 
-func (s *Server) importShellMailbox(ctx context.Context, tenantID, domain, local string) error {
+func (s *Server) importShellMailbox(ctx context.Context, tenantID, domain, local, mailHome, volumeID, volumeRoot string) error {
 	email := local + "@" + domain
 	random, err := randomPassword(28)
 	if err != nil {
@@ -468,7 +511,15 @@ func (s *Server) importShellMailbox(ctx context.Context, tenantID, domain, local
 	if err != nil {
 		return err
 	}
-	maildir, err := s.ensureMaildir(domain, local)
+	var maildir string
+	if strings.TrimSpace(mailHome) != "" {
+		if strings.TrimSpace(volumeRoot) == "" {
+			return fmt.Errorf("imported mailbox is on a volume with no mount path")
+		}
+		maildir, err = s.ensureMailHome(volumeRoot, mailHome)
+	} else {
+		maildir, err = s.ensureMaildir(domain, local)
+	}
 	if err != nil {
 		return err
 	}
@@ -489,10 +540,15 @@ func (s *Server) importShellMailbox(ctx context.Context, tenantID, domain, local
 		return err
 	}
 	_, err = tx.Exec(ctx, `
-		INSERT INTO public.mailboxes (tenant_id,user_id,email,domain,local_part,maildir_path,active,provision_status,provisioned_at)
-		VALUES ($1,$2,$3,$4,$5,$6,true,'ready',now())
-		ON CONFLICT (email) DO UPDATE SET maildir_path=EXCLUDED.maildir_path, active=true, provision_status='ready', provisioned_at=now()
-	`, tenantID, userID, email, domain, local, maildir)
+		INSERT INTO public.mailboxes
+		  (tenant_id,user_id,email,domain,local_part,maildir_path,mail_home,storage_volume_id,active,provision_status,provisioned_at)
+		VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,'')::uuid,true,'ready',now())
+		ON CONFLICT (email) DO UPDATE SET
+		  maildir_path=EXCLUDED.maildir_path,
+		  mail_home=COALESCE(NULLIF(EXCLUDED.mail_home,''), public.mailboxes.mail_home),
+		  storage_volume_id=COALESCE(EXCLUDED.storage_volume_id, public.mailboxes.storage_volume_id),
+		  active=true, provision_status='ready', provisioned_at=now()
+	`, tenantID, userID, email, domain, local, maildir, mailHome, volumeID)
 	if err != nil {
 		return err
 	}

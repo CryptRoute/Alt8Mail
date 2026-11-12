@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -8,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -28,6 +30,24 @@ func hashToken(value string) string {
 func sha256Hex(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+// canonicalPlanHash hashes the semantic JSON value rather than the original
+// byte layout. Storage plans live in a jsonb column, which reorders keys and
+// normalizes numbers; hashing the stored bytes directly would make every
+// plan fail its own integrity check after a database round-trip.
+func canonicalPlanHash(raw []byte) string {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return ""
+	}
+	normalized, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return hashToken(string(normalized))
 }
 
 func constantTimeEqual(left, right string) bool {

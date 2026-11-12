@@ -19,24 +19,28 @@ import (
 var webFiles embed.FS
 
 type Server struct {
-	cfg          Config
-	db           *pgxpool.Pool
-	logger       *slog.Logger
-	version      string
-	secrets      *secretBox
-	started      time.Time
-	dummyHash    string
-	hub          *eventHub
-	probe        *systemProbe
-	importMu     sync.Mutex
-	importCancel map[string]context.CancelFunc
-	importWake   chan struct{}
-	updateMu     sync.Mutex
-	updateJobs   map[string]*updateJob
-	termMu       sync.Mutex
-	termSessions map[string]*terminalSession
-	webNetMu     sync.Mutex
-	threatMu     sync.Mutex
+	cfg                 Config
+	db                  *pgxpool.Pool
+	logger              *slog.Logger
+	version             string
+	secrets             *secretBox
+	started             time.Time
+	dummyHash           string
+	hub                 *eventHub
+	probe               *systemProbe
+	importMu            sync.Mutex
+	importCancel        map[string]context.CancelFunc
+	importWake          chan struct{}
+	updateMu            sync.Mutex
+	updateJobs          map[string]*updateJob
+	termMu              sync.Mutex
+	termSessions        map[string]*terminalSession
+	webNetMu            sync.Mutex
+	threatMu            sync.Mutex
+	storageUsageMu      sync.Mutex
+	storageUsageRunning bool
+	storageHealthMu     sync.Mutex
+	storageHealthCache  map[string]storageDiskHealthCache
 
 	// Test seams. Production leaves these nil; tests replace the session,
 	// audit sink and seat counter so handlers can run without PostgreSQL.
@@ -125,6 +129,9 @@ func (s *Server) Handler() http.Handler {
 	s.registerSystemRoutes(mux)
 	s.registerTerminalRoutes(mux)
 	s.registerLicenseRoutes(mux)
+	s.registerStorageRoutes(mux)
+	s.registerStorageMoveRoutes(mux)
+	s.registerStorageVolumeRoutes(mux)
 
 	return s.securityHeaders(s.logRequests(mux))
 }
