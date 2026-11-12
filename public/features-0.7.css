@@ -567,15 +567,15 @@
 .forwarding-field-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
 .forwarding-field-head label { font-size: .68rem; font-weight: 650; color: var(--text-2); }
 .forwarding-field-head span { font-size: .61rem; color: var(--text-3); }
-.recipient-field { display: grid; grid-template-columns: 20px minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 0 11px; min-height: 40px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); transition: border-color .15s, box-shadow .15s; }
-.recipient-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
-.recipient-field > svg { width: 16px; height: 16px; color: var(--text-3); }
-.recipient-field input { width: 100%; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: .76rem; outline: 0; padding: 9px 0; }
-.recipient-field input::placeholder { color: var(--text-3); }
-.recipient-field.is-error { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 14%, transparent); }
-.recipient-field-clear { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); cursor: pointer; }
-.recipient-field-clear:hover { background: var(--surface-2); color: var(--text); }
-.recipient-field-clear svg { width: 13px; height: 13px; }
+.forwarding-address-field { display: grid; grid-template-columns: 20px minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 0 11px; min-height: 40px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); transition: border-color .15s, box-shadow .15s; }
+.forwarding-address-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.forwarding-address-field > svg { width: 16px; height: 16px; color: var(--text-3); }
+.forwarding-address-field input { width: 100%; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: .76rem; outline: 0; padding: 9px 0; }
+.forwarding-address-field input::placeholder { color: var(--text-3); }
+.forwarding-address-field.is-error { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 14%, transparent); }
+.forwarding-address-clear { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); cursor: pointer; }
+.forwarding-address-clear:hover { background: var(--surface-2); color: var(--text); }
+.forwarding-address-clear svg { width: 13px; height: 13px; }
 .forwarding-recipient-preview { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; gap: 9px; align-items: center; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
 .forwarding-recipient-avatar { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-size: .7rem; font-weight: 700; }
 .forwarding-recipient-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }

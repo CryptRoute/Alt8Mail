@@ -1,3 +1,23 @@
+# Alt8Mail 3.2.2
+
+Release date: 2026-11-12. Compose regression fix.
+
+## 3.2.2 compose keeps its identity, layout and calm typing area
+
+- A message is now always routed through the account that owns its From
+  identity. Choosing a native identity inside a compose window while a
+  connected Gmail/Outlook mailbox is open no longer fails drafts or sends with
+  `Choose the connected account address as the From identity`. The compose
+  account is derived from the selected From address everywhere: draft save,
+  send, schedule, AI tone and team templates, and it is repaired when identities
+  refresh.
+- The forwarding card's recipient field styles are scoped to forwarding again.
+  The compose To, Cc and Bcc rows keep their original flat layout with no
+  rounded border or focus box.
+- The compose writing area no longer draws a rectangle while typing. The
+  keyboard focus ring is shown only when the editor is reached with Tab, so the
+  keyboard accessibility gate still passes.
+
 # Alt8Mail 3.2.1
 
 Release date: 2026-11-12. CI reliability for the 3.2.0 line.

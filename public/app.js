@@ -6923,7 +6923,7 @@ function applyTeamTemplate(session, template) {  if (!session?.el || !template) 
   }
   if (template.aliasEmail && aliasForEmail(template.aliasEmail)?.canSend) {
     session.fromEmail = template.aliasEmail;
-    session.accountId = aliasForEmail(template.aliasEmail)?.accountId || session.accountId;
+    session.accountId = composeAccountIdFor(template.aliasEmail);
     const fromSelect = session.el.querySelector('[data-compose-field="fromEmail"]');
     if (fromSelect) fromSelect.value = template.aliasEmail;
   }
@@ -8126,6 +8126,15 @@ function defaultComposeAccountId() {
   return state.activeAccountId === "all" ? (nativeMailAccount()?.id || "") : state.activeAccountId;
 }
 
+// A message is delivered through the account that owns its From address. A
+// native identity never rides on whichever connected mailbox happens to be
+// open, otherwise the server rejects the send with BAD_FROM.
+function composeAccountIdFor(email) {
+  const alias = aliasForEmail(email);
+  if (alias?.accountId) return alias.accountId;
+  return nativeMailAccount()?.id || defaultComposeAccountId();
+}
+
 function accountMenuAccounts() {
   return (state.accounts || []).filter((account) => account.isNative || externalAccountsEnabled());
 }
@@ -8703,7 +8712,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.2.1";
+const MAIL_PROVIDER_ASSET_VERSION = "3.2.2";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -16041,7 +16050,7 @@ function scheduleToneSuggestion(session) {
           subject: session.subject || "",
           draft: session.body || stripHtml(session.bodyHtml || ""),
           language: state.preferences.language || "en-US",
-          accountId: session.accountId || defaultComposeAccountId()
+          accountId: composeAccountIdFor(session.fromEmail)
         }
       });
       if (!composeSessions.includes(session)) return;
@@ -16578,7 +16587,7 @@ function openCompose(prefill = {}, options = {}) {
   const fromEmail = activeAccountAlias && activeAccountAlias.canSend
     ? (requestedAlias && requestedAlias.accountId === activeAccountAlias.accountId ? requestedFrom : activeAccountAlias.email)
     : (requestedAlias && requestedAlias.canSend ? requestedFrom : defaultAlias.email);
-  const composeAccountId = aliasForEmail(fromEmail)?.accountId || defaultComposeAccountId();
+  const composeAccountId = composeAccountIdFor(fromEmail);
   const htmlMode = data.htmlMode != null ? !!data.htmlMode : state.preferences.composeMode !== "plain";
   const context = (data.kind === "reply" || data.kind === "replyAll") ? "reply" : data.kind === "forward" ? "forward" : "new";
   const signatureItem = options.restoring ? null : defaultSignatureForCompose(context, fromEmail);
@@ -18303,7 +18312,7 @@ function composePayload(session) {
     bodyText: session.body,
     bodyHtml: session.htmlMode ? restoreEditorImageSources(session.bodyHtml) : "",
     fromEmail: session.fromEmail,
-    accountId: session.accountId || defaultComposeAccountId(),
+    accountId: composeAccountIdFor(session.fromEmail),
     attachments: session.files,
     mentions: activeComposeMentions(session),
     threadId: session.threadId,
@@ -18931,7 +18940,7 @@ function composeSendPayload(session, extra = {}) {
   return {
     draftId: session.draftId,
     fromEmail: session.fromEmail,
-    accountId: session.accountId || defaultComposeAccountId(),
+    accountId: composeAccountIdFor(session.fromEmail),
     to: session.to,
     cc: session.cc,
     bcc: session.bcc,
@@ -19290,7 +19299,7 @@ function updateComposeField(session, target) {
   const value = target.type === "checkbox" ? target.checked : target.value;
   session[field] = value;
   if (field === "fromEmail") {
-    session.accountId = aliasForEmail(value)?.accountId || defaultComposeAccountId();
+    session.accountId = composeAccountIdFor(value);
     swapComposeIdentitySignature(session, value);
   }
   session.dirty = true;
@@ -21366,6 +21375,7 @@ function refreshComposeIdentityOptions() {
         `<option value="${esc(alias.email)}"${normalizeEmail(session.fromEmail) === normalizeEmail(alias.email) ? " selected" : ""}>${esc(alias.label)} — ${esc(alias.email)}</option>`
       ).join("");
     }
+    session.accountId = composeAccountIdFor(session.fromEmail);
     updateComposeIdentity(session);
   });
 }
@@ -29766,8 +29776,14 @@ function wireHtmlSourceDialog() {
 }
 
 function bindEvents() {
-  document.addEventListener("pointerdown", () => { document.documentElement.dataset.input = "pointer"; }, true);
-  document.addEventListener("keydown", () => { document.documentElement.dataset.input = "keyboard"; }, true);
+  document.addEventListener("pointerdown", () => {
+    document.documentElement.dataset.input = "pointer";
+    document.documentElement.dataset.keyboardNav = "false";
+  }, true);
+  document.addEventListener("keydown", (event) => {
+    document.documentElement.dataset.input = "keyboard";
+    if (event.key === "Tab") document.documentElement.dataset.keyboardNav = "true";
+  }, true);
   document.addEventListener("input", (event) => {
     if (event.target?.id === "forwardingTarget") {
       setForwardingFieldError("");
