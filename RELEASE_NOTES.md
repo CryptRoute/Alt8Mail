@@ -1,3 +1,47 @@
+# Alt8Mail 3.6.0
+
+Release date: 2026-11-13. Forwarding, connected accounts, Office recovery and
+workspace reminders.
+
+## 3.6.0 forwarding, connected accounts and Office recovery
+
+- **Mail forwarding.** The forwarding panel now leaves its faded state as soon
+  as the switch is enabled, and the target field receives focus. Policy
+  refusals such as an external recipient stay visible under the address field
+  instead of disappearing with a toast. The generated ruleset is covered by a
+  regression test that asserts the active redirect and optional stop
+  instruction.
+- **Connected accounts.** A dropped IMAP connection during login was being
+  treated as a credential failure, which parked the account in `reauth` and
+  stopped the sync worker from retrying. Connection drops, closed sockets and
+  unexpected EOFs are now transient, IMAP login gets one fresh retry, transient
+  OAuth refresh failures do not require reconnection, and OAuth accounts already
+  in `reauth` return to the retry pool. Migration
+  `0095_mail_account_transient_reauth` moves previously stranded accounts back
+  into that pool.
+- **Office after reboot.** The Control Plane database role was missing grants on
+  `public.office_settings`, so the Office page failed to load its settings and
+  the background monitor stopped refreshing `last_health_at`; webmail then
+  reported Office as not enabled, healthy and reachable. The authoritative
+  grants file now covers Office, add-on and web-push tables, and a missing
+  singleton Office settings row is recreated automatically.
+- **No mail-stack names in webmail.** User-facing Dovecot/Postfix wording was
+  replaced with neutral “mail server”, “mailbox policy” and “applied
+  automatically” copy. System Control and administrator surfaces keep their
+  operational wording.
+- **Task badge and reminders.** The Tasks rail icon and mobile tab show a
+  pulsing count of open tasks. Clicking the badge opens the open-task filter.
+  Due and overdue tasks produce persistent reminder cards with Done, Postpone
+  and Open task actions.
+- **Calendar reminders.** Events on the current day produce persistent,
+  interactive cards that stay until Noted, Postpone or Reschedule. Postpone
+  opens an in-app time chooser; Reschedule opens the existing event editor.
+  Multiple events stack independently, and acknowledgements and snoozes survive
+  a reload.
+- **Cabinet view preference.** List, Tiles and Thumbnails are now saved in the
+  user's database preferences as `cabinetView` as well as local storage, so the
+  chosen layout follows the user across devices and sign-ins.
+
 # Alt8Mail 3.5.1
 
 Release date: 2026-11-13. Swap-file fix for the legacy mail root.

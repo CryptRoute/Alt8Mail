@@ -109,7 +109,7 @@ func (s *Server) saveSieve(w http.ResponseWriter, r *http.Request) {
 		}
 		script := renderSieveWithFolders(next, sess.User.Email, folderMapForSieve(state))
 		if err := s.pushSieveScript(r.Context(), sess.User, script); err != nil {
-			return failDetails(http.StatusBadGateway, "SIEVE_SERVICE", "Dovecot rejected the Sieve ruleset", map[string]any{"error": err.Error()})
+			return failDetails(http.StatusBadGateway, "SIEVE_SERVICE", "The mail server rejected the ruleset", map[string]any{"error": err.Error()})
 		}
 		next["script"] = script
 		state["sieve"] = next
@@ -314,6 +314,13 @@ func (s *Server) patchPreferencesState(w http.ResponseWriter, r *http.Request) {
 				return fail(http.StatusBadRequest, "PREFERENCES", "Inbox view must be grouped or individual")
 			}
 			assign("inboxView", view)
+		}
+		if value, ok := patch["cabinetView"]; ok {
+			view := fmt.Sprint(value)
+			if view != "list" && view != "tiles" && view != "thumbs" {
+				return fail(http.StatusBadRequest, "PREFERENCES", "Cabinet view must be list, tiles or thumbs")
+			}
+			assign("cabinetView", view)
 		}
 		if value, ok := patch["theme"]; ok {
 			theme := fmt.Sprint(value)

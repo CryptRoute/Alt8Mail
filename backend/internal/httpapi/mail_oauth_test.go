@@ -199,6 +199,8 @@ func TestTransientExternalMailError(t *testing.T) {
 		"IMAP login failed: Temporary system problem. Please try again later. cdc0902",
 		"dial tcp 142.250.1.1:993: i/o timeout",
 		"read tcp: connection reset by peer",
+		"IMAP login failed: imap: connection closed",
+		"unexpected EOF",
 		"server busy",
 		"HTTP 503 Service Unavailable",
 	} {
@@ -240,6 +242,7 @@ func TestExternalSyncFailureStatus(t *testing.T) {
 		status  string
 	}{
 		{"IMAP login failed: Temporary system problem. Please try again later. cdc0902", "error"},
+		{"IMAP login failed: imap: connection closed", "error"},
 		{"IMAP login failed: Invalid credentials (Failure)", "reauth"},
 		{"the mail server did not expose any usable folders", "error"},
 		{"this account needs to be reconnected", "reauth"},

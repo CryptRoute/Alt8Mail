@@ -118,3 +118,19 @@ func TestSieveCommentCannotInjectStatements(t *testing.T) {
 		t.Fatal("normalizeSieve accepted a rule name containing a line break")
 	}
 }
+
+func TestForwardingRendersActiveRedirect(t *testing.T) {
+	forwarding, problems := normalizeForwarding(map[string]any{
+		"enabled": true, "target": "Ops@A8M.TEST", "keepCopy": false, "permanent": true,
+	})
+	if len(problems) != 0 {
+		t.Fatalf("normalizeForwarding returned %v", problems)
+	}
+	script := strings.Join(renderForwarding(forwarding), "\n")
+	if !strings.Contains(script, `redirect "ops@a8m.test";`) {
+		t.Fatalf("forwarding script does not redirect:\n%s", script)
+	}
+	if !strings.Contains(script, "stop;") {
+		t.Fatalf("forwarding without a kept copy must stop processing:\n%s", script)
+	}
+}

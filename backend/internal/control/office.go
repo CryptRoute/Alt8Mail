@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type officeSettings struct {
@@ -88,6 +91,22 @@ func (s *Server) registerOfficeRoutes(mux *http.ServeMux) {
 }
 
 func (s *Server) officeSettings(ctx context.Context) (officeSettings, error) {
+	settings, err := s.readOfficeSettings(ctx)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return settings, err
+	}
+	// A restore or an interrupted first boot can leave the singleton row
+	// missing. Recreate it instead of failing the whole Office page.
+	if _, insertErr := s.db.Exec(ctx, `
+		INSERT INTO public.office_settings (id) VALUES ('default')
+		ON CONFLICT (id) DO NOTHING
+	`); insertErr != nil {
+		return settings, err
+	}
+	return s.readOfficeSettings(ctx)
+}
+
+func (s *Server) readOfficeSettings(ctx context.Context) (officeSettings, error) {
 	var settings officeSettings
 	err := s.db.QueryRow(ctx, `
 		SELECT id, enabled, monitoring_enabled, deployment_mode, public_url, status, container_status, version,

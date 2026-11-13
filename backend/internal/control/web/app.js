@@ -1,5 +1,5 @@
 /* Alt8Mail System Control — application shell, authentication and core views. */
-import * as ui from './ui.js?v=3.5.1';
+import * as ui from './ui.js?v=3.6.0';
 import {
   renderDomains, renderDomainDetail, renderMailboxes, renderMailboxDetail,
   renderAliases, renderImports,
@@ -15,16 +15,16 @@ import { renderWebPush } from './views-push.js';
 import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
 import { renderLicense } from './views-license.js';
-import { renderAddons } from './views-addons.js?v=3.5.1';
-import { renderOffice } from './views-office.js?v=3.5.1';
-import { renderStorage } from './views-storage.js?v=3.5.1';
-import { renderMailOAuth } from './views-mail-oauth.js?v=3.5.1';
+import { renderAddons } from './views-addons.js?v=3.6.0';
+import { renderOffice } from './views-office.js?v=3.6.0';
+import { renderStorage } from './views-storage.js?v=3.6.0';
+import { renderMailOAuth } from './views-mail-oauth.js?v=3.6.0';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '3.5.1';
+const APP_VERSION = '3.6.0';
 
 // A stale admin binary can lack the embedded brand artwork. Hide the broken
 // image rather than letting the browser paint a missing-image glyph.

@@ -1159,6 +1159,10 @@ export async function createApp(options = {}) {
       if (!["grouped", "individual"].includes(input.inboxView)) throw new ApiError(400, "PREFERENCES", "Inbox view must be grouped or individual");
       assign("inboxView", input.inboxView);
     }
+    if (input.cabinetView !== undefined) {
+      if (!["list", "tiles", "thumbs"].includes(input.cabinetView)) throw new ApiError(400, "PREFERENCES", "Cabinet view must be list, tiles or thumbs");
+      assign("cabinetView", input.cabinetView);
+    }
     if (input.theme !== undefined) {
       if (!["light", "dark", "system"].includes(input.theme)) throw new ApiError(400, "PREFERENCES", "Theme must be light, dark or system");
       assign("theme", input.theme);

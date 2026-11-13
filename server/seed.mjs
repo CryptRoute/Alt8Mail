@@ -762,7 +762,8 @@ export function seedDatabase() {
         defaultFrom: DEMO_EMAIL,
         signatureEnabled: true,
         signature: "Avery Chen\nVP Product · Alt8Mail\n+1 (415) 555-0101",
-        autoAdvance: false
+        autoAdvance: false,
+        cabinetView: "list"
       },
       security: {
         twoFactor: {

@@ -910,6 +910,7 @@ const DEFAULT_PREFERENCES = {
   density: "comfortable",
   markReadOnOpen: true,
   inboxView: "grouped",
+  cabinetView: "list",
   defaultPriority: "normal",
   defaultReceipt: false,
   undoSendSeconds: 8,
@@ -966,6 +967,8 @@ function persistDismissedNotifications() {
 /* ============================================================
    state
    ============================================================ */
+const REMINDER_STORAGE_KEY = "a8m.reminders.v1";
+
 const state = {
   task: "mail",
   folder: "inbox",
@@ -1233,6 +1236,10 @@ const state = {
   mailMonitorTimer: null,
   calendarReminderTimer: null,
   remindedEventIds: new Set(),
+  reminderState: { acked: {}, snoozed: {} },
+  reminderSignature: "",
+  pendingReminderKey: "",
+  cabinetViewPending: "",
   contactEmail: null,
   contactDept: "All",
   peopleQuery: "",
@@ -1280,6 +1287,7 @@ try {
   state.calendarView = localStorage.getItem("a8m.calendar.view") || "month";
   const hidden = JSON.parse(localStorage.getItem("a8m.calendar.hidden") || "[]");
   if (Array.isArray(hidden)) state.calendarHidden = new Set(hidden);
+  state.reminderState = loadReminderState();
 } catch {}
 
 let composeSessions = [];
@@ -3843,6 +3851,10 @@ function applyServerPreferences() {
   for (const key of ["markReadOnOpen", "defaultReceipt", "notifyDesktop", "notifySound", "notifyCalendar", "externalWarnings"]) {
     prefs.set(key, state[key] ? "1" : "0");
   }
+  if (!state.cabinetViewPending && ["list", "tiles", "thumbs"].includes(p.cabinetView)) {
+    state.fileView = p.cabinetView;
+    prefs.set("cabinet.view", state.fileView);
+  }
   prefs.set("defaultPriority", state.defaultPriority);
   prefs.set("undoSendSeconds", String(state.undoSendSeconds));
 }
@@ -5818,8 +5830,8 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   const dataNote = document.querySelector(".about-actions .about-note");
   if (dataAction && state.mailboxMode === "imap") {
     dataAction.classList.remove("danger-btn");
-    dataAction.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Resync from Dovecot';
-    if (dataNote) dataNote.textContent = "Live Dovecot mailbox · IMAP sync and Postfix submission are enabled.";
+    dataAction.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>Resync mailbox';
+    if (dataNote) dataNote.textContent = "Live mailbox · IMAP sync and sending are enabled.";
   }
   syncStatusRange();
   syncStatusContext();
@@ -5828,6 +5840,8 @@ function applyBootstrap(data, { restoreDrafts = false, quiet = false } = {}) {
   state.knownPendingIds = new Set(state.pendingSends.map((item) => item.id));
   const onboardingShown = maybeShowOnboarding();
   if (!onboardingShown) maybeShowPasswordChange();
+  updateTasksBadge();
+  renderReminderStack();
   updateDocumentTitle();
 }
 
@@ -5844,16 +5858,19 @@ function startMailMonitor() {
     pollNewMail().catch(() => {});
     pollAccountSummaries().catch(() => {});
     checkCalendarReminders().catch(() => {});
+    renderReminderStack();
   }, 15000);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       pollNewMail().catch(() => {});
       pollAccountSummaries().catch(() => {});
+      renderReminderStack();
     }
   });
   startMailRealtime();
   pollNewMail().catch(() => {});
   pollAccountSummaries().catch(() => {});
+  renderReminderStack();
 }
 
 function startMailRealtime() {
@@ -6289,10 +6306,211 @@ async function checkCalendarReminders() {
     state.remindedEventIds.add(key);
     const label = minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}` : `${minutes} minutes`;
     const body = `${event.start} · ${event.where || "Calendar"}`;
-    if (!showBrowserNotification(`Event in ${label}`, `${event.title} — ${body}`, "a8m-calendar-" + key)) {
-      showToast(`Starting in ${label}: ${event.title} · ${body}`);
-    }
+    showBrowserNotification(`Event in ${label}`, `${event.title} — ${body}`, "a8m-calendar-" + key);
   }
+}
+/* ============================================================
+   persistent task and calendar reminders
+   ============================================================ */
+const REMINDER_ACK_DAYS = 90;
+
+function loadReminderState() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(REMINDER_STORAGE_KEY) || "{}");
+    return {
+      acked: raw && typeof raw.acked === "object" && raw.acked ? raw.acked : {},
+      snoozed: raw && typeof raw.snoozed === "object" && raw.snoozed ? raw.snoozed : {}
+    };
+  } catch {
+    return { acked: {}, snoozed: {} };
+  }
+}
+
+function saveReminderState() {
+  const now = Date.now();
+  const acked = { ...(state.reminderState?.acked || {}) };
+  const snoozed = { ...(state.reminderState?.snoozed || {}) };
+  for (const [key, at] of Object.entries(acked)) {
+    if (!Number.isFinite(Number(at)) || now - Number(at) > REMINDER_ACK_DAYS * 86400000) delete acked[key];
+  }
+  for (const [key, at] of Object.entries(snoozed)) {
+    if (!Number.isFinite(Number(at)) || Number(at) < now - 7 * 86400000) delete snoozed[key];
+  }
+  state.reminderState = { acked, snoozed };
+  try { localStorage.setItem(REMINDER_STORAGE_KEY, JSON.stringify(state.reminderState)); } catch {}
+}
+
+function reminderIsSuppressed(key) {
+  if (!key) return true;
+  const reminders = state.reminderState || {};
+  if (reminders.acked && reminders.acked[key]) return true;
+  const until = Number(reminders.snoozed && reminders.snoozed[key]);
+  return Number.isFinite(until) && until > Date.now();
+}
+
+function acknowledgeReminder(key) {
+  if (!key) return;
+  state.reminderState.acked = { ...(state.reminderState.acked || {}), [key]: Date.now() };
+  if (state.reminderState.snoozed) delete state.reminderState.snoozed[key];
+  saveReminderState();
+  renderReminderStack();
+}
+
+function snoozeReminder(key, until) {
+  if (!key || !Number.isFinite(until)) return;
+  state.reminderState.snoozed = { ...(state.reminderState.snoozed || {}), [key]: until };
+  if (state.reminderState.acked) delete state.reminderState.acked[key];
+  saveReminderState();
+  renderReminderStack();
+}
+
+function reminderRelativeLabel(stamp, now) {
+  const diff = stamp - now;
+  if (diff <= 0) return "Happening now";
+  const minutes = Math.ceil(diff / 60000);
+  if (minutes < 60) return `In ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `In ${hours} hour${hours === 1 ? "" : "s"}`;
+  return "Today";
+}
+
+function calendarReminderItems(now) {
+  const today = dateKeyInZone(new Date(now));
+  const items = [];
+  for (const event of calendarOccurrences(today, today, { all: true })) {
+    if (!event || event.allDay || event.status === "cancelled" || event.myStatus === "declined") continue;
+    const start = zonedWallTimeToUtc(event.occurrenceDate, event.start);
+    if (!start) continue;
+    const end = zonedWallTimeToUtc(event.occurrenceDate, event.end || event.start);
+    const ended = Boolean(end && end.getTime() < now);
+    const key = `event:${event.id}:${event.occurrenceDate}:${event.start || ""}:${event.end || ""}:${event.allDay ? "all" : "timed"}`;
+    if (reminderIsSuppressed(key)) continue;
+    const timeLabel = event.allDay ? "All day" : `${event.start}–${event.end || ""}`.replace(/–$/, "");
+    const relative = ended ? "Earlier today" : reminderRelativeLabel(start.getTime(), now);
+    const detail = [timeLabel, event.where || "", relative].filter(Boolean).join(" · ");
+    items.push({
+      kind: "event", key, eventId: event.id, occurrenceDate: event.occurrenceDate,
+      title: event.title || "Untitled event", meta: detail, timestamp: start.getTime(),
+      icon: "i-calendar", overdue: false, ended
+    });
+  }
+  return items;
+}
+
+function taskReminderItems(now) {
+  const today = dateKeyInZone(new Date(now));
+  const items = [];
+  for (const task of state.tasks || []) {
+    if (!task || task.status !== "open") continue;
+    const dueStamp = task.due ? zonedWallTimeToUtc(task.due, task.dueTime || "23:59") : null;
+    const reminderStamp = task.reminderAt ? Date.parse(task.reminderAt) : NaN;
+    const overdue = Boolean(task.due && task.due < today);
+    const dueNow = Boolean(task.due && (overdue || (task.due === today && (!task.dueTime || (dueStamp && dueStamp.getTime() <= now)))));
+    const reminded = Number.isFinite(reminderStamp) && reminderStamp <= now;
+    if (!dueNow && !reminded) continue;
+    const stamp = overdue ? (dueStamp ? dueStamp.getTime() : now) : dueStamp ? dueStamp.getTime() : reminderStamp;
+    const key = `task:${task.id}:${task.due || ""}:${task.reminderAt || ""}`;
+    if (reminderIsSuppressed(key)) continue;
+    const dueLabel = overdue ? "Overdue" : "Due today";
+    const meta = [dueLabel, task.due ? taskDueLabel(task) : "", task.assignee?.name ? `Assigned to ${task.assignee.name}` : ""].filter(Boolean).join(" · ");
+    items.push({
+      kind: "task", key, taskId: task.id, title: task.title || "Untitled task",
+      meta, timestamp: stamp, icon: "i-task", overdue
+    });
+  }
+  return items;
+}
+
+function reminderCardMarkup(item, now) {
+  const urgency = item.kind === "event"
+    ? (item.ended ? "Earlier today" : item.timestamp <= now ? "Happening now" : reminderRelativeLabel(item.timestamp, now))
+    : item.overdue ? "Overdue" : "Due today";
+  const actions = item.kind === "event"
+    ? `<button type="button" data-reminder-ack="${esc(item.key)}">Noted</button>
+       <button type="button" data-reminder-postpone="${esc(item.key)}">Postpone</button>
+       <button type="button" class="is-primary" data-reminder-reschedule="${esc(item.eventId)}" data-reminder-date="${esc(item.occurrenceDate)}">Reschedule</button>`
+    : `<button type="button" data-reminder-task-done="${esc(item.taskId)}">Done</button>
+       <button type="button" data-reminder-postpone="${esc(item.key)}">Postpone</button>
+       <button type="button" class="is-primary" data-reminder-task-open="${esc(item.taskId)}">Open task</button>`;
+  return `<article class="reminder-card ${item.kind === "task" ? "is-task" : "is-event"}${item.overdue ? " is-overdue" : ""}" data-reminder-key="${esc(item.key)}">
+    <span class="reminder-card-icon"><svg class="icon" aria-hidden="true"><use href="#${item.icon}"/></svg></span>
+    <div class="reminder-card-main">
+      <div class="reminder-card-eyebrow"><span>${item.kind === "event" ? "Calendar reminder" : "Task reminder"}</span><span class="reminder-urgency">${esc(urgency)}</span></div>
+      <div class="reminder-card-title">${esc(item.title)}</div>
+      <div class="reminder-card-meta">${esc(item.meta)}</div>
+    </div>
+    <div class="reminder-card-actions">${actions}</div>
+  </article>`;
+}
+
+function renderReminderStack() {
+  const stack = document.getElementById("reminderStack");
+  if (!stack) return;
+  const now = Date.now();
+  const items = [...calendarReminderItems(now), ...taskReminderItems(now)]
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const seen = new Set();
+  const unique = items.filter((item) => {
+    if (seen.has(item.key)) return false;
+    seen.add(item.key);
+    return true;
+  });
+  const signature = unique.map((item) => `${item.key}:${Math.floor((item.timestamp - now) / 60000)}`).join("|");
+  if (signature !== state.reminderSignature) {
+    state.reminderSignature = signature;
+    stack.innerHTML = unique.map((item) => reminderCardMarkup(item, now)).join("");
+  }
+  stack.hidden = unique.length === 0;
+  updateTasksBadge();
+}
+
+function updateTasksBadge() {
+  const count = (state.tasks || []).filter((task) => task && task.status === "open").length;
+  const label = count === 1 ? "1 open task" : `${count} open tasks`;
+  for (const id of ["tasksRailBadge", "tasksMobileBadge"]) {
+    const badge = document.getElementById(id);
+    if (!badge) continue;
+    badge.hidden = count === 0;
+    badge.textContent = count > 99 ? "99+" : String(count);
+    badge.setAttribute("aria-label", label);
+  }
+  const rail = document.querySelector('.rail-btn[data-task="tasks"]');
+  if (rail) rail.setAttribute("aria-label", count ? `Tasks, ${label}` : "Tasks");
+}
+
+function openReminderPostpone(key) {
+  if (!key) return;
+  state.pendingReminderKey = key;
+  const overlay = document.getElementById("reminderPostponeOverlay");
+  if (!overlay) return;
+  const item = [...calendarReminderItems(Date.now()), ...taskReminderItems(Date.now())].find((entry) => entry.key === key);
+  const copy = document.getElementById("reminderPostponeCopy");
+  if (copy) copy.textContent = item ? `Choose when "${item.title}" should come back.` : "Choose when this reminder should come back.";
+  const custom = document.getElementById("reminderPostponeCustom");
+  if (custom) {
+    const next = new Date(Date.now() + 60 * 60 * 1000);
+    const pad = (value) => String(value).padStart(2, "0");
+    custom.value = `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T${pad(next.getHours())}:${pad(next.getMinutes())}`;
+  }
+  overlay.hidden = false;
+  document.getElementById("reminderPostponeCustom")?.focus();
+}
+
+function closeReminderPostpone() {
+  const overlay = document.getElementById("reminderPostponeOverlay");
+  if (overlay) overlay.hidden = true;
+  state.pendingReminderKey = "";
+}
+
+function confirmReminderPostpone(until) {
+  const key = state.pendingReminderKey;
+  if (!key || !Number.isFinite(until) || until <= Date.now()) {
+    showToast("Choose a future time for the reminder");
+    return;
+  }
+  snoozeReminder(key, until);
+  closeReminderPostpone();
+  showToast(`Reminder postponed to ${formatDateOnly(dateKeyInZone(new Date(until)))} ${formatClock(new Date(until))}`);
 }
 
 async function refreshMailbox({ quiet = true } = {}) {
@@ -6549,7 +6767,7 @@ function ensureAutomationOverlay() {
   document.body.insertAdjacentHTML("beforeend", `<div class="overlay" id="automationOverlay" hidden>
     <div class="dialog shared-drafts-dialog automation-dialog" role="dialog" aria-modal="true" aria-labelledby="automationTitle">
       <div class="dialog-head"><div><p class="eyebrow">Team automation</p><h2 id="automationTitle">Automation rules</h2><p class="dialog-note" id="automationNote"></p></div><button class="icon-btn" id="automationClose" type="button" aria-label="Close automation"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
-      <div class="dialog-body"><div id="automationRuleList" class="automation-rule-list"></div><form id="automationForm" class="automation-form"><input type="hidden" id="automationRuleId"><label class="field"><span>Rule name</span><input id="automationName" required placeholder="Route urgent renewals"></label><div class="field-row"><label class="field"><span>From contains</span><input id="automationFrom" placeholder="customer@example.com"></label><label class="field"><span>From domain</span><input id="automationFromDomain" placeholder="example.com"></label></div><div class="field-row"><label class="field"><span>Subject contains</span><input id="automationSubject" placeholder="urgent"></label><label class="field"><span>Category</span><input id="automationCategory" placeholder="Billing"></label></div><label class="check-field"><input id="automationHasAttachment" type="checkbox"> Only messages with attachments</label><div class="field-row"><label class="field"><span>Label</span><input id="automationLabel" placeholder="urgent"></label><label class="field"><span>Move to folder</span><input id="automationMove" placeholder="Archive"></label></div><div class="field-row"><label class="field"><span>Create task</span><input id="automationTask" placeholder="Handle urgent renewal"></label><label class="field"><span>Notify title</span><input id="automationNotify" placeholder="Urgent renewal needs an owner"></label></div><div class="field-row"><label class="field"><span>Webhook URL</span><input id="automationWebhook" type="url" placeholder="https://hooks.example.com/a8m"></label><label class="field"><span>Auto-reply draft body</span><textarea id="automationReply" rows="2" placeholder="Thanks — we are on it."></textarea></label></div><label class="check-field"><input id="automationEnabled" type="checkbox" checked> Rule is enabled</label><p class="settings-note">Auto-replies are staged as drafts for an agent to review. Delivery-time folder moves also produce a Sieve preview.</p><pre class="automation-sieve" id="automationSieve" hidden></pre><div class="dialog-foot"><button class="btn-secondary" type="button" id="automationReset">Clear</button><button class="btn-primary" type="submit" id="automationSave">Save rule</button></div></form></div>
+      <div class="dialog-body"><div id="automationRuleList" class="automation-rule-list"></div><form id="automationForm" class="automation-form"><input type="hidden" id="automationRuleId"><label class="field"><span>Rule name</span><input id="automationName" required placeholder="Route urgent renewals"></label><div class="field-row"><label class="field"><span>From contains</span><input id="automationFrom" placeholder="customer@example.com"></label><label class="field"><span>From domain</span><input id="automationFromDomain" placeholder="example.com"></label></div><div class="field-row"><label class="field"><span>Subject contains</span><input id="automationSubject" placeholder="urgent"></label><label class="field"><span>Category</span><input id="automationCategory" placeholder="Billing"></label></div><label class="check-field"><input id="automationHasAttachment" type="checkbox"> Only messages with attachments</label><div class="field-row"><label class="field"><span>Label</span><input id="automationLabel" placeholder="urgent"></label><label class="field"><span>Move to folder</span><input id="automationMove" placeholder="Archive"></label></div><div class="field-row"><label class="field"><span>Create task</span><input id="automationTask" placeholder="Handle urgent renewal"></label><label class="field"><span>Notify title</span><input id="automationNotify" placeholder="Urgent renewal needs an owner"></label></div><div class="field-row"><label class="field"><span>Webhook URL</span><input id="automationWebhook" type="url" placeholder="https://hooks.example.com/a8m"></label><label class="field"><span>Auto-reply draft body</span><textarea id="automationReply" rows="2" placeholder="Thanks — we are on it."></textarea></label></div><label class="check-field"><input id="automationEnabled" type="checkbox" checked> Rule is enabled</label><p class="settings-note">Auto-replies are staged as drafts for an agent to review. Delivery-time folder moves also produce a rule preview.</p><pre class="automation-sieve" id="automationSieve" hidden></pre><div class="dialog-foot"><button class="btn-secondary" type="button" id="automationReset">Clear</button><button class="btn-primary" type="submit" id="automationSave">Save rule</button></div></form></div>
     </div>
   </div>`);
   overlay = document.getElementById("automationOverlay");
@@ -8713,7 +8931,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.5.1";
+const MAIL_PROVIDER_ASSET_VERSION = "3.6.0";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -19916,7 +20134,7 @@ const SETTINGS_META = {
   identities: { title: "Identities & forwarding", eyebrow: "Verified senders and mail forwarding" },
   notifications: { title: "Notifications", eyebrow: "Delivery and alerts" },
   regional: { title: "Language & time", eyebrow: "Locale, time zone and work hours" },
-  rules: { title: "Rules", eyebrow: "Server-side Sieve" },
+  rules: { title: "Rules", eyebrow: "Server-side mail rules" },
   autoreply: { title: "Automatic replies", eyebrow: "Out of office" },
   audit: { title: "Audit log", eyebrow: "Account activity" },
   security: { title: "Security & privacy", eyebrow: "Alt8Mail policy" },
@@ -21477,8 +21695,7 @@ function renderForwardingSettings() {
   if (end) end.value = isoToDisplayDate(forwarding.end || "");
   const dates = document.getElementById("forwardingDates");
   if (dates) dates.hidden = forwarding.permanent !== false;
-  const panel = document.getElementById("forwardingPanel");
-  if (panel) panel.classList.toggle("is-off", !forwarding.enabled);
+  syncForwardingPanelState();
   setForwardingFieldError("");
   updateForwardingTargetPreview();
   const policy = state.forwardingPolicy || {};
@@ -21490,8 +21707,15 @@ function renderForwardingSettings() {
       ? "Auto-forwarding is disabled by your organization."
       : policy.externalForwarding === false
         ? "External forwarding is disabled; only internal recipients are allowed."
-        : "Forwarding is applied by Dovecot Sieve before your rules.";
+        : "Forwarding is applied before your other rules.";
   }
+}
+
+function syncForwardingPanelState() {
+  const toggle = document.getElementById("forwardingEnabled");
+  const on = toggle ? toggle.getAttribute("aria-checked") === "true" : Boolean(state.forwarding?.enabled);
+  const panel = document.getElementById("forwardingPanel");
+  if (panel) panel.classList.toggle("is-off", !on);
 }
 
 async function saveForwardingSettings() {
@@ -21532,8 +21756,12 @@ async function saveForwardingSettings() {
     renderForwardingSettings();
     showToast(enabled ? "Mail forwarding saved" : "Mail forwarding disabled");
   } catch (error) {
-    if (error.code === "FORWARDING_VALIDATION" || error.code === "FORWARDING_SELF") {
+    if (error.code === "FORWARDING_VALIDATION" || error.code === "FORWARDING_SELF" || error.code === "FORWARDING_EXTERNAL" || error.code === "FORWARDING_DISABLED") {
       setForwardingFieldError(error.message || "Check the forwarding address.");
+      if (error.code === "FORWARDING_DISABLED") {
+        const note = document.getElementById("forwardingNote");
+        if (note) note.textContent = "Auto-forwarding is disabled by your organization.";
+      }
       target?.focus();
     } else {
       showError(error);
@@ -21836,7 +22064,7 @@ async function resyncMailbox() {
     return;
   }
   const connected = state.activeAccount && !state.activeAccount.isNative;
-  if (!(await appConfirm({ title: "Refresh mailbox?", message: connected ? `Alt8Mail will ask ${state.activeAccount.email} for new messages. Open compose windows are kept.` : "Alt8Mail will ask Dovecot for new messages. Open compose windows are kept.", confirmLabel: "Refresh" }))) return;
+  if (!(await appConfirm({ title: "Refresh mailbox?", message: connected ? `Alt8Mail will ask ${state.activeAccount.email} for new messages. Open compose windows are kept.` : "Alt8Mail will check the mail server for new messages. Open compose windows are kept.", confirmLabel: "Refresh" }))) return;
   if (connected) {
     try {
       await api(`/api/accounts/${encodeURIComponent(state.activeAccount.id)}/sync`, { method: "POST", body: {} });
@@ -21850,7 +22078,7 @@ async function resyncMailbox() {
     await refreshMailbox({ quiet: true });
     const imported = result && result.sync ? result.sync.imported || 0 : 0;
     const removed = result && result.sync ? result.sync.removed || 0 : 0;
-    showToast(`Mailbox synced from Dovecot · ${imported} new · ${removed} removed`);
+    showToast(`Mailbox synced · ${imported} new · ${removed} removed`);
   } catch (error) { showError(error); }
 }
 
@@ -21883,6 +22111,7 @@ function handleDataAction() {
    ============================================================ */
 const TASK_FILTERS = [
   { id: "all", label: "All" },
+  { id: "open", label: "Open" },
   { id: "mine", label: "My tasks" },
   { id: "team", label: "Team" },
   { id: "today", label: "Due today" },
@@ -21905,6 +22134,7 @@ function taskDueState(task) {
 
 function taskMatchesFilter(task) {
   const filter = state.taskFilter;
+  if (filter === "open" && task.status === "done") return false;
   if (filter === "mine" && !taskIsMine(task)) return false;
   if (filter === "team" && taskIsMine(task)) return false;
   if (filter === "today" && (task.status === "done" || task.due !== dateKeyInZone(new Date()))) return false;
@@ -21986,6 +22216,8 @@ function renderTasks() {
   renderTaskDetail();
   syncStatusRange();
   syncStatusContext();
+  updateTasksBadge();
+  renderReminderStack();
 }
 
 function renderTaskDetail() {
@@ -22593,6 +22825,16 @@ function persistCabinetView() {
     localStorage.setItem("a8m.cabinet.view", state.fileView);
     localStorage.setItem("a8m.cabinet.sortDesc", state.fileSortDesc ? "1" : "0");
   } catch {}
+  if (state.preferences?.cabinetView === state.fileView) return;
+  state.preferences = { ...(state.preferences || {}), cabinetView: state.fileView };
+  if (state.user) state.user.preferences = state.preferences;
+  state.cabinetViewPending = state.fileView;
+  api("/api/preferences", { method: "PATCH", body: { cabinetView: state.fileView } })
+    .then((data) => {
+      if (data?.preferences) state.preferences = { ...state.preferences, ...data.preferences };
+    })
+    .catch(() => {})
+    .finally(() => { state.cabinetViewPending = ""; });
 }
 
 function openFileFolder(folderId) {
@@ -27747,6 +27989,7 @@ async function refreshCalendarData() {
       state.calendarActiveId = state.calendars.find((calendar) => calendar.isDefault)?.id || state.calendars[0]?.id || "default";
     }
     renderCalendarProposalDock();
+    renderReminderStack();
     if (state.task === "calendar") renderCalendar();
     return data;
   } catch (error) {
@@ -29794,7 +30037,15 @@ function handleFeatureClick(event) {
   if (deleteSignatureButton) { event.preventDefault(); deleteSignature(deleteSignatureButton.getAttribute("data-delete-signature")); return true; }
   const pickSignatureButton = target.closest("[data-insert-signature]");
   if (pickSignatureButton) { event.preventDefault(); insertPickedSignature(pickSignatureButton.getAttribute("data-insert-signature")); return true; }
-  if (target.closest("#forwardingEnabled")) { event.preventDefault(); toggleSwitch(target.closest("#forwardingEnabled")); return true; }
+  if (target.closest("#forwardingEnabled")) {
+    event.preventDefault();
+    const toggle = target.closest("#forwardingEnabled");
+    if (toggle.disabled) return true;
+    toggleSwitch(toggle);
+    syncForwardingPanelState();
+    if (toggle.getAttribute("aria-checked") === "true") document.getElementById("forwardingTarget")?.focus();
+    return true;
+  }
   if (target.closest("#forwardingTargetClear")) {
     event.preventDefault();
     const input = document.getElementById("forwardingTarget");
@@ -30689,8 +30940,79 @@ function bindEvents() {
       return;
     }
 
+    const reminderAck = target.closest("[data-reminder-ack]");
+    if (reminderAck) { event.preventDefault(); acknowledgeReminder(reminderAck.getAttribute("data-reminder-ack")); return; }
+    const reminderPostpone = target.closest("[data-reminder-postpone]");
+    if (reminderPostpone) { event.preventDefault(); openReminderPostpone(reminderPostpone.getAttribute("data-reminder-postpone")); return; }
+    const reminderReschedule = target.closest("[data-reminder-reschedule]");
+    if (reminderReschedule) {
+      event.preventDefault();
+      const eventId = reminderReschedule.getAttribute("data-reminder-reschedule");
+      const eventDate = reminderReschedule.getAttribute("data-reminder-date") || "";
+      hideNotify();
+      setTask("calendar");
+      openEventDialog(eventId, { date: eventDate });
+      return true;
+    }
+    const reminderTaskDone = target.closest("[data-reminder-task-done]");
+    if (reminderTaskDone) { event.preventDefault(); toggleTask(reminderTaskDone.getAttribute("data-reminder-task-done")); return; }
+    const reminderTaskOpen = target.closest("[data-reminder-task-open]");
+    if (reminderTaskOpen) {
+      event.preventDefault();
+      const id = reminderTaskOpen.getAttribute("data-reminder-task-open");
+      state.taskFilter = "all";
+      state.selectedTaskId = id;
+      state.editingTaskId = null;
+      state.taskDraftLink = null;
+      setTask("tasks");
+      renderTasks();
+      return;
+    }
+    const postponeDelay = target.closest("[data-reminder-delay]");
+    if (postponeDelay) {
+      event.preventDefault();
+      const delay = postponeDelay.getAttribute("data-reminder-delay");
+      let until = 0;
+      if (delay === "tomorrow") {
+        until = zonedWallTimeToUtc(addDaysToKey(dateKeyInZone(new Date()), 1), "09:00")?.getTime() || 0;
+      } else {
+        until = Date.now() + Math.max(1, Number(delay) || 10) * 60000;
+      }
+      confirmReminderPostpone(until);
+      return;
+    }
+    if (target.closest("#reminderPostponeConfirm")) {
+      event.preventDefault();
+      const value = document.getElementById("reminderPostponeCustom")?.value || "";
+      const date = value.slice(0, 10);
+      const time = value.slice(11, 16);
+      const until = date && time ? zonedWallTimeToUtc(date, time)?.getTime() || 0 : 0;
+      confirmReminderPostpone(until);
+      return;
+    }
+    if (target.closest("#reminderPostponeClose") || target.closest("#reminderPostponeCancel")) {
+      event.preventDefault();
+      closeReminderPostpone();
+      return;
+    }
+    if (target === document.getElementById("reminderPostponeOverlay")) {
+      closeReminderPostpone();
+      return;
+    }
+    const tasksBadge = target.closest("#tasksRailBadge, #tasksMobileBadge");
+    if (tasksBadge) {
+      event.preventDefault();
+      state.taskFilter = "open";
+      setTask("tasks");
+      return true;
+    }
     const taskButton = target.closest("button[data-task]");
-    if (taskButton) { event.preventDefault(); setTask(taskButton.getAttribute("data-task")); return; }
+    if (taskButton) {
+      event.preventDefault();
+      if (taskButton.getAttribute("data-task") === "tasks") state.taskFilter = "all";
+      setTask(taskButton.getAttribute("data-task"));
+      return;
+    }
     const folderButton = target.closest("button[data-folder]");
     if (folderButton) { event.preventDefault(); setFolder(folderButton.getAttribute("data-folder")); applyFolderDensity(folderButton.getAttribute("data-folder")); return; }
     if (target.closest("#dateJumpBtn")) { event.preventDefault(); toggleDateJumpMenu(); return; }
@@ -30895,7 +31217,7 @@ function bindEvents() {
     if (ruleDelete) {
       event.preventDefault();
       const id = ruleDelete.getAttribute("data-rule-delete");
-      appConfirm({ title: "Delete this rule?", message: "The Sieve rule will stop filtering incoming mail immediately.", confirmLabel: "Delete rule", tone: "danger" }).then((ok) => {
+      appConfirm({ title: "Delete this rule?", message: "The rule will stop filtering incoming mail immediately.", confirmLabel: "Delete rule", tone: "danger" }).then((ok) => {
         if (ok) saveSieve(state.sieve.rules.filter((item) => item.id !== id), state.sieve.vacation, "Rule deleted");
       });
       return;
@@ -32566,6 +32888,7 @@ function bindEvents() {
       return;
     }
     if (event.key === "Escape") {
+      if (document.getElementById("reminderPostponeOverlay") && !document.getElementById("reminderPostponeOverlay").hidden) { closeReminderPostpone(); return; }
       if (!confirmOverlay.hidden) { settleConfirm(false); return; }
       if (state.selectionTranslation) { closeSelectionTranslation(); return; }
       if (state.accountMenuOpen) { closeAccountMenu(true); return; }

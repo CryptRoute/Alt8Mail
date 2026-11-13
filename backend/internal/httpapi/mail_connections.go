@@ -250,8 +250,9 @@ func transientExternalMailError(err error) bool {
 	for _, marker := range []string{
 		"temporary system problem", "temporary failure", "temporarily unavailable",
 		"try again later", "timeout", "i/o timeout", "connection reset", "connection refused",
-		"no such host", "network is unreachable", "server busy", "too many",
-		"rate limit", "service unavailable", "bad gateway", "gateway timeout",
+		"connection closed", "unexpected eof", "use of closed network connection",
+		"broken pipe", "connection aborted", "no such host", "network is unreachable", "server busy",
+		"too many", "rate limit", "service unavailable", "bad gateway", "gateway timeout",
 	} {
 		if strings.Contains(message, marker) {
 			return true
@@ -344,6 +345,24 @@ func openExternalIMAPWithPassword(ctx context.Context, host string, port int, tl
 }
 
 func openExternalIMAPWithAuth(ctx context.Context, host string, port int, tlsMode string, auth externalMailAuth) (*imapclient.Client, error) {
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		conn, err := openExternalIMAPWithAuthOnce(ctx, host, port, tlsMode, auth)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		// Gmail occasionally drops the connection during the XOAUTH2 exchange
+		// (or immediately after a long idle period). One fresh connection is
+		// enough to tell a provider hiccup from a real credential problem.
+		if !transientExternalMailError(err) || ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, lastErr
+}
+
+func openExternalIMAPWithAuthOnce(ctx context.Context, host string, port int, tlsMode string, auth externalMailAuth) (*imapclient.Client, error) {
 	host = strings.Trim(strings.TrimSpace(host), "[]")
 	if auth.Username == "" {
 		return nil, fmt.Errorf("mail account has no username")

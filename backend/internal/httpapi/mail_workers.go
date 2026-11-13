@@ -130,7 +130,8 @@ func (s *Server) activeMailWorkerAccounts(ctx context.Context) ([]mailWorkerAcco
 		FROM public.mail_accounts a
 		JOIN public.users u ON u.id = a.user_id
 		JOIN public.tenants t ON t.id = a.tenant_id
-		WHERE a.status IN ('active', 'error') AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'
+		WHERE (a.status IN ('active', 'error') OR (a.status = 'reauth' AND a.auth_type = 'oauth2'))
+		  AND u.status = 'active' AND u.deleted_at IS NULL AND t.status = 'active'
 		  AND (a.kind <> 'native' OR EXISTS (
 			SELECT 1 FROM public.mailboxes m WHERE m.user_id = a.user_id AND m.active
 		  ))

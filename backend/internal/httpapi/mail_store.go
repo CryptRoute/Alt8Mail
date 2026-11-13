@@ -1410,7 +1410,7 @@ func (s *Server) mailQuota(ctx context.Context, userID string, state map[string]
 		percentage = roundOneDecimal(float64(used) / float64(limit) * 100)
 	}
 	return map[string]any{
-		"source": "dovecot", "limitBytes": limit, "usedBytes": used,
+		"source": "mailbox", "limitBytes": limit, "usedBytes": used,
 		"dynamicBytes": dynamic, "percent": percentage,
 		"label":   fmt.Sprintf("%s of %s", formatBytes(used), formatBytes(limit)),
 		"folders": folders, "refreshedAt": nowISO(),

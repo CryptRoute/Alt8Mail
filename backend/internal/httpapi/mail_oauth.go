@@ -592,6 +592,11 @@ func (s *Server) mailOAuthAccessToken(ctx context.Context, account mailAccountRe
 	}
 	token, err := s.refreshMailOAuthToken(ctx, config, clientID, clientSecret, refresh)
 	if err != nil {
+		// A provider timeout or rate limit is not a revoked authorization. Keep
+		// the account in the retry pool and let the next pass refresh again.
+		if transientExternalMailError(err) {
+			return "", fmt.Errorf("could not refresh the OAuth token: %w", err)
+		}
 		s.markMailAccountReauth(ctx, account, err.Error())
 		return "", fmt.Errorf("this account needs to be reconnected")
 	}

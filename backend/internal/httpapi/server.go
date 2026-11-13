@@ -1496,7 +1496,7 @@ func preferencesFor(user userRecord) map[string]any {
 		"signatureEnabled": true, "signature": "", "autoAdvance": false,
 		"saveCopyEnabled": true, "spellCheckEnabled": true, "autoLoadImages": true,
 		"theme": "system", "accent": "blue", "density": "comfortable",
-		"markReadOnOpen": true, "inboxView": "grouped", "defaultPriority": "normal", "defaultReceipt": false,
+		"markReadOnOpen": true, "inboxView": "grouped", "cabinetView": "list", "defaultPriority": "normal", "defaultReceipt": false,
 		"undoSendSeconds": 8, "notifyDesktop": true, "notifySound": false,
 		"notifyCalendar": true, "externalWarnings": true,
 		"composeMode": "html", "composeWidth": "wide", "composePosition": "center",
@@ -1512,7 +1512,7 @@ func preferencesFor(user userRecord) map[string]any {
 
 func quotaFor(user userRecord) map[string]any {
 	return map[string]any{
-		"source": "dovecot", "limitBytes": user.QuotaBytes, "usedBytes": user.UsedBytes,
+		"source": "mailbox", "limitBytes": user.QuotaBytes, "usedBytes": user.UsedBytes,
 		"dynamicBytes": user.UsedBytes, "percent": percent(user.UsedBytes, user.QuotaBytes),
 		"label":   fmt.Sprintf("%.2f GB of %.0f GB", float64(user.UsedBytes)/1e9, float64(user.QuotaBytes)/1e9),
 		"folders": []any{}, "refreshedAt": time.Now().UTC().Format(time.RFC3339),

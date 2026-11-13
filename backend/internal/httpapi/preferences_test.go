@@ -10,4 +10,7 @@ func TestPreferencesDefaultInboxViewIsGrouped(t *testing.T) {
 	if prefs["composeMode"] != "html" {
 		t.Fatalf("default composeMode = %v, want html", prefs["composeMode"])
 	}
+	if prefs["cabinetView"] != "list" {
+		t.Fatalf("default cabinetView = %v, want list", prefs["cabinetView"])
+	}
 }

@@ -275,7 +275,7 @@ func (s *Server) adminUserVacation(w http.ResponseWriter, r *http.Request) {
 		}
 		script := renderSieveWithFolders(next, user.Email, folderMapForSieve(state))
 		if err := s.pushSieveScript(r.Context(), user.userRecord(), script); err != nil {
-			return failDetails(http.StatusBadGateway, "SIEVE_SERVICE", "Dovecot rejected the vacation responder", map[string]any{"error": err.Error()})
+			return failDetails(http.StatusBadGateway, "SIEVE_SERVICE", "The mail server rejected the vacation responder", map[string]any{"error": err.Error()})
 		}
 		next["script"] = script
 		state["sieve"] = next

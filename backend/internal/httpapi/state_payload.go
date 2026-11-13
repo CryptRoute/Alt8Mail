@@ -219,7 +219,7 @@ func stateQuota(state map[string]any) map[string]any {
 		percentage = math.Round(float64(used)/float64(limit)*1000) / 10
 	}
 	return map[string]any{
-		"source": "dovecot", "limitBytes": limit, "usedBytes": used,
+		"source": "mailbox", "limitBytes": limit, "usedBytes": used,
 		"dynamicBytes": dynamic, "percent": percentage,
 		"label":   fmt.Sprintf("%s of %s", formatBytes(used), formatBytes(limit)),
 		"folders": folders, "refreshedAt": nowISO(),

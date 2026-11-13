@@ -60,7 +60,7 @@ func (s *Server) saveForwarding(w http.ResponseWriter, r *http.Request) {
 		next["updatedAt"] = nowISO()
 		script := renderSieveWithFolders(next, sess.User.Email, folderMapForSieve(state))
 		if err := s.pushSieveScript(r.Context(), sess.User, script); err != nil {
-			return failDetails(http.StatusBadGateway, "SIEVE_SERVICE", "Dovecot rejected the forwarding rule", map[string]any{"error": err.Error()})
+			return failDetails(http.StatusBadGateway, "SIEVE_SERVICE", "The mail server rejected the forwarding rule", map[string]any{"error": err.Error()})
 		}
 		next["script"] = script
 		state["sieve"] = next
