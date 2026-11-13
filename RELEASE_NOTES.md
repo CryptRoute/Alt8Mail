@@ -1,3 +1,19 @@
+# Alt8Mail 3.5.1
+
+Release date: 2026-11-13. Swap-file fix for the legacy mail root.
+
+## 3.5.1 swap files work on /var/vmail
+
+- The legacy mail root `/var/vmail` is normally a directory on the root
+  filesystem, not a separate mountpoint. The swap-file runner previously
+  required an active mount and failed after a valid plan was created.
+- The swap planner, candidate list and runner now accept the legacy root when
+  its directory and filesystem are readable. Managed volumes still require an
+  active mount, so a missing mount cannot silently place a swap file on the
+  parent filesystem.
+- Existing failed plans can be retried by creating a new swap plan after
+  installing 3.5.1.
+
 # Alt8Mail 3.5.0
 
 Release date: 2026-11-13. Swap visibility and safe swap creation in Disk
