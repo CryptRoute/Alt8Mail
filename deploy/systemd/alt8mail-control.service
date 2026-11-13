@@ -10,6 +10,7 @@ User=root
 Group=root
 WorkingDirectory=/opt/alt8mail
 EnvironmentFile=/etc/a8m/control.env
+ExecStartPre=/opt/a8m/current/scripts/alt8mail-ensure-storage-root.sh
 ExecStartPre=/opt/alt8mail/bin/alt8mail-control ensure-mail-guard
 ExecStartPre=/opt/alt8mail/bin/alt8mail-control ensure-clamav-limits
 ExecStart=/opt/alt8mail/bin/alt8mail-control serve
