@@ -1,3 +1,22 @@
+# Alt8Mail 3.4.2
+
+Release date: 2026-11-13. Completes the 3.4.1 upgrade recovery.
+
+## 3.4.2 create the storage root even on the first hop from 3.3.1
+
+- The updater that runs during a 3.3.1 → 3.4.x update is the one installed in
+  3.3.1, so it cannot run the 3.4.1 directory-creation change. The control unit
+  now runs `/opt/a8m/current/scripts/alt8mail-ensure-storage-root.sh` as an
+  `ExecStartPre`, creating `CONTROL_STORAGE_ROOT` (default
+  `/srv/a8m-storage`) as `root:vmail` mode `0750` inside the service sandbox.
+  This makes the first upgrade create the directory even when the old updater
+  performed the restart.
+- The helper is idempotent and falls back to creating the directory without the
+  `vmail` group when that group is unavailable. The unit still marks the path
+  optional, so a missing root cannot block the control plane from starting.
+- This completes the 3.4.1 fix. Use 3.4.2 for upgrades; 3.4.0 should not be
+  installed over an existing 3.3.1 host.
+
 # Alt8Mail 3.4.1
 
 Release date: 2026-11-13. Upgrade hotfix for existing 3.3.1 hosts.

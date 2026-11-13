@@ -1,5 +1,5 @@
 /* Office / OnlyOffice lifecycle and feature flag. */
-import * as ui from './ui.js?v=3.4.1';
+import * as ui from './ui.js?v=3.4.2';
 
 const esc = ui.esc;
 
