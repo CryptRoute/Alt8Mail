@@ -402,6 +402,23 @@ on_error() {
 }
 trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 
+# Existing installs predate the managed storage root. Create it before the
+# updated units start; systemd otherwise refuses to set up a ReadWritePaths
+# entry that does not exist. The units also mark the path optional so a host
+# can still boot and repair storage if the directory is removed later.
+storage_root="$(env_file_value CONTROL_STORAGE_ROOT /etc/a8m/control.env)"
+storage_root="${storage_root:-/srv/a8m-storage}"
+if [[ "$storage_root" != /* || "$storage_root" == *..* ]]; then
+  log "WARNING: invalid CONTROL_STORAGE_ROOT '$storage_root'; using /srv/a8m-storage"
+  storage_root=/srv/a8m-storage
+fi
+if install -d -m 0750 -o root -g vmail "$storage_root" 2>/dev/null; then
+  log "ensured mail storage root $storage_root"
+else
+  install -d -m 0750 "$storage_root"
+  log "ensured mail storage root $storage_root (vmail group unavailable)"
+fi
+
 # Install updated unit files before restarting. Custom site configuration is
 # intentionally not overwritten by an application update.
 for unit in "$TARGET_RELEASE"/deploy/systemd/*.service "$TARGET_RELEASE"/deploy/systemd/*.timer; do
