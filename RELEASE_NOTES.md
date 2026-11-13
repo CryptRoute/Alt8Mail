@@ -1,3 +1,33 @@
+# Alt8Mail 3.5.0
+
+Release date: 2026-11-13. Swap visibility and safe swap creation in Disk
+Management.
+
+## 3.5.0 host swap without leaving the panel
+
+- **Swap card.** Disk Management now reports total, used and free swap, the
+  active swap areas, their type, size, usage, priority and whether they persist
+  at boot. Host memory, available memory and `vm.swappiness` are shown alongside
+  the current swap state.
+- **Swap file creation.** An administrator can allocate a hidden
+  `.a8m-swapfile` on an online ext4 or XFS mail volume. The wizard recommends a
+  size from host memory, enforces at least 64 MiB and protects the existing
+  capacity reserve. The file is formatted, activated, restricted to mode 0600
+  and persisted with a managed fstab block.
+- **Dedicated disk creation.** A blank whole disk can be dedicated to swap.
+  Disks with partitions, a mountpoint, system protection or active swap are not
+  eligible. The operation requires the `storage.destroy` permission, a typed
+  erase confirmation, and revalidates the disk identity and blank state in the
+  root runner before the first write.
+- **Reviewed operations.** Both modes use the existing storage plan/execute
+  token flow and appear in the live Storage operations console. Failure cleanup
+  removes a partial swap file, deactivates swap, restores fstab and removes a
+  partial swap signature.
+- NFS volumes are excluded from swap-file creation. Host disk provisioning must
+  be enabled, and the existing runner and operation gates still apply.
+- This release adds swap visibility and creation; turning off or removing an
+  existing swap area is not included.
+
 # Alt8Mail 3.4.2
 
 Release date: 2026-11-13. Completes the 3.4.1 upgrade recovery.

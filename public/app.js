@@ -8713,7 +8713,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.4.2";
+const MAIL_PROVIDER_ASSET_VERSION = "3.5.0";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
