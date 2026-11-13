@@ -1,3 +1,25 @@
+# Alt8Mail 3.4.1
+
+Release date: 2026-11-13. Upgrade hotfix for existing 3.3.1 hosts.
+
+## 3.4.1 upgrades start on hosts that do not yet have a storage root
+
+- The 3.4.0 service units added `/srv/a8m-storage` to `ReadWritePaths`. systemd
+  refuses to start a unit when a `ReadWritePaths` entry does not exist, and an
+  existing 3.3.1 host did not have that directory yet because it was created
+  only by a fresh install. After migrations, `alt8mail-control` therefore failed
+  to start and the updater rolled back to 3.3.1.
+- The control and mail-provisioning units now mark the storage root optional
+  with the systemd `-` prefix. The updater also resolves
+  `CONTROL_STORAGE_ROOT` (defaulting to `/srv/a8m-storage`) and creates it as
+  `root:vmail` mode `0750` before installing the new units and restarting
+  services. A missing directory can no longer block the control plane from
+  booting; storage can still be repaired from Disk Management.
+- Regression tests assert that both units use the optional path and that the
+  updater creates the storage root before its restart loop.
+- Use 3.4.1 for upgrades. The 3.4.0 release asset remains available for audit
+  history but should not be installed over an existing host.
+
 # Alt8Mail 3.4.0
 
 Release date: 2026-11-13. Managed mail storage, capacity protection and a rebuilt
