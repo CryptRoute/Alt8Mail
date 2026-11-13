@@ -132,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerStorageRoutes(mux)
 	s.registerStorageMoveRoutes(mux)
 	s.registerStorageVolumeRoutes(mux)
+	s.registerStorageSwapRoutes(mux)
 
 	return s.securityHeaders(s.logRequests(mux))
 }

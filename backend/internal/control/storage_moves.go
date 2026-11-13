@@ -627,7 +627,7 @@ func (s *Server) handleStorageOperations(w http.ResponseWriter, r *http.Request,
 	sortKey := strings.TrimSpace(r.URL.Query().Get("sort"))
 	sortExpressions := map[string]string{
 		"operation": "kind",
-		"target":    "COALESCE(NULLIF(plan->>'targetVolumeName', ''), NULLIF(plan->>'volumeName', ''), NULLIF(plan->>'name', ''), NULLIF(plan->>'mountPath', ''), '')",
+		"target":    "COALESCE(NULLIF(plan->>'target', ''), NULLIF(plan->>'targetVolumeName', ''), NULLIF(plan->>'volumeName', ''), NULLIF(plan->>'name', ''), NULLIF(plan->>'mountPath', ''), '')",
 		"mailboxes": "CASE WHEN kind = 'move_mailboxes' AND jsonb_typeof(plan->'items') = 'array' THEN jsonb_array_length(plan->'items') ELSE 0 END",
 		"status":    "status",
 		"createdAt": "created_at",
@@ -643,7 +643,7 @@ func (s *Server) handleStorageOperations(w http.ResponseWriter, r *http.Request,
 	var total int
 	if err := s.db.QueryRow(r.Context(), `
 		SELECT count(*) FROM control.storage_operations
-		WHERE kind = 'move_mailboxes' OR kind LIKE 'volume_%'
+		WHERE kind = 'move_mailboxes' OR kind = 'swap_create' OR kind LIKE 'volume_%'
 	`).Scan(&total); err != nil {
 		writeFromError(w, err)
 		return
@@ -654,7 +654,7 @@ func (s *Server) handleStorageOperations(w http.ResponseWriter, r *http.Request,
 		       COALESCE(actor_id::text, ''), actor_email, created_at, updated_at,
 		       started_at, finished_at, finalize_at
 		FROM control.storage_operations
-		WHERE kind = 'move_mailboxes' OR kind LIKE 'volume_%'
+		WHERE kind = 'move_mailboxes' OR kind = 'swap_create' OR kind LIKE 'volume_%'
 		ORDER BY `+sortExpression+` `+order+`, created_at DESC
 		LIMIT $1 OFFSET $2
 	`, limit, offset)
@@ -820,6 +820,29 @@ func storageOperationSummary(op storageOperation) map[string]any {
 		view["canFinalize"] = false
 		return view
 	}
+	if op.Kind == "swap_create" {
+		var swapPlan storageSwapPlan
+		if json.Unmarshal(op.Plan, &swapPlan) == nil {
+			view["scope"] = "swap"
+			view["swapMode"] = swapPlan.Mode
+			view["swapTarget"] = swapPlan.Target
+			view["swapSizeBytes"] = swapPlan.SizeBytes
+			view["targetVolume"] = swapPlan.VolumeName
+			view["targetMountPath"] = swapPlan.MountPath
+			view["planName"] = swapPlan.Name
+			view["planMountPath"] = swapPlan.FilePath
+			view["planDevice"] = swapPlan.DevicePath
+			view["planMode"] = swapPlan.Mode
+			view["planCommands"] = swapPlan.Commands
+			view["planWarnings"] = swapPlan.Warnings
+			view["planConfirmValue"] = swapPlan.ConfirmValue
+			view["mailboxes"] = 0
+		}
+		view["canCancel"] = op.Status == "planned" || op.Status == "queued"
+		view["canRollback"] = false
+		view["canFinalize"] = false
+		return view
+	}
 	var plan storageMovePlan
 	if json.Unmarshal(op.Plan, &plan) == nil {
 		view["scope"] = plan.Scope
@@ -867,7 +890,7 @@ func (s *Server) enqueueStorageOperation(operationID string) error {
 	}
 	unit := "a8m-storage-" + strings.ReplaceAll(operationID, "-", "")
 	cmd := exec.Command("systemd-run",
-		"--unit="+unit, "--collect", "--description=Alt8Mail storage move",
+		"--unit="+unit, "--collect", "--description=Alt8Mail storage operation",
 		"--property=EnvironmentFile=/etc/a8m/control.env",
 		"--property=WorkingDirectory=/opt/alt8mail",
 		"--property=Nice=10", "--property=IOSchedulingClass=best-effort",

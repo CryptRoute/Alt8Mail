@@ -76,6 +76,9 @@ func (s *Server) RunStorageOperation(ctx context.Context, operationID string) er
 	if strings.HasPrefix(op.Kind, "volume_") {
 		return s.RunStorageVolumeOperation(ctx, op)
 	}
+	if op.Kind == "swap_create" {
+		return s.RunStorageSwapOperation(ctx, op)
+	}
 	if op.Kind != "move_mailboxes" {
 		return fmt.Errorf("unsupported storage operation %q", op.Kind)
 	}
@@ -716,6 +719,9 @@ func (s *Server) failStorageOperation(ctx context.Context, id, message string) {
 }
 
 func (s *Server) appendStorageLog(ctx context.Context, id, line string) {
+	if s.db == nil {
+		return
+	}
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return

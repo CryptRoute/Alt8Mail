@@ -179,6 +179,7 @@ export async function renderStorage(ctx) {
   let operations = null;
   let hostInfo = null;
   let usage = null;
+  let swapInfo = null;
   let forecastVolumeId = '';
   let volumeFilter = 'all';
   const operationsState = { page: 1, limit: 10, sort: 'createdAt', order: 'desc' };
@@ -233,12 +234,22 @@ export async function renderStorage(ctx) {
         <div class="card-body" id="storage-host">${ui.loadingState('Checking host capabilities…', 3)}</div>
       </section>
     </div>
+    <section class="card storage-swap-card">
+      <header class="card-head">
+        <div><h3>Swap</h3><p>Host memory overflow space with explicit boot persistence</p></div>
+        <div class="card-actions">
+          <button class="btn btn-ghost btn-sm" type="button" id="storage-swap-refresh">${ui.icon('refresh', 13)} Refresh</button>
+          ${canManage ? `<button class="btn btn-secondary btn-sm" type="button" id="storage-swap-create" disabled title="Loading swap status">${ui.icon('plus', 13)} Create swap</button>` : ''}
+        </div>
+      </header>
+      <div class="card-body" id="storage-swap">${ui.loadingState('Reading host swap…', 3)}</div>
+    </section>
     <section class="card storage-disks-card">
       <header class="card-head"><div><h3>Physical disks</h3><p>Read-only host inventory used by the add-disk planner</p></div><div class="card-actions" id="storage-disk-actions"></div></header>
       <div class="card-body" id="storage-disks">${ui.loadingState('Reading block devices…', 4)}</div>
     </section>
     <section class="card storage-operations-card">
-      <header class="card-head"><div><h3>Storage operations</h3><p>Verified moves, retained sources and rollback windows</p></div><div class="card-actions"><button class="btn btn-secondary btn-sm" type="button" id="storage-operations-refresh">${ui.icon('refresh', 13)} Refresh</button></div></header>
+      <header class="card-head"><div><h3>Storage operations</h3><p>Verified moves, host operations and rollback windows</p></div><div class="card-actions"><button class="btn btn-secondary btn-sm" type="button" id="storage-operations-refresh">${ui.icon('refresh', 13)} Refresh</button></div></header>
       <div class="card-body" id="storage-operations">${ui.loadingState('Loading storage operations…', 3)}</div>
     </section>
     <p class="form-note" style="margin-top:14px">Live values refresh every 5 seconds while this page is visible. Capacity history is sampled every 30 seconds. No disk is formatted or mounted by this page.</p>`;
@@ -904,9 +915,12 @@ export async function renderStorage(ctx) {
       const statusLabel = op.status === 'grace' ? 'Verified · grace' : ui.humanTitle(op.status);
       const tone = op.status === 'grace' ? 'good' : op.status === 'succeeded' ? 'good' : op.status === 'failed' ? 'critical' : op.status === 'rolled_back' || op.status === 'canceled' ? 'neutral' : 'info';
       const volumeOp = String(op.kind || '').startsWith('volume_');
-      const operationLabel = volumeOp ? `${ui.humanTitle(String(op.kind).replace('volume_', ''))} volume` : op.scope === 'domain' ? `${op.domain || 'Domain'} · domain move` : 'Mailbox move';
-      const operationTarget = volumeOp ? op.planName || op.planVolumeName || op.planMountPath : op.targetVolume || '—';
-      return `<tr><td><span class="cell-main">${esc(operationLabel)}</span><span class="cell-sub">${esc(op.actorEmail || '')} · ${esc(fmt.timeAgo(op.createdAt))}</span></td><td>${esc(operationTarget || '—')}<span class="cell-sub mono">${esc(volumeOp ? op.planMountPath || '' : op.targetMountPath || '')}</span></td><td class="num">${volumeOp ? '—' : ui.num(op.mailboxes || 0)}</td><td>${ui.badge(statusLabel, tone)}<span class="cell-sub">${esc(op.step || '')}</span></td><td><div class="storage-operation-progress">${ui.progress(op.progress || 0, op.status === 'failed' ? 'critical' : op.status === 'grace' || op.status === 'succeeded' ? 'good' : 'accent')}<span class="cell-sub">${fmt.bytes(op.movedBytes || 0)} of ${fmt.bytes(op.totalBytes || 0)}</span></div></td><td class="actions"><button class="btn btn-ghost btn-sm" type="button" data-storage-operation="${esc(op.id)}">${ui.icon('terminal', 12)} Open</button></td></tr>`;
+      const swapOp = op.kind === 'swap_create';
+      const operationLabel = swapOp ? 'Create swap' : volumeOp ? `${ui.humanTitle(String(op.kind).replace('volume_', ''))} volume` : op.scope === 'domain' ? `${op.domain || 'Domain'} · domain move` : 'Mailbox move';
+      const operationTarget = swapOp ? op.swapTarget || op.planMountPath || op.planDevice || 'Swap' : volumeOp ? op.planName || op.planVolumeName || op.planMountPath : op.targetVolume || '—';
+      const operationPath = swapOp ? (op.swapTarget || op.planMountPath || op.planDevice || '') : volumeOp ? op.planMountPath || '' : op.targetMountPath || '';
+      const progressDetail = swapOp ? `${fmt.bytes(op.totalBytes || 0)} swap area` : `${fmt.bytes(op.movedBytes || 0)} of ${fmt.bytes(op.totalBytes || 0)}`;
+      return `<tr><td><span class="cell-main">${esc(operationLabel)}</span><span class="cell-sub">${esc(op.actorEmail || '')} · ${esc(fmt.timeAgo(op.createdAt))}</span></td><td>${esc(operationTarget || '—')}<span class="cell-sub mono">${esc(operationPath)}</span></td><td class="num">${volumeOp || swapOp ? '—' : ui.num(op.mailboxes || 0)}</td><td>${ui.badge(statusLabel, tone)}<span class="cell-sub">${esc(op.step || '')}</span></td><td><div class="storage-operation-progress">${ui.progress(op.progress || 0, op.status === 'failed' ? 'critical' : op.status === 'grace' || op.status === 'succeeded' ? 'good' : 'accent')}<span class="cell-sub">${progressDetail}</span></div></td><td class="actions"><button class="btn btn-ghost btn-sm" type="button" data-storage-operation="${esc(op.id)}">${ui.icon('terminal', 12)} Open</button></td></tr>`;
     }).join('')}</tbody></table></div>
     <div class="table-footer storage-ops-footer">
       <span class="pagination-summary">Showing <strong>${ui.num(first)}–${ui.num(last)}</strong> of <strong>${ui.num(total)}</strong> operations</span>
@@ -965,7 +979,7 @@ export async function renderStorage(ctx) {
     let timer = null;
     let last = null;
     const modal = ctx.modal({
-      title: 'Storage operation', subtitle: 'Verified move with a retained source until finalization.',
+      title: 'Storage operation', subtitle: 'Live host operation with runner progress, logs and audit history.',
       size: 'large',
       body: ui.loadingState('Loading operation…', 4),
       footer: `<button class="btn btn-secondary" type="button" data-modal-close>Close</button>`,
@@ -989,20 +1003,24 @@ export async function renderStorage(ctx) {
       last = op;
       const items = Array.isArray(op.items) ? op.items : [];
       const volumeOp = String(op.kind || '').startsWith('volume_');
+      const swapOp = op.kind === 'swap_create';
+      const hostOp = volumeOp || swapOp;
       const tone = op.status === 'grace' || op.status === 'succeeded' ? 'good' : op.status === 'failed' ? 'critical' : op.status === 'rolled_back' || op.status === 'canceled' ? 'neutral' : 'info';
-      const statusLabel = op.status === 'grace' ? 'Verified · grace window' : op.status === 'succeeded' ? (volumeOp ? 'Completed' : 'Finalized') : ui.humanTitle(op.status);
-      const title = volumeOp ? `${ui.humanTitle(String(op.kind).replace('volume_', ''))} volume` : (op.scope === 'domain' ? op.domain || 'Domain move' : 'Mailbox move');
-      const subtitle = volumeOp ? `${esc(op.planName || op.planVolumeName || '')} · ${esc(op.planMountPath || op.planDevice || '')}` : `${ui.num(op.mailboxes || 0)} mailbox${op.mailboxes === 1 ? '' : 'es'} → ${esc(op.targetVolume || '')} <span class="mono">${esc(op.targetMountPath || '')}</span>`;
+      const statusLabel = op.status === 'grace' ? 'Verified · grace window' : op.status === 'succeeded' ? (hostOp ? 'Completed' : 'Finalized') : ui.humanTitle(op.status);
+      const title = swapOp ? 'Create swap' : volumeOp ? `${ui.humanTitle(String(op.kind).replace('volume_', ''))} volume` : (op.scope === 'domain' ? op.domain || 'Domain move' : 'Mailbox move');
+      const subtitle = swapOp
+        ? `${op.planMode === 'device' ? 'Dedicated disk' : 'Swap file'} · <span class="mono">${esc(op.swapTarget || op.planMountPath || op.planDevice || '')}</span> · ${fmt.bytes(op.swapSizeBytes || op.totalBytes || 0)}`
+        : volumeOp ? `${esc(op.planName || op.planVolumeName || '')} · ${esc(op.planMountPath || op.planDevice || '')}` : `${ui.num(op.mailboxes || 0)} mailbox${op.mailboxes === 1 ? '' : 'es'} → ${esc(op.targetVolume || '')} <span class="mono">${esc(op.targetMountPath || '')}</span>`;
       body.innerHTML = `
         <div class="storage-operation-head">
           <div><span class="mono muted">${esc(op.id)}</span><h3>${esc(title)}</h3><p>${subtitle}</p></div>
           <div class="storage-operation-status">${ui.badge(statusLabel, tone)}${op.status === 'grace' && op.finalizeAt ? `<span class="cell-sub">Finalize after ${esc(fmt.dateTime(op.finalizeAt))}</span>` : ''}</div>
         </div>
         ${ui.progress(op.progress || 0, op.status === 'failed' ? 'critical' : op.status === 'grace' || op.status === 'succeeded' ? 'good' : 'accent', `${op.progress || 0}%`)}
-        <div class="storage-operation-meta"><span>${esc(op.step || '')}</span><span class="mono">${volumeOp ? esc(op.planDevice || '') : `${fmt.bytes(op.movedBytes || 0)} / ${fmt.bytes(op.totalBytes || 0)}`}</span></div>
+        <div class="storage-operation-meta"><span>${esc(op.step || '')}</span><span class="mono">${swapOp ? esc(op.swapTarget || '') : volumeOp ? esc(op.planDevice || '') : `${fmt.bytes(op.movedBytes || 0)} / ${fmt.bytes(op.totalBytes || 0)}`}</span></div>
         ${op.error ? ui.inlineNotice('critical', 'Operation error', op.error) : ''}
         ${op.status === 'grace' ? ui.inlineNotice('good', 'Verified; source retained', 'Rollback is available until finalization. Finalize only when you are satisfied; it permanently removes the retained source copy.') : ''}
-        ${volumeOp && Array.isArray(op.planCommands) && op.planCommands.length ? `<h4 style="margin-top:14px">Planned host steps</h4><pre class="storage-log">${op.planCommands.map((command) => esc(command)).join('\n')}</pre>` : ''}
+        ${hostOp && Array.isArray(op.planCommands) && op.planCommands.length ? `<h4 style="margin-top:14px">Planned host steps</h4><pre class="storage-log">${op.planCommands.map((command) => esc(command)).join('\n')}</pre>` : ''}
         ${items.length ? `<div class="table-wrap" style="margin-top:12px"><table class="data compact storage-operation-items"><thead><tr><th>Mailbox</th><th>From</th><th>To</th><th>Status</th><th class="num">Size</th></tr></thead><tbody>${items.map((item) => `<tr><td><span class="cell-main">${esc(item.email)}</span><span class="cell-sub mono">${esc(item.sourceHome)}</span></td><td>${esc(item.sourceVolume || 'legacy')}</td><td>${esc(item.targetVolume || '—')}<span class="cell-sub mono">${esc(item.targetHome)}</span></td><td>${ui.badge(ui.humanTitle(item.status), item.status === 'grace' || item.status === 'finalized' ? 'good' : item.status === 'failed' ? 'critical' : 'info')}${item.error ? `<span class="cell-sub" style="color:var(--status-critical-ink)">${esc(item.error)}</span>` : ''}</td><td class="num">${fmt.bytes(item.bytes || 0)}</td></tr>`).join('')}</tbody></table></div>` : ''}
         <details style="margin-top:12px"><summary class="form-note">Runner log</summary><pre class="storage-log">${esc(op.log || 'No log lines yet.')}</pre></details>`;
       const controls = [`<button class="btn btn-secondary" type="button" data-modal-close>Close</button>`];
@@ -1012,7 +1030,7 @@ export async function renderStorage(ctx) {
       footer.innerHTML = `<div class="form-actions-right">${controls.join('')}</div>`;
       footer.querySelectorAll('[data-modal-close]').forEach((button) => button.addEventListener('click', () => modal.close()));
       document.getElementById('storage-op-cancel')?.addEventListener('click', async (event) => {
-        const ok = await ctx.confirm({ title: 'Cancel storage operation', message: volumeOp ? 'Cancel this host operation before the runner starts? No host writes have occurred.' : 'The runner stops at the next safe checkpoint. A mailbox that already switched can still be rolled back from the grace window.', confirmLabel: 'Request cancellation', tone: 'danger' });
+        const ok = await ctx.confirm({ title: 'Cancel storage operation', message: hostOp ? 'Cancel this host operation before the runner starts? No host writes have occurred.' : 'The runner stops at the next safe checkpoint. A mailbox that already switched can still be rolled back from the grace window.', confirmLabel: 'Request cancellation', tone: 'danger' });
         if (!ok) return;
         await runOperationAction(op.id, 'cancel', event.currentTarget);
       });
@@ -1567,6 +1585,7 @@ export async function renderStorage(ctx) {
       }
     });
     updateHostControls();
+    if (swapInfo) paintSwap();
   };
 
   const updateHostControls = () => {
@@ -1788,6 +1807,351 @@ export async function renderStorage(ctx) {
     });
   };
 
+  const swapTypeLabel = (type) => {
+    const value = String(type || '').toLowerCase();
+    if (value === 'file') return 'Swap file';
+    if (value === 'partition') return 'Drive / partition';
+    return ui.humanTitle(value || 'Swap');
+  };
+
+  const swapBootBadge = (entry) => {
+    if (entry.managed) return ui.badge('Managed boot', 'good', 'check-circle');
+    if (entry.persistent) return ui.badge('In fstab', 'info', 'archive');
+    return ui.badge('Session only', 'neutral', 'alert-circle');
+  };
+
+  const paintSwap = () => {
+    const host = document.getElementById('storage-swap');
+    const create = document.getElementById('storage-swap-create');
+    if (!host) return;
+    if (!swapInfo) {
+      host.innerHTML = ui.loadingState('Reading host swap…', 3);
+      if (create) create.disabled = true;
+      return;
+    }
+    const info = swapInfo;
+    const tools = info.tools || {};
+    const missingTools = ['mkswap', 'swapon', 'swapoff', 'fallocate'].filter((tool) => tools[tool] === false);
+    const provisioningKnown = Boolean(hostInfo);
+    const provisioning = Boolean(hostInfo?.capabilities?.provisioningEnabled);
+    const ready = Boolean(canManage && info.supported && provisioningKnown && provisioning && missingTools.length === 0);
+    if (create) {
+      create.disabled = !ready;
+      create.title = !info.supported
+        ? info.reason || 'Swap management is unavailable on this host'
+        : !provisioningKnown
+          ? 'Loading host capabilities'
+          : !provisioning
+            ? 'A superadmin must enable host disk provisioning'
+          : missingTools.length
+            ? `Install ${missingTools.join(', ')} on the host`
+            : 'Create a swap file or dedicate a disk to swap';
+    }
+    if (!info.supported) {
+      host.innerHTML = ui.inlineNotice('info', 'Swap management unavailable', info.reason || 'Swap can be managed on the Linux control host only.');
+      return;
+    }
+    const entries = Array.isArray(info.entries) ? info.entries : [];
+    const total = Number(info.totalBytes) || 0;
+    const used = Number(info.usedBytes) || 0;
+    const free = Number(info.freeBytes) || 0;
+    const percent = total > 0 ? used / total * 100 : 0;
+    const candidates = Array.isArray(info.candidates) ? info.candidates : [];
+    const devices = Array.isArray(info.devices) ? info.devices : [];
+    const eligibleCandidates = candidates.filter((candidate) => candidate.eligible).length;
+    const eligibleDevices = devices.filter((device) => device.eligible).length;
+    host.innerHTML = `
+      ${provisioningKnown && !provisioning ? ui.inlineNotice('warning', 'Swap creation is locked', 'A superadmin must enable host disk provisioning before creating or changing swap.') : ''}
+      ${missingTools.length ? ui.inlineNotice('warning', 'Host swap tools are missing', `Install ${missingTools.join(', ')} before creating swap.`) : ''}
+      <div class="storage-swap-summary">
+        <div><span>Total swap</span><strong>${total > 0 ? fmt.bytes(total) : 'None'}</strong><small>${entries.length ? `${ui.num(entries.length)} active area${entries.length === 1 ? '' : 's'}` : 'No active area'}</small></div>
+        <div><span>Used</span><strong>${fmt.bytes(used)}</strong><small>${total > 0 ? `${fmt.pct(percent)} of swap` : 'No swap active'}</small></div>
+        <div><span>Free</span><strong>${total > 0 ? fmt.bytes(free) : '—'}</strong><small>${total > 0 ? 'Available to the kernel' : 'No swap active'}</small></div>
+        <div><span>Host memory</span><strong>${info.memoryTotalBytes ? fmt.bytes(info.memoryTotalBytes) : '—'}</strong><small>${info.memoryFreeBytes ? `${fmt.bytes(info.memoryFreeBytes)} available` : 'Memory details unavailable'}</small></div>
+      </div>
+      ${total > 0 ? `<div class="storage-swap-meter">${ui.meter({ label: 'Swap used', value: percent, detail: `${fmt.bytes(used)} of ${fmt.bytes(total)}`, tone: percent >= 85 ? 'warning' : '' })}</div>` : ''}
+      ${entries.length ? `<div class="table-wrap storage-swap-table-wrap"><table class="data compact"><thead><tr><th>Swap area</th><th>Type</th><th class="num">Size</th><th class="num">Used</th><th class="num">Priority</th><th>Boot</th></tr></thead><tbody>${entries.map((entry) => `<tr><td><span class="cell-main mono">${esc(entry.path)}</span><span class="cell-sub">${entry.managed ? 'Managed by Alt8Mail' : 'External or manual swap'}</span></td><td>${esc(swapTypeLabel(entry.type))}</td><td class="num">${fmt.bytes(entry.sizeBytes)}</td><td class="num">${fmt.bytes(entry.usedBytes)}</td><td class="num">${ui.num(entry.priority)}</td><td>${swapBootBadge(entry)}</td></tr>`).join('')}</tbody></table></div>` : ui.emptyState('No swap configured', 'Create a swap file on an online mail volume, or dedicate a blank disk to host memory overflow.', '', 'gauge')}
+      <div class="storage-swap-foot"><span>vm.swappiness ${ui.num(info.swappiness)}</span><span>${ui.num(eligibleCandidates)} volume source${eligibleCandidates === 1 ? '' : 's'} · ${ui.num(eligibleDevices)} disk${eligibleDevices === 1 ? '' : 's'} eligible</span><span>Swap is host memory overflow, not mail storage.</span></div>`;
+  };
+
+  const loadSwap = async () => {
+    const host = document.getElementById('storage-swap');
+    try {
+      const payload = await ctx.api('/control/api/storage/swap');
+      if (!ctx.isCurrent()) return false;
+      swapInfo = payload;
+      paintSwap();
+      return true;
+    } catch (error) {
+      if (!ctx.isCurrent()) return false;
+      if (!swapInfo && host) host.innerHTML = ui.inlineNotice('critical', 'Could not load swap', errorText(error));
+      const create = document.getElementById('storage-swap-create');
+      if (create) create.disabled = true;
+      return false;
+    }
+  };
+
+  const openSwapWizard = async () => {
+    if (!swapInfo) await loadSwap();
+    if (!swapInfo) {
+      ui.toast('Swap status is still loading.', 'info');
+      return;
+    }
+    if (!swapInfo.supported) {
+      ui.toast(swapInfo.reason || 'Swap management is unavailable on this host.', 'warning');
+      return;
+    }
+    if (!hostInfo) await loadHost();
+    if (!hostInfo?.capabilities?.provisioningEnabled) {
+      ui.toast('A superadmin must enable host disk provisioning before creating swap.', 'warning');
+      return;
+    }
+    const tools = swapInfo.tools || {};
+    const missingTools = ['mkswap', 'swapon', 'swapoff', 'fallocate'].filter((tool) => !tools[tool]);
+    if (missingTools.length) {
+      ui.toast(`Install ${missingTools.join(', ')} on the host before creating swap.`, 'warning');
+      return;
+    }
+    const candidates = Array.isArray(swapInfo.candidates) ? swapInfo.candidates : [];
+    const devices = Array.isArray(swapInfo.devices) ? swapInfo.devices : [];
+    const fileCandidates = candidates.filter((candidate) => candidate.eligible);
+    const deviceCandidates = devices.filter((device) => device.eligible);
+    const canDestroy = ctx.can('storage.destroy');
+    let mode = fileCandidates.length ? 'file' : deviceCandidates.length && canDestroy ? 'device' : 'file';
+    const volumeOptions = candidates.length ? candidates.map((candidate) => ({
+      value: candidate.volumeId,
+      label: `${candidate.name} · ${fmt.bytes(candidate.freeBytes)} free · ${candidate.fsType}${candidate.eligible ? '' : ` — ${candidate.reason || 'not eligible'}`}`,
+      disabled: !candidate.eligible,
+    })) : [{ value: '', label: 'No registered online volume', disabled: true }];
+    const deviceOptions = devices.length ? devices.map((device) => ({
+      value: device.path,
+      label: `${device.path} · ${fmt.bytes(device.sizeBytes)}${device.model ? ` · ${device.model}` : ''}${device.eligible ? '' : ` — ${device.reason || 'not eligible'}`}`,
+      disabled: !device.eligible,
+    })) : [{ value: '', label: 'No whole-disk device found', disabled: true }];
+    const defaultVolume = fileCandidates[0]?.volumeId || '';
+    const defaultDevice = deviceCandidates[0]?.path || '';
+    const recommendedGiB = Math.max(0.0625, Math.round((Number(swapInfo.recommendedSizeBytes) || 2 * 1024 ** 3) / 1024 ** 3 * 4) / 4);
+    const modal = ctx.modal({
+      title: 'Create swap',
+      subtitle: 'Allocate host memory overflow as a swap file or dedicate a whole disk.',
+      size: 'large',
+      body: `<form id="storage-swap-form">
+        <div class="storage-swap-layout">
+          <div class="storage-swap-main">
+            <div class="storage-swap-tabs" role="tablist" aria-label="Swap type">
+              <button class="storage-swap-tab${mode === 'file' ? ' is-active' : ''}" id="storage-swap-tab-file" type="button" role="tab" tabindex="0" aria-selected="${mode === 'file' ? 'true' : 'false'}" aria-controls="storage-swap-file-pane" data-swap-mode="file">
+                <span class="storage-swap-tab-icon">${ui.icon('file-plus', 18)}</span>
+                <span><strong>Swap file</strong><small>Use free space on an ext4 or XFS mail volume</small></span>
+              </button>
+              <button class="storage-swap-tab${mode === 'device' ? ' is-active' : ''}" id="storage-swap-tab-device" type="button" role="tab" tabindex="-1" aria-selected="${mode === 'device' ? 'true' : 'false'}" aria-controls="storage-swap-device-pane" data-swap-mode="device">
+                <span class="storage-swap-tab-icon">${ui.icon('disk', 18)}</span>
+                <span><strong>Dedicated disk</strong><small>Erase a blank disk and dedicate it to swap</small></span>
+              </button>
+            </div>
+            <div class="storage-swap-pane" id="storage-swap-file-pane" role="tabpanel" aria-labelledby="storage-swap-tab-file"${mode === 'file' ? '' : ' hidden'}>
+              <div class="storage-swap-recommend">
+                <span class="storage-swap-recommend-icon">${ui.icon('gauge', 18)}</span>
+                <div><span>Recommended starting point</span><strong>${fmt.bytes(swapInfo.recommendedSizeBytes || 2 * 1024 ** 3)}</strong><small>Guided by ${swapInfo.memoryTotalBytes ? fmt.bytes(swapInfo.memoryTotalBytes) : 'host'} memory. Adjust to your workload.</small></div>
+              </div>
+              ${fileCandidates.length ? ui.field({ label: 'Mail volume', name: 'swapVolumeId', type: 'select', value: defaultVolume, options: volumeOptions, help: 'The hidden swap file is placed at the root of this volume. NFS and non-ext4/XFS volumes are not eligible.' }) : `<div class="notice tone-warning"><span class="notice-icon">${ui.icon('alert-circle', 17)}</span><div><strong>No eligible mail volume</strong><p>${candidates.length ? 'Every registered volume is offline, NFS-backed, or short on space after the capacity reserve.' : 'Register an online ext4 or XFS volume before creating a swap file. You can still dedicate a blank disk.'}</p></div></div>`}
+              <div class="storage-swap-size-row">
+                <div class="field"><label for="storage-swap-size">Size (GiB)</label><input class="input" id="storage-swap-size" name="swapSizeGib" type="number" min="0.0625" step="any" value="${recommendedGiB}"${fileCandidates.length ? '' : ' disabled'}><small class="field-help">Between 64 MiB and the volume's swap-safe free space.</small></div>
+                <div class="storage-swap-quick" role="group" aria-label="Suggested swap sizes">${[1, 2, 4, 8, 16].map((size) => `<button class="btn btn-ghost btn-sm" type="button" data-swap-size="${size}">${size} GiB</button>`).join('')}</div>
+              </div>
+              <div id="storage-swap-file-preview" class="storage-swap-preview"></div>
+              <p class="form-note">A managed fstab entry will enable the swap file at boot. Creating it changes capacity accounting but never moves or rewrites mailbox data.</p>
+            </div>
+            <div class="storage-swap-pane" id="storage-swap-device-pane" role="tabpanel" aria-labelledby="storage-swap-tab-device"${mode === 'device' ? '' : ' hidden'}>
+              ${!canDestroy ? ui.inlineNotice('info', 'Superadmin permission required', 'Dedicating a disk to swap requires the storage.destroy permission.') : ''}
+              ${deviceCandidates.length ? ui.field({ label: 'Disk', name: 'swapDevicePath', type: 'select', value: defaultDevice, options: deviceOptions, help: 'Only whole disks with no partitions, mountpoint or system protection are eligible.' }) : `<div class="notice tone-warning"><span class="notice-icon">${ui.icon('alert-circle', 17)}</span><div><strong>No eligible disk</strong><p>${devices.length ? 'Every detected disk is mounted, partitioned, protected or already used for swap.' : 'No whole-disk device was found. A swap file on a mail volume is the safer option.'}</p></div></div>`}
+              <div id="storage-swap-device-preview" class="storage-swap-preview"></div>
+              <div class="notice tone-warning"><span class="notice-icon">${ui.icon('alert-circle', 17)}</span><div><strong>The entire disk will be erased</strong><p>All data and filesystem signatures on the selected disk are destroyed. The plan rechecks the disk serial or WWN before the first write.</p></div></div>
+            </div>
+          </div>
+          <aside class="storage-swap-side">
+            <span class="eyebrow">Plan summary</span>
+            <div class="storage-swap-current"><span>Current swap</span><strong>${fmt.bytes(Number(swapInfo.totalBytes) || 0)}</strong><small>${fmt.bytes(Number(swapInfo.usedBytes) || 0)} used · ${fmt.bytes(Number(swapInfo.freeBytes) || 0)} free</small></div>
+            <div id="storage-swap-summary" class="storage-swap-plan"></div>
+            <div class="notice tone-info"><span class="notice-icon">${ui.icon('info', 17)}</span><div><strong>Planning performs no writes</strong><p>You will review the target and exact host commands before execution.</p></div></div>
+          </aside>
+        </div>
+      </form>`,
+      footer: `<button class="btn btn-ghost" type="button" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit" form="storage-swap-form" id="storage-swap-submit">${ui.icon('forward', 14)} Preview plan</button>`,
+    });
+    const form = modal.root.querySelector('#storage-swap-form');
+    if (form) form.noValidate = true;
+    const filePane = modal.root.querySelector('#storage-swap-file-pane');
+    const devicePane = modal.root.querySelector('#storage-swap-device-pane');
+    const volumeSelect = form.querySelector('[name="swapVolumeId"]');
+    const sizeInput = form.querySelector('#storage-swap-size');
+    const deviceSelect = form.querySelector('[name="swapDevicePath"]');
+    const filePreview = modal.root.querySelector('#storage-swap-file-preview');
+    const devicePreview = modal.root.querySelector('#storage-swap-device-preview');
+    const summaryHost = modal.root.querySelector('#storage-swap-summary');
+    const submit = modal.root.querySelector('#storage-swap-submit');
+    const selectedCandidate = () => candidates.find((candidate) => candidate.volumeId === volumeSelect?.value && candidate.eligible);
+    const selectedDevice = () => devices.find((device) => device.path === deviceSelect?.value && device.eligible);
+    const sizeBytes = () => Math.round(Math.max(0, Number(sizeInput?.value) || 0) * 1024 ** 3);
+    const updateSizeLimit = () => {
+      const candidate = selectedCandidate();
+      if (!candidate) return;
+      const maxGiB = Math.max(0.0625, Math.floor((Number(candidate.maxSwapBytes) / 1024 ** 3) * 4) / 4);
+      if (sizeInput) {
+        sizeInput.max = String(maxGiB);
+        if (Number(sizeInput.value) > maxGiB) sizeInput.value = String(maxGiB);
+      }
+      modal.root.querySelectorAll('[data-swap-size]').forEach((button) => {
+        button.disabled = Number(button.dataset.swapSize) > maxGiB;
+        button.classList.toggle('is-active', Number(button.dataset.swapSize) === Number(sizeInput?.value));
+      });
+    };
+    const updateFilePreview = () => {
+      const candidate = selectedCandidate();
+      if (!filePreview) return;
+      if (!candidate) {
+        filePreview.innerHTML = `<div class="form-note">Choose an eligible mail volume to see the swap file placement.</div>`;
+        updateSwapSummary();
+        return;
+      }
+      updateSizeLimit();
+      const bytes = sizeBytes();
+      const freeAfter = Math.max(0, Number(candidate.freeBytes) - bytes);
+      filePreview.innerHTML = `<div class="storage-swap-preview-head"><span>${ui.icon('file-plus', 15)} ${esc(candidate.name)}</span>${ui.badge('Managed boot', 'info', 'archive')}</div>
+        <dl class="storage-swap-facts"><div><dt>File</dt><dd class="mono">${esc(candidate.mountPath)}/.a8m-swapfile</dd></div><div><dt>Free after</dt><dd>${fmt.bytes(freeAfter)}</dd></div><div><dt>Filesystem</dt><dd>${esc(candidate.fsType)}</dd></div></dl>`;
+      updateSwapSummary();
+    };
+    const updateDevicePreview = () => {
+      const device = selectedDevice();
+      if (!devicePreview) return;
+      if (!device) {
+        devicePreview.innerHTML = `<div class="form-note">Choose an eligible blank disk to dedicate to swap.</div>`;
+        updateSwapSummary();
+        return;
+      }
+      devicePreview.innerHTML = `<div class="storage-swap-preview-head"><span>${ui.icon('disk', 15)} ${esc(device.path)}</span>${device.hasSignatures ? ui.badge('Existing data', 'warning', 'alert') : ui.badge('Blank disk', 'good', 'check-circle')}</div>
+        <dl class="storage-swap-facts"><div><dt>Size</dt><dd>${fmt.bytes(device.sizeBytes)}</dd></div><div><dt>Model</dt><dd>${esc(device.model || '—')}</dd></div><div><dt>Serial</dt><dd class="mono">${esc(device.serial || device.wwn || '—')}</dd></div></dl>`;
+      updateSwapSummary();
+    };
+    const updateSwapSummary = () => {
+      if (!summaryHost) return;
+      const fileMode = mode === 'file';
+      const candidate = fileCandidates.find((item) => item.volumeId === volumeSelect?.value);
+      const device = deviceCandidates.find((item) => item.path === deviceSelect?.value);
+      const target = fileMode ? (candidate ? `${candidate.name} · ${candidate.mountPath}/.a8m-swapfile` : 'No eligible volume') : (device ? device.path : 'No eligible disk');
+      const bytes = fileMode ? sizeBytes() : Number(device?.sizeBytes) || 0;
+      const valid = fileMode ? Boolean(candidate && bytes >= 64 * 1024 ** 2 && bytes <= Number(candidate.maxSwapBytes)) : Boolean(canDestroy && device);
+      summaryHost.innerHTML = `
+        <div class="storage-swap-plan-row"><span>Type</span><strong>${fileMode ? 'Swap file' : 'Dedicated disk'}</strong></div>
+        <div class="storage-swap-plan-row"><span>Target</span><strong>${esc(target)}</strong></div>
+        <div class="storage-swap-plan-row"><span>Size</span><strong>${bytes ? fmt.bytes(bytes) : 'Choose a size'}</strong></div>
+        <div class="storage-swap-plan-row"><span>Boot</span><strong>Managed fstab entry</strong></div>
+        ${!fileMode ? `<div class="storage-swap-plan-warning">${ui.icon('alert-circle', 14)} The disk will be erased.</div>` : ''}`;
+      if (submit) submit.disabled = !valid;
+    };
+    const setMode = (next) => {
+      mode = next === 'device' ? 'device' : 'file';
+      modal.root.querySelectorAll('[data-swap-mode]').forEach((button) => {
+        const active = button.dataset.swapMode === mode;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+        button.tabIndex = active ? 0 : -1;
+      });
+      if (filePane) filePane.hidden = mode !== 'file';
+      if (devicePane) devicePane.hidden = mode !== 'device';
+      updateSwapSummary();
+    };
+    modal.root.querySelectorAll('[data-swap-mode]').forEach((button) => {
+      button.addEventListener('click', () => setMode(button.dataset.swapMode));
+      button.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        const next = mode === 'file' ? 'device' : 'file';
+        setMode(next);
+        modal.root.querySelector(`[data-swap-mode="${next}"]`)?.focus();
+      });
+    });
+    volumeSelect?.addEventListener('change', updateFilePreview);
+    deviceSelect?.addEventListener('change', updateDevicePreview);
+    sizeInput?.addEventListener('input', updateFilePreview);
+    modal.root.querySelectorAll('[data-swap-size]').forEach((button) => button.addEventListener('click', () => {
+      if (!sizeInput) return;
+      sizeInput.value = button.dataset.swapSize;
+      updateFilePreview();
+    }));
+    setMode(mode);
+    if (fileCandidates.length) updateFilePreview();
+    if (deviceCandidates.length) updateDevicePreview();
+    updateSwapSummary();
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const body = { mode };
+      if (mode === 'file') {
+        const candidate = selectedCandidate();
+        const bytes = sizeBytes();
+        if (!candidate) { ui.toast('Choose an eligible mail volume.', 'warning'); return; }
+        if (bytes < 64 * 1024 ** 2) { ui.toast('Swap size must be at least 64 MiB.', 'warning'); return; }
+        if (bytes > Number(candidate.maxSwapBytes)) { ui.toast(`Choose at most ${fmt.bytes(candidate.maxSwapBytes)} on this volume.`, 'warning'); return; }
+        body.volumeId = candidate.volumeId;
+        body.sizeBytes = bytes;
+      } else {
+        const device = selectedDevice();
+        if (!device) { ui.toast('Choose an eligible blank disk.', 'warning'); return; }
+        if (!canDestroy) { ui.toast('Creating swap on a disk requires the storage.destroy permission.', 'warning'); return; }
+        body.devicePath = device.path;
+        body.deviceSerial = device.serial || '';
+        body.deviceWwn = device.wwn || '';
+      }
+      submit.disabled = true;
+      submit.classList.add('is-loading');
+      try {
+        const result = await ctx.api('/control/api/storage/swap/plan', { method: 'POST', body });
+        modal.close();
+        showSwapReview(result);
+      } catch (error) {
+        ui.toast(errorText(error), 'critical', { title: 'Could not plan swap creation' });
+        submit.disabled = false;
+        submit.classList.remove('is-loading');
+      }
+    });
+  };
+
+  const showSwapReview = (planResult) => {
+    const plan = planResult.plan || {};
+    const commands = Array.isArray(plan.commands) ? plan.commands : [];
+    const warnings = Array.isArray(plan.warnings) ? plan.warnings : [];
+    const expected = plan.confirmValue || 'CREATE SWAP';
+    const modal = ctx.modal({
+      title: 'Review swap plan',
+      subtitle: 'Nothing has been written. Review the target and exact host commands.',
+      size: 'medium',
+      body: `${warnings.map((warning) => ui.inlineNotice('warning', 'Review before continuing', warning)).join('')}
+        <div class="storage-review-grid"><div><span>Type</span><strong>${esc(plan.mode === 'device' ? 'Dedicated disk' : 'Swap file')}</strong></div><div><span>Target</span><strong class="mono">${esc(plan.target || '')}</strong></div><div><span>Size</span><strong>${fmt.bytes(Number(plan.sizeBytes) || 0)}</strong></div><div><span>Boot</span><strong>Managed fstab entry</strong></div></div>
+        ${commands.length ? `<h4 style="margin-top:14px">Host operations</h4><pre class="storage-log">${commands.map((command) => esc(command)).join('\n')}</pre>` : ''}
+        <div class="field" style="margin-top:13px"><label for="storage-swap-confirm">Type <strong class="mono">${esc(expected)}</strong> to confirm</label><input class="input mono" id="storage-swap-confirm" autocomplete="off" spellcheck="false"></div>`,
+      footer: `<button class="btn btn-ghost" type="button" data-modal-close>Cancel</button><button class="btn ${plan.requireDestroy ? 'btn-danger' : 'btn-primary'}" type="button" id="storage-swap-execute" disabled>${ui.icon('play', 14)} Create swap</button>`,
+    });
+    const input = modal.root.querySelector('#storage-swap-confirm');
+    const execute = modal.root.querySelector('#storage-swap-execute');
+    input?.addEventListener('input', () => { execute.disabled = input.value.trim() !== expected; });
+    execute?.addEventListener('click', async () => {
+      execute.classList.add('is-loading');
+      execute.disabled = true;
+      try {
+        await ctx.api('/control/api/storage/swap/execute', { method: 'POST', body: {
+          operationId: planResult.operationId, token: planResult.token, confirm: true, confirmValue: input.value.trim(),
+        } });
+        modal.close();
+        ui.toast('Swap creation queued. Follow the runner in Storage operations.', 'good');
+        await Promise.all([loadSwap(), loadDisks(), loadOperations()]);
+        openOperationConsole(planResult.operationId);
+      } catch (error) {
+        ui.toast(errorText(error), 'critical', { title: 'Could not create swap' });
+        execute.classList.remove('is-loading');
+        execute.disabled = false;
+      }
+    });
+  };
+
   const paintDisks = () => {
     const host = document.getElementById('storage-disks');
     if (!host) return;
@@ -1863,9 +2227,11 @@ export async function renderStorage(ctx) {
     }
   };
 
-  document.getElementById('storage-refresh')?.addEventListener('click', () => { load(); loadDisks(); loadPlacements(); loadOperations(); loadHost(); loadUsage(); });
+  document.getElementById('storage-refresh')?.addEventListener('click', () => { load(); loadDisks(); loadPlacements(); loadOperations(); loadHost(); loadUsage(); loadSwap(); });
   document.getElementById('storage-host-refresh')?.addEventListener('click', () => loadHost());
   document.getElementById('storage-add-disk')?.addEventListener('click', () => openAddDiskWizard());
+  document.getElementById('storage-swap-refresh')?.addEventListener('click', () => loadSwap());
+  document.getElementById('storage-swap-create')?.addEventListener('click', () => openSwapWizard());
   document.getElementById('storage-operations-refresh')?.addEventListener('click', () => loadOperations());
   document.getElementById('storage-move')?.addEventListener('click', () => openMoveWizard());
   document.getElementById('storage-policy-open')?.addEventListener('click', () => openPolicyModal());
@@ -1889,14 +2255,14 @@ export async function renderStorage(ctx) {
     }
   });
   ctx.listen(document, 'visibilitychange', () => {
-    if (document.visibilityState === 'visible' && ctx.isCurrent()) { load(true); loadUsage(); }
+    if (document.visibilityState === 'visible' && ctx.isCurrent()) { load(true); loadUsage(); loadSwap(); }
   });
   ctx.onCleanup(() => { if (timer) clearInterval(timer); if (usageTimer) clearInterval(usageTimer); });
-  await Promise.all([load(), loadDisks(), loadPlacements(), loadOperations(), loadHost(), loadUsage()]);
+  await Promise.all([load(), loadDisks(), loadPlacements(), loadOperations(), loadHost(), loadUsage(), loadSwap()]);
   timer = setInterval(() => {
     if (document.visibilityState === 'visible' && ctx.isCurrent()) { load(true); loadOperations(); }
   }, 5000);
   usageTimer = setInterval(() => {
-    if (document.visibilityState === 'visible' && ctx.isCurrent()) loadUsage();
+    if (document.visibilityState === 'visible' && ctx.isCurrent()) { loadUsage(); loadSwap(); }
   }, 30000);
 }

@@ -78,6 +78,9 @@ func (s *Server) failStorageVolumeOperation(ctx context.Context, id, message str
 }
 
 func (s *Server) volumeOperationStep(ctx context.Context, id, step string, progress int) {
+	if s.db == nil {
+		return
+	}
 	_, _ = s.db.Exec(ctx, `
 		UPDATE control.storage_operations
 		SET step = $2, progress = $3, updated_at = now()

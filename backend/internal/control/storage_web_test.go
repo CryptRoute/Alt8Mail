@@ -41,6 +41,11 @@ func TestStorageControlWebAssets(t *testing.T) {
 		"data-op-sort",
 		"control/api/storage/mailboxes?",
 		"Preview domain plan",
+		"storage-swap-create",
+		"control/api/storage/swap",
+		"Dedicated disk",
+		"Review swap plan",
+		"vm.swappiness",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("storage view is missing %q", want)
