@@ -1,10 +1,13 @@
 package control
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReadStorageSwapEntriesAndMemory(t *testing.T) {
@@ -126,5 +129,34 @@ func TestStorageSwapRoutesRegister(t *testing.T) {
 	}
 	if handler := server.Handler(); handler == nil {
 		t.Fatal("control handler is nil")
+	}
+}
+
+func TestStorageSwapLegacyRootDoesNotRequireSeparateMount(t *testing.T) {
+	root := t.TempDir()
+	oldCommand := storageHostCommand
+	oldStat := filesystemStatLookup
+	storageHostCommand = func(_ context.Context, _ time.Duration, _ string, _ ...string) (commandResult, error) {
+		return commandResult{ExitCode: 1}, fmt.Errorf("not a mountpoint")
+	}
+	filesystemStatLookup = func(string) (filesystemStat, error) {
+		return filesystemStat{TotalBytes: 20 << 30, FreeBytes: 10 << 30}, nil
+	}
+	t.Cleanup(func() {
+		storageHostCommand = oldCommand
+		filesystemStatLookup = oldStat
+	})
+	server := &Server{cfg: Config{VmailRoot: root}}
+	legacy := storageVolume{Name: "legacy", State: "online", MountPath: root, FSType: "ext4"}
+	if err := server.storageSwapFileVolumeReady(context.Background(), legacy); err != nil {
+		t.Fatalf("legacy root should be usable without a separate mount: %v", err)
+	}
+	managedPath := filepath.Join(root, "mail-stack")
+	if err := os.MkdirAll(managedPath, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	managed := storageVolume{Name: "mail-stack", State: "online", MountPath: managedPath, FSType: "ext4"}
+	if err := server.storageSwapFileVolumeReady(context.Background(), managed); err == nil {
+		t.Fatal("a managed volume without an active mount should be refused")
 	}
 }

@@ -110,7 +110,7 @@ func TestStorageSwapFilePlanAndRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM control.storage_volumes WHERE id = $1`, volumeID) }()
-	server := &Server{db: pool, cfg: Config{StorageRoot: root, StorageFstab: fstabPath, BackupDir: filepath.Join(root, "backup")}}
+	server := &Server{db: pool, cfg: Config{VmailRoot: mountPath, StorageRoot: root, StorageFstab: fstabPath, BackupDir: filepath.Join(root, "backup")}}
 
 	plan, err := server.buildStorageSwapPlan(ctx, storageSwapPlanRequest{Mode: "file", VolumeID: volumeID, SizeBytes: 2 << 30})
 	if err != nil {

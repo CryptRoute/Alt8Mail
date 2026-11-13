@@ -69,8 +69,8 @@ func (s *Server) runSwapFileCreate(ctx context.Context, op storageOperation, pla
 	if err != nil {
 		return fmt.Errorf("the source volume is no longer registered")
 	}
-	if volume.State == "retired" || volume.State == "wiped" || !s.storageMountActive(ctx, volume.MountPath) {
-		return fmt.Errorf("the source volume is not online and mounted")
+	if err := s.storageSwapFileVolumeReady(ctx, volume); err != nil {
+		return err
 	}
 	fsType := strings.ToLower(strings.TrimSpace(volume.FSType))
 	if fsType != "ext4" && fsType != "xfs" {

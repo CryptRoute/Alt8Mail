@@ -203,18 +203,20 @@ func (s *Server) loadStorageSwapInfo(ctx context.Context) (storageSwapInfo, erro
 		}
 		fsType := strings.ToLower(strings.TrimSpace(volume.FSType))
 		network := candidate.Topology == "nfs" || fsType == "nfs" || fsType == "nfs4"
-		switch {
-		case network:
-			candidate.Reason = "NFS cannot host a swap file."
-		case fsType != "ext4" && fsType != "xfs":
-			candidate.Reason = "Swap files require ext4 or XFS."
-		case !s.storageMountActive(ctx, volume.MountPath):
-			candidate.Reason = "The volume is not mounted."
-		case candidate.MaxSwapBytes < storageSwapMinBytes:
-			candidate.Reason = "Not enough free space after the capacity reserve."
-		default:
+		if err := s.storageSwapFileVolumeReady(ctx, volume); err != nil {
+			candidate.Reason = err.Error()
+		} else {
 			candidate.Online = true
-			candidate.Eligible = true
+			switch {
+			case network:
+				candidate.Reason = "NFS cannot host a swap file."
+			case fsType != "ext4" && fsType != "xfs":
+				candidate.Reason = "Swap files require ext4 or XFS."
+			case candidate.MaxSwapBytes < storageSwapMinBytes:
+				candidate.Reason = "Not enough free space after the capacity reserve."
+			default:
+				candidate.Eligible = true
+			}
 		}
 		info.Candidates = append(info.Candidates, candidate)
 	}
@@ -423,6 +425,32 @@ func (s *Server) buildStorageSwapPlan(ctx context.Context, req storageSwapPlanRe
 	}
 }
 
+// storageSwapFileVolumeReady accepts the legacy /var/vmail root even though it
+// is usually a directory on the root filesystem rather than a separate mount.
+// Managed volumes must still be real mounts so a missing mount cannot silently
+// place the swap file on the parent filesystem.
+func (s *Server) storageSwapFileVolumeReady(ctx context.Context, volume storageVolume) error {
+	if volume.State != "" && volume.State != "online" {
+		return fmt.Errorf("the source volume is not online")
+	}
+	mountPath := strings.TrimSpace(volume.MountPath)
+	if mountPath == "" {
+		return fmt.Errorf("the source volume has no mount path")
+	}
+	info, err := os.Stat(mountPath)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("the source volume directory is not readable")
+	}
+	if _, err := filesystemStatLookup(mountPath); err != nil {
+		return fmt.Errorf("the source volume is not readable: %w", err)
+	}
+	legacy := volume.Name == "legacy" || sameStoragePath(mountPath, s.cfg.VmailRoot)
+	if !legacy && !s.storageMountActive(ctx, mountPath) {
+		return fmt.Errorf("the source volume is not mounted")
+	}
+	return nil
+}
+
 func (s *Server) buildStorageSwapFilePlan(ctx context.Context, req storageSwapPlanRequest, policy storagePolicy) (storageSwapPlan, error) {
 	if err := storageSwapToolError(map[string]bool{
 		"mkswap": hasStorageTool("mkswap"), "swapon": hasStorageTool("swapon"),
@@ -435,15 +463,12 @@ func (s *Server) buildStorageSwapFilePlan(ctx context.Context, req storageSwapPl
 	if err != nil {
 		return storageSwapPlan{}, fmt.Errorf("choose an online mail volume")
 	}
-	if volume.State == "retired" || volume.State == "wiped" {
-		return storageSwapPlan{}, fmt.Errorf("the chosen volume is inactive")
+	if err := s.storageSwapFileVolumeReady(ctx, volume); err != nil {
+		return storageSwapPlan{}, err
 	}
 	fsType := strings.ToLower(strings.TrimSpace(volume.FSType))
 	if fsType != "ext4" && fsType != "xfs" {
 		return storageSwapPlan{}, fmt.Errorf("swap files require an ext4 or XFS volume")
-	}
-	if !s.storageMountActive(ctx, volume.MountPath) {
-		return storageSwapPlan{}, fmt.Errorf("the chosen volume is not mounted")
 	}
 	stat, err := filesystemStatLookup(volume.MountPath)
 	if err != nil {
