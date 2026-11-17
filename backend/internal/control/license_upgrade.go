@@ -398,6 +398,12 @@ func installEnterpriseRelease(ctx context.Context, root, bundlePath, version str
 	if err := os.Rename(tmpLink, current); err != nil {
 		return err
 	}
+	return enterpriseRestart(ctx, version)
+}
+
+// enterpriseRestart is a test seam. The transient unit lets Control persist
+// the completed job before systemd restarts the process that scheduled it.
+var enterpriseRestart = func(ctx context.Context, version string) error {
 	unit := "a8m-enterprise-" + strings.NewReplacer(".", "-", " ", "-").Replace(version)
 	script := "sleep 2; systemctl restart a8m-server a8m-admin; systemctl restart alt8mail-control"
 	if output, err := exec.CommandContext(ctx, "systemd-run", "--collect", "--unit="+unit, "/bin/sh", "-c", script).CombinedOutput(); err != nil {

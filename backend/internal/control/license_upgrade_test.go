@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -269,6 +270,65 @@ func TestExtractEnterpriseBundleRejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestInstallEnterpriseReleaseOverlaysCurrentRelease(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("release symlink semantics are POSIX")
+	}
+	root := t.TempDir()
+	base := filepath.Join(root, "releases", "base")
+	if err := os.MkdirAll(filepath.Join(base, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"bin/a8m-server":         "community-server",
+		"bin/a8m-admin-server":   "community-admin",
+		"bin/alt8mail-control":   "community-control",
+		"bin/a8m-storage-runner": "community-storage",
+		"VERSION":                "3.9.3",
+	} {
+		if err := os.WriteFile(filepath.Join(base, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(base, filepath.Join(root, "current")); err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := filepath.Join(t.TempDir(), "enterprise.tar.gz")
+	if err := os.WriteFile(bundlePath, buildTestEnterpriseBundle(t, "9.9.9"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previousRestart := enterpriseRestart
+	restarted := ""
+	enterpriseRestart = func(_ context.Context, version string) error {
+		restarted = version
+		return nil
+	}
+	defer func() { enterpriseRestart = previousRestart }()
+	if err := installEnterpriseRelease(context.Background(), root, bundlePath, "9.9.9"); err != nil {
+		t.Fatal(err)
+	}
+	target, err := os.Readlink(filepath.Join(root, "current"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(target, "9.9.9-enterprise-") {
+		t.Fatalf("current -> %q", target)
+	}
+	server, _ := os.ReadFile(filepath.Join(target, "bin", "a8m-server"))
+	control, _ := os.ReadFile(filepath.Join(target, "bin", "alt8mail-control"))
+	storage, _ := os.ReadFile(filepath.Join(target, "bin", "a8m-storage-runner"))
+	if string(server) != "server" || string(control) != "control" || string(storage) != "community-storage" {
+		t.Fatalf("overlay server=%q control=%q storage=%q", server, control, storage)
+	}
+	marker, err := os.ReadFile(filepath.Join(target, "enterprise.json"))
+	if err != nil || !strings.Contains(string(marker), `"9.9.9"`) {
+		t.Fatalf("enterprise marker = %q err=%v", marker, err)
+	}
+	if restarted != "9.9.9" {
+		t.Fatalf("restart = %q", restarted)
+	}
+}
+
 func buildTestEnterpriseBundle(t *testing.T, version string) []byte {
 	t.Helper()
 	var buffer bytes.Buffer
@@ -281,7 +341,7 @@ func buildTestEnterpriseBundle(t *testing.T, version string) []byte {
 	}
 	add(base+"/bin/a8m-server", "server")
 	add(base+"/bin/a8m-admin-server", "admin")
-	add(base+"/bin/a8m-control", "control")
+	add(base+"/bin/alt8mail-control", "control")
 	_ = tw.Close()
 	_ = gz.Close()
 	return buffer.Bytes()
