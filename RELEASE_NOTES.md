@@ -1,3 +1,19 @@
+# Alt8Mail 3.9.2
+
+Release date: 2026-11-17. First clean community-edition baseline after the
+enterprise split.
+
+## 3.9.2 community baseline
+
+- Paid enterprise implementations now ship only in the private enterprise
+  module; the public tree contains the community application, the extension
+  host, entitlement gates and community defaults.
+- Old community 3.9.1 installations can update through the normal release
+  updater to this community build. The update removes paid features from that
+  host; enterprise hosts must use the private signed enterprise release.
+- The admin console, System Control plane, mail stack, migrations and community
+  features remain in the public release.
+
 # Alt8Mail 3.9.1
 
 Release date: 2026-11-16. Reliable capacity forecasts and SSH-safe intrusion bans.
