@@ -41,6 +41,14 @@ GOARCH_TARGET="${GOARCH_TARGET:-amd64}"
 NAME="alt8mail-$VERSION"
 STAGE="$OUT_DIR/$NAME"
 
+# Vendor defaults for the community installer. Public trust anchors and the
+# portal URL are not secrets; a production build overrides them with the
+# release environment. The private signing keys never enter this repository.
+: "${A8M_LICENSE_PORTAL_URL:=http://161.97.183.90:88}"
+: "${A8M_LICENSE_PUBLIC_KEY:=5qrP8kj3F2zXCE7ptW4CmnJmSxF9evoDeZN3pKR0AY8}"
+: "${A8M_LICENSE_PUBLIC_KEY_ID:=2026-11}"
+: "${A8M_ENTERPRISE_RELEASE_PUBLIC_KEY:=MZO5ExWWH_pooM06zfWOfbAIHCCjdchtTugmW7rYqII}"
+
 # The license trust anchor is compiled into every binary that verifies a
 # license. The public key is safe to distribute; the private key must stay in
 # KMS/HSM or an offline signer. A build without this value still produces a
