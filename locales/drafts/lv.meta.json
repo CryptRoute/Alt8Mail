@@ -1,0 +1,12 @@
+{
+  "locale": "lv",
+  "catalog": "lv",
+  "label": "Latviešu",
+  "model": "qwen3.6:latest",
+  "sourceHash": "3f4e1fb836099884",
+  "startedAt": "2026-11-15T21:50:29.756Z",
+  "updatedAt": "2026-11-15T22:22:08.087Z",
+  "preservedKeys": 4892,
+  "machineKeys": 77,
+  "failedKeys": []
+}

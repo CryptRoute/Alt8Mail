@@ -1,0 +1,179 @@
+/* Alt8Mail — RTL, script typography and bidi polish.
+   Logical properties live in the component stylesheets; this file handles
+   direction-specific affordances that CSS cannot express logically. */
+
+/* Directional glyphs and icons mirror in RTL. Symmetric marks (mail, people,
+   clocks, stars) deliberately do not. */
+[dir="rtl"] .icon:has(use[href="#i-arrow-left"]),
+[dir="rtl"] .icon:has(use[href="#i-chevron-left"]),
+[dir="rtl"] .icon:has(use[href="#i-chevron-right"]),
+[dir="rtl"] .icon:has(use[href="#i-curve-down-left"]),
+[dir="rtl"] .icon:has(use[href="#i-reply"]),
+[dir="rtl"] .icon:has(use[href="#i-reply-all"]),
+[dir="rtl"] .icon:has(use[href="#i-forward"]),
+[dir="rtl"] .icon:has(use[href="#i-send"]),
+[dir="rtl"] .icon:has(use[href="#i-logout"]),
+[dir="rtl"] .icon:has(use[href="#i-external"]),
+[dir="rtl"] .icon:has(use[href="#i-collapse"]),
+[dir="rtl"] .icon:has(use[href="#i-expand"]) {
+  transform: scaleX(-1);
+}
+
+[dir="rtl"] .menu-chevron,
+[dir="rtl"] [data-folder-submenu-back] {
+  transform: scaleX(-1);
+}
+
+/* Native select affordance: the arrow moves to the inline-end side and the
+   text padding follows it. */
+[dir="rtl"] select:not([multiple]) {
+  padding-inline: 32px 11px;
+  background-position: left 11px center;
+}
+
+[dir="rtl"] .pref-select:not([multiple]),
+[dir="rtl"] .compose-editor-toolbar select:not([multiple]),
+[dir="rtl"] .office-compare-controls select:not([multiple]),
+[dir="rtl"] .office-review-select:not([multiple]),
+[dir="rtl"] .compose-option select:not([multiple]),
+[dir="rtl"] .pulse-year select:not([multiple]),
+[dir="rtl"] .year-review-year select:not([multiple]),
+[dir="rtl"] .collab-field select:not([multiple]),
+[dir="rtl"] .files-toolbar .pref-select:not([multiple]) {
+  padding-inline: 27px 8px;
+  background-position: left 8px center;
+}
+
+/* Side-attached surfaces use logical radius pairs in RTL. */
+[dir="rtl"] .ai-reader-primary { border-radius: 0 7px 7px 0; }
+[dir="rtl"] .ai-reader-chevron { border-radius: 7px 0 0 7px; border-inline-start: 0; border-inline-end: 1px solid rgba(255, 255, 255, .28); }
+[dir="rtl"] .message-side-sheet,
+[dir="rtl"] .reader-side-panel { border-radius: 8px 0 0 8px; }
+
+/* Message content keeps its own direction inside an RTL interface. */
+.msg-from,
+.msg-subject,
+.msg-snippet,
+.thread-msg-name,
+.thread-msg-snippet,
+.reader-subject-line h2,
+.email-body,
+.thread-note p,
+.search-report-subject,
+.search-report-row {
+  unicode-bidi: plaintext;
+}
+
+.email-body,
+.compose-editor,
+.compose-text {
+  text-align: start;
+}
+
+/* Arabic and Hebrew: taller lines, no synthetic tracking, Arabic-first stacks. */
+html:lang(ar) {
+  --font-ui: "Segoe UI", Tahoma, "Noto Naskh Arabic", "Noto Sans Arabic", "Geeza Pro", Arial, sans-serif;
+  --font-display: "Segoe UI", Tahoma, "Noto Naskh Arabic", "Noto Sans Arabic", "Geeza Pro", Arial, sans-serif;
+}
+html:lang(he) {
+  --font-ui: "Segoe UI", Arial, "Noto Sans Hebrew", "Noto Serif Hebrew", David, sans-serif;
+  --font-display: "Segoe UI", Arial, "Noto Sans Hebrew", "Noto Serif Hebrew", David, sans-serif;
+}
+html:lang(ar) .msg-subject,
+html:lang(ar) .msg-snippet,
+html:lang(ar) .email-body,
+html:lang(ar) .thread-msg-snippet,
+html:lang(ar) .compose-editor,
+html:lang(ar) .compose-text,
+html:lang(he) .msg-subject,
+html:lang(he) .msg-snippet,
+html:lang(he) .email-body,
+html:lang(he) .thread-msg-snippet,
+html:lang(he) .compose-editor,
+html:lang(he) .compose-text {
+  line-height: 1.7;
+  letter-spacing: 0;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Japanese, Chinese and Korean: locale-specific glyph stacks and line breaks. */
+html:lang(ja) {
+  --font-ui: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, "Noto Sans JP", sans-serif;
+  --font-display: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, "Noto Sans JP", sans-serif;
+}
+html:lang(zh-Hans), html:lang(zh-CN), html:lang(zh-SG) {
+  --font-ui: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-display: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+html:lang(ko) {
+  --font-ui: "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --font-display: "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+html:lang(ja) .msg-subject,
+html:lang(ja) .msg-snippet,
+html:lang(ja) .email-body,
+html:lang(ja) .compose-editor,
+html:lang(ja) .compose-text,
+html:lang(zh-Hans) .msg-subject,
+html:lang(zh-Hans) .msg-snippet,
+html:lang(zh-Hans) .email-body,
+html:lang(zh-Hans) .compose-editor,
+html:lang(zh-Hans) .compose-text,
+html:lang(ko) .msg-subject,
+html:lang(ko) .msg-snippet,
+html:lang(ko) .email-body,
+html:lang(ko) .compose-editor,
+html:lang(ko) .compose-text {
+  line-height: 1.75;
+  letter-spacing: .01em;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  line-break: strict;
+}
+
+/* Devanagari: taller lines and a Devanagari-first stack. */
+html:lang(hi) {
+  --font-ui: "Segoe UI", "Nirmala UI", "Noto Sans Devanagari", Mangal, sans-serif;
+  --font-display: "Segoe UI", "Nirmala UI", "Noto Sans Devanagari", Mangal, sans-serif;
+}
+html:lang(hi) .msg-subject,
+html:lang(hi) .msg-snippet,
+html:lang(hi) .email-body,
+html:lang(hi) .compose-editor,
+html:lang(hi) .compose-text {
+  line-height: 1.8;
+  letter-spacing: 0;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Addresses, verification codes and source blocks stay LTR inside RTL UI. */
+[dir="rtl"] input[type="email"],
+[dir="rtl"] input[type="url"],
+[dir="rtl"] input[type="tel"],
+[dir="rtl"] .source-view,
+[dir="rtl"] .email-address {
+  direction: ltr;
+  text-align: start;
+  unicode-bidi: plaintext;
+}
+
+/* Stateful transforms that move in a physical direction. */
+[dir="rtl"] .switch[aria-checked="true"] span { transform: translateX(-14px); }
+[dir="rtl"] .mail-provider-tile:hover .mail-provider-arrow { transform: translateX(-2px); }
+[dir="rtl"] .folders {
+  inset-inline-start: max(16px, env(safe-area-inset-right, 0px));
+  transform: translateX(calc(100% + 16px));
+}
+[dir="rtl"] body.drawer-open .folders { transform: none; }
+
+[dir="rtl"] .rail-btn.is-active::before { border-radius: 3px 0 0 3px; }
+[dir="rtl"] .upcoming-item { border-radius: 4px 0 0 4px; }
+[dir="rtl"] .totp-provider-guidance > p { border-radius: 8px 0 0 8px; }
+@media (max-width: 719px) {
+  [dir="rtl"] .settings-nav-list {
+    -webkit-mask-image: linear-gradient(to left, #000 0, #000 calc(100% - 26px), transparent 100%);
+    mask-image: linear-gradient(to left, #000 0, #000 calc(100% - 26px), transparent 100%);
+  }
+}

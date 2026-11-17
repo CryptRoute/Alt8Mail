@@ -1,0 +1,17 @@
+From: Alt8Mail Test Sender <sender@example.test>
+To: Alt8Mail Test Recipient <recipient@example.test>
+Subject: Plain multipart fixture
+Date: Sun, 15 Nov 2026 00:00:00 +0000
+Message-ID: <plain@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="plain-alt"
+
+--plain-alt
+Content-Type: text/plain; charset=UTF-8
+
+Plain body.
+--plain-alt
+Content-Type: text/html; charset=UTF-8
+
+<p>Plain body.</p>
+--plain-alt--

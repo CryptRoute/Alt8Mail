@@ -1,0 +1,12 @@
+{
+  "locale": "ro",
+  "catalog": "ro",
+  "label": "Română",
+  "model": "qwen3.6:latest",
+  "sourceHash": "3f4e1fb836099884",
+  "startedAt": "2026-11-15T21:59:23.668Z",
+  "updatedAt": "2026-11-15T22:20:13.004Z",
+  "preservedKeys": 4892,
+  "machineKeys": 78,
+  "failedKeys": []
+}

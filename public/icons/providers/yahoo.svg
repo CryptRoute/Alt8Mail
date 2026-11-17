@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Yahoo Mail">
+  <rect width="48" height="48" rx="12" fill="#f3efff"/>
+  <circle cx="24" cy="24" r="16" fill="#6001d2"/>
+  <path d="M14 16h6.4l3.8 8.1L28 16h6.3l-7.4 13.1V34h-6v-4.9Z" fill="#fff"/>
+  <path d="M31.2 13.2h4.6l-2.5 5.2h-3.8Z" fill="#ffcf33"/>
+</svg>

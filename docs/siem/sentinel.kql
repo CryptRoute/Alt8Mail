@@ -1,0 +1,13 @@
+Alt8MailAudit_CL
+| where action_s in ("admin.legal_hold_released", "admin.encryption_locked", "admin.encryption_rotated", "mcp.action_approved")
+| project TimeGenerated, action_s, actorEmail_s, target_s, detail_s, ip_s
+| order by TimeGenerated desc
+
+Alt8MailAudit_CL
+| where action_s in ("mail.forward_blocked", "file.share_blocked", "office.dlp_blocked")
+| summarize Blocks = count() by bin(TimeGenerated, 1h), action_s
+| render timechart
+
+Alt8MailAudit_CL
+| where action_s == "admin.audit_bundle_exported"
+| project TimeGenerated, actorEmail_s, target_s, detail_s

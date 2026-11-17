@@ -1,0 +1,26 @@
+From: Alt8Mail Test Sender <sender@example.test>
+To: Alt8Mail Test Recipient <recipient@example.test>
+Subject: PGP/MIME encrypted fixture
+Date: Sun, 15 Nov 2026 00:00:00 +0000
+Message-ID: <pgp-mime-encrypted@example.test>
+X-Alt8Mail-Fixture: phase0
+MIME-Version: 1.0
+Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="alt8mail-pgp-encrypted"
+
+--alt8mail-pgp-encrypted
+Content-Type: application/pgp-encrypted
+
+Version: 1
+--alt8mail-pgp-encrypted
+Content-Type: application/octet-stream; name="encrypted.asc"
+Content-Disposition: inline; filename="encrypted.asc"
+Content-Transfer-Encoding: base64
+
+wcBMAwwIb3riPGZ9AQf/QrTsYtrhmC6TPGjdafiOa51Gtn/x3PMITlSkpLraLMAZ0lKE0XATz+l1
+S5VyUoperKwpRyQd1sA1+m1fYffZ18uNPubJu8UyPhCAhUIsmvhMi8A65dTQlbC/clVu433YRWeo
+UDqO1uxuAgX7oqGMMa8YalweMTr7QDKcVH0jcMohCG070PfCOqzRXofWjOdh3mVYLORcyCmdrpl+
+MSqWtMcmrdwYaqS6+sgMaaabKXRxGTclMs51miRziXeqpEwWWS/OxDZp9JRDVDxTXFikCaHaDisO
+hyd5GoJorijcGisiDhdEoVbm0EKweNZtbYAGI7wsr1U+fFcd/NlbKdIt0dJ2AbA4iE1KTOwqubK6
+Mhp8doFNa/FI1PvxcMWgRzSRssCljTJ7XP0aQmIWv2jgZTKb5o6zYnLjM1GOnoJXzxhRMYsaP6Be
+2AiyBnqpqROYIdAe0XrAN+yI4gfw0d5BDBIv7m1GnqOWCLdg5uxurLcz17YlwqifBg==
+--alt8mail-pgp-encrypted--

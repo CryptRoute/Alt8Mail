@@ -1,0 +1,12 @@
+{
+  "locale": "nb",
+  "catalog": "nb",
+  "label": "Norsk bokmål",
+  "model": "qwen3.6:latest",
+  "sourceHash": "3f4e1fb836099884",
+  "startedAt": "2026-11-15T21:55:06.027Z",
+  "updatedAt": "2026-11-15T21:56:59.216Z",
+  "preservedKeys": 4892,
+  "machineKeys": 78,
+  "failedKeys": []
+}

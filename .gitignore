@@ -1,0 +1,24 @@
+node_modules/
+backend/bin/
+backend/*.exe
+data/
+artifacts/
+tmp-preview/
+build/
+staging_avery_password
+*.env
+*.log
+*.tgz
+*.tar.gz
+tools/__pycache__/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+dist/
+
+.worktrees/
+.worktrees/
+
+# Local mail-crypto fixture generation scratch (never commit private keys)
+backend/internal/mailcrypto/testdata/.tmp/

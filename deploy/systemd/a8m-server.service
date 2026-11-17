@@ -1,0 +1,34 @@
+[Unit]
+Description=Alt8Mail system backend
+Documentation=https://github.com/CryptRoute/Alt8Mail
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=a8m
+Group=a8m
+WorkingDirectory=/opt/a8m/current
+EnvironmentFile=/etc/a8m/app.env
+ExecStart=/opt/a8m/current/bin/a8m-server
+Restart=on-failure
+RestartSec=2
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/opt/a8m/uploads
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+From: Alt8Mail Test Sender <sender@example.test>
+To: Alt8Mail Test Recipient <recipient@example.test>
+Subject: Inline PGP encrypted fixture
+Date: Sun, 15 Nov 2026 00:00:00 +0000
+Message-ID: <pgp-inline-encrypted@example.test>
+X-Alt8Mail-Fixture: phase0
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+-----BEGIN PGP MESSAGE-----
+
+wcBMAwwIb3riPGZ9AQf/QrTsYtrhmC6TPGjdafiOa51Gtn/x3PMITlSkpLraLMAZ
+0lKE0XATz+l1S5VyUoperKwpRyQd1sA1+m1fYffZ18uNPubJu8UyPhCAhUIsmvhM
+i8A65dTQlbC/clVu433YRWeoUDqO1uxuAgX7oqGMMa8YalweMTr7QDKcVH0jcMoh
+CG070PfCOqzRXofWjOdh3mVYLORcyCmdrpl+MSqWtMcmrdwYaqS6+sgMaaabKXRx
+GTclMs51miRziXeqpEwWWS/OxDZp9JRDVDxTXFikCaHaDisOhyd5GoJorijcGisi
+DhdEoVbm0EKweNZtbYAGI7wsr1U+fFcd/NlbKdIt0dJ2AbA4iE1KTOwqubK6Mhp8
+doFNa/FI1PvxcMWgRzSRssCljTJ7XP0aQmIWv2jgZTKb5o6zYnLjM1GOnoJXzxhR
+MYsaP6Be2AiyBnqpqROYIdAe0XrAN+yI4gfw0d5BDBIv7m1GnqOWCLdg5uxurLcz
+17YlwqifBg==
+=SwsU
+-----END PGP MESSAGE-----

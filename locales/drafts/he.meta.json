@@ -1,0 +1,12 @@
+{
+  "locale": "he",
+  "catalog": "he",
+  "label": "עברית",
+  "model": "qwen3.6:latest",
+  "sourceHash": "3f4e1fb836099884",
+  "startedAt": "2026-11-15T21:34:33.610Z",
+  "updatedAt": "2026-11-15T22:22:00.781Z",
+  "preservedKeys": 4892,
+  "machineKeys": 76,
+  "failedKeys": []
+}

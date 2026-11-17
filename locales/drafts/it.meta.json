@@ -1,0 +1,12 @@
+{
+  "locale": "it-IT",
+  "catalog": "it",
+  "label": "Italiano",
+  "model": "qwen3.6:latest",
+  "sourceHash": "3f4e1fb836099884",
+  "startedAt": "2026-11-15T21:19:58.909Z",
+  "updatedAt": "2026-11-15T22:21:53.102Z",
+  "preservedKeys": 4892,
+  "machineKeys": 77,
+  "failedKeys": []
+}

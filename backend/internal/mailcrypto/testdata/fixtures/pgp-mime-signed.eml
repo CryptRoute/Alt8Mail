@@ -1,0 +1,32 @@
+From: Alt8Mail Test Sender <sender@example.test>
+To: Alt8Mail Test Recipient <recipient@example.test>
+Subject: PGP/MIME signed fixture
+Date: Sun, 15 Nov 2026 00:00:00 +0000
+Message-ID: <pgp-mime-signed@example.test>
+X-Alt8Mail-Fixture: phase0
+MIME-Version: 1.0
+Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=pgp-sha256; boundary="alt8mail-pgp-signed"
+
+--alt8mail-pgp-signed
+Content-Type: text/plain; charset=UTF-8
+
+Alt8Mail Phase 0 interop fixture.
+This body is used only by tests.
+
+--alt8mail-pgp-signed
+Content-Type: application/pgp-signature; name="signature.asc"
+Content-Disposition: attachment; filename="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+wsCpBAABCABdBYJq+WMQCRD223F2vWskyzUUAAAAAAAcABBzYWx0QG5vdGF0aW9u
+cy5vcGVucGdwanMub3JnyZJNBuLKL3NgCtCz7mlbpxYhBM3JWHwitRM3uEjBgvbb
+cXa9ayTLAAD+cwf+MAooXQYDea9Gocr75cNNoB3KUEBCrbpwSOzxCWAdtmE4ZLqT
+lJfJv2yn/qlos8qTqKfjgU8rPfNtzLoGA4OH/9WHRtFeI0awkHER/wQKIK7ud9Ya
+oOeoLERiwBbKkRJnw8vcZuB7wxssuzId6oIt8rki1ldGoq6xvQloCVAEcIqmVoiO
+DluL5alg+l3IpYVNduDUX6GuyU/Xmnc6E02ObY+kfQKiaeBwmrwXuFHbhWNikmYa
+UkMayRM5BiSDJpTu7E6vyjWjtJITqguRintPJMS7feq9pSpLtCmrXtzZmHGqqnfI
+u8pqTiTZwGDJ0sYjjZU1Kb2SooFcpk5dHKX7PA==
+=W1+w
+-----END PGP SIGNATURE-----
+--alt8mail-pgp-signed--

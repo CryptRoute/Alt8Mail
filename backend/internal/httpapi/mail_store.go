@@ -1,0 +1,1637 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+const mailMessageColumns = `id, folder, imap_folder, uid, uid_validity,
+	message_id, thread_id, COALESCE(in_reply_to,''), references_json, subject,
+	from_name, from_email::text, to_json, cc_json, bcc_json, to_text, cc_text, bcc_text,
+	snippet, body_text, body_html, sent_at, received_at, created_at, updated_at,
+	size_bytes, unread, starred, flagged, pinned, draft, external, classification, categories,
+	auth, spam_report, event, priority, receipt, delivery, save_copy, via_api, window_mode,
+	replied_at, forwarded_at, reply_count, forward_count, snoozed_until, ignored, ignored_at,
+	compose_kind, source_message_id, unsubscribe, sender_utc_offset_minutes,
+	COALESCE(account_id, ''), crypto_protocol, crypto_encrypted, crypto_signed,
+	crypto_state, crypto_signer, crypto_error`
+
+type mailRow struct {
+	ID                     string
+	Folder                 string
+	IMAPFolder             string
+	UID                    int64
+	UIDValidity            int64
+	MessageID              string
+	ThreadID               string
+	InReplyTo              string
+	ReferencesJSON         []byte
+	Subject                string
+	FromName               string
+	FromEmail              string
+	ToJSON                 []byte
+	CCJSON                 []byte
+	BCCJSON                []byte
+	ToText                 string
+	CCText                 string
+	BCCText                string
+	Snippet                string
+	BodyText               string
+	BodyHTML               string
+	SentAt                 time.Time
+	ReceivedAt             time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	SizeBytes              int64
+	Unread                 bool
+	Starred                bool
+	Flagged                bool
+	Pinned                 bool
+	Draft                  bool
+	External               bool
+	Classification         string
+	Categories             []string
+	AuthJSON               []byte
+	SpamReportJSON         []byte
+	EventJSON              []byte
+	Priority               string
+	Receipt                bool
+	Delivery               bool
+	SaveCopy               bool
+	ViaAPI                 bool
+	WindowMode             string
+	RepliedAt              *time.Time
+	ForwardedAt            *time.Time
+	ReplyCount             int
+	ForwardCount           int
+	SnoozedUntil           *time.Time
+	Ignored                bool
+	IgnoredAt              *time.Time
+	ComposeKind            string
+	SourceMessageID        string
+	UnsubscribeJSON        []byte
+	SenderUTCOffsetMinutes *int
+	AccountID              string
+	CryptoProtocol         string
+	CryptoEncrypted        bool
+	CryptoSigned           bool
+	CryptoState            string
+	CryptoSigner           string
+	CryptoError            string
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanMailRow(scanner rowScanner) (mailRow, error) {
+	var row mailRow
+	err := scanner.Scan(&row.ID, &row.Folder, &row.IMAPFolder, &row.UID, &row.UIDValidity,
+		&row.MessageID, &row.ThreadID, &row.InReplyTo, &row.ReferencesJSON, &row.Subject,
+		&row.FromName, &row.FromEmail, &row.ToJSON, &row.CCJSON, &row.BCCJSON,
+		&row.ToText, &row.CCText, &row.BCCText, &row.Snippet, &row.BodyText, &row.BodyHTML,
+		&row.SentAt, &row.ReceivedAt, &row.CreatedAt, &row.UpdatedAt, &row.SizeBytes,
+		&row.Unread, &row.Starred, &row.Flagged, &row.Pinned, &row.Draft, &row.External,
+		&row.Classification, &row.Categories, &row.AuthJSON, &row.SpamReportJSON,
+		&row.EventJSON, &row.Priority, &row.Receipt, &row.Delivery, &row.SaveCopy,
+		&row.ViaAPI, &row.WindowMode, &row.RepliedAt, &row.ForwardedAt, &row.ReplyCount,
+		&row.ForwardCount, &row.SnoozedUntil, &row.Ignored, &row.IgnoredAt,
+		&row.ComposeKind, &row.SourceMessageID, &row.UnsubscribeJSON, &row.SenderUTCOffsetMinutes,
+		&row.AccountID, &row.CryptoProtocol, &row.CryptoEncrypted, &row.CryptoSigned,
+		&row.CryptoState, &row.CryptoSigner, &row.CryptoError)
+	return row, err
+}
+
+func decodeJSONAny(raw []byte, fallback any) any {
+	if len(raw) == 0 {
+		return fallback
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return fallback
+	}
+	return value
+}
+
+func decodePeople(raw []byte, state map[string]any) []any {
+	value := decodeJSONAny(raw, []any{})
+	list, ok := value.([]any)
+	if !ok {
+		return []any{}
+	}
+	out := make([]any, 0, len(list))
+	for _, rawPerson := range list {
+		person, _ := rawPerson.(map[string]any)
+		if person == nil {
+			continue
+		}
+		email := stateString(person, "email")
+		name := stateString(person, "name")
+		normalized := personFor(state, email, name)
+		if normalized == nil {
+			normalized = person
+		}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func peopleText(people []any) string {
+	parts := make([]string, 0, len(people))
+	for _, raw := range people {
+		person, _ := raw.(map[string]any)
+		if person == nil {
+			continue
+		}
+		name := stateString(person, "name")
+		email := stateString(person, "email")
+		if name != "" && name != email {
+			parts = append(parts, name+" "+email)
+		} else if email != "" {
+			parts = append(parts, email)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func (row mailRow) stateMap(state map[string]any, attachments []map[string]any) map[string]any {
+	to := decodePeople(row.ToJSON, state)
+	cc := decodePeople(row.CCJSON, state)
+	bcc := decodePeople(row.BCCJSON, state)
+	from := personFor(state, row.FromEmail, row.FromName)
+	if from == nil {
+		from = map[string]any{"name": row.FromEmail, "email": row.FromEmail, "initials": "?", "color": "#64748b"}
+	}
+	auth := decodeJSONAny(row.AuthJSON, map[string]any{})
+	if _, ok := auth.(map[string]any); !ok {
+		auth = map[string]any{}
+	}
+	attachmentList := make([]any, 0, len(attachments))
+	for _, attachment := range attachments {
+		attachmentList = append(attachmentList, attachment)
+	}
+	out := map[string]any{
+		"id": row.ID, "threadId": row.ThreadID, "folder": row.Folder,
+		"from": from, "fromEmail": row.FromEmail, "to": to, "cc": cc, "bcc": bcc,
+		"toText": row.ToText, "ccText": row.CCText, "bccText": row.BCCText,
+		"subject": row.Subject, "snippet": row.Snippet,
+		"bodyText": row.BodyText, "bodyHtml": row.BodyHTML,
+		"date": row.SentAt.UTC().Format(time.RFC3339), "unread": row.Unread,
+		"starred": row.Starred, "flagged": row.Flagged, "pinned": row.Pinned, "draft": row.Draft,
+		"attachments": attachmentList, "categories": stringSliceToAny(row.Categories),
+		"classification": row.Classification, "external": row.External, "auth": auth,
+		"event": decodeJSONAny(row.EventJSON, nil), "sizeBytes": row.SizeBytes,
+		"messageId": row.MessageID, "inReplyTo": nullableString(row.InReplyTo),
+		"priority": row.Priority, "receipt": row.Receipt, "delivery": row.Delivery,
+		"saveCopy": row.SaveCopy, "viaApi": row.ViaAPI, "windowMode": row.WindowMode,
+		"imapUid": row.UID, "imapFolder": row.IMAPFolder, "imapUidValidity": row.UIDValidity,
+		"replyCount": row.ReplyCount, "forwardCount": row.ForwardCount,
+		"ignored":     row.Ignored,
+		"composeKind": row.ComposeKind, "sourceMessageId": row.SourceMessageID,
+		"createdAt": row.CreatedAt.UTC().Format(time.RFC3339),
+		"updatedAt": row.UpdatedAt.UTC().Format(time.RFC3339),
+		"accountId": row.AccountID,
+	}
+	if row.RepliedAt != nil {
+		out["repliedAt"] = row.RepliedAt.UTC().Format(time.RFC3339)
+	}
+	if row.ForwardedAt != nil {
+		out["forwardedAt"] = row.ForwardedAt.UTC().Format(time.RFC3339)
+	}
+	if row.SnoozedUntil != nil {
+		out["snoozedUntil"] = row.SnoozedUntil.UTC().Format(time.RFC3339)
+	}
+	if row.IgnoredAt != nil {
+		out["ignoredAt"] = row.IgnoredAt.UTC().Format(time.RFC3339)
+	}
+	if row.InReplyTo != "" {
+		out["inReplyTo"] = row.InReplyTo
+	}
+	references := []any{}
+	_ = json.Unmarshal(row.ReferencesJSON, &references)
+	if len(references) > 0 {
+		out["references"] = references
+	}
+	if spamReport := decodeJSONAny(row.SpamReportJSON, nil); spamReport != nil {
+		out["spamReport"] = spamReport
+	}
+	if unsubscribe := decodeJSONAny(row.UnsubscribeJSON, nil); unsubscribe != nil {
+		out["unsubscribe"] = unsubscribe
+	}
+	if row.SenderUTCOffsetMinutes != nil {
+		out["senderUtcOffsetMinutes"] = *row.SenderUTCOffsetMinutes
+	}
+	if row.CryptoProtocol != "" || row.CryptoEncrypted || row.CryptoSigned {
+		out["crypto"] = map[string]any{
+			"protocol": row.CryptoProtocol, "encrypted": row.CryptoEncrypted,
+			"signed": row.CryptoSigned, "state": row.CryptoState,
+			"signer": row.CryptoSigner, "error": row.CryptoError,
+		}
+	}
+	words, minutes := readingTimeForText(row.BodyText)
+	out["wordCount"] = words
+	out["readingMinutes"] = minutes
+	return out
+}
+
+func stringSliceToAny(values []string) []any {
+	result := make([]any, 0, len(values))
+	for _, value := range values {
+		result = append(result, value)
+	}
+	return result
+}
+
+func mailAttachmentPublic(record map[string]any) map[string]any {
+	id := stateString(record, "id")
+	return map[string]any{
+		"id": id, "name": stateString(record, "name"), "type": stateString(record, "type"),
+		"mime": stateString(record, "mime"), "size": stateString(record, "size"),
+		"sizeBytes": stateInt(record, "sizeBytes"), "previewable": stateBool(record, "previewable"),
+		"contentId": stateString(record, "contentId"), "disposition": stateString(record, "disposition"),
+		"contentUrl":  "/api/attachments/" + id + "/content",
+		"downloadUrl": "/api/attachments/" + id + "/content",
+	}
+}
+
+func mailAttachmentStateRecord(attachmentID, name, mime, storedPath string, sizeBytes int64, previewable bool, contentID, disposition string) map[string]any {
+	return map[string]any{
+		"id": attachmentID, "name": name, "mime": mime,
+		"size": formatBytes(sizeBytes), "sizeBytes": sizeBytes,
+		"storedName": storedPath, "previewable": previewable,
+		"contentId": contentID, "disposition": disposition,
+		"type": attachmentBadgeType(mime, name),
+	}
+}
+
+func (s *Server) loadAttachmentRows(ctx context.Context, userID string, messageIDs []string) (map[string][]map[string]any, map[string]any, error) {
+	byMessage := map[string][]map[string]any{}
+	stateRecords := map[string]any{}
+	if len(messageIDs) == 0 {
+		return byMessage, stateRecords, nil
+	}
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT ma.message_id, a.id, a.name, a.mime, a.size_bytes, a.stored_path, a.previewable,
+		       ma.content_id, ma.disposition
+		FROM mail_message_attachments ma
+		JOIN attachments a ON a.id = ma.attachment_id AND a.user_id = $1
+		WHERE ma.message_id = ANY($2)
+		ORDER BY ma.message_id, ma.position
+	`, userID, messageIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var messageID, id, name, mime, storedPath, contentID, disposition string
+		var sizeBytes int64
+		var previewable bool
+		if err := rows.Scan(&messageID, &id, &name, &mime, &sizeBytes, &storedPath, &previewable, &contentID, &disposition); err != nil {
+			continue
+		}
+		record := mailAttachmentStateRecord(id, name, mime, storedPath, sizeBytes, previewable, contentID, disposition)
+		byMessage[messageID] = append(byMessage[messageID], mailAttachmentPublic(record))
+		stateRecords[id] = record
+	}
+	return byMessage, stateRecords, rows.Err()
+}
+
+func (s *Server) loadMailMessagesQuery(ctx context.Context, userID, query string, args ...any) ([]map[string]any, map[string]any, error) {
+	return s.loadMailMessagesQueryMode(ctx, userID, query, false, args...)
+}
+
+// loadMailMessagesMetadata is the bucket-brigade path for mailbox-wide syncs.
+// It keeps IDs, threading, IMAP coordinates and flags but does not transfer or
+// retain message bodies. A full sync over a 7k-message mailbox then costs a
+// few megabytes instead of the full HTML/text corpus.
+func (s *Server) loadMailMessagesMetadata(ctx context.Context, userID, query string, args ...any) ([]map[string]any, map[string]any, error) {
+	return s.loadMailMessagesQueryMode(ctx, userID, query, true, args...)
+}
+
+func (s *Server) loadMailMessagesQueryMode(ctx context.Context, userID, query string, metadataOnly bool, args ...any) ([]map[string]any, map[string]any, error) {
+	if metadataOnly {
+		query = strings.Replace(query,
+			"snippet, body_text, body_html",
+			"''::text AS snippet, ''::text AS body_text, ''::text AS body_html", 1)
+	}
+	rows, err := s.store.DB.Query(ctx, query, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	records := []mailRow{}
+	ids := []string{}
+	for rows.Next() {
+		row, err := scanMailRow(rows)
+		if err != nil {
+			return nil, nil, err
+		}
+		records = append(records, row)
+		ids = append(ids, row.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	byMessage := map[string][]map[string]any{}
+	attachmentRecords := map[string]any{}
+	if !metadataOnly {
+		byMessage, attachmentRecords, err = s.loadAttachmentRows(ctx, userID, ids)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	// Persist decoded legacy-charset subjects the first time these rows are
+	// read, so search and future API calls use the readable subject too.
+	for i := range records {
+		subject := records[i].Subject
+		if subject == "" || !strings.Contains(subject, "=?") {
+			continue
+		}
+		decoded := decodeHeader(subject)
+		if decoded == subject {
+			continue
+		}
+		records[i].Subject = decoded
+		_, _ = s.store.DB.Exec(ctx, `
+			UPDATE mail_messages
+			SET subject = $1,
+			    snippet = CASE WHEN snippet = $2 THEN $1 ELSE snippet END,
+			    updated_at = now()
+			WHERE id = $3 AND user_id = $4
+		`, decoded, subject, records[i].ID, userID)
+	}
+	messages := make([]map[string]any, 0, len(records))
+	for _, row := range records {
+		message := row.stateMap(nil, byMessage[row.ID])
+		if metadataOnly {
+			message["_light"] = true
+		}
+		messages = append(messages, message)
+	}
+	return messages, attachmentRecords, nil
+}
+
+func (s *Server) loadAllMailMessages(ctx context.Context, userID, accountScope string) ([]map[string]any, map[string]any, error) {
+	return s.loadMailMessagesQuery(ctx, userID,
+		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE `+mailAccountScopeCondition(accountScope)+` ORDER BY sent_at ASC`, userID)
+}
+
+func (s *Server) loadAllMailMetadata(ctx context.Context, userID, accountScope string) ([]map[string]any, map[string]any, error) {
+	return s.loadMailMessagesMetadata(ctx, userID,
+		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE `+mailAccountScopeCondition(accountScope)+` ORDER BY sent_at ASC`, userID)
+}
+
+func mailAccountScopeCondition(accountScope string) string {
+	if accountScope == mailAccountKindNative {
+		return `user_id=$1 AND account_id=(
+			SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+		)`
+	}
+	return "user_id=$1"
+}
+
+func (s *Server) loadMailMessagesByIDs(ctx context.Context, userID string, ids []string) ([]map[string]any, map[string]any, error) {
+	if len(ids) == 0 {
+		return []map[string]any{}, map[string]any{}, nil
+	}
+	return s.loadMailMessagesQuery(ctx, userID,
+		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE user_id=$1 AND id = ANY($2) ORDER BY sent_at ASC`, userID, ids)
+}
+
+func mailFolderCondition(userID, folder, filter string) (string, []any) {
+	return mailFolderConditionForAccount(userID, "", folder, filter)
+}
+
+func mailFolderConditionForAccount(userID, accountID, folder, filter string) (string, []any) {
+	conditions := []string{"user_id=$1", "NOT ignored"}
+	args := []any{userID}
+	if trimmed := strings.TrimSpace(accountID); trimmed != "" && trimmed != mailAccountScopeAll {
+		args = append(args, accountID)
+		conditions = append(conditions, fmt.Sprintf(`account_id=$%d`, len(args)))
+	}
+	switch folder {
+	case "starred":
+		conditions = append(conditions, `(starred OR flagged) AND folder NOT IN ('spam', 'trash')`, `(snoozed_until IS NULL OR snoozed_until <= now())`)
+	case "snoozed":
+		conditions = append(conditions, `snoozed_until IS NOT NULL AND snoozed_until > now()`)
+	case "subscriptions":
+		conditions = append(conditions, `folder = 'subscriptions'`, `(snoozed_until IS NULL OR snoozed_until <= now())`)
+	case "", "all":
+		conditions = append(conditions, `(snoozed_until IS NULL OR snoozed_until <= now())`)
+	default:
+		args = append(args, folder)
+		conditions = append(conditions, fmt.Sprintf(`folder = $%d`, len(args)), `(snoozed_until IS NULL OR snoozed_until <= now())`)
+	}
+	closedCondition := `EXISTS (SELECT 1 FROM public.mail_thread_meta mt WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id AND mt.closed_at IS NOT NULL)`
+	if filter == "closed" {
+		conditions = append(conditions, closedCondition)
+	} else {
+		conditions = append(conditions, "NOT "+closedCondition)
+	}
+	switch filter {
+	case "unread":
+		conditions = append(conditions, `unread`)
+	case "starred":
+		conditions = append(conditions, `(starred OR flagged)`)
+	case "flagged":
+		conditions = append(conditions, `flagged`)
+	case "attachments":
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM mail_message_attachments ma WHERE ma.message_id = mail_messages.id)`)
+	case "toMe":
+		conditions = append(conditions, `(to_text ILIKE '%' || (SELECT email::text FROM users WHERE id=$1) || '%' OR cc_text ILIKE '%' || (SELECT email::text FROM users WHERE id=$1) || '%' OR bcc_text ILIKE '%' || (SELECT email::text FROM users WHERE id=$1) || '%')`)
+	case "mentions":
+		conditions = append(conditions, `body_text ILIKE '%@' || split_part((SELECT email::text FROM users WHERE id=$1), '@', 1) || '%'`)
+	case "calendar":
+		conditions = append(conditions, `((event IS NOT NULL AND event::text NOT IN ('null', '{}')) OR EXISTS (SELECT 1 FROM mail_message_attachments ma JOIN attachments a ON a.id=ma.attachment_id WHERE ma.message_id=mail_messages.id AND a.mime LIKE 'text/calendar%'))`)
+	}
+	return strings.Join(conditions, " AND "), args
+}
+
+func (s *Server) loadMailMessagesByFolder(ctx context.Context, userID, accountID, folder, filter string) ([]map[string]any, map[string]any, error) {
+	where, args := mailFolderConditionForAccount(userID, accountID, folder, filter)
+	return s.loadMailMessagesQuery(ctx, userID,
+		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE `+where+` ORDER BY sent_at DESC`, args...)
+}
+
+// mailThreadPage is a page of conversations, not raw messages. Selecting all
+// messages in the page's threads keeps a conversation readable even when its
+// older messages would fall on a later page.
+type mailThreadPage struct {
+	Messages      []map[string]any
+	Total         int
+	TotalMessages int
+	Offset        int
+	Limit         int
+	HasMore       bool
+}
+
+func (s *Server) loadMailThreadPage(ctx context.Context, userID, accountID, folder, filter string, limit, offset int) (mailThreadPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	where, args := mailFolderConditionForAccount(userID, accountID, folder, filter)
+	var total, totalMessages int
+	if err := s.store.DB.QueryRow(ctx, `SELECT count(DISTINCT thread_id), count(*) FROM mail_messages WHERE `+where, args...).Scan(&total, &totalMessages); err != nil {
+		return mailThreadPage{}, err
+	}
+	pageArgs := append(append([]any{}, args...), limit, offset)
+	limitIndex := len(args) + 1
+	offsetIndex := len(args) + 2
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT thread_id FROM mail_messages
+		WHERE `+where+`
+		GROUP BY thread_id
+		ORDER BY bool_or(pinned) DESC,
+		         bool_or(unread AND snoozed_until IS NOT NULL AND snoozed_until <= now()) DESC,
+		         max(sent_at) DESC
+		LIMIT $`+strconv.Itoa(limitIndex)+` OFFSET $`+strconv.Itoa(offsetIndex),
+		pageArgs...)
+	if err != nil {
+		return mailThreadPage{}, err
+	}
+	threadIDs := []string{}
+	for rows.Next() {
+		var threadID string
+		if rows.Scan(&threadID) == nil && threadID != "" {
+			threadIDs = append(threadIDs, threadID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return mailThreadPage{}, err
+	}
+	rows.Close()
+	messages := []map[string]any{}
+	if len(threadIDs) > 0 {
+		messages, _, err = s.loadMailMessagesByThreadsPreferred(ctx, userID, threadIDs, folder)
+		if err != nil {
+			return mailThreadPage{}, err
+		}
+	}
+	return mailThreadPage{
+		Messages: messages, Total: total, TotalMessages: totalMessages,
+		Offset: offset, Limit: limit, HasMore: offset+len(threadIDs) < total,
+	}, nil
+}
+
+func (s *Server) loadMailFolderCounts(ctx context.Context, userID, accountID string) (map[string]int, map[string]int, error) {
+	counts := map[string]int{}
+	unread := map[string]int{}
+	accountFilter := ""
+	countArgs := []any{userID}
+	if strings.TrimSpace(accountID) != "" && strings.TrimSpace(accountID) != mailAccountScopeAll {
+		accountFilter = " AND account_id=$2"
+		countArgs = append(countArgs, accountID)
+	}
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT folder,
+		       count(*) FILTER (WHERE NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())),
+		       count(*) FILTER (WHERE unread AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now()))
+		FROM mail_messages
+		WHERE user_id=$1`+accountFilter+` AND NOT EXISTS (
+			SELECT 1 FROM public.mail_thread_meta mt
+			WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id
+			  AND mt.closed_at IS NOT NULL
+		)
+		GROUP BY folder
+	`, countArgs...)
+	if err != nil {
+		return counts, unread, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var folder string
+		var total, unreadCount int
+		if rows.Scan(&folder, &total, &unreadCount) == nil {
+			counts[folder] = total
+			unread[folder] = unreadCount
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return counts, unread, err
+	}
+	var snoozed, snoozedUnread int
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE unread)
+		FROM mail_messages
+		WHERE user_id=$1`+accountFilter+` AND NOT ignored AND snoozed_until > now()
+		  AND NOT EXISTS (
+			SELECT 1 FROM public.mail_thread_meta mt
+			WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id
+			  AND mt.closed_at IS NOT NULL
+		  )
+	`, countArgs...).Scan(&snoozed, &snoozedUnread)
+	counts["snoozed"] = snoozed
+	unread["snoozed"] = snoozedUnread
+	var starred, starredUnread int
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE unread)
+		FROM mail_messages
+		WHERE user_id=$1`+accountFilter+` AND (starred OR flagged) AND folder NOT IN ('spam', 'trash')
+		  AND NOT ignored AND (snoozed_until IS NULL OR snoozed_until <= now())
+		  AND NOT EXISTS (
+			SELECT 1 FROM public.mail_thread_meta mt
+			WHERE mt.owner_user_id=mail_messages.user_id AND mt.thread_id=mail_messages.thread_id
+			  AND mt.closed_at IS NOT NULL
+		  )
+	`, countArgs...).Scan(&starred, &starredUnread)
+	counts["starred"] = starred
+	unread["starred"] = starredUnread
+	var subscriptions, subscriptionsUnread int
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT count(*), count(*) FILTER (WHERE unread)
+		FROM mail_messages
+		WHERE user_id=$1`+accountFilter+` AND folder='subscriptions' AND NOT ignored
+		  AND (snoozed_until IS NULL OR snoozed_until <= now())
+	`, countArgs...).Scan(&subscriptions, &subscriptionsUnread)
+	counts["subscriptions"] = subscriptions
+	unread["subscriptions"] = subscriptionsUnread
+	return counts, unread, nil
+}
+
+func (s *Server) loadMailMessagesByThreads(ctx context.Context, userID string, threadIDs []string) ([]map[string]any, map[string]any, error) {
+	return s.loadMailMessagesByThreadsPreferred(ctx, userID, threadIDs, "")
+}
+
+// loadMailMessagesByThreadsPreferred keeps one copy of a message that exists
+// in several mirror folders (a Gmail message with labels, or a Sent copy) while
+// preferring the copy in the folder currently being read.
+func (s *Server) loadMailMessagesByThreadsPreferred(ctx context.Context, userID string, threadIDs []string, preferredFolder string) ([]map[string]any, map[string]any, error) {
+	if len(threadIDs) == 0 {
+		return []map[string]any{}, map[string]any{}, nil
+	}
+	messages, attachments, err := s.loadMailMessagesQuery(ctx, userID,
+		`SELECT `+mailMessageColumns+` FROM mail_messages WHERE user_id=$1 AND thread_id = ANY($2) ORDER BY sent_at ASC`, userID, threadIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return dedupeThreadMessages(messages, preferredFolder), attachments, nil
+}
+
+func dedupeThreadMessages(messages []map[string]any, preferredFolder string) []map[string]any {
+	chosen := map[string]map[string]any{}
+	order := []string{}
+	for _, message := range messages {
+		key := stateString(message, "accountId") + "\x00" + stateString(message, "messageId")
+		if stateString(message, "messageId") == "" {
+			key = "\x00id\x00" + stateString(message, "id")
+		}
+		existing, seen := chosen[key]
+		if !seen {
+			order = append(order, key)
+			chosen[key] = message
+			continue
+		}
+		if preferredFolder != "" && stateString(message, "folder") == preferredFolder &&
+			stateString(existing, "folder") != preferredFolder {
+			chosen[key] = message
+		}
+	}
+	out := make([]map[string]any, 0, len(order))
+	for _, key := range order {
+		out = append(out, chosen[key])
+	}
+	return out
+}
+
+func (s *Server) loadFolderUIDs(ctx context.Context, userID, folder string, uidValidity int64) map[uint32]bool {
+	known := map[uint32]bool{}
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT uid FROM mail_messages
+		WHERE user_id=$1 AND account_id=(
+			SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+		) AND imap_folder=$2 AND uid_validity=$3 AND uid > 0 AND uid <= 4294967295
+	`, userID, folder, uidValidity)
+	if err != nil {
+		return known
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid int64
+		if rows.Scan(&uid) == nil {
+			known[uint32(uid)] = true
+		}
+	}
+	return known
+}
+
+func (s *Server) countMailMessages(ctx context.Context, userID, folder string, uidValidity int64) int {
+	var count int
+	_ = s.store.DB.QueryRow(ctx, `
+		SELECT count(*) FROM mail_messages
+		WHERE user_id=$1 AND account_id=(
+			SELECT id FROM public.mail_accounts WHERE user_id=$1 AND kind='native' LIMIT 1
+		) AND imap_folder=$2 AND uid_validity=$3 AND uid > 0
+	`, userID, folder, uidValidity).Scan(&count)
+	return count
+}
+
+func (s *Server) loadAttachmentsByIDs(ctx context.Context, userID string, ids []string) (map[string]any, error) {
+	result := map[string]any{}
+	if len(ids) == 0 {
+		return result, nil
+	}
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT id, name, mime, size_bytes, stored_path, previewable
+		FROM attachments WHERE user_id=$1 AND id = ANY($2)
+	`, userID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name, mime, storedPath string
+		var sizeBytes int64
+		var previewable bool
+		if rows.Scan(&id, &name, &mime, &sizeBytes, &storedPath, &previewable) == nil {
+			result[id] = mailAttachmentStateRecord(id, name, mime, storedPath, sizeBytes, previewable, "", "")
+		}
+	}
+	return result, rows.Err()
+}
+
+func attachmentIDsFromValue(value any) []string {
+	items, _ := value.([]any)
+	ids := []string{}
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		if id := stateString(item, "id"); strings.HasPrefix(id, "att_") {
+			ids = append(ids, id)
+		}
+	}
+	return uniqueStrings(ids, 50)
+}
+
+func (s *Server) preloadAttachments(ctx context.Context, userID string, state map[string]any, ids []string) {
+	loaded, err := s.loadAttachmentsByIDs(ctx, userID, ids)
+	if err != nil {
+		return
+	}
+	known, _ := state["attachments"].(map[string]any)
+	if known == nil {
+		known = map[string]any{}
+	}
+	for id, record := range loaded {
+		known[id] = record
+	}
+	state["attachments"] = known
+}
+
+func (s *Server) loadOutboxRows(ctx context.Context, userID string) ([]map[string]any, error) {
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT id, draft_id, from_json, to_json, cc_json, bcc_json, subject, body_text, body_html, attachments,
+		       thread_id, COALESCE(in_reply_to,''), priority, receipt, delivery, save_copy, scheduled,
+		       send_at, queued_at, hold_ms, status, delivery_state, delivery_claimed_at, retry_at,
+		       attempts, last_error, mime_message_id, draft_snapshot, ip, user_agent,
+		       compose_kind, source_message_id, classification, dlp_warnings, COALESCE(account_id,''),
+		       COALESCE(reply_to::text,''), crypto_protocol, crypto_encrypt, crypto_sign, client_mime
+		FROM outbox WHERE user_id=$1 ORDER BY send_at ASC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []map[string]any{}
+	for rows.Next() {
+		var id, draftID, threadID, inReplyTo, priority, status, deliveryState, lastError, mimeMessageID, ip, userAgent, composeKind, sourceMessageID, classification, accountID, replyTo, cryptoProtocol, clientMIME string
+		var subject, bodyText, bodyHTML string
+		var fromJSON, toJSON, ccJSON, bccJSON, attachmentsJSON, draftSnapshotJSON, dlpWarningsJSON []byte
+		var receipt, delivery, saveCopy, scheduled bool
+		var cryptoEncrypt, cryptoSigned bool
+		var sendAt, queuedAt time.Time
+		var claimedAt, retryAt *time.Time
+		var holdMs, attempts int64
+		if err := rows.Scan(&id, &draftID, &fromJSON, &toJSON, &ccJSON, &bccJSON, &subject, &bodyText, &bodyHTML,
+			&attachmentsJSON, &threadID, &inReplyTo, &priority, &receipt, &delivery, &saveCopy,
+			&scheduled, &sendAt, &queuedAt, &holdMs, &status, &deliveryState, &claimedAt, &retryAt,
+			&attempts, &lastError, &mimeMessageID, &draftSnapshotJSON, &ip, &userAgent,
+			&composeKind, &sourceMessageID, &classification, &dlpWarningsJSON, &accountID, &replyTo,
+			&cryptoProtocol, &cryptoEncrypt, &cryptoSigned, &clientMIME); err != nil {
+			continue
+		}
+		item := map[string]any{
+			"id": id, "draftId": draftID, "from": decodeJSONAny(fromJSON, map[string]any{}),
+			"to": decodeJSONAny(toJSON, []any{}), "cc": decodeJSONAny(ccJSON, []any{}),
+			"bcc": decodeJSONAny(bccJSON, []any{}), "subject": subject,
+			"bodyText": bodyText, "bodyHtml": bodyHTML,
+			"attachments": decodeJSONAny(attachmentsJSON, []any{}), "threadId": threadID,
+			"priority": priority, "receipt": receipt, "delivery": delivery, "saveCopy": saveCopy,
+			"scheduled": scheduled, "sendAt": sendAt.UTC().Format(time.RFC3339),
+			"queuedAt": queuedAt.UTC().Format(time.RFC3339), "holdMs": holdMs,
+			"status": status, "deliveryState": deliveryState, "attempts": attempts,
+			"lastError": lastError, "mimeMessageId": mimeMessageID, "ip": ip, "userAgent": userAgent,
+			"composeKind": composeKind, "sourceMessageId": sourceMessageID,
+			"classification": firstNonEmpty(classification, "Internal"),
+			"dlpWarnings":    decodeJSONAny(dlpWarningsJSON, []any{}),
+			"accountId":      accountID, "replyTo": replyTo,
+			"cryptoProtocol": cryptoProtocol, "cryptoEncrypt": cryptoEncrypt, "cryptoSigned": cryptoSigned,
+			"cryptoClientSide": clientMIME != "", "clientMime": clientMIME,
+		}
+		if inReplyTo != "" {
+			item["inReplyTo"] = inReplyTo
+		}
+		if claimedAt != nil {
+			item["deliveryClaimedAt"] = claimedAt.UTC().Format(time.RFC3339)
+		}
+		if retryAt != nil {
+			item["retryAt"] = retryAt.UTC().Format(time.RFC3339)
+		}
+		if snapshot := decodeJSONAny(draftSnapshotJSON, nil); snapshot != nil {
+			item["draftSnapshot"] = snapshot
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Server) attachOutbox(ctx context.Context, userID string, state map[string]any) {
+	items, err := s.loadOutboxRows(ctx, userID)
+	if err != nil {
+		return
+	}
+	outbox := make([]any, 0, len(items))
+	for _, item := range items {
+		outbox = append(outbox, item)
+	}
+	state["outbox"] = outbox
+}
+
+func (s *Server) loadStateWithOutbox(ctx context.Context, userID string) (map[string]any, bool) {
+	state, ok := s.loadStateFor(ctx, userID)
+	if !ok {
+		return state, false
+	}
+	s.attachOutbox(ctx, userID, state)
+	return state, true
+}
+
+func copyMailMapList(messages []any) map[string]map[string]any {
+	result := map[string]map[string]any{}
+	for _, raw := range messages {
+		message, _ := raw.(map[string]any)
+		if message == nil {
+			continue
+		}
+		id := stateString(message, "id")
+		if id != "" {
+			result[id] = deepCopyMap(message)
+		}
+	}
+	return result
+}
+
+func copyAttachmentMap(state map[string]any) map[string]map[string]any {
+	result := map[string]map[string]any{}
+	known, _ := state["attachments"].(map[string]any)
+	for id, raw := range known {
+		record, _ := raw.(map[string]any)
+		if record != nil {
+			result[id] = deepCopyMap(record)
+		}
+	}
+	return result
+}
+
+func (s *Server) withMailState(ctx context.Context, user userRecord, ids []string, loadAll bool, fn func(map[string]any) error) error {
+	return s.withMailStateMode(ctx, user, ids, loadAll, false, "", fn)
+}
+
+// withMailMetadataState is for mailbox-wide operations that only need message
+// identity, threading, folder and flag data: IMAP syncs, folder actions and
+// undo. It never transfers the stored HTML or plain-text bodies, avoiding
+// several copies of the entire mailbox on each pass.
+func (s *Server) withMailMetadataState(ctx context.Context, user userRecord, fn func(map[string]any) error) error {
+	return s.withMailStateMode(ctx, user, nil, true, true, "", fn)
+}
+
+// The native IMAP engine must never see connected-account rows in its
+// mailbox-wide state. Native folder actions, subscriptions and reconciliation
+// use this scope so two providers with the same IMAP folder/UID cannot collide.
+func (s *Server) withNativeMailMetadataState(ctx context.Context, user userRecord, fn func(map[string]any) error) error {
+	return s.withMailStateMode(ctx, user, nil, true, true, mailAccountKindNative, fn)
+}
+
+func (s *Server) withMailStateMode(ctx context.Context, user userRecord, ids []string, loadAll, metadataOnly bool, accountScope string, fn func(map[string]any) error) error {
+	return s.withStateTimeout(user.ID, user.TenantID, 120*time.Second, func(state map[string]any) error {
+		ensureStateCollections(state)
+		if err := s.syncStateAliases(ctx, user, state); err != nil {
+			return fmt.Errorf("load sending identities: %w", err)
+		}
+		var messages []map[string]any
+		var attachmentRecords map[string]any
+		var err error
+		if loadAll {
+			if metadataOnly {
+				messages, attachmentRecords, err = s.loadAllMailMetadata(ctx, user.ID, accountScope)
+			} else {
+				messages, attachmentRecords, err = s.loadAllMailMessages(ctx, user.ID, accountScope)
+			}
+		} else {
+			messages, attachmentRecords, err = s.loadMailMessagesByIDs(ctx, user.ID, ids)
+		}
+		if err != nil {
+			return err
+		}
+		outbox, err := s.loadOutboxRows(ctx, user.ID)
+		if err != nil {
+			return err
+		}
+		stateMessagesOut := make([]any, 0, len(messages))
+		for _, message := range messages {
+			stateMessagesOut = append(stateMessagesOut, message)
+		}
+		outboxAny := make([]any, 0, len(outbox))
+		for _, item := range outbox {
+			outboxAny = append(outboxAny, item)
+		}
+		state["messages"] = stateMessagesOut
+		state["attachments"] = attachmentRecords
+		state["outbox"] = outboxAny
+		beforeMessages := copyMailMapList(stateMessagesOut)
+		beforeAttachments := copyAttachmentMap(state)
+		beforeOutbox := copyMailMapList(outboxAny)
+		committed := false
+		defer func() {
+			if !committed {
+				s.removeUncommittedAttachments(state, beforeAttachments)
+			}
+		}()
+		if err := fn(state); err != nil {
+			return err
+		}
+		if err := s.persistMailStateDelta(ctx, user, state, beforeMessages, beforeAttachments, beforeOutbox); err != nil {
+			return err
+		}
+		committed = true
+		// Messages and attachment metadata belong in the normalized tables.
+		// Never write them back into app_states: the next bootstrap would parse
+		// the whole mailbox just to read folders and preferences.
+		delete(state, "messages")
+		delete(state, "attachments")
+		delete(state, "outbox")
+		return nil
+	})
+}
+
+func (s *Server) persistMailStateDelta(ctx context.Context, user userRecord, state map[string]any,
+	beforeMessages map[string]map[string]any, beforeAttachments map[string]map[string]any,
+	beforeOutbox map[string]map[string]any) error {
+	tx, err := s.store.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// New attachment bytes/metadata (for example an IMAP import) are inserted
+	// before message rows so the link inserts can resolve them.
+	known, _ := state["attachments"].(map[string]any)
+	for id, raw := range known {
+		if _, existed := beforeAttachments[id]; existed {
+			continue
+		}
+		record, _ := raw.(map[string]any)
+		if record == nil {
+			continue
+		}
+		storedName := stateString(record, "storedName")
+		if storedName == "" {
+			storedName = stateString(record, "storedPath")
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO attachments (id, tenant_id, user_id, name, mime, size_bytes, sha256, stored_path, previewable)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			ON CONFLICT (id) DO NOTHING
+		`, id, user.TenantID, user.ID,
+			truncate(sanitizeMailText(firstNonEmpty(stateString(record, "name"), "attachment")), 240),
+			sanitizeMailText(firstNonEmpty(stateString(record, "mime"), "application/octet-stream")),
+			stateInt(record, "sizeBytes"), sanitizeMailText(stateString(record, "checksum")),
+			sanitizeMailText(storedName), stateBool(record, "previewable"))
+		if err != nil {
+			return err
+		}
+	}
+
+	after := map[string]map[string]any{}
+	for _, raw := range stateMessages(state) {
+		message, _ := raw.(map[string]any)
+		if message == nil {
+			continue
+		}
+		id := stateString(message, "id")
+		if id == "" {
+			continue
+		}
+		after[id] = message
+		previous, existed := beforeMessages[id]
+		if existed && reflect.DeepEqual(previous, message) {
+			continue
+		}
+		if light, _ := message["_light"].(bool); light {
+			if err := s.persistMailMessageMetadataTx(ctx, tx, user, message); err != nil {
+				return err
+			}
+		} else if err := s.persistMailMessageTx(ctx, tx, user, message); err != nil {
+			return err
+		}
+	}
+	for id := range beforeMessages {
+		if _, exists := after[id]; !exists {
+			if _, err := tx.Exec(ctx, `DELETE FROM mail_messages WHERE id=$1 AND user_id=$2`, id, user.ID); err != nil {
+				return err
+			}
+		}
+	}
+	afterOutbox := map[string]map[string]any{}
+	for _, raw := range stateSlice(state, "outbox") {
+		item, _ := raw.(map[string]any)
+		if item == nil {
+			continue
+		}
+		id := stateString(item, "id")
+		if id == "" {
+			continue
+		}
+		afterOutbox[id] = item
+		previous, existed := beforeOutbox[id]
+		if existed && reflect.DeepEqual(previous, item) {
+			continue
+		}
+		if err := s.persistOutboxItemTx(ctx, tx, user, item); err != nil {
+			return err
+		}
+	}
+	for id := range beforeOutbox {
+		if _, exists := afterOutbox[id]; !exists {
+			if _, err := tx.Exec(ctx, `DELETE FROM outbox WHERE id=$1 AND user_id=$2`, id, user.ID); err != nil {
+				return err
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		// Keep the maps in state until the commit succeeds: withMailState uses
+		// them to remove attachment files written by a failed transaction.
+		return err
+	}
+	// The per-user document must never retain mail, attachment or outbox data.
+	// These maps existed only to let the existing handlers mutate normalized
+	// rows in place; the tables are the sole source of truth once the
+	// transaction commits.
+	delete(state, "messages")
+	delete(state, "attachments")
+	delete(state, "outbox")
+	return nil
+}
+
+func parseOptionalTime(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	stamp, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return nil
+	}
+	return stamp
+}
+
+func (s *Server) persistOutboxItemTx(ctx context.Context, tx pgx.Tx, user userRecord, item map[string]any) error {
+	id := stateString(item, "id")
+	if id == "" {
+		return fmt.Errorf("outbox item has no id")
+	}
+	from, _ := item["from"].(map[string]any)
+	fromJSON, _ := json.Marshal(from)
+	to := stateSlice(item, "to")
+	cc := stateSlice(item, "cc")
+	bcc := stateSlice(item, "bcc")
+	toJSON, _ := json.Marshal(to)
+	ccJSON, _ := json.Marshal(cc)
+	bccJSON, _ := json.Marshal(bcc)
+	attachments := stateSlice(item, "attachments")
+	attachmentsJSON, _ := json.Marshal(attachments)
+	draftSnapshotJSON := []byte(nil)
+	if snapshot, ok := item["draftSnapshot"].(map[string]any); ok && snapshot != nil {
+		draftSnapshotJSON, _ = json.Marshal(snapshot)
+	}
+	sendAt, err := time.Parse(time.RFC3339, stateString(item, "sendAt"))
+	if err != nil {
+		sendAt = time.Now().UTC()
+	}
+	queuedAt, err := time.Parse(time.RFC3339, stateString(item, "queuedAt"))
+	if err != nil {
+		queuedAt = sendAt
+	}
+	status := firstNonEmpty(stateString(item, "status"), "queued")
+	classification := canonicalDLPClassification(stateString(item, "classification"))
+	if classification == "" {
+		classification = "Internal"
+	}
+	dlpWarningsJSON, _ := json.Marshal(stateSlice(item, "dlpWarnings"))
+	accountID := sanitizeMailText(stateString(item, "accountId"))
+	_, err = tx.Exec(ctx, `
+		INSERT INTO outbox (
+			id, tenant_id, user_id, draft_id, from_json, to_json, cc_json, bcc_json, subject,
+			body_text, body_html, attachments, thread_id, in_reply_to, priority, receipt, delivery,
+			save_copy, scheduled, send_at, queued_at, hold_ms, status, delivery_state, delivery_claimed_at,
+			retry_at, attempts, last_error, mime_message_id, draft_snapshot, ip, user_agent,
+			compose_kind, source_message_id, classification, dlp_warnings, created_at, updated_at, account_id,
+			reply_to, crypto_protocol, crypto_encrypt, crypto_sign, client_mime
+		) VALUES (
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULLIF($14,''),$15,$16,$17,$18,$19,$20,
+			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,now(),NULLIF($38,''),NULLIF($39,''),
+			$40,$41,$42,$43
+		)
+		ON CONFLICT (id) DO UPDATE SET
+			draft_id=EXCLUDED.draft_id, from_json=EXCLUDED.from_json, to_json=EXCLUDED.to_json,
+			cc_json=EXCLUDED.cc_json, bcc_json=EXCLUDED.bcc_json, subject=EXCLUDED.subject,
+			body_text=EXCLUDED.body_text, body_html=EXCLUDED.body_html,
+			attachments=EXCLUDED.attachments, thread_id=EXCLUDED.thread_id,
+			in_reply_to=EXCLUDED.in_reply_to, priority=EXCLUDED.priority, receipt=EXCLUDED.receipt,
+			delivery=EXCLUDED.delivery, save_copy=EXCLUDED.save_copy, scheduled=EXCLUDED.scheduled,
+			send_at=EXCLUDED.send_at, queued_at=EXCLUDED.queued_at, hold_ms=EXCLUDED.hold_ms,
+			status=EXCLUDED.status, delivery_state=EXCLUDED.delivery_state,
+			delivery_claimed_at=EXCLUDED.delivery_claimed_at, retry_at=EXCLUDED.retry_at,
+			attempts=EXCLUDED.attempts, last_error=EXCLUDED.last_error,
+			mime_message_id=EXCLUDED.mime_message_id, draft_snapshot=EXCLUDED.draft_snapshot,
+			ip=EXCLUDED.ip, user_agent=EXCLUDED.user_agent,
+			compose_kind=EXCLUDED.compose_kind, source_message_id=EXCLUDED.source_message_id,
+			classification=EXCLUDED.classification, dlp_warnings=EXCLUDED.dlp_warnings,
+			account_id=EXCLUDED.account_id, reply_to=EXCLUDED.reply_to, updated_at=now(),
+			crypto_protocol=EXCLUDED.crypto_protocol, crypto_encrypt=EXCLUDED.crypto_encrypt,
+			crypto_sign=EXCLUDED.crypto_sign, client_mime=EXCLUDED.client_mime
+	`, id, user.TenantID, user.ID, sanitizeMailText(stateString(item, "draftId")), fromJSON, toJSON, ccJSON, bccJSON,
+		truncate(sanitizeMailText(stateString(item, "subject")), 500), sanitizeMailText(stateString(item, "bodyText")),
+		sanitizeMailText(stateString(item, "bodyHtml")), attachmentsJSON,
+		sanitizeMailText(stateString(item, "threadId")), sanitizeMailText(stateString(item, "inReplyTo")),
+		firstNonEmpty(sanitizeMailText(stateString(item, "priority")), "normal"), stateBool(item, "receipt"),
+		stateBool(item, "delivery"), item["saveCopy"] == nil || stateBool(item, "saveCopy"),
+		stateBool(item, "scheduled"), sendAt, queuedAt, stateInt(item, "holdMs"), sanitizeMailText(status),
+		sanitizeMailText(stateString(item, "deliveryState")), parseOptionalTime(stateString(item, "deliveryClaimedAt")),
+		parseOptionalTime(stateString(item, "retryAt")), stateInt(item, "attempts"),
+		truncate(sanitizeMailText(stateString(item, "lastError")), 500), sanitizeMailText(stateString(item, "mimeMessageId")),
+		draftSnapshotJSON, truncate(sanitizeMailText(stateString(item, "ip")), 64),
+		truncate(sanitizeMailText(stateString(item, "userAgent")), 300),
+		truncate(sanitizeMailText(stateString(item, "composeKind")), 24),
+		truncate(sanitizeMailText(stateString(item, "sourceMessageId")), 120),
+		classification, dlpWarningsJSON, queuedAt, accountID, sanitizeMailText(stateString(item, "replyTo")),
+		sanitizeMailText(stateString(item, "cryptoProtocol")), stateBool(item, "cryptoEncrypt"), stateBool(item, "cryptoSigned"),
+		stateString(item, "clientMime"))
+	return err
+}
+
+// persistMailMessageMetadataTx updates only the fields an IMAP reconciler can
+// change on an existing message. The body columns are intentionally absent so
+// a metadata-only sync can never overwrite the stored HTML or text with blanks.
+func (s *Server) persistMailMessageMetadataTx(ctx context.Context, tx pgx.Tx, user userRecord, message map[string]any) error {
+	id := stateString(message, "id")
+	if id == "" {
+		return fmt.Errorf("message has no id")
+	}
+	from, _ := message["from"].(map[string]any)
+	fromEmail := sanitizeMailText(firstNonEmpty(stateString(message, "fromEmail"), stateString(from, "email")))
+	fromName := sanitizeMailText(stateString(from, "name"))
+	to := stateSlice(message, "to")
+	cc := stateSlice(message, "cc")
+	bcc := stateSlice(message, "bcc")
+	toJSON, _ := json.Marshal(to)
+	ccJSON, _ := json.Marshal(cc)
+	bccJSON, _ := json.Marshal(bcc)
+	auth, _ := message["auth"].(map[string]any)
+	authJSON, _ := json.Marshal(auth)
+	spamJSON := []byte(nil)
+	if report, ok := message["spamReport"].(map[string]any); ok && report != nil {
+		spamJSON, _ = json.Marshal(report)
+	}
+	eventJSON := []byte(nil)
+	if event, ok := message["event"].(map[string]any); ok && event != nil {
+		eventJSON, _ = json.Marshal(event)
+	}
+	references := []any{}
+	if raw, ok := message["references"].([]any); ok {
+		references = raw
+	}
+	referencesJSON, _ := json.Marshal(references)
+	categories := []string{}
+	for _, raw := range stateSlice(message, "categories") {
+		if value, ok := raw.(string); ok && value != "" {
+			categories = append(categories, sanitizeMailText(value))
+		}
+	}
+	sentAt := parseOptionalTime(stateString(message, "date"))
+	repliedAt := parseOptionalTime(stateString(message, "repliedAt"))
+	forwardedAt := parseOptionalTime(stateString(message, "forwardedAt"))
+	snoozedUntil := parseOptionalTime(stateString(message, "snoozedUntil"))
+	ignoredAt := parseOptionalTime(stateString(message, "ignoredAt"))
+	folder := firstNonEmpty(sanitizeMailText(stateString(message, "folder")), "inbox")
+	imapFolder := firstNonEmpty(sanitizeMailText(stateString(message, "imapFolder")), folder)
+	threadID := firstNonEmpty(sanitizeMailText(stateString(message, "threadId")), id)
+	unsubscribeJSON := []byte(nil)
+	if unsubscribe, ok := message["unsubscribe"].(map[string]any); ok && unsubscribe != nil {
+		unsubscribeJSON, _ = json.Marshal(unsubscribe)
+	}
+	senderOffset := any(nil)
+	if raw, ok := message["senderUtcOffsetMinutes"]; ok && raw != nil {
+		senderOffset = stateInt(message, "senderUtcOffsetMinutes")
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE mail_messages SET
+			folder=$3, imap_folder=$4, uid=$5, uid_validity=$6,
+			message_id=$7, thread_id=$8, in_reply_to=NULLIF($9,''),
+			references_json=$10, subject=$11, from_name=$12, from_email=$13,
+			to_json=$14, cc_json=$15, bcc_json=$16, to_text=$17, cc_text=$18, bcc_text=$19,
+			sent_at=COALESCE($20, sent_at), size_bytes=$21, unread=$22, starred=$23,
+			flagged=$24, pinned=$25, draft=$26, external=$27, classification=$28,
+			categories=$29, auth=$30, spam_report=$31, event=$32, priority=$33,
+			receipt=$34, delivery=$35, save_copy=$36, via_api=$37, window_mode=$38,
+			replied_at=$39, forwarded_at=$40, reply_count=$41, forward_count=$42,
+			snoozed_until=$43, ignored=$44, ignored_at=$45, compose_kind=$46,
+			source_message_id=$47, unsubscribe=COALESCE($48, unsubscribe),
+			sender_utc_offset_minutes=COALESCE($49, sender_utc_offset_minutes), updated_at=now()
+		WHERE id=$1 AND user_id=$2
+	`, id, user.ID, folder, imapFolder, stateInt(message, "imapUid"),
+		stateInt(message, "imapUidValidity"), sanitizeMailText(stateString(message, "messageId")),
+		threadID, sanitizeMailText(stateString(message, "inReplyTo")), referencesJSON,
+		truncate(sanitizeMailText(stateString(message, "subject")), 1000), truncate(fromName, 240), fromEmail,
+		toJSON, ccJSON, bccJSON,
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "toText"), peopleText(to))), 4000),
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "ccText"), peopleText(cc))), 4000),
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "bccText"), peopleText(bcc))), 4000),
+		sentAt, stateInt(message, "sizeBytes"), stateBool(message, "unread"), stateBool(message, "starred"),
+		stateBool(message, "flagged"), stateBool(message, "pinned"), stateBool(message, "draft"),
+		stateBool(message, "external"), firstNonEmpty(sanitizeMailText(stateString(message, "classification")), "Internal"),
+		categories, authJSON, spamJSON, eventJSON, firstNonEmpty(sanitizeMailText(stateString(message, "priority")), "normal"),
+		stateBool(message, "receipt"), stateBool(message, "delivery"),
+		message["saveCopy"] == nil || stateBool(message, "saveCopy"), stateBool(message, "viaApi"),
+		firstNonEmpty(sanitizeMailText(stateString(message, "windowMode")), "floating"),
+		repliedAt, forwardedAt, max(int(stateInt(message, "replyCount")), 0), max(int(stateInt(message, "forwardCount")), 0),
+		snoozedUntil, stateBool(message, "ignored"), ignoredAt,
+		truncate(sanitizeMailText(stateString(message, "composeKind")), 24),
+		truncate(sanitizeMailText(stateString(message, "sourceMessageId")), 120),
+		unsubscribeJSON, senderOffset)
+	if err != nil {
+		return err
+	}
+	return updateMailCryptoTx(ctx, tx, user, message)
+}
+
+func updateMailCryptoTx(ctx context.Context, tx pgx.Tx, user userRecord, message map[string]any) error {
+	crypto, ok := message["crypto"].(map[string]any)
+	if !ok || crypto == nil {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE mail_messages SET
+			crypto_protocol=$3, crypto_encrypted=$4, crypto_signed=$5,
+			crypto_state=$6, crypto_signer=$7, crypto_error=$8, updated_at=now()
+		WHERE id=$1 AND user_id=$2
+	`, stateString(message, "id"), user.ID, truncate(sanitizeMailText(stateString(crypto, "protocol")), 40),
+		stateBool(crypto, "encrypted"), stateBool(crypto, "signed"),
+		truncate(sanitizeMailText(stateString(crypto, "state")), 80),
+		truncate(sanitizeMailText(stateString(crypto, "signer")), 320),
+		truncate(sanitizeMailText(stateString(crypto, "error")), 500))
+	return err
+}
+
+func (s *Server) persistMailMessageTx(ctx context.Context, tx pgx.Tx, user userRecord, message map[string]any) error {
+	id := stateString(message, "id")
+	if id == "" {
+		return fmt.Errorf("message has no id")
+	}
+	from, _ := message["from"].(map[string]any)
+	fromEmail := sanitizeMailText(firstNonEmpty(stateString(message, "fromEmail"), stateString(from, "email")))
+	fromName := sanitizeMailText(stateString(from, "name"))
+	to := stateSlice(message, "to")
+	cc := stateSlice(message, "cc")
+	bcc := stateSlice(message, "bcc")
+	toJSON, _ := json.Marshal(to)
+	ccJSON, _ := json.Marshal(cc)
+	bccJSON, _ := json.Marshal(bcc)
+	auth, _ := message["auth"].(map[string]any)
+	authJSON, _ := json.Marshal(auth)
+	spamJSON := []byte(nil)
+	if report, ok := message["spamReport"].(map[string]any); ok && report != nil {
+		spamJSON, _ = json.Marshal(report)
+	}
+	eventJSON := []byte(nil)
+	if event, ok := message["event"].(map[string]any); ok && event != nil {
+		eventJSON, _ = json.Marshal(event)
+	}
+	references := []any{}
+	if raw, ok := message["references"].([]any); ok {
+		references = raw
+	}
+	referencesJSON, _ := json.Marshal(references)
+	categories := []string{}
+	for _, raw := range stateSlice(message, "categories") {
+		if value, ok := raw.(string); ok && value != "" {
+			categories = append(categories, sanitizeMailText(value))
+		}
+	}
+	sentAt, err := time.Parse(time.RFC3339, stateString(message, "date"))
+	if err != nil {
+		sentAt = time.Now().UTC()
+	}
+	createdAt, err := time.Parse(time.RFC3339, stateString(message, "createdAt"))
+	if err != nil {
+		createdAt = sentAt
+	}
+	updatedAt, err := time.Parse(time.RFC3339, stateString(message, "updatedAt"))
+	if err != nil {
+		updatedAt = time.Now().UTC()
+	}
+	threadID := firstNonEmpty(sanitizeMailText(stateString(message, "threadId")), id)
+	windowMode := firstNonEmpty(sanitizeMailText(stateString(message, "windowMode")), "floating")
+	priority := firstNonEmpty(sanitizeMailText(stateString(message, "priority")), "normal")
+	classification := firstNonEmpty(sanitizeMailText(stateString(message, "classification")), "Internal")
+	folder := firstNonEmpty(sanitizeMailText(stateString(message, "folder")), "inbox")
+	imapFolder := firstNonEmpty(sanitizeMailText(stateString(message, "imapFolder")), folder)
+	accountID := sanitizeMailText(stateString(message, "accountId"))
+	messageID := sanitizeMailText(stateString(message, "messageId"))
+	inReplyTo := sanitizeMailText(stateString(message, "inReplyTo"))
+	subject := truncate(sanitizeMailText(stateString(message, "subject")), 1000)
+	snippet := truncate(sanitizeMailText(stateString(message, "snippet")), 500)
+	bodyText := sanitizeMailText(stateString(message, "bodyText"))
+	bodyHTML := sanitizeMailText(stateString(message, "bodyHtml"))
+	repliedAt := parseOptionalTime(stateString(message, "repliedAt"))
+	forwardedAt := parseOptionalTime(stateString(message, "forwardedAt"))
+	snoozedUntil := parseOptionalTime(stateString(message, "snoozedUntil"))
+	ignoredAt := parseOptionalTime(stateString(message, "ignoredAt"))
+	unsubscribeJSON := []byte(nil)
+	if unsubscribe, ok := message["unsubscribe"].(map[string]any); ok && unsubscribe != nil {
+		unsubscribeJSON, _ = json.Marshal(unsubscribe)
+	}
+	var senderOffset any
+	if raw, ok := message["senderUtcOffsetMinutes"]; ok && raw != nil {
+		senderOffset = stateInt(message, "senderUtcOffsetMinutes")
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO mail_messages (
+			id, tenant_id, user_id, mailbox_id, folder, imap_folder, uid, uid_validity,
+			message_id, thread_id, in_reply_to, references_json, subject, from_name, from_email,
+			to_json, cc_json, bcc_json, to_text, cc_text, bcc_text, snippet, body_text, body_html,
+			sent_at, received_at, created_at, updated_at, size_bytes, unread, starred, flagged,
+			pinned, draft, external, classification, categories, auth, spam_report, event, priority,
+			receipt, delivery, save_copy, via_api, window_mode, replied_at, forwarded_at,
+			reply_count, forward_count, snoozed_until, ignored, ignored_at, compose_kind,
+			source_message_id, unsubscribe, sender_utc_offset_minutes, account_id
+		) VALUES (
+			$1,$2,$3,CASE WHEN $56 = '' OR EXISTS (
+				SELECT 1 FROM public.mail_accounts WHERE id=$56 AND kind='native'
+			) THEN (SELECT id FROM mailboxes WHERE user_id=$3 LIMIT 1) ELSE NULL END,$4,$5,$6,$7,
+			$8,$9,NULLIF($10,''),$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,
+			$24,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,
+			$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,NULLIF($56,'')
+		)
+		ON CONFLICT (id) DO UPDATE SET
+			folder=EXCLUDED.folder, imap_folder=EXCLUDED.imap_folder, uid=EXCLUDED.uid,
+			uid_validity=EXCLUDED.uid_validity, message_id=EXCLUDED.message_id,
+			thread_id=EXCLUDED.thread_id, in_reply_to=EXCLUDED.in_reply_to,
+			references_json=EXCLUDED.references_json, subject=EXCLUDED.subject,
+			from_name=EXCLUDED.from_name, from_email=EXCLUDED.from_email,
+			to_json=EXCLUDED.to_json, cc_json=EXCLUDED.cc_json, bcc_json=EXCLUDED.bcc_json,
+			to_text=EXCLUDED.to_text, cc_text=EXCLUDED.cc_text, bcc_text=EXCLUDED.bcc_text,
+			snippet=EXCLUDED.snippet, body_text=EXCLUDED.body_text, body_html=EXCLUDED.body_html,
+			sent_at=EXCLUDED.sent_at, received_at=EXCLUDED.received_at, updated_at=EXCLUDED.updated_at,
+			size_bytes=EXCLUDED.size_bytes, unread=EXCLUDED.unread, starred=EXCLUDED.starred,
+			flagged=EXCLUDED.flagged, pinned=EXCLUDED.pinned, draft=EXCLUDED.draft, external=EXCLUDED.external,
+			classification=EXCLUDED.classification, categories=EXCLUDED.categories,
+			auth=EXCLUDED.auth, spam_report=EXCLUDED.spam_report, event=EXCLUDED.event,
+			priority=EXCLUDED.priority, receipt=EXCLUDED.receipt, delivery=EXCLUDED.delivery,
+			save_copy=EXCLUDED.save_copy, via_api=EXCLUDED.via_api, window_mode=EXCLUDED.window_mode,
+			replied_at=EXCLUDED.replied_at, forwarded_at=EXCLUDED.forwarded_at,
+			reply_count=EXCLUDED.reply_count, forward_count=EXCLUDED.forward_count,
+			snoozed_until=EXCLUDED.snoozed_until, ignored=EXCLUDED.ignored,
+			ignored_at=EXCLUDED.ignored_at, compose_kind=EXCLUDED.compose_kind,
+			source_message_id=EXCLUDED.source_message_id,
+			unsubscribe=COALESCE(EXCLUDED.unsubscribe, mail_messages.unsubscribe),
+			sender_utc_offset_minutes=COALESCE(EXCLUDED.sender_utc_offset_minutes, mail_messages.sender_utc_offset_minutes)
+	`, id, user.TenantID, user.ID, folder, imapFolder,
+		stateInt(message, "imapUid"), stateInt(message, "imapUidValidity"),
+		messageID, threadID, inReplyTo,
+		referencesJSON, subject, truncate(fromName, 240), fromEmail,
+		toJSON, ccJSON, bccJSON,
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "toText"), peopleText(to))), 4000),
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "ccText"), peopleText(cc))), 4000),
+		truncate(sanitizeMailText(firstNonEmpty(stateString(message, "bccText"), peopleText(bcc))), 4000),
+		snippet, bodyText, bodyHTML, sentAt, createdAt, updatedAt, stateInt(message, "sizeBytes"),
+		stateBool(message, "unread"), stateBool(message, "starred"), stateBool(message, "flagged"),
+		stateBool(message, "pinned"), stateBool(message, "draft"), stateBool(message, "external"),
+		classification, categories, authJSON,
+		spamJSON, eventJSON, priority, stateBool(message, "receipt"), stateBool(message, "delivery"),
+		message["saveCopy"] == nil || stateBool(message, "saveCopy"), stateBool(message, "viaApi"), windowMode,
+		repliedAt, forwardedAt, max(int(stateInt(message, "replyCount")), 0), max(int(stateInt(message, "forwardCount")), 0),
+		snoozedUntil, stateBool(message, "ignored"), ignoredAt,
+		truncate(sanitizeMailText(stateString(message, "composeKind")), 24),
+		truncate(sanitizeMailText(stateString(message, "sourceMessageId")), 120),
+		unsubscribeJSON, senderOffset, accountID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM mail_message_attachments WHERE message_id=$1`, id); err != nil {
+		return err
+	}
+	position := 0
+	for _, raw := range stateSlice(message, "attachments") {
+		attachment, _ := raw.(map[string]any)
+		if attachment == nil {
+			continue
+		}
+		attachmentID := stateString(attachment, "id")
+		if attachmentID == "" {
+			continue
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO mail_message_attachments (message_id, attachment_id, position, content_id, disposition)
+			SELECT $1, $2, $3, $4, $5 FROM attachments
+			WHERE id=$2 AND user_id=$6
+			ON CONFLICT (message_id, attachment_id) DO NOTHING
+		`, id, attachmentID, position, sanitizeMailText(stateString(attachment, "contentId")),
+			sanitizeMailText(stateString(attachment, "disposition")), user.ID)
+		if err != nil {
+			return err
+		}
+		position++
+	}
+	return updateMailCryptoTx(ctx, tx, user, message)
+}
+
+func (s *Server) mailQuota(ctx context.Context, userID string, state map[string]any) map[string]any {
+	user := stateMap(state, "user")
+	quota := stateMap(user, "quota")
+	limit := stateInt(quota, "limitBytes")
+	if limit <= 0 {
+		limit = 16 * 1024 * 1024 * 1024
+	}
+	baseline := stateInt(quota, "baselineUsedBytes")
+	perFolder := map[string]int64{}
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT folder, COALESCE(sum(size_bytes),0)::bigint
+		FROM mail_messages WHERE user_id=$1 GROUP BY folder
+	`, userID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var folder string
+			var bytes int64
+			if rows.Scan(&folder, &bytes) == nil {
+				perFolder[folder] = bytes
+			}
+		}
+	}
+	dynamic := int64(0)
+	for _, bytes := range perFolder {
+		dynamic += bytes
+	}
+	used := baseline + dynamic
+	if used > limit {
+		used = limit
+	}
+	folders := []any{map[string]any{"id": "_baseline", "label": "Provider baseline", "bytes": baseline}}
+	for _, raw := range stateSlice(state, "folders") {
+		folder, _ := raw.(map[string]any)
+		if folder == nil || stateBool(folder, "virtual") {
+			continue
+		}
+		id := stateString(folder, "id")
+		folders = append(folders, map[string]any{"id": id, "label": stateString(folder, "label"), "bytes": perFolder[id]})
+	}
+	percentage := 0.0
+	if limit > 0 {
+		percentage = roundOneDecimal(float64(used) / float64(limit) * 100)
+	}
+	return map[string]any{
+		"source": "mailbox", "limitBytes": limit, "usedBytes": used,
+		"dynamicBytes": dynamic, "percent": percentage,
+		"label":   fmt.Sprintf("%s of %s", formatBytes(used), formatBytes(limit)),
+		"folders": folders, "refreshedAt": nowISO(),
+	}
+}
+
+func roundOneDecimal(value float64) float64 {
+	return float64(int64(value*10+0.5)) / 10
+}
+
+type mailSearchQuery struct {
+	Filters map[string][]string
+	Free    []string
+}
+
+func parseMailSearch(raw string) mailSearchQuery {
+	query := strings.TrimSpace(raw)
+	parsed := mailSearchQuery{Filters: map[string][]string{}, Free: []string{}}
+	remaining := searchOperatorPattern.ReplaceAllStringFunc(query, func(match string) string {
+		parts := searchOperatorPattern.FindStringSubmatch(match)
+		if len(parts) < 3 {
+			return match
+		}
+		operator := strings.ToLower(parts[1])
+		value := strings.Trim(parts[2], `"`)
+		switch operator {
+		case "from", "to", "cc", "subject", "body", "filename", "attachment", "has", "before", "after", "is", "in", "larger", "smaller":
+			parsed.Filters[operator] = append(parsed.Filters[operator], strings.ToLower(value))
+			return ""
+		}
+		return match
+	})
+	for _, term := range strings.Fields(remaining) {
+		term = strings.Trim(term, `"`)
+		if term != "" {
+			parsed.Free = append(parsed.Free, strings.ToLower(term))
+		}
+	}
+	return parsed
+}
+
+func mailSearchParsed(raw string, parsed mailSearchQuery) map[string]any {
+	out := map[string]any{"raw": raw, "textTerms": parsed.Free}
+	for key, values := range parsed.Filters {
+		out[key] = values
+	}
+	return out
+}
+
+func likePattern(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, "%", `\%`)
+	value = strings.ReplaceAll(value, "_", `\_`)
+	return "%" + value + "%"
+}
+
+func (s *Server) searchMailMessages(ctx context.Context, userID, accountID, raw string) ([]map[string]any, mailSearchQuery, error) {
+	parsed := parseMailSearch(raw)
+	conditions := []string{"user_id=$1"}
+	args := []any{userID}
+	if strings.TrimSpace(accountID) != "" && strings.TrimSpace(accountID) != mailAccountScopeAll {
+		args = append(args, accountID)
+		conditions = append(conditions, fmt.Sprintf("account_id=$%d", len(args)))
+	}
+	appendClause := func(format string, value any) {
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf(format, len(args)))
+	}
+	for _, value := range parsed.Filters["from"] {
+		args = append(args, likePattern(value))
+		index := len(args)
+		conditions = append(conditions, fmt.Sprintf(
+			"(from_name ILIKE $%d ESCAPE '\\' OR from_email::text ILIKE $%d ESCAPE '\\')", index, index))
+	}
+	for _, value := range parsed.Filters["to"] {
+		appendClause("to_text ILIKE $%d ESCAPE '\\'", likePattern(value))
+	}
+	for _, value := range parsed.Filters["cc"] {
+		appendClause("cc_text ILIKE $%d ESCAPE '\\'", likePattern(value))
+	}
+	for _, value := range parsed.Filters["subject"] {
+		appendClause("subject ILIKE $%d ESCAPE '\\'", likePattern(value))
+	}
+	for _, value := range parsed.Filters["body"] {
+		appendClause("body_text ILIKE $%d ESCAPE '\\'", likePattern(value))
+	}
+	for _, value := range append(append([]string{}, parsed.Filters["filename"]...), parsed.Filters["attachment"]...) {
+		args = append(args, likePattern(value))
+		index := len(args)
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM mail_message_attachments ma
+			JOIN attachments a ON a.id=ma.attachment_id
+			WHERE ma.message_id=mail_messages.id AND a.name ILIKE $%d ESCAPE '\')`, index))
+	}
+	for _, value := range parsed.Filters["has"] {
+		switch value {
+		case "attachment", "attachments", "file", "files":
+			conditions = append(conditions, `EXISTS (SELECT 1 FROM mail_message_attachments ma WHERE ma.message_id=mail_messages.id)`)
+		}
+	}
+	for _, value := range parsed.Filters["is"] {
+		switch value {
+		case "unread":
+			conditions = append(conditions, "unread")
+		case "read":
+			conditions = append(conditions, "NOT unread")
+		case "starred", "flagged":
+			conditions = append(conditions, "(starred OR flagged)")
+		}
+	}
+	if folder := firstValue(parsed.Filters["in"]); folder != "" && folder != "all" && folder != "anywhere" {
+		appendClause("folder=$%d", folder)
+	}
+	if cutoff := firstValue(parsed.Filters["before"]); cutoff != "" {
+		if stamp, ok := parseSearchDate(cutoff); ok {
+			appendClause("sent_at < $%d", stamp)
+		}
+	}
+	if cutoff := firstValue(parsed.Filters["after"]); cutoff != "" {
+		if stamp, ok := parseSearchDate(cutoff); ok {
+			appendClause("sent_at >= $%d", stamp)
+		}
+	}
+	if value := firstValue(parsed.Filters["larger"]); value != "" {
+		if limit, ok := parseSearchSize(value); ok {
+			appendClause("size_bytes > $%d", limit)
+		}
+	}
+	if value := firstValue(parsed.Filters["smaller"]); value != "" {
+		if limit, ok := parseSearchSize(value); ok {
+			appendClause("size_bytes < $%d", limit)
+		}
+	}
+	if len(parsed.Free) > 0 {
+		// Subject/participants are indexed with the simple configuration and
+		// bodies with english. Match both so a stemmed body query cannot miss
+		// an unstemmed subject word (and vice versa); the OR still uses the GIN
+		// index on each side.
+		args = append(args, strings.Join(parsed.Free, " "))
+		index := len(args)
+		conditions = append(conditions, fmt.Sprintf(
+			`(search_vector @@ websearch_to_tsquery('simple', $%d) OR search_vector @@ websearch_to_tsquery('english', $%d))`,
+			index, index))
+	}
+	query := `SELECT ` + mailMessageColumns + ` FROM mail_messages WHERE ` +
+		strings.Join(conditions, " AND ") + ` ORDER BY sent_at DESC LIMIT 500`
+	messages, _, err := s.loadMailMessagesQuery(ctx, userID, query, args...)
+	return messages, parsed, err
+}
+
+func (s *Server) loadMailMessage(ctx context.Context, userID, id string) (map[string]any, error) {
+	messages, _, err := s.loadMailMessagesByIDs(ctx, userID, []string{id})
+	if err != nil {
+		return nil, err
+	}
+	if len(messages) == 0 {
+		return nil, fmt.Errorf("message not found")
+	}
+	return messages[0], nil
+}
+
+func (s *Server) mailQuotaForUser(ctx context.Context, userID string) map[string]any {
+	state, err := s.loadState(ctx, userID)
+	if err != nil {
+		state = map[string]any{}
+	}
+	return s.mailQuota(ctx, userID, state)
+}
+
+func readingTimeForText(text string) (words int, minutes int) {
+	words = len(strings.Fields(text))
+	if words == 0 {
+		return 0, 0
+	}
+	minutes = (words + 219) / 220
+	if minutes < 1 {
+		minutes = 1
+	}
+	return words, minutes
+}

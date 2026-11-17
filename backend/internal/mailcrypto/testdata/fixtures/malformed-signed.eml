@@ -1,0 +1,11 @@
+From: Alt8Mail Test Sender <sender@example.test>
+To: Alt8Mail Test Recipient <recipient@example.test>
+Subject: Broken multipart/signed fixture
+Message-ID: <malformed-signed@example.test>
+MIME-Version: 1.0
+Content-Type: multipart/signed; protocol="application/pgp-signature"; boundary="broken"
+
+--broken
+Content-Type: text/plain
+
+Only one part.

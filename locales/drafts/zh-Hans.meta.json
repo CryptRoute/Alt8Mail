@@ -1,0 +1,12 @@
+{
+  "locale": "zh-Hans",
+  "catalog": "zh-Hans",
+  "label": "简体中文",
+  "model": "qwen3.6:latest",
+  "sourceHash": "3f4e1fb836099884",
+  "startedAt": "2026-11-15T22:16:05.474Z",
+  "updatedAt": "2026-11-15T22:17:41.358Z",
+  "preservedKeys": 4892,
+  "machineKeys": 78,
+  "failedKeys": []
+}

@@ -1,0 +1,12 @@
+{
+  "locale": "bg",
+  "catalog": "bg",
+  "label": "Български",
+  "model": "qwen3.6:latest",
+  "sourceHash": "3f4e1fb836099884",
+  "startedAt": "2026-11-15T21:21:46.429Z",
+  "updatedAt": "2026-11-15T21:24:12.484Z",
+  "preservedKeys": 4892,
+  "machineKeys": 78,
+  "failedKeys": []
+}

@@ -1,0 +1,27 @@
+From: Alt8Mail Test Sender <sender@example.test>
+To: Alt8Mail Test Recipient <recipient@example.test>
+Subject: Inline PGP signed fixture
+Date: Sun, 15 Nov 2026 00:00:00 +0000
+Message-ID: <pgp-inline-signed@example.test>
+X-Alt8Mail-Fixture: phase0
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+
+Alt8Mail Phase 0 interop fixture.
+This body is used only by tests.
+
+-----BEGIN PGP SIGNATURE-----
+
+wsCpBAEBCABdBYJq+WMQCRD223F2vWskyzUUAAAAAAAcABBzYWx0QG5vdGF0aW9u
+cy5vcGVucGdwanMub3JnCwWSiS/MMP/Xw6l+ahn3dhYhBM3JWHwitRM3uEjBgvbb
+cXa9ayTLAABOOgf+K3zCrHa3s0JPbhAAshWLY1qp/uQWQCtYPdF6+8N69TuZYE8a
+1OJER0CWqUfc2LyYsdI/RyWkm3UJpjr7PQDzuyKKCfh2CB/9digcFaTAPZFXc/hD
+kKL2ur4Katauh2qKJ4jsRp51XXhU6ze2PYpLXR1VHDMru5/FMVfpoaYq9xoXoOVe
+KbRiNXVpBTXOfPNf7KpSdYTJ+/6IwRp31oi0c604oDSsbfZA9IHFpouuMBtW0hoh
+2lDFBXAt/CrzRTaeGJQPCNK7pDEDRV6b5ppEOy6UTS7VmLKH5OOJjmuyfK4GEcKm
+V2i7VXU0GD4fq5Ze2BbmqjVX5wtT9ZyqXw+yCw==
+-----END PGP SIGNATURE-----

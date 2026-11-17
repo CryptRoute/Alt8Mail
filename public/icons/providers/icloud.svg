@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="iCloud Mail">
+  <defs><linearGradient id="i" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6ec8ff"/><stop offset="1" stop-color="#1d7fe0"/></linearGradient></defs>
+  <rect width="48" height="48" rx="12" fill="#eef8ff"/>
+  <path d="M15.2 33.5a8 8 0 0 1-1.1-15.9A10.5 10.5 0 0 1 34.5 20a7 7 0 0 1-.9 13.5Z" fill="url(#i)"/>
+  <path d="m18 30 6.5-7 6.5 7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

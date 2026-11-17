@@ -1,0 +1,315 @@
+package httpapi
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+)
+
+type contactBody struct {
+	Name          *string `json:"name"`
+	Email         *string `json:"email"`
+	Company       *string `json:"company"`
+	Title         *string `json:"title"`
+	Phone         *string `json:"phone"`
+	Location      *string `json:"location"`
+	Notes         *string `json:"notes"`
+	Birthday      *string `json:"birthday"`
+	AddressBookID *string `json:"addressBookId"`
+}
+
+func (s *Server) getDirectory(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	people, err := s.directoryPeople(r.Context(), sess, true)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "DIRECTORY", "Could not load directory")
+		return
+	}
+	policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"people": people, "count": len(people),
+		"policy": map[string]any{
+			"contactSharing":    policy.Directory.ContactSharing || webmailAdminRole(sess.User.Role),
+			"externalDirectory": policy.Directory.ExternalDirectory,
+			"profileEditing":    policy.Directory.ProfileEditing,
+			"autoAddExternal":   policy.Directory.AutoAddExternal,
+		},
+	})
+}
+
+func (s *Server) getContacts(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	contacts, err := s.loadContacts(r.Context(), sess.User.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "CONTACTS", "Could not load contacts")
+		return
+	}
+	books, _ := s.loadAddressBooks(r.Context(), sess.User)
+	writeJSON(w, http.StatusOK, map[string]any{"contacts": contacts, "count": len(contacts), "addressBooks": books})
+}
+
+func (s *Server) loadContacts(ctx context.Context, userID string) ([]map[string]any, error) {
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT id, email::text, name, company, title, phone, location, notes, source,
+		       address_book_id, birthday, created_at, updated_at
+		FROM contacts WHERE user_id = $1 ORDER BY name, email
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	contacts := []map[string]any{}
+	for rows.Next() {
+		var id, email, name, company, title, phone, location, notes, source, bookID string
+		var birthday *time.Time
+		var created, updated time.Time
+		if rows.Scan(&id, &email, &name, &company, &title, &phone, &location, &notes, &source,
+			&bookID, &birthday, &created, &updated) == nil {
+			entry := map[string]any{
+				"id": id, "email": strings.ToLower(email), "name": firstNonEmpty(name, email),
+				"company": company, "title": title, "phone": phone, "location": location,
+				"notes": notes, "source": source, "addressBookId": firstNonEmpty(bookID, "default"),
+				"initials": initialsForName(firstNonEmpty(name, email)), "color": colorForString(email),
+				"createdAt": created.UTC().Format(time.RFC3339), "updatedAt": updated.UTC().Format(time.RFC3339),
+			}
+			if birthday != nil {
+				entry["birthday"] = birthday.Format("2006-01-02")
+			}
+			contacts = append(contacts, entry)
+		}
+	}
+	return contacts, rows.Err()
+}
+
+func (s *Server) createContact(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	var body contactBody
+	if !s.decodeBody(w, r, &body, 256*1024) {
+		return
+	}
+	email, name, company, title, phone, location, notes, err := validateContactBody(body, nil)
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	birthday, bookID, fieldErr := s.contactExtras(r.Context(), sess.User, body)
+	if fieldErr != nil {
+		writeFromError(w, fieldErr)
+		return
+	}
+	id := newID("contact")
+	etag := newID("etag")
+	err = s.store.DB.QueryRow(r.Context(), `
+		INSERT INTO contacts (id, tenant_id, user_id, email, name, company, title, phone, location, notes,
+		                      source, uid, resource_name, etag, birthday, address_book_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'manual', $1, $1 || '.vcf', $11, $12, $13)
+		ON CONFLICT (user_id, email) DO UPDATE
+		SET name = EXCLUDED.name, company = EXCLUDED.company, title = EXCLUDED.title,
+		    phone = EXCLUDED.phone, location = EXCLUDED.location, notes = EXCLUDED.notes,
+		    etag = EXCLUDED.etag, birthday = EXCLUDED.birthday,
+		    address_book_id = EXCLUDED.address_book_id, updated_at = now()
+		RETURNING id
+	`, id, sess.User.TenantID, sess.User.ID, email, name, company, title, phone, location, notes, etag,
+		birthday, bookID).Scan(&id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "CONTACT", "Could not save the contact")
+		return
+	}
+	s.recordWorkspaceAudit(r.Context(), sess, "contact.created", firstNonEmpty(name, email), "Contact saved")
+	contact, _ := s.loadContact(r.Context(), sess.User.ID, id)
+	writeJSON(w, http.StatusCreated, map[string]any{"contact": contact})
+}
+
+// autoSaveContact records a compose recipient in the user's personal address
+// book. It is intentionally upsert-only: manual contacts keep their names and
+// notes, and repeated recipients do not create duplicates.
+func (s *Server) autoSaveContact(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	var body struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	}
+	if !s.decodeBody(w, r, &body, 64*1024) {
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if !calendarEmailPattern.MatchString(email) {
+		writeError(w, http.StatusBadRequest, "CONTACT_EMAIL", "Enter a valid recipient email")
+		return
+	}
+	policy := s.tenantPolicyFor(r.Context(), sess.User.TenantID)
+	if !policy.Directory.AutoAddExternal {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "skipped": true, "reason": "directory.autoAddExternal is disabled"})
+		return
+	}
+	name := truncate(strings.TrimSpace(body.Name), 240)
+	if name == "" {
+		name = displayNameFromEmail(email)
+	}
+	id := newID("contact")
+	etag := newID("etag")
+	err := s.store.DB.QueryRow(r.Context(), `
+		INSERT INTO contacts (id, tenant_id, user_id, email, name, source, uid, resource_name, etag)
+		VALUES ($1, $2, $3, $4, $5, 'auto', $1, $1 || '.vcf', $6)
+		ON CONFLICT (user_id, email) DO UPDATE
+		SET name = CASE
+			WHEN contacts.name = '' OR lower(contacts.name) = lower(contacts.email) THEN EXCLUDED.name
+			ELSE contacts.name
+		END,
+		updated_at = now()
+		RETURNING id
+	`, id, sess.User.TenantID, sess.User.ID, email, name, etag).Scan(&id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "CONTACT", "Could not save the recipient")
+		return
+	}
+	contact, _ := s.loadContact(r.Context(), sess.User.ID, id)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "contact": contact})
+}
+
+func (s *Server) updateContact(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	id := r.PathValue("id")
+	existing, err := s.loadContact(r.Context(), sess.User.ID, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "Contact not found")
+		return
+	}
+	var body contactBody
+	if !s.decodeBody(w, r, &body, 256*1024) {
+		return
+	}
+	email, name, company, title, phone, location, notes, err := validateContactBody(body, existing)
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	birthday, bookID, fieldErr := s.contactExtras(r.Context(), sess.User, body)
+	if fieldErr != nil {
+		writeFromError(w, fieldErr)
+		return
+	}
+	_, err = s.store.DB.Exec(r.Context(), `
+		UPDATE contacts SET email=$2, name=$3, company=$4, title=$5, phone=$6, location=$7, notes=$8,
+		       etag=$10, birthday=$11, address_book_id=$12, updated_at=now()
+		WHERE id=$1 AND user_id=$9
+	`, id, email, name, company, title, phone, location, notes, sess.User.ID, newID("etag"), birthday, bookID)
+	if err != nil {
+		writeError(w, http.StatusConflict, "CONTACT", "Could not update the contact; the email may already exist")
+		return
+	}
+	s.recordWorkspaceAudit(r.Context(), sess, "contact.updated", firstNonEmpty(name, email), "Contact updated")
+	contact, _ := s.loadContact(r.Context(), sess.User.ID, id)
+	writeJSON(w, http.StatusOK, map[string]any{"contact": contact})
+}
+
+func (s *Server) deleteContact(w http.ResponseWriter, r *http.Request) {
+	sess := s.requireSessionFromContext(r)
+	id := r.PathValue("id")
+	result, err := s.store.DB.Exec(r.Context(), `DELETE FROM contacts WHERE id=$1 AND user_id=$2`, id, sess.User.ID)
+	if err != nil || result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "Contact not found")
+		return
+	}
+	s.recordWorkspaceAudit(r.Context(), sess, "contact.deleted", id, "Contact removed")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) loadContact(ctx context.Context, userID, id string) (map[string]any, error) {
+	rows, err := s.store.DB.Query(ctx, `
+		SELECT id, email::text, name, company, title, phone, location, notes, source,
+		       address_book_id, birthday, created_at, updated_at
+		FROM contacts WHERE user_id=$1 AND id=$2
+	`, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, fmt.Errorf("contact not found")
+	}
+	var contactID, email, name, company, title, phone, location, notes, source, bookID string
+	var birthday *time.Time
+	var created, updated time.Time
+	if err := rows.Scan(&contactID, &email, &name, &company, &title, &phone, &location, &notes, &source,
+		&bookID, &birthday, &created, &updated); err != nil {
+		return nil, err
+	}
+	entry := map[string]any{
+		"id": contactID, "email": strings.ToLower(email), "name": firstNonEmpty(name, email),
+		"company": company, "title": title, "phone": phone, "location": location, "notes": notes,
+		"source": source, "addressBookId": firstNonEmpty(bookID, "default"),
+		"initials": initialsForName(firstNonEmpty(name, email)),
+		"color":    colorForString(email), "createdAt": created.UTC().Format(time.RFC3339),
+		"updatedAt": updated.UTC().Format(time.RFC3339),
+	}
+	if birthday != nil {
+		entry["birthday"] = birthday.Format("2006-01-02")
+	}
+	return entry, nil
+}
+
+func (s *Server) contactExtras(ctx context.Context, user userRecord, body contactBody) (any, string, error) {
+	var birthday any
+	if body.Birthday != nil && strings.TrimSpace(*body.Birthday) != "" {
+		value, err := time.Parse("2006-01-02", strings.TrimSpace(*body.Birthday))
+		if err != nil {
+			return nil, "", fail(http.StatusBadRequest, "CONTACT_BIRTHDAY", "Birthday must be YYYY-MM-DD")
+		}
+		birthday = value
+	}
+	bookID := "default"
+	if body.AddressBookID != nil {
+		bookID = strings.TrimSpace(*body.AddressBookID)
+		if bookID == "" {
+			bookID = "default"
+		}
+	}
+	var exists bool
+	if err := s.store.DB.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM address_books WHERE user_id=$1 AND id=$2)
+	`, user.ID, bookID).Scan(&exists); err != nil || !exists {
+		return nil, "", fail(http.StatusBadRequest, "CONTACT_BOOK", "Choose a valid address book")
+	}
+	return birthday, bookID, nil
+}
+
+func validateContactBody(body contactBody, existing map[string]any) (email, name, company, title, phone, location, notes string, err error) {
+	email = stateString(existing, "email")
+	name = stateString(existing, "name")
+	company = stateString(existing, "company")
+	title = stateString(existing, "title")
+	phone = stateString(existing, "phone")
+	location = stateString(existing, "location")
+	notes = stateString(existing, "notes")
+	if body.Email != nil {
+		email = strings.ToLower(strings.TrimSpace(*body.Email))
+	}
+	if !calendarEmailPattern.MatchString(email) {
+		return "", "", "", "", "", "", "", fail(http.StatusBadRequest, "CONTACT_EMAIL", "Enter a valid contact email")
+	}
+	if body.Name != nil {
+		name = strings.TrimSpace(*body.Name)
+	}
+	if name == "" {
+		name = email
+	}
+	if body.Company != nil {
+		company = truncate(*body.Company, 160)
+	}
+	if body.Title != nil {
+		title = truncate(*body.Title, 160)
+	}
+	if body.Phone != nil {
+		phone = truncate(*body.Phone, 80)
+	}
+	if body.Location != nil {
+		location = truncate(*body.Location, 160)
+	}
+	if body.Notes != nil {
+		notes = truncate(*body.Notes, 4000)
+	}
+	return email, name, company, title, phone, location, notes, nil
+}

@@ -1,0 +1,482 @@
+package httpapi
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"hash/fnv"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
+	"github.com/CryptRoute/Alt8Mail/backend/internal/licensing"
+	"github.com/jackc/pgx/v5"
+)
+
+const (
+	// seatLimitMessage is the fixed admin error returned when an activation
+	// would exceed the licensed seat count.
+	seatLimitMessage = "The license seat limit has been reached. Deactivate a user or upgrade the license."
+	// globalSeatLockClass namespaces the advisory lock that serializes
+	// seat-consuming changes for a global (multi-tenant) license.
+	globalSeatLockClass int32 = 0x41384D31
+	// maxLicenseFileBytes mirrors the Control Plane upload cap. Larger files
+	// are rejected instead of being read into memory at startup.
+	maxLicenseFileBytes = 64 << 10
+)
+
+// errSeatLimit is returned by the seat helpers when an activation would exceed
+// the licensed seat count. Callers map it to the admin or SCIM error envelope.
+var errSeatLimit = errors.New("license seat limit reached")
+
+// rowQuerier is the subset of pgxpool.Pool/pgx.Tx used to count seats. Counting
+// through the provisioning transaction lets the row lock and the re-count share
+// one snapshot ordering.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// loadLicense reads and verifies the optional offline license file. A missing
+// file is a normal OSS deployment (the installer provisions the shared path
+// even before a token exists), so it returns no license and no error. An
+// unreadable or invalid file is reported to the caller so startup can continue
+// with paid features disabled. When ALT8MAIL_LICENSE_TENANT is configured, the
+// payload's tenant claim must match it exactly (an absent claim never matches).
+func loadLicense(cfg config.Config, logger *slog.Logger) (*licensing.License, error) {
+	if strings.TrimSpace(cfg.LicenseFile) == "" {
+		return nil, nil
+	}
+	file, err := os.Open(cfg.LicenseFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// A configured-but-absent file is the normal fresh-install path the
+			// Control upload later populates. Treat it as OSS, not a failure.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read license file: %w", err)
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, maxLicenseFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read license file: %w", err)
+	}
+	if len(raw) > maxLicenseFileBytes {
+		return nil, fmt.Errorf("license file exceeds %d bytes", maxLicenseFileBytes)
+	}
+	verifier, source, err := licensing.ResolveVerifierWithKeys(
+		cfg.LicensePublicKey,
+		cfg.LicensePublicKeys,
+		licensing.ConfigKeyAllowed(cfg.Env, cfg.LicenseAllowConfigKey),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("license trust anchor: %w", err)
+	}
+	license, err := verifier.Verify(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("verify license: %w", err)
+	}
+	if expected := strings.TrimSpace(cfg.LicenseTenant); expected != "" && license.Tenant != expected {
+		return nil, fmt.Errorf("license tenant %q does not match ALT8MAIL_LICENSE_TENANT", license.Tenant)
+	}
+	if logger != nil {
+		status := license.Status(time.Now())
+		logger.Info("license loaded", "edition", license.Edition, "state", status.State,
+			"seats", status.SeatLimit, "daysRemaining", status.DaysRemaining, "trustAnchor", source)
+	}
+	return &license, nil
+}
+
+// licenseTime is the clock used to evaluate the license lifecycle. Production
+// uses time.Now; tests can inject a clock to move through valid, grace and
+// expired without waiting.
+func (s *Server) licenseTime() time.Time {
+	if s.licenseNow != nil {
+		return s.licenseNow()
+	}
+	return time.Now()
+}
+
+func (s *Server) licenseTrustSource() string {
+	if s.licenseTrustAnchor != "" {
+		return s.licenseTrustAnchor
+	}
+	return licensing.TrustAnchorMissing
+}
+
+// licenseSnapshot returns the non-secret entitlement view exposed to the
+// webmail and Control Plane. Raw tokens, signatures and private material never
+// leave this process. The lifecycle is evaluated against the current clock on
+// every call, so a long-running server transitions through valid, grace and
+// expired without restarting.
+func (s *Server) licenseSnapshot(ctx context.Context) map[string]any {
+	if s.license == nil {
+		state := "unlicensed"
+		if s.licenseConfigured {
+			state = "invalid"
+		}
+		used := s.licenseSeatUsageCount(ctx)
+		return map[string]any{
+			"edition": "oss", "state": state, "inGrace": false, "expired": false,
+			"seats": communitySeatLimit, "seatLimit": communitySeatLimit, "usedSeats": used,
+			"remainingSeats": maxInt(communitySeatLimit-used, 0), "seatSource": "community",
+			"communitySeatLimit": communitySeatLimit,
+			"plan":               "community", "trial": false, "deploymentId": "", "limits": nil,
+			"features": []string{}, "daysRemaining": 0, "expiresAt": "",
+			"availableFeatures": append([]string{}, paidFeatureKeys...),
+			"missingFeatures":   append([]string{}, paidFeatureKeys...),
+			"featureCatalog":    licensing.Catalog(),
+			"trustAnchor":       s.licenseTrustSource(),
+			"portalUrl":         s.cfg.LicensePortalURL,
+			"paidUI":            s.paidUIDescriptors(),
+		}
+	}
+	status := s.license.Status(s.licenseTime())
+	features := append([]string(nil), status.Features...)
+	if status.Expired || features == nil {
+		// An expired license must not advertise usable paid features.
+		features = []string{}
+	}
+	used := s.licenseSeatUsageCount(ctx)
+	limit := s.licenseSeatLimit()
+	return map[string]any{
+		"edition": s.license.Edition, "state": status.State,
+		"inGrace": status.InGrace, "expired": status.Expired,
+		"seats": limit, "seatLimit": limit, "licensedSeats": status.SeatLimit,
+		"usedSeats": used, "remainingSeats": maxInt(limit-used, 0),
+		"seatSource": s.seatSource(), "communitySeatLimit": communitySeatLimit,
+		"plan": status.Plan, "trial": status.Trial,
+		"deploymentId": status.DeploymentID, "limits": status.Limits,
+		"features":          features,
+		"availableFeatures": append([]string{}, paidFeatureKeys...),
+		"missingFeatures":   s.missingPaidFeatures(),
+		"featureCatalog":    licensing.Catalog(),
+		"trustAnchor":       s.licenseTrustSource(),
+		"portalUrl":         s.cfg.LicensePortalURL,
+		"paidUI":            s.paidUIDescriptors(),
+		"daysRemaining":     status.DaysRemaining,
+		"expiresAt":         status.ExpiresAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func (s *Server) licenseSeatUsageCount(ctx context.Context) int {
+	if s.store == nil || s.store.DB == nil {
+		return 0
+	}
+	used, err := s.activeSeatCount(ctx, "")
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("license seat count failed", "err", err)
+		}
+		return 0
+	}
+	return used
+}
+
+// syncSeatPolicy publishes the effective policy to PostgreSQL for the
+// defense-in-depth trigger. The application remains the first line of
+// enforcement; this row lets a missed activation path or a direct SQL insert
+// still hit the same limit. A root operator can change the row deliberately.
+func (s *Server) syncSeatPolicy(ctx context.Context) {
+	if s.store == nil || s.store.DB == nil {
+		return
+	}
+	seats := communitySeatLimit
+	tenant := ""
+	source := "community"
+	var expires any
+	grace := 0
+	hash := fnv.New32a()
+	if s.license != nil {
+		seats = s.license.Seats
+		tenant = strings.TrimSpace(s.license.Tenant)
+		source = "license"
+		expires = s.license.ExpiresAt.UTC()
+		grace = s.license.GraceDays
+		_, _ = hash.Write([]byte(s.license.ID))
+	}
+	if seats < 1 {
+		seats = communitySeatLimit
+		source = "community"
+	}
+	_, err := s.store.DB.Exec(ctx, `
+		INSERT INTO control.seat_policy
+		  (id, seats, tenant_id, expires_at, grace_days, lock_key, source, updated_at)
+		VALUES (true, $1, $2, $3, $4, $5, $6, now())
+		ON CONFLICT (id) DO UPDATE SET
+		  seats = EXCLUDED.seats, tenant_id = EXCLUDED.tenant_id,
+		  expires_at = EXCLUDED.expires_at, grace_days = EXCLUDED.grace_days,
+		  lock_key = EXCLUDED.lock_key, source = EXCLUDED.source,
+		  updated_at = now()
+	`, seats, tenant, expires, grace, int32(hash.Sum32()), source)
+	if err != nil && s.logger != nil {
+		s.logger.Warn("seat policy sync failed", "err", err)
+	}
+}
+
+func maxInt(value, floor int) int {
+	if value < floor {
+		return floor
+	}
+	return value
+}
+
+// communitySeatLimit is the free-edition active-user allowance. It applies to
+// every tenant when no valid paid license is loaded. This is the public
+// commercial boundary; it is not a tamper-proof security control.
+const communitySeatLimit = 25
+
+// licenseSeatLimit is the effective active-user limit: the signed seat claim
+// while a license is valid or in grace, otherwise the community allowance.
+func (s *Server) licenseSeatLimit() int {
+	if s.license != nil {
+		status := s.license.Status(s.licenseTime())
+		if status.SeatLimit > 0 && (status.State == "valid" || status.State == "grace") {
+			return status.SeatLimit
+		}
+	}
+	return communitySeatLimit
+}
+
+// seatSource describes where the effective limit came from.
+func (s *Server) seatSource() string {
+	if s.license != nil {
+		status := s.license.Status(s.licenseTime())
+		if status.SeatLimit > 0 && (status.State == "valid" || status.State == "grace") {
+			return "license"
+		}
+	}
+	return "community"
+}
+
+// licenseSeatTenant is the tenant claim that scopes seat counting. It is empty
+// for a global license, for an expired/invalid license and for the community
+// edition. A tenant-scoped paid license limits only its tenant.
+func (s *Server) licenseSeatTenant() string {
+	if s.license == nil {
+		return ""
+	}
+	status := s.license.Status(s.licenseTime())
+	if status.State != "valid" && status.State != "grace" {
+		return ""
+	}
+	return strings.TrimSpace(s.license.Tenant)
+}
+
+// seatEnforced reports whether activation consumes a limited seat. Only a
+// loaded license in the valid or grace state with a positive seat count gates
+// user creation. OSS, unlicensed, invalid and expired deployments keep core
+// user creation available; expired paid features are gated separately.
+func (s *Server) seatEnforced() bool {
+	return true
+}
+
+// seatAppliesToTenant reports whether seat enforcement covers this tenant. The
+// community edition and a global license count every tenant. A tenant-scoped
+// paid license limits only the tenant named in its claim; every other tenant
+// keeps core mail and user creation available while that license is valid.
+func (s *Server) seatAppliesToTenant(tenantID string) bool {
+	scope := s.licenseSeatTenant()
+	return scope == "" || scope == tenantID
+}
+
+// activeSeatCount counts the users that consume a seat from the pool. A
+// tenant-scoped license always counts the licensed tenant; a global license
+// counts every tenant. System administrators and soft-deleted users never
+// consume a seat.
+func (s *Server) activeSeatCount(ctx context.Context, tenantID string) (int, error) {
+	if s.store == nil || s.store.DB == nil {
+		return 0, errors.New("license seat count requires a database")
+	}
+	return s.countActiveSeats(ctx, s.store.DB, tenantID)
+}
+
+// countActiveSeats runs the seat query through q, which may be the pool for a
+// read-only check or the provisioning transaction for a locked re-count.
+// tenantID names the caller's tenant but is ignored for a global license,
+// whose count spans every tenant.
+func (s *Server) countActiveSeats(ctx context.Context, q rowQuerier, tenantID string) (int, error) {
+	query := `SELECT count(*) FROM users
+		WHERE status = 'active' AND deleted_at IS NULL AND is_system_admin = false`
+	args := []any{}
+	if scope := s.licenseSeatTenant(); scope != "" {
+		query += ` AND tenant_id = $1`
+		args = append(args, scope)
+	}
+	var count int
+	if err := q.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// seatAvailable reports whether another active seat is available for tenantID.
+// It is a read-only convenience for callers outside a provisioning transaction;
+// activation paths must use ensureSeatCapacityTx after locking.
+func (s *Server) seatAvailable(ctx context.Context, tenantID string) (bool, error) {
+	if !s.seatAppliesToTenant(tenantID) {
+		return true, nil
+	}
+	used, err := s.activeSeatCount(ctx, tenantID)
+	if err != nil {
+		return false, err
+	}
+	return used < s.licenseSeatLimit(), nil
+}
+
+// lockSeatScopeTx serializes seat-consuming changes before they re-count. The
+// tenant row lock covers a tenant-scoped license and same-tenant creations. A
+// global license counts users in every tenant, so an advisory lock keyed by the
+// license further serializes activations across tenants.
+func (s *Server) lockSeatScopeTx(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	if !s.seatAppliesToTenant(tenantID) {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id = $1 FOR UPDATE`, tenantID); err != nil {
+		return err
+	}
+	if s.licenseSeatTenant() == "" {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`, globalSeatLockClass, s.globalSeatLockKey()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// globalSeatLockKey derives a stable advisory-lock key from the license id so
+// separate licenses (and separate deployments sharing a database) do not
+// serialize each other.
+func (s *Server) globalSeatLockKey() int32 {
+	hash := fnv.New32a()
+	if s.license != nil {
+		_, _ = hash.Write([]byte(s.license.ID))
+	}
+	return int32(hash.Sum32())
+}
+
+// ensureSeatCapacityTx re-counts inside the locked transaction and reports
+// errSeatLimit when adding `additional` active users would exceed the license.
+// It returns the current usage for audit metadata on both success and failure.
+func (s *Server) ensureSeatCapacityTx(ctx context.Context, tx pgx.Tx, tenantID string, additional int) (int, error) {
+	if !s.seatAppliesToTenant(tenantID) {
+		return 0, nil
+	}
+	used, err := s.countActiveSeats(ctx, tx, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	if used+additional > s.licenseSeatLimit() {
+		return used, errSeatLimit
+	}
+	return used, nil
+}
+
+// recordSeatLimitBlocked writes the admin audit row for a rejected activation.
+// It records only the tenant, limit and usage; the raw license token and
+// signature are never included.
+func (s *Server) recordSeatLimitBlocked(ctx context.Context, sess *adminSessionRecord, tenantID, target string, used int) {
+	limit := s.licenseSeatLimit()
+	detail := fmt.Sprintf("License seat limit reached (tenant %s, limit %d, used %d)", tenantID, limit, used)
+	if sess == nil {
+		sess = &adminSessionRecord{ActiveTenantID: tenantID}
+	}
+	s.recordAdminAudit(ctx, sess, sess.User, "license.seat_limit_blocked", target, detail, map[string]any{
+		"tenantId": tenantID, "limit": limit, "used": used,
+	})
+}
+
+// writeSeatLimit writes the fixed admin 409 used for every rejected activation.
+func writeSeatLimit(w http.ResponseWriter) {
+	writeError(w, http.StatusConflict, "SEAT_LIMIT", seatLimitMessage)
+}
+
+// rejectSeatLimit rolls back the provisioning transaction before writing the
+// audit (the audit's tenant foreign key would otherwise wait on the tenant row
+// lock still held here) and then returns the fixed admin 409.
+func (s *Server) rejectSeatLimit(ctx context.Context, w http.ResponseWriter, tx pgx.Tx, sess *adminSessionRecord, auditTenantID, target string, used int) {
+	_ = tx.Rollback(ctx)
+	s.recordSeatLimitBlocked(ctx, sess, auditTenantID, target, used)
+	writeSeatLimit(w)
+}
+
+// enforceAdminSeatTx locks the seat scope and verifies capacity for an admin
+// activation. It writes the response and returns false when the request must
+// stop (limit reached or the count could not be verified).
+func (s *Server) enforceAdminSeatTx(ctx context.Context, w http.ResponseWriter, tx pgx.Tx, sess *adminSessionRecord, tenantID, target string, additional int) bool {
+	if !s.seatAppliesToTenant(tenantID) {
+		return true
+	}
+	if err := s.lockSeatScopeTx(ctx, tx, tenantID); err != nil {
+		_ = tx.Rollback(ctx)
+		if s.logger != nil {
+			s.logger.Warn("license seat lock failed", "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
+		return false
+	}
+	used, err := s.ensureSeatCapacityTx(ctx, tx, tenantID, additional)
+	if errors.Is(err, errSeatLimit) {
+		s.rejectSeatLimit(ctx, w, tx, sess, tenantID, target, used)
+		return false
+	}
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		if s.logger != nil {
+			s.logger.Warn("license seat count failed", "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
+		return false
+	}
+	return true
+}
+
+// enforceNewTenantSeatTx gates the active owner created for a brand-new tenant.
+// Only a global license counts that owner; a tenant-scoped license does not
+// count a new, unrelated tenant. The audit is attributed to the operator's
+// tenant because the new tenant is rolled back on rejection.
+func (s *Server) enforceNewTenantSeatTx(ctx context.Context, w http.ResponseWriter, tx pgx.Tx, sess *adminSessionRecord, newTenantID, ownerEmail string) bool {
+	if !s.seatAppliesToTenant(newTenantID) {
+		return true
+	}
+	if err := s.lockSeatScopeTx(ctx, tx, newTenantID); err != nil {
+		_ = tx.Rollback(ctx)
+		if s.logger != nil {
+			s.logger.Warn("license seat lock failed", "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
+		return false
+	}
+	used, err := s.ensureSeatCapacityTx(ctx, tx, newTenantID, 1)
+	if errors.Is(err, errSeatLimit) {
+		s.rejectSeatLimit(ctx, w, tx, sess, sess.ActiveTenantID, ownerEmail, used)
+		return false
+	}
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		if s.logger != nil {
+			s.logger.Warn("license seat count failed", "err", err)
+		}
+		writeError(w, http.StatusInternalServerError, "LICENSE", "Could not verify the license seat limit")
+		return false
+	}
+	return true
+}
+
+// entitled reports whether a verified, non-expired license includes a paid
+// feature. Grace-period licenses remain usable; expired licenses do not.
+func (s *Server) entitled(feature string) bool {
+	if s.license == nil {
+		return false
+	}
+	if s.license.Status(s.licenseTime()).Expired {
+		return false
+	}
+	return s.license.HasFeature(feature)
+}
+
+func (s *Server) getEntitlements(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.licenseSnapshot(r.Context()))
+}

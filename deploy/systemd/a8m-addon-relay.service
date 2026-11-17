@@ -1,0 +1,33 @@
+[Unit]
+Description=Alt8Mail managed add-on OAuth relay
+Documentation=https://github.com/CryptRoute/Alt8Mail
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=a8m
+Group=a8m
+WorkingDirectory=/opt/a8m/current
+EnvironmentFile=/etc/a8m/addon-relay.env
+ExecStart=/opt/a8m/current/bin/a8m-addon-relay
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillSignal=SIGTERM
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

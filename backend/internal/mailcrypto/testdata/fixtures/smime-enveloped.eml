@@ -1,0 +1,24 @@
+From: Alt8Mail Test Sender <sender@example.test>
+To: Alt8Mail Test Recipient <recipient@example.test>
+Subject: S/MIME enveloped fixture
+Date: Sun, 15 Nov 2026 00:00:00 +0000
+Message-ID: <s-mime-enveloped-fixture@example.test>
+X-Alt8Mail-Fixture: phase0
+MIME-Version: 1.0
+Content-Disposition: attachment; filename="smime.p7m"
+Content-Type: application/x-pkcs7-mime; smime-type=enveloped-data; name="smime.p7m"
+Content-Transfer-Encoding: base64
+
+MIICDwYJKoZIhvcNAQcDoIICADCCAfwCAQAxggF3MIIBcwIBADBbMEMxHTAbBgNV
+BAMMFEFsdDhNYWlsIFRlc3QgU2VuZGVyMSIwIAYJKoZIhvcNAQkBFhNzZW5kZXJA
+ZXhhbXBsZS50ZXN0AhRpjXfQoae4ZQyLaBCxnRuiZrdZ8zANBgkqhkiG9w0BAQEF
+AASCAQB0GQDvX7MMpWLjvSv3e9qYKM7L7eTIYGghYnKxeHCZSXoI01hnP1eGPhjV
+JUg0/Ay4mW5OB6u5MOzF6XlghTsabKu/LUtVXv/4kLZ4TOYOvGsPi8RiQGK+WIvh
+K8omVzdeFFqv2t6XGah+EBvoQbIaHfkNZxFV2jePcmkx1VLkGQeVs1XywQVYAdSY
+J1+1ilzgtTYDtPuxY2F6HIFGK2sLBluMhouQ17XSim51+7bzAAUn9k2rH3yFpTYJ
+PMcuJ0pxX2EQAXmQUJ0ZzQACvXZb06ayI/ito5Sz8mu3Cb8KhSGE1kiQHHnnpLlG
+gWLWkVwA46O+pLu0pKcuGnuBqIOEMHwGCSqGSIb3DQEHATAdBglghkgBZQMEASoE
+EPTS5hK9vkr8qYX4Zn2vjsiAUH/Bpb9D7PjdiRjr2P6Rgr5e3lUBj/iNKm2h9KRI
+WQA/2PmlX+aIcvEO7GZKwpR8HAAmkYomxqkdvJJkgVwq4eE9mdDA1btiZBW3tpky
+C5B6
+

@@ -1,0 +1,37 @@
+{
+  "name": "alt8mail-webmail",
+  "version": "3.9.1",
+  "private": true,
+  "type": "module",
+  "description": "AI-powered enterprise email with workspace for business email, calendar, files, tasks, office and AI.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test tests/api.test.mjs tests/i18n.test.mjs tests/crypto-interop.test.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "test:a11y": "npm run test:a11y:audit && npm run test:a11y:keyboard",
+    "test:a11y:audit": "node tests/a11y-baseline.mjs",
+    "test:a11y:keyboard": "node tests/a11y-keyboard.mjs",
+    "test:all": "node tools/check-version.mjs && node tools/module-manifest.mjs && node tools/rtl-audit.mjs --fail && node scripts/i18n-perf.mjs --fail && npm run test:i18n && node --test tests/api.test.mjs tests/i18n.test.mjs tests/crypto-interop.test.mjs && node tests/e2e.mjs && node tests/i18n-e2e.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "test:i18n": "node scripts/i18n-check.mjs",
+    "i18n:sync": "node scripts/i18n-sync.mjs",
+    "i18n:check": "node scripts/i18n-check.mjs",
+    "i18n:status": "node scripts/i18n-status.mjs",
+    "i18n:lint": "node scripts/i18n-lint.mjs",
+    "test:i18n:e2e": "node tests/i18n-e2e.mjs",
+    "modules:check": "node tools/module-manifest.mjs",
+    "i18n:draft": "node scripts/i18n-draft.mjs",
+    "i18n:review": "node scripts/i18n-review.mjs",
+    "i18n:promote": "node scripts/i18n-promote.mjs",
+    "i18n:mark-drafts": "node scripts/i18n-mark-drafts.mjs",
+    "rtl:check": "node tools/rtl-audit.mjs --fail",
+    "i18n:certify": "node scripts/i18n-certify.mjs",
+    "i18n:release": "node scripts/i18n-release.mjs",
+    "i18n:perf": "node scripts/i18n-perf.mjs",
+    "test:i18n:matrix": "node tests/i18n-matrix.mjs"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "locale": "tr",
+  "catalog": "tr",
+  "label": "Türkçe",
+  "model": "qwen3.6:latest",
+  "sourceHash": "3f4e1fb836099884",
+  "startedAt": "2026-11-15T22:10:53.915Z",
+  "updatedAt": "2026-11-15T22:13:06.208Z",
+  "preservedKeys": 4892,
+  "machineKeys": 78,
+  "failedKeys": []
+}

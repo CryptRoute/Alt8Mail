@@ -1,0 +1,12 @@
+{
+  "locale": "sv",
+  "catalog": "sv",
+  "label": "Svenska",
+  "model": "qwen3.6:latest",
+  "sourceHash": "3f4e1fb836099884",
+  "startedAt": "2026-11-15T22:08:46.378Z",
+  "updatedAt": "2026-11-15T22:22:20.597Z",
+  "preservedKeys": 4892,
+  "machineKeys": 77,
+  "failedKeys": []
+}

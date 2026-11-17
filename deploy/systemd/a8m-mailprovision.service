@@ -1,0 +1,28 @@
+[Unit]
+Description=Provision Alt8Mail mailbox directories and ownership
+Documentation=https://github.com/CryptRoute/Alt8Mail
+After=postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/a8m/current
+EnvironmentFile=/etc/a8m/app.env
+ExecStart=/opt/a8m/current/bin/a8m-mailprovision
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/var/vmail -/srv/a8m-storage
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
+AmbientCapabilities=

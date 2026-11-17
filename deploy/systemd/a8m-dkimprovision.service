@@ -1,0 +1,28 @@
+[Unit]
+Description=Provision Alt8Mail DKIM signing keys for mail domains
+Documentation=https://github.com/CryptRoute/Alt8Mail
+After=postgresql.service redis-server.service rspamd.service
+Wants=postgresql.service redis-server.service rspamd.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/a8m/current
+EnvironmentFile=/etc/a8m/app.env
+ExecStart=/opt/a8m/current/bin/a8m-dkimprovision
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/var/lib/rspamd
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
+AmbientCapabilities=

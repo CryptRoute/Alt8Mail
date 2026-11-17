@@ -1,0 +1,10 @@
+BEGIN;
+DROP TABLE IF EXISTS public.dlp_false_positives;
+DROP TABLE IF EXISTS public.file_text_index;
+DROP TABLE IF EXISTS public.discovery_exports;
+DROP TABLE IF EXISTS public.file_share_requests;
+DROP TABLE IF EXISTS public.file_legal_holds;
+DROP TABLE IF EXISTS public.tenant_encryption_keys;
+ALTER TABLE public.office_document_versions DROP COLUMN IF EXISTS encryption_key_version;
+DELETE FROM schema_migrations WHERE version = '0076_governance';
+COMMIT;

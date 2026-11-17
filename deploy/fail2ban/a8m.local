@@ -1,0 +1,19 @@
+[DEFAULT]
+backend = systemd
+# Ban only the SSH port. The stock `ufw` action bans the address on every port,
+# so failed SSH logins would also take webmail and System Control offline.
+banaction = a8m-ufw-port
+# Never ban loopback: the System Control terminal authenticates to sshd over
+# 127.0.0.1, and a UFW reject for ::1/127.0.0.1 would break local mail and SSH.
+ignoreip = 127.0.0.1/8 ::1
+# One hour is long enough to stop a password spray without permanently locking
+# out a legitimate administrator who mistyped a password.
+bantime = 3600
+findtime = 600
+maxretry = 5
+
+[sshd]
+enabled = true
+# install.sh and alt8mail-update.sh replace `ssh` with the literal port so the
+# ufw action can add a port-scoped rule even when sshd listens on a custom port.
+port = ssh

@@ -1,0 +1,472 @@
+package config
+
+import (
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Config struct {
+	Env                   string
+	Listen                string
+	PublicURL             string
+	MailDomain            string
+	MailHostname          string
+	MaildirBase           string
+	DKIMDir               string
+	DKIMSelectorMap       string
+	LocalDomainsMap       string
+	PublicDir             string
+	UploadDir             string
+	DatabaseURL           string
+	DBMaxConns            int32
+	MemoryLimitMB         int
+	RedisAddr             string
+	RedisPassword         string
+	RedisDB               int
+	SessionSecret         string
+	SessionSecretPrevious string
+	// CryptoSecret wraps private mail-encryption keys. Keep it separate from
+	// SessionSecret: rotating a session secret must not make stored keys
+	// unreadable. Empty falls back to SessionSecret for development only.
+	CryptoSecret                string
+	CryptoSecretPrevious        string
+	SMIMECAFile                 string
+	SMIMELDAPURL                string
+	SMIMEPKCS11Identities       string
+	SMIMELDAPBaseDN             string
+	SMIMELDAPBindDN             string
+	SMIMELDAPBindPassword       string
+	SMIMELDAPFilter             string
+	SMIMELDAPAttribute          string
+	SMIMELDAPInsecure           bool
+	SMIMERevocationMode         string
+	SMIMERevocationTimeout      time.Duration
+	SMIMERevocationCache        time.Duration
+	SMIMERevocationAllowPrivate bool
+	CSRFSecret                  string
+	CookieSecure                bool
+	SessionTTL                  time.Duration
+	RememberTTL                 time.Duration
+	StaticCacheBust             string
+	ReadHeaderTimeout           time.Duration
+
+	IMAPAddr              string
+	IMAPUser              string
+	IMAPPassword          string
+	IMAPMasterUser        string
+	IMAPMasterPassword    string
+	IMAPTLSName           string
+	SMTPAddr              string
+	SMTPTLSName           string
+	ManageSieveAddr       string
+	ManageSieveTLSName    string
+	MailCAFile            string
+	IMAPSyncInterval      time.Duration
+	IMAPPollInterval      time.Duration
+	IMAPIdle              bool
+	MailWorkerConcurrency int
+	OrphanSweepInterval   time.Duration
+	OrphanGracePeriod     time.Duration
+	ImportScan            bool
+	ImportScanMaxMB       int
+	ClamAVAddr            string
+
+	DemoMode      bool
+	DemoEmail     string
+	DemoPassword  string
+	DemoUserEmail string
+
+	WebAuthnRPID     string
+	WebAuthnOrigins  []string
+	PushVAPIDKeyFile string
+
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCRedirectURL  string
+	OIDCDisplayName  string
+	OIDCEmailDomains []string
+
+	SAMLIDPMetadataURL  string
+	SAMLIDPMetadataFile string
+	SAMLSPEntityID      string
+	SAMLSPCertFile      string
+	SAMLSPKeyFile       string
+	SAMLDisplayName     string
+	SAMLEmailDomains    []string
+	// SAMLEmailAttribute is the exact SAML Attribute Name that carries the
+	// user's email. Empty means the assertion NameID must itself be an email.
+	SAMLEmailAttribute string
+	// SAMLMFAContexts are additional exact AuthnContextClassRef values that
+	// count as strong MFA evidence for the tenant MFA policy.
+	SAMLMFAContexts []string
+
+	S3Endpoint                 string
+	S3Region                   string
+	S3Bucket                   string
+	S3AccessKey                string
+	S3SecretKey                string
+	S3UseSSL                   bool
+	S3PathStyle                bool
+	GoogleClientID             string
+	GoogleClientSecret         string
+	GoogleMailClientID         string
+	GoogleMailClientSecret     string
+	GoogleMailOAuthDisabled    bool
+	DropboxClientID            string
+	DropboxClientSecret        string
+	MicrosoftClientID          string
+	MicrosoftClientSecret      string
+	MicrosoftMailClientID      string
+	MicrosoftMailClientSecret  string
+	MicrosoftMailTenant        string
+	MicrosoftMailOAuthDisabled bool
+
+	AddonRelayURL       string
+	AddonRelaySecret    string
+	AddonGatewayURL     string
+	OfficeJWTSecretFile string
+
+	AdminListen       string
+	AdminDir          string
+	AdminPublicURL    string
+	AdminSessionTTL   time.Duration
+	AdminRateLimitMax int
+	AdminRateWindow   time.Duration
+
+	LicenseFile       string
+	LicensePublicKey  string
+	LicensePublicKeys string
+	// LicenseAllowConfigKey permits the old environment-supplied public key.
+	// It exists only for local development and an explicit migration window;
+	// production releases must use the compiled-in vendor trust anchor.
+	LicenseAllowConfigKey bool
+	LicensePortalURL      string
+	// LicenseTenant optionally pins the license payload's tenant claim. When
+	// set, a license whose tenant claim is missing or different is invalid.
+	LicenseTenant string
+	// LicenseUsageURL and LicenseUsageToken enable the optional deployment
+	// usage heartbeat. The heartbeat carries license identifiers, version,
+	// seat counts and enabled-feature counts only; never mail content.
+	LicenseUsageURL      string
+	LicenseUsageToken    string
+	LicenseUsageInterval time.Duration
+}
+
+func Load() (Config, error) {
+	dkimDir := env("ALT8MAIL_DKIM_DIR", "/var/lib/rspamd/dkim")
+	cfg := Config{
+		Env:                         env("ALT8MAIL_ENV", "development"),
+		Listen:                      env("ALT8MAIL_LISTEN", "127.0.0.1:8080"),
+		PublicURL:                   env("ALT8MAIL_PUBLIC_URL", "http://localhost:8001"),
+		MailDomain:                  env("ALT8MAIL_MAIL_DOMAIN", "a8m.test"),
+		MailHostname:                strings.TrimSuffix(strings.ToLower(env("ALT8MAIL_MAIL_HOSTNAME", "mail.a8m.test")), "."),
+		MaildirBase:                 env("ALT8MAIL_MAILDIR_BASE", "/var/vmail"),
+		DKIMDir:                     dkimDir,
+		DKIMSelectorMap:             env("ALT8MAIL_DKIM_SELECTOR_MAP", filepath.Join(dkimDir, "selectors.map")),
+		LocalDomainsMap:             env("ALT8MAIL_LOCAL_DOMAINS_MAP", "/var/lib/rspamd/local_domains.map"),
+		PublicDir:                   env("ALT8MAIL_PUBLIC_DIR", "./public"),
+		UploadDir:                   env("ALT8MAIL_UPLOAD_DIR", "./data/uploads"),
+		RedisAddr:                   env("ALT8MAIL_REDIS_ADDR", "127.0.0.1:6379"),
+		RedisPassword:               os.Getenv("ALT8MAIL_REDIS_PASSWORD"),
+		SessionSecret:               os.Getenv("ALT8MAIL_SESSION_SECRET"),
+		SessionSecretPrevious:       os.Getenv("ALT8MAIL_SESSION_SECRET_PREVIOUS"),
+		CryptoSecret:                os.Getenv("ALT8MAIL_CRYPTO_SECRET"),
+		CryptoSecretPrevious:        os.Getenv("ALT8MAIL_CRYPTO_SECRET_PREVIOUS"),
+		SMIMECAFile:                 os.Getenv("ALT8MAIL_SMIME_CA_FILE"),
+		SMIMELDAPURL:                os.Getenv("ALT8MAIL_SMIME_LDAP_URL"),
+		SMIMEPKCS11Identities:       os.Getenv("ALT8MAIL_SMIME_PKCS11_IDENTITIES"),
+		SMIMELDAPBaseDN:             os.Getenv("ALT8MAIL_SMIME_LDAP_BASE_DN"),
+		SMIMELDAPBindDN:             os.Getenv("ALT8MAIL_SMIME_LDAP_BIND_DN"),
+		SMIMELDAPBindPassword:       os.Getenv("ALT8MAIL_SMIME_LDAP_BIND_PASSWORD"),
+		SMIMELDAPFilter:             os.Getenv("ALT8MAIL_SMIME_LDAP_FILTER"),
+		SMIMELDAPAttribute:          os.Getenv("ALT8MAIL_SMIME_LDAP_ATTRIBUTE"),
+		SMIMELDAPInsecure:           envBool("ALT8MAIL_SMIME_LDAP_INSECURE", false),
+		SMIMERevocationMode:         strings.ToLower(env("ALT8MAIL_SMIME_REVOCATION_MODE", "off")),
+		SMIMERevocationTimeout:      time.Duration(envInt("ALT8MAIL_SMIME_REVOCATION_TIMEOUT_SECONDS", 5)) * time.Second,
+		SMIMERevocationCache:        time.Duration(envInt("ALT8MAIL_SMIME_REVOCATION_CACHE_SECONDS", 300)) * time.Second,
+		SMIMERevocationAllowPrivate: envBool("ALT8MAIL_SMIME_REVOCATION_ALLOW_PRIVATE", false),
+		CSRFSecret:                  os.Getenv("ALT8MAIL_CSRF_SECRET"),
+		CookieSecure:                envBool("ALT8MAIL_COOKIE_SECURE", false),
+		StaticCacheBust:             os.Getenv("ALT8MAIL_BUILD_ID"),
+		ReadHeaderTimeout:           10 * time.Second,
+		PushVAPIDKeyFile:            env("ALT8MAIL_PUSH_VAPID_KEY_FILE", "/etc/a8m/web_push_vapid.key"),
+		OIDCIssuer:                  strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_ISSUER")),
+		OIDCClientID:                strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_CLIENT_ID")),
+		OIDCClientSecret:            strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_CLIENT_SECRET")),
+		OIDCRedirectURL:             strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_REDIRECT_URL")),
+		OIDCDisplayName:             strings.TrimSpace(os.Getenv("ALT8MAIL_OIDC_DISPLAY_NAME")),
+		OIDCEmailDomains:            parseOIDCEmailDomains(os.Getenv("ALT8MAIL_OIDC_EMAIL_DOMAINS")),
+		SAMLIDPMetadataURL:          strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_IDP_METADATA_URL")),
+		SAMLIDPMetadataFile:         strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_IDP_METADATA_FILE")),
+		SAMLSPEntityID:              strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_SP_ENTITY_ID")),
+		SAMLSPCertFile:              strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_SP_CERT_FILE")),
+		SAMLSPKeyFile:               strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_SP_KEY_FILE")),
+		SAMLDisplayName:             strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_DISPLAY_NAME")),
+		SAMLEmailDomains:            parseSAMLEmailDomains(os.Getenv("ALT8MAIL_SAML_EMAIL_DOMAINS")),
+		SAMLEmailAttribute:          strings.TrimSpace(os.Getenv("ALT8MAIL_SAML_EMAIL_ATTRIBUTE")),
+		SAMLMFAContexts:             parseSAMLMFAContexts(os.Getenv("ALT8MAIL_SAML_MFA_AUTHN_CONTEXT_CLASSES")),
+		SessionTTL:                  12 * time.Hour,
+		RememberTTL:                 30 * 24 * time.Hour,
+		IMAPAddr:                    env("ALT8MAIL_IMAP_ADDR", "127.0.0.1:993"),
+		IMAPUser:                    os.Getenv("ALT8MAIL_IMAP_USER"),
+		IMAPMasterUser:              os.Getenv("ALT8MAIL_IMAP_MASTER_USER"),
+		IMAPTLSName:                 env("ALT8MAIL_IMAP_TLS_NAME", "mail.a8m.test"),
+		SMTPAddr:                    env("ALT8MAIL_SMTP_ADDR", "127.0.0.1:587"),
+		SMTPTLSName:                 env("ALT8MAIL_SMTP_TLS_NAME", "mail.a8m.test"),
+		ManageSieveAddr:             env("ALT8MAIL_MANAGESIEVE_ADDR", "127.0.0.1:4190"),
+		MailCAFile:                  os.Getenv("ALT8MAIL_MAIL_CA_FILE"),
+		DemoMode:                    envBool("ALT8MAIL_DEMO_MODE", false),
+		DemoEmail:                   strings.ToLower(env("ALT8MAIL_DEMO_EMAIL", "")),
+		DemoPassword:                os.Getenv("ALT8MAIL_DEMO_PASSWORD"),
+		DemoUserEmail:               strings.ToLower(env("ALT8MAIL_DEMO_USER_EMAIL", "")),
+		IMAPSyncInterval:            5 * time.Minute,
+		IMAPPollInterval:            15 * time.Second,
+		IMAPIdle:                    envBool("ALT8MAIL_IMAP_IDLE", true),
+		MailWorkerConcurrency:       8,
+		OrphanSweepInterval:         time.Hour,
+		OrphanGracePeriod:           5 * time.Minute,
+		ImportScan:                  envBool("ALT8MAIL_IMPORT_SCAN", true),
+		ImportScanMaxMB:             24,
+		ClamAVAddr:                  os.Getenv("ALT8MAIL_CLAMAV_ADDR"),
+		S3Endpoint:                  env("ALT8MAIL_S3_ENDPOINT", ""),
+		S3Region:                    env("ALT8MAIL_S3_REGION", "us-east-1"),
+		S3Bucket:                    env("ALT8MAIL_S3_BUCKET", ""),
+		S3AccessKey:                 os.Getenv("ALT8MAIL_S3_ACCESS_KEY"),
+		S3SecretKey:                 os.Getenv("ALT8MAIL_S3_SECRET_KEY"),
+		S3UseSSL:                    envBool("ALT8MAIL_S3_USE_SSL", true),
+		S3PathStyle:                 envBool("ALT8MAIL_S3_PATH_STYLE", true),
+		GoogleClientID:              os.Getenv("ALT8MAIL_GOOGLE_CLIENT_ID"),
+		GoogleClientSecret:          os.Getenv("ALT8MAIL_GOOGLE_CLIENT_SECRET"),
+		GoogleMailClientID:          os.Getenv("ALT8MAIL_GOOGLE_MAIL_CLIENT_ID"),
+		GoogleMailClientSecret:      os.Getenv("ALT8MAIL_GOOGLE_MAIL_CLIENT_SECRET"),
+		// An explicit false in app.env disables the mail OAuth flow even when
+		// a shared OIDC client ID is present. The zero value stays enabled so
+		// callers that build Config directly keep the historical behaviour.
+		GoogleMailOAuthDisabled:    !envBool("ALT8MAIL_GOOGLE_MAIL_OAUTH_ENABLED", true),
+		DropboxClientID:            os.Getenv("ALT8MAIL_DROPBOX_CLIENT_ID"),
+		DropboxClientSecret:        os.Getenv("ALT8MAIL_DROPBOX_CLIENT_SECRET"),
+		MicrosoftClientID:          os.Getenv("ALT8MAIL_MICROSOFT_CLIENT_ID"),
+		MicrosoftClientSecret:      os.Getenv("ALT8MAIL_MICROSOFT_CLIENT_SECRET"),
+		MicrosoftMailClientID:      os.Getenv("ALT8MAIL_MICROSOFT_MAIL_CLIENT_ID"),
+		MicrosoftMailClientSecret:  os.Getenv("ALT8MAIL_MICROSOFT_MAIL_CLIENT_SECRET"),
+		MicrosoftMailTenant:        env("ALT8MAIL_MICROSOFT_MAIL_TENANT", "common"),
+		MicrosoftMailOAuthDisabled: !envBool("ALT8MAIL_MICROSOFT_MAIL_OAUTH_ENABLED", true),
+		AddonRelayURL:              strings.TrimRight(env("ALT8MAIL_ADDON_RELAY_URL", ""), "/"),
+		AddonRelaySecret:           os.Getenv("ALT8MAIL_ADDON_RELAY_SECRET"),
+		AddonGatewayURL:            strings.TrimRight(env("ALT8MAIL_ADDON_GATEWAY_URL", ""), "/"),
+		OfficeJWTSecretFile:        env("ALT8MAIL_OFFICE_JWT_SECRET_FILE", "/etc/a8m/office-jwt-secret"),
+		AdminListen:                env("ALT8MAIL_ADMIN_LISTEN", "127.0.0.1:8081"),
+		AdminDir:                   env("ALT8MAIL_ADMIN_DIR", "./admin"),
+		AdminPublicURL:             strings.TrimRight(env("ALT8MAIL_ADMIN_URL", ""), "/"),
+		AdminSessionTTL:            8 * time.Hour,
+		AdminRateLimitMax:          10,
+		AdminRateWindow:            10 * time.Minute,
+		LicenseFile:                strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_FILE")),
+		LicensePublicKey:           strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_PUBLIC_KEY")),
+		LicensePublicKeys:          strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_PUBLIC_KEYS")),
+		LicenseAllowConfigKey:      envBool("ALT8MAIL_LICENSE_ALLOW_CONFIG_KEY", false),
+		LicensePortalURL:           strings.TrimRight(strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_PORTAL_URL")), "/"),
+		LicenseTenant:              strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_TENANT")),
+		LicenseUsageURL:            strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_USAGE_URL")),
+		LicenseUsageToken:          strings.TrimSpace(os.Getenv("ALT8MAIL_LICENSE_USAGE_TOKEN")),
+		LicenseUsageInterval:       24 * time.Hour,
+	}
+	if hours, err := strconv.Atoi(env("ALT8MAIL_LICENSE_USAGE_INTERVAL_HOURS", "24")); err == nil && hours >= 1 && hours <= 168 {
+		cfg.LicenseUsageInterval = time.Duration(hours) * time.Hour
+	}
+	if hours, err := strconv.Atoi(env("ALT8MAIL_ADMIN_SESSION_HOURS", "8")); err == nil && hours >= 1 && hours <= 72 {
+		cfg.AdminSessionTTL = time.Duration(hours) * time.Hour
+	}
+	if limit, err := strconv.Atoi(env("ALT8MAIL_ADMIN_RATE_LIMIT", "10")); err == nil && limit >= 3 && limit <= 100 {
+		cfg.AdminRateLimitMax = limit
+	}
+	if minutes, err := strconv.Atoi(env("ALT8MAIL_ADMIN_RATE_WINDOW_MINUTES", "10")); err == nil && minutes >= 1 && minutes <= 120 {
+		cfg.AdminRateWindow = time.Duration(minutes) * time.Minute
+	}
+	publicURL, _ := url.Parse(cfg.PublicURL)
+	defaultRPID := publicURL.Hostname()
+	if defaultRPID == "" {
+		defaultRPID = "localhost"
+	}
+	cfg.ManageSieveTLSName = env("ALT8MAIL_MANAGESIEVE_TLS_NAME", cfg.IMAPTLSName)
+	cfg.WebAuthnRPID = env("ALT8MAIL_WEBAUTHN_RPID", defaultRPID)
+	origins := strings.TrimSpace(os.Getenv("ALT8MAIL_WEBAUTHN_ORIGINS"))
+	if origins == "" {
+		cfg.WebAuthnOrigins = []string{strings.TrimRight(cfg.PublicURL, "/")}
+	} else {
+		for _, origin := range strings.Split(origins, ",") {
+			if origin = strings.TrimSpace(origin); origin != "" {
+				cfg.WebAuthnOrigins = append(cfg.WebAuthnOrigins, strings.TrimRight(origin, "/"))
+			}
+		}
+	}
+	if seconds, err := strconv.Atoi(env("ALT8MAIL_IMAP_SYNC_SECONDS", "300")); err == nil && seconds >= 30 {
+		cfg.IMAPSyncInterval = time.Duration(seconds) * time.Second
+	}
+	if seconds, err := strconv.Atoi(env("ALT8MAIL_ORPHAN_SWEEP_SECONDS", "3600")); err == nil && seconds >= 60 {
+		cfg.OrphanSweepInterval = time.Duration(seconds) * time.Second
+	}
+	if seconds, err := strconv.Atoi(env("ALT8MAIL_ORPHAN_GRACE_SECONDS", "300")); err == nil && seconds >= 60 {
+		cfg.OrphanGracePeriod = time.Duration(seconds) * time.Second
+	}
+	if megabytes, err := strconv.Atoi(env("ALT8MAIL_IMPORT_SCAN_MAX_MB", "24")); err == nil && megabytes >= 1 && megabytes <= 64 {
+		cfg.ImportScanMaxMB = megabytes
+	}
+	if seconds, err := strconv.Atoi(env("ALT8MAIL_IMAP_POLL_SECONDS", "15")); err == nil && seconds >= 5 {
+		cfg.IMAPPollInterval = time.Duration(seconds) * time.Second
+	}
+	if workers, err := strconv.Atoi(env("ALT8MAIL_MAIL_WORKER_CONCURRENCY", "8")); err == nil && workers >= 1 && workers <= 64 {
+		cfg.MailWorkerConcurrency = workers
+	}
+	if file := strings.TrimSpace(os.Getenv("ALT8MAIL_IMAP_PASSWORD_FILE")); file != "" {
+		password, err := os.ReadFile(file)
+		if err != nil {
+			return Config{}, fmt.Errorf("read ALT8MAIL_IMAP_PASSWORD_FILE: %w", err)
+		}
+		cfg.IMAPPassword = strings.TrimSpace(string(password))
+	} else {
+		cfg.IMAPPassword = os.Getenv("ALT8MAIL_IMAP_PASSWORD")
+	}
+	if file := strings.TrimSpace(os.Getenv("ALT8MAIL_IMAP_MASTER_PASSWORD_FILE")); file != "" {
+		password, err := os.ReadFile(file)
+		if err != nil {
+			return Config{}, fmt.Errorf("read ALT8MAIL_IMAP_MASTER_PASSWORD_FILE: %w", err)
+		}
+		cfg.IMAPMasterPassword = strings.TrimSpace(string(password))
+	} else {
+		cfg.IMAPMasterPassword = os.Getenv("ALT8MAIL_IMAP_MASTER_PASSWORD")
+	}
+
+	dbHost := env("ALT8MAIL_DB_HOST", "127.0.0.1")
+	dbPort := env("ALT8MAIL_DB_PORT", "5432")
+	dbName := env("ALT8MAIL_DB_NAME", "a8m")
+	dbUser := env("ALT8MAIL_DB_USER", "a8m_app")
+	dbPassword := os.Getenv("ALT8MAIL_DB_PASSWORD")
+	sslMode := env("ALT8MAIL_DB_SSLMODE", "disable")
+	cfg.DatabaseURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		dbUser, urlEscape(dbPassword), dbHost, dbPort, dbName, sslMode)
+
+	maxConns, err := strconv.Atoi(env("ALT8MAIL_DB_MAX_CONNS", "20"))
+	if err != nil || maxConns < 1 {
+		return Config{}, fmt.Errorf("ALT8MAIL_DB_MAX_CONNS must be a positive integer")
+	}
+	cfg.DBMaxConns = int32(maxConns)
+	if value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("ALT8MAIL_MEMORY_LIMIT_MB"))); err == nil && value > 0 {
+		cfg.MemoryLimitMB = value
+	} else {
+		cfg.MemoryLimitMB = defaultMemoryLimitMB(hostMemoryMB())
+	}
+	applyHostDefaults(&cfg)
+	cfg.RedisDB, _ = strconv.Atoi(env("ALT8MAIL_REDIS_DB", "0"))
+
+	if cfg.SessionSecret == "" || cfg.CSRFSecret == "" {
+		return Config{}, fmt.Errorf("ALT8MAIL_SESSION_SECRET and ALT8MAIL_CSRF_SECRET are required")
+	}
+	if cfg.Env == "production" && !cfg.CookieSecure {
+		return Config{}, fmt.Errorf("ALT8MAIL_COOKIE_SECURE must be true in production")
+	}
+	if cfg.Env == "production" && cfg.DemoMode {
+		return Config{}, fmt.Errorf("staging demo login cannot be enabled in production")
+	}
+	if cfg.DemoMode && (cfg.DemoEmail == "" || cfg.DemoPassword == "" || cfg.DemoUserEmail == "") {
+		return Config{}, fmt.Errorf("ALT8MAIL_DEMO_EMAIL, ALT8MAIL_DEMO_PASSWORD and ALT8MAIL_DEMO_USER_EMAIL are required when demo mode is on")
+	}
+	return cfg, nil
+}
+
+func env(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+// parseOIDCEmailDomains splits the comma-separated OIDC sign-in allowlist.
+func parseOIDCEmailDomains(value string) []string {
+	return parseEmailDomains(value)
+}
+
+// parseSAMLEmailDomains splits the comma-separated SAML sign-in allowlist. It
+// shares normalization with OIDC so both providers apply the same exact-match
+// rules.
+func parseSAMLEmailDomains(value string) []string {
+	return parseEmailDomains(value)
+}
+
+// parseSAMLMFAContexts splits the comma-separated additional
+// AuthnContextClassRef allowlist. Values keep their case because SAML class
+// references are compared exactly, and only surrounding whitespace, empty
+// entries and exact duplicates are removed.
+func parseSAMLMFAContexts(value string) []string {
+	contexts := []string{}
+	seen := map[string]bool{}
+	for _, item := range strings.Split(value, ",") {
+		context := strings.TrimSpace(item)
+		if context == "" || seen[context] {
+			continue
+		}
+		seen[context] = true
+		contexts = append(contexts, context)
+	}
+	return contexts
+}
+
+// parseEmailDomains splits a comma-separated sign-in allowlist. Entries are
+// trimmed and lowercased, an optional leading "@" is accepted, and duplicates
+// and empty entries are dropped so an operator cannot accidentally loosen the
+// allowlist with punctuation.
+func parseEmailDomains(value string) []string {
+	domains := []string{}
+	seen := map[string]bool{}
+	for _, item := range strings.Split(value, ",") {
+		domain := strings.ToLower(strings.TrimSpace(item))
+		domain = strings.TrimPrefix(domain, "@")
+		if domain == "" || seen[domain] {
+			continue
+		}
+		seen[domain] = true
+		domains = append(domains, domain)
+	}
+	return domains
+}
+
+// urlEscape escapes a password for use in a URL DSN. pgx accepts URL DSNs; the
+// password is the only user-controlled component that commonly contains '@',
+// ':' or '/'. Keep the escaping local so deployments cannot leak it in logs.
+func urlEscape(value string) string {
+	replacer := strings.NewReplacer(
+		"%", "%25", " ", "%20", "@", "%40", ":", "%3A", "/", "%2F",
+		"?", "%3F", "#", "%23", "&", "%26", "+", "%2B", "=", "%3D",
+	)
+	return replacer.Replace(value)
+}
