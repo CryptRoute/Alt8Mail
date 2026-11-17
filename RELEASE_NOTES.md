@@ -1,3 +1,29 @@
+# Alt8Mail 3.9.3
+
+Release date: 2026-11-18. One-click community-to-enterprise upgrades and a
+cleaner community admin experience.
+
+## 3.9.3 upgrade and operations
+
+- **One-click enterprise upgrade.** System Control now starts an upgrade in
+  the licensing portal, waits for the signed licence and private enterprise
+  bundle, verifies the SHA-256 checksum and Ed25519 release signature, installs
+  the bundle beside the running release and restarts the services. The previous
+  release stays available if any step fails.
+- **Installer carries the vendor defaults.** A release built with the licensing
+  portal URL and trust anchors configures the licence path, public key, key id
+  and portal URL during installation. Operators no longer edit license
+  variables over SSH before the first upgrade.
+- **Operator console download and handoff.** The licensing console exposes a
+  Download action for issued licences and a Send to Alt8Mail action that returns
+  an existing licence to a deployment waiting for an upgrade.
+- **Community admin gating.** Paid administration pages are hidden in community
+  builds and direct links show an enterprise-required panel instead of an API
+  error. Community builds continue to serve all core mail, admin and control
+  features.
+- **Localization.** New admin and upgrade strings, including sidebar category
+  labels, are present in every console locale catalog.
+
 # Alt8Mail 3.9.2
 
 Release date: 2026-11-17. First clean community-edition baseline after the

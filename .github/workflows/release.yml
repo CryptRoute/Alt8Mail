@@ -28,6 +28,8 @@ jobs:
           A8M_LICENSE_PUBLIC_KEY: ${{ secrets.ALT8MAIL_LICENSE_PUBLIC_KEY }}
           A8M_LICENSE_PUBLIC_KEY_ID: ${{ vars.ALT8MAIL_LICENSE_PUBLIC_KEY_ID }}
           A8M_LICENSE_PUBLIC_KEYS: ${{ vars.ALT8MAIL_LICENSE_PUBLIC_KEYS }}
+          A8M_LICENSE_PORTAL_URL: ${{ vars.ALT8MAIL_LICENSE_PORTAL_URL }}
+          A8M_ENTERPRISE_RELEASE_PUBLIC_KEY: ${{ vars.ALT8MAIL_ENTERPRISE_RELEASE_PUBLIC_KEY }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           bash scripts/build-release.sh "$version" dist

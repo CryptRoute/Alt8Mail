@@ -115,6 +115,9 @@ exec > >(tee -a "$LOG") 2>&1
 # that directory world-executable so PostgreSQL client tools do not warn.
 cd /tmp
 
+if [[ -f "$CURRENT/enterprise.json" ]]; then
+  die "this deployment is running the enterprise release; use Control → License → Upgrade or the private enterprise release channel"
+fi
 CURRENT_VERSION="$(tr -d '[:space:]' < "$CURRENT/VERSION")"
 [[ -n "$CURRENT_VERSION" ]] || die "cannot read the installed version"
 

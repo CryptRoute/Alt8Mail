@@ -139,7 +139,21 @@ CONTROL_LICENSE_PUBLIC_KEY=
 CONTROL_LICENSE_WARNING_PERCENT=80
 CONTROL_LICENSE_PORTAL_URL=
 CONTROL_LICENSE_ALLOW_CONFIG_KEY=false
+CONTROL_ENTERPRISE_RELEASE_PUBLIC_KEY=
 EOF
+
+# Vendor defaults consumed by install.sh. The release is built once with the
+# portal URL and public trust anchors, so a customer never edits license
+# variables by hand after installing the community release.
+cat > "$STAGE/deploy/release-license.env" <<EOF
+A8M_RELEASE_LICENSE_PORTAL_URL='${A8M_LICENSE_PORTAL_URL:-}'
+A8M_RELEASE_LICENSE_PUBLIC_KEY='${A8M_LICENSE_PUBLIC_KEY:-}'
+A8M_RELEASE_LICENSE_PUBLIC_KEY_ID='${A8M_LICENSE_PUBLIC_KEY_ID:-}'
+A8M_RELEASE_ENTERPRISE_RELEASE_PUBLIC_KEY='${A8M_ENTERPRISE_RELEASE_PUBLIC_KEY:-}'
+EOF
+if [[ -z "${A8M_LICENSE_PORTAL_URL:-}" ]]; then
+  echo "WARNING: A8M_LICENSE_PORTAL_URL is unset; the installer cannot offer one-click upgrades" >&2
+fi
 
 # Normalize line endings for text files. The repository is edited on Windows
 # as well as Linux, but the installer, systemd units and mail daemons require LF.

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
 )
 
 var backupContentNames = map[string]string{

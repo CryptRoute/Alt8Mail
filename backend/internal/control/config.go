@@ -48,6 +48,7 @@ type Config struct {
 	WebRoot               string
 	WebNetRoot            string
 	AppEnvFile            string
+	ControlEnvFile        string
 	WebUpstream           string
 	AdminUpstream         string
 	WebHealthURL          string
@@ -67,6 +68,11 @@ type Config struct {
 	LicensePortalURL      string
 	LicenseGroup          string
 	LicenseWarningPercent int
+	EnterpriseInstallRoot string
+	EnterpriseStateDir    string
+	DeploymentIDFile      string
+	EnterpriseInstallCmd  string
+	EnterpriseReleaseKey  string
 	IngestInterval        time.Duration
 	HealthInterval        time.Duration
 	MetricsInterval       time.Duration
@@ -113,6 +119,7 @@ func LoadConfig() (Config, error) {
 		WebRoot:             env("CONTROL_WEB_ROOT", "/var/www/a8m"),
 		WebNetRoot:          env("CONTROL_WEB_NET_ROOT", "/var/www/a8m-webnet"),
 		AppEnvFile:          env("CONTROL_APP_ENV", "/etc/a8m/app.env"),
+		ControlEnvFile:      env("CONTROL_CONTROL_ENV", "/etc/a8m/control.env"),
 		WebUpstream:         env("CONTROL_WEB_UPSTREAM", "127.0.0.1:8080"),
 		AdminUpstream:       env("CONTROL_ADMIN_UPSTREAM", "127.0.0.1:8081"),
 		WebHealthURL:        env("CONTROL_WEB_HEALTH_URL", "http://127.0.0.1:8080/api/health"),
@@ -134,6 +141,11 @@ func LoadConfig() (Config, error) {
 		LicensePortalURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("CONTROL_LICENSE_PORTAL_URL")), "/"),
 		LicenseGroup:          env("CONTROL_LICENSE_GROUP", "a8m"),
 		LicenseWarningPercent: 80,
+		EnterpriseInstallRoot: env("CONTROL_ENTERPRISE_INSTALL_ROOT", "/opt/a8m"),
+		EnterpriseStateDir:    env("CONTROL_ENTERPRISE_STATE_DIR", "/var/lib/alt8mail-control"),
+		DeploymentIDFile:      env("CONTROL_DEPLOYMENT_ID_FILE", "/etc/a8m/deployment.id"),
+		EnterpriseInstallCmd:  env("CONTROL_ENTERPRISE_INSTALL_COMMAND", ""),
+		EnterpriseReleaseKey:  strings.TrimSpace(os.Getenv("CONTROL_ENTERPRISE_RELEASE_PUBLIC_KEY")),
 		IngestInterval:        envDuration("CONTROL_INGEST_INTERVAL", 8*time.Second),
 		HealthInterval:        envDuration("CONTROL_HEALTH_INTERVAL", 15*time.Second),
 		MetricsInterval:       envDuration("CONTROL_METRICS_INTERVAL", 5*time.Second),

@@ -78,6 +78,7 @@ type licenseStatus struct {
 func (s *Server) registerLicenseRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /control/api/license", s.require("settings.write", s.handleLicenseStatus))
 	mux.HandleFunc("POST /control/api/license", s.require("settings.write", s.handleLicenseUpload))
+	s.registerLicenseUpgradeRoutes(mux)
 }
 
 func (s *Server) hasPaidFeature(feature string) bool {

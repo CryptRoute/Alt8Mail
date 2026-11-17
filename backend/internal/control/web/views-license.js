@@ -1,5 +1,5 @@
 /* System Control — offline license status, seat metering and token upload. */
-import * as ui from './ui.js?v=3.9.2';
+import * as ui from './ui.js?v=3.9.3';
 
 const esc = ui.esc;
 const fmt = {
@@ -358,6 +358,14 @@ export async function renderLicense(ctx) {
         </section>
       </div>
       <div class="stack">
+        <section class="card" id="license-upgrade-card">
+          <header class="card-head"><div><h3>One-click upgrade</h3><p>Install the signed license and private enterprise release</p></div>${ui.badge('Portal', 'info', 'sparkles')}</header>
+          <div class="card-body">
+            <p class="form-note">Start a trial or purchase in the licensing portal. Alt8Mail claims the signed license automatically, installs the enterprise release and restarts the services.</p>
+            <div id="license-upgrade-status" aria-live="polite"><p class="form-note">No upgrade in progress.</p></div>
+            <div class="form-actions"><span class="form-note">Requires the signing portal and a published enterprise bundle.</span><div class="form-actions-right"><button class="btn btn-primary" type="button" id="license-upgrade-start">${ui.icon('sparkles', 15)} Upgrade to Enterprise</button></div></div>
+          </div>
+        </section>
         <section class="card" id="license-upload-card">
           <header class="card-head"><div><h3>Upload license</h3><p>Validate and install a signed token</p></div>${ui.badge('64 KiB max', 'neutral', 'upload')}</header>
           <div class="card-body">
@@ -413,6 +421,48 @@ export async function renderLicense(ctx) {
   const fileName = document.getElementById('license-file-name');
   const resultHost = document.getElementById('license-upload-result');
   const submit = document.getElementById('license-upload-submit');
+  const upgradeStatus = document.getElementById('license-upgrade-status');
+  const upgradeStart = document.getElementById('license-upgrade-start');
+  let upgradeTimer = null;
+
+  const renderUpgrade = (job) => {
+    if (!job || !job.phase || job.phase === 'idle') {
+      if (upgradeStatus) upgradeStatus.innerHTML = '<p class="form-note">No upgrade in progress.</p>';
+      return;
+    }
+    const tone = job.phase === 'error' ? 'critical' : job.phase === 'complete' ? 'success' : 'info';
+    const title = job.phase === 'error' ? 'Upgrade failed' : job.phase === 'complete' ? 'Upgrade complete' : 'Upgrade in progress';
+    if (upgradeStatus) {
+      upgradeStatus.innerHTML = ui.inlineNotice(tone, title, esc(job.message || job.error || job.phase)) +
+        (job.licenseId ? `<p class="form-note mono">${esc(job.licenseId)}${job.version ? ' · ' + esc(job.version) : ''}</p>` : '');
+    }
+    if (upgradeTimer) { clearTimeout(upgradeTimer); upgradeTimer = null; }
+    if (job.phase === 'complete') { setTimeout(load, 1200); return; }
+    if (job.phase !== 'error') upgradeTimer = setTimeout(pollUpgrade, 3000);
+  };
+
+  const pollUpgrade = async () => {
+    try {
+      const job = await ctx.api('/control/api/license/upgrade/status');
+      renderUpgrade(job);
+    } catch (error) {
+      if (upgradeStatus) upgradeStatus.innerHTML = ui.inlineNotice('warning', 'Upgrade status unavailable', esc(error.message || 'Could not read the upgrade status.'));
+    }
+  };
+
+  upgradeStart?.addEventListener('click', async () => {
+    upgradeStart.disabled = true;
+    try {
+      const data = await ctx.api('/control/api/license/upgrade/start', { method: 'POST', body: {} });
+      if (data?.portalUrl) window.open(data.portalUrl, '_blank', 'noopener');
+      if (upgradeStatus) upgradeStatus.innerHTML = ui.inlineNotice('info', 'Portal opened', 'Complete the trial or purchase in the licensing portal. This page updates automatically.');
+      upgradeTimer = setTimeout(pollUpgrade, 2500);
+    } catch (error) {
+      if (upgradeStatus) upgradeStatus.innerHTML = ui.inlineNotice('critical', 'Could not start the upgrade', esc(error.message || 'Try again.'));
+    } finally {
+      upgradeStart.disabled = false;
+    }
+  });
 
   const paint = () => {
     if (statusBody) statusBody.innerHTML = statusMarkup(license);

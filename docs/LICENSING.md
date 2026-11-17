@@ -13,7 +13,7 @@ offline signing device. Set `A8M_LICENSE_PUBLIC_KEY` (and optionally
 `A8M_LICENSE_PUBLIC_KEY_ID`) when building a release:
 
 ```bash
-A8M_LICENSE_PUBLIC_KEY=<base64-ed25519-public-key> A8M_LICENSE_PUBLIC_KEY_ID=2026-11   bash scripts/build-release.sh 3.9.2 dist
+A8M_LICENSE_PUBLIC_KEY=<base64-ed25519-public-key> A8M_LICENSE_PUBLIC_KEY_ID=2026-11 A8M_LICENSE_PORTAL_URL=https://licenses.example.com   bash scripts/build-release.sh 3.9.3 dist
 ```
 
 The GitHub release workflow reads the public key from the repository secret
@@ -370,6 +370,42 @@ detail:
 The webmail bootstrap exposes a redacted `license` snapshot with edition,
 state, seats, features, remaining days and expiry. It never exposes the token
 or signature. `GET /api/entitlements` returns the same snapshot.
+
+## One-click enterprise upgrade
+
+A release built with `A8M_LICENSE_PORTAL_URL` and the vendor trust anchors
+offers **Infrastructure → License → One-click upgrade** in System Control.
+The flow is:
+
+1. Control creates a deployment id, records a pending upgrade under
+   `/var/lib/alt8mail-control/license-upgrade.json` and opens the portal's
+   `/upgrade` page with the deployment id and a Control callback URL.
+2. The customer starts a trial, buys a plan or signs in to an existing account.
+   The portal issues a signed licence and returns a one-time claim code to the
+   Control callback.
+3. Control claims the licence once, verifies it with the compiled trust anchor
+   or `CONTROL_LICENSE_PUBLIC_KEY`, writes the shared token file, and updates
+   both `app.env` and `control.env` with the licence path and public key.
+4. If the portal publishes an enterprise bundle, Control downloads it, checks
+   the SHA-256, verifies the Ed25519 release signature (when a release public
+   key is configured), extracts it safely, copies the current release, overlays
+   the enterprise binaries and switches `/opt/a8m/current` to the new release.
+5. Control restarts the webmail, admin and control services. The previous
+   release stays on disk, and a failed step leaves the running release untouched.
+
+The portal serves the newest
+`alt8mail-enterprise-<version>-linux-amd64.tar.gz` from
+`PORTAL_ENTERPRISE_BUNDLE_DIR`, together with its `.sha256`, `.sig` and
+`enterprise-release-public.key`. Build an enterprise release with
+`build-enterprise.sh` and `ENTERPRISE_RELEASE_SIGNING_KEY`; the signature covers
+the tarball digest using the `a8m-enterprise-release-sha256:<hex>` message.
+`CONTROL_ENTERPRISE_RELEASE_PUBLIC_KEY` pins the release key; when it is empty,
+Control uses the public key returned by the portal for the same response.
+
+Existing customers can also download a licence from the portal console or use
+**Send to Alt8Mail** while a deployment is waiting for a claim. In both cases the
+portal returns the signed token through the same one-time callback, so an
+operator never has to copy a token onto the server.
 
 ## Paid feature keys (Phase 3–6)
 
