@@ -663,8 +663,9 @@ and requires a backup.
 
 The Phase 1 SCIM migration `0061_scim` is additive and has a matching rollback.
 `tools/migration-upgrade-smoke.sh` verifies the supported upgrade path on a
-disposable PostgreSQL: it applies the migrations shipped at `v0.27.6`, upgrades
-with the current tree, rolls the new migrations back, reapplies them and checks
+disposable PostgreSQL: it applies the current migrations through baseline
+`0060` (override with `A8M_UPGRADE_BASE_VERSION`), upgrades with the remaining
+current migrations, rolls them back, reapplies them and checks
 `schema_migrations`. Run it before a release that includes new migrations.
 
 Connected-account create/test/update/delete/sync and OAuth starts are limited to

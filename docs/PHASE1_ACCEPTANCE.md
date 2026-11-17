@@ -20,7 +20,7 @@ external system/credential and is documented for the operator run).
 | 1F White-label and custom webmail domains | done | Paid white_label branding, login logo/links/attribution, custom hostname resolution against Web Net route/cert inventory, migration 0062, `docs/WHITE_LABEL.md`; unit + PostgreSQL integration tests |
 | 1G Per-mailbox/per-folder restore and DR | done | Additive Maildir preview/apply, `control.restore_jobs` (migration 0063), Control UI/audit, `docs/DR.md`; unit path/extraction tests plus disposable-PostgreSQL preview/job/cross-tenant integration twice, including migration rollback/reapply |
 | 1H Accessibility baseline and keyboard gate | done | `tools/a11y-audit.mjs`, `tests/a11y-baseline.mjs`, `tests/a11y-keyboard.mjs`, `docs/ACCESSIBILITY.md`; 9 surfaces audited at 0 Critical/High, keyboard compose/send and Arabic RTL 360px pass |
-| Upgrade/rollback from v0.27.6 | done | `tools/migration-upgrade-smoke.sh` (apply tag migrations, upgrade, rollback new, reapply) |
+| Upgrade/rollback smoke | done | `tools/migration-upgrade-smoke.sh` (apply baseline migrations, upgrade, rollback new, reapply) |
 
 ## Release acceptance checklist
 
