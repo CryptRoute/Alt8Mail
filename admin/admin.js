@@ -28,6 +28,7 @@ const state = {
   admin: null,
   tenants: [],
   activeTenant: null,
+  enterprise: false,
   stats: null,
   policy: null,
   catalog: [],
@@ -175,6 +176,9 @@ function updateChrome() {
   const pending = state.stats?.domains?.pending ?? 0;
   $("#navDomainState").textContent = pending > 0 ? String(pending) : "";
   $$("[data-permission]").forEach((element) => { element.hidden = !can(element.dataset.permission); });
+  $$(".nav-link[data-view]").forEach((element) => {
+    if (!state.enterprise && paidViews.has(element.dataset.view)) element.hidden = true;
+  });
   $("#systemNav").hidden = !can("system.tenants.manage");
   const activeTenant = state.activeTenant?.status;
   $("#tenantPicker").title = activeTenant === "suspended" ? "This organization is suspended" : "Switch organization";
@@ -223,6 +227,7 @@ async function loadBootstrap() {
   state.policy = data.policy;
   state.catalog = data.catalog || [];
   state.permissions = data.permissions || [];
+  state.enterprise = data.enterprise === true;
   state.scimURL = String(data.server?.scimURL || "");
   if (window.A8M_I18N) {
     let language = data.admin?.language || "";
@@ -319,6 +324,8 @@ async function logout() {
    Navigation / route
 ------------------------------------------------------------ */
 const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "team-inboxes", "org-units", "domains", "roles", "provisioning", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "tenants", "settings"]);
+const paidViews = new Set(["team-inboxes", "import-mailboxes", "provisioning", "ai", "compliance", "integrations"]);
+const enterpriseViewTitles = { "team-inboxes": "Team inboxes", "import-mailboxes": "Import mailboxes", provisioning: "Provisioning", ai: "AI assistant", compliance: "Compliance", integrations: "Integrations" };
 
 function route() {
   if (!state.admin) return;
@@ -333,6 +340,7 @@ function route() {
   state.view = views.has(view) ? view : "overview";
   const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "team-inboxes": "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", provisioning: "roles.manage", policies: "policies.read", addons: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
   if (required && !can(required)) { state.view = "overview"; location.hash = "#/overview"; return; }
+  if (!state.enterprise && paidViews.has(state.view)) { renderEnterpriseRequired(state.view); return; }
   const navView = ["user-detail", "import-users", "import-mailboxes"].includes(state.view) ? "users" : state.view;
   $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === navView));
   $("#sidebar").classList.remove("open");
@@ -456,6 +464,11 @@ function viewError(error) {
 /* ------------------------------------------------------------
    Overview
 ------------------------------------------------------------ */
+function renderEnterpriseRequired(view) {
+  const title = enterpriseViewTitles[view] || "Enterprise capability";
+  $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>${esc(title)}</h1><p>This capability is part of Alt8Mail Enterprise.</p></div></div><div class="card card-pad"><div class="empty">${icon("lock", 22)}<h3>Enterprise edition required</h3><p>The community build does not include ${esc(title)}. Install the Alt8Mail enterprise release and upload a valid license to use it.</p></div></div>`;
+}
+
 async function renderOverview() {
   loading("Overview");
   try {
@@ -502,7 +515,7 @@ async function renderOverview() {
           <div class="quick-grid">
             ${can("users.create") ? quick("users", "plus", "Add a user", "Create a mailbox and identity", "new-user") : ""}
             ${can("users.create") ? quick("list", "arrow-up", "Import users", "CSV or Excel account creation", "import-users") : ""}
-            ${can("users.create") ? quick("mail", "arrow-up", "Import mailboxes", "Bring mail from another provider", "import-mailboxes") : ""}
+            ${can("users.create") && state.enterprise ? quick("mail", "arrow-up", "Import mailboxes", "Bring mail from another provider", "import-mailboxes") : ""}
             ${can("groups.manage") ? quick("group", "plus", "Create a group", "Distribution and security groups", "new-group") : ""}
             ${can("domains.manage") ? quick("globe", "plus", "Add a domain", "Start DNS verification", "new-domain") : ""}
             ${can("policies.manage") ? quick("shield", "sliders", "Review policies", "MFA, mail and sharing controls", "go-policies") : ""}
@@ -574,7 +587,7 @@ function renderUsersView() {
   $("#viewRoot").innerHTML = `
     <div class="view-head">
       <div><h1>Users</h1><p>Manage identities, access, quotas and mailbox configuration across ${esc(state.activeTenant.name)}.</p></div>
-      <div class="view-actions">${can("users.create") ? `<button class="btn secondary" data-action="import-users">${icon("list")}Import users</button><button class="btn secondary" data-action="import-mailboxes">${icon("refresh")}Import mailboxes</button><button class="btn primary" data-action="new-user">${icon("plus")}Add user</button>` : ""}</div>
+      <div class="view-actions">${can("users.create") ? `<button class="btn secondary" data-action="import-users">${icon("list")}Import users</button>${state.enterprise ? `<button class="btn secondary" data-action="import-mailboxes">${icon("refresh")}Import mailboxes</button>` : ""}<button class="btn primary" data-action="new-user">${icon("plus")}Add user</button>` : ""}</div>
     </div>
     <div class="toolbar">
       <div class="search-box">${icon("search")}<input id="userSearch" type="search" placeholder="Search name, email, title…" value="${esc(state.userFilter.q)}"></div>
@@ -2947,7 +2960,11 @@ document.addEventListener("click", async (event) => {
     const action = actionEl.dataset.action;
     if (action === "new-user") return openNewUserModal();
     if (action === "import-users") { location.hash = "#/users/import"; return; }
-    if (action === "import-mailboxes") { location.hash = "#/mailboxes/import"; return; }
+    if (action === "import-mailboxes") {
+      if (!state.enterprise) { renderEnterpriseRequired("import-mailboxes"); return; }
+      location.hash = "#/mailboxes/import";
+      return;
+    }
     if (action === "back-users") { location.hash = "#/users"; return; }
     if (action === "new-group") return openNewGroupModal();
     if (action === "new-team-inbox") return openNewTeamInboxModal();

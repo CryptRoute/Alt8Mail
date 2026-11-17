@@ -441,7 +441,8 @@ func (h enterpriseHost) RedactForAI(ctx context.Context, tenantID, text string) 
 	return text
 }
 
-func (h enterpriseHost) OfficeAIAllowed(ctx context.Context, principal enterprise.Principal) bool {	user := userRecord{
+func (h enterpriseHost) OfficeAIAllowed(ctx context.Context, principal enterprise.Principal) bool {
+	user := userRecord{
 		ID: principal.UserID, TenantID: principal.TenantID, Email: principal.Email,
 		Name: principal.Name, Role: principal.Role,
 	}
@@ -779,6 +780,12 @@ func (s *Server) registerEnterpriseExtension(mux *http.ServeMux, admin bool) {
 	if err := extension.Register(enterpriseHost{server: s, mux: mux, admin: admin}); err != nil && s.logger != nil {
 		s.logger.Error("enterprise extension registration failed", "admin", admin, "err", err)
 	}
+}
+
+// enterpriseAvailable reports whether the private enterprise module is linked
+// into this build. Community builds have no paid routes or paid console pages.
+func (s *Server) enterpriseAvailable() bool {
+	return enterprise.Registered() != nil
 }
 
 func (s *Server) paidUIDescriptors() []enterprise.PaidUI {

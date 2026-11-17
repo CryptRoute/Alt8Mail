@@ -212,7 +212,6 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /addons/{id}", s.adminRequirePermission("policies.manage", s.adminUpdateAddon))
 	mux.HandleFunc("POST /addon-requests/{id}/resolve", s.adminRequirePermission("policies.manage", s.adminResolveAddonRequest))
 
-
 	mux.HandleFunc("GET /quarantine", s.adminRequirePermission("users.security", s.adminListQuarantine))
 	mux.HandleFunc("POST /quarantine/{userId}/{messageId}/release", s.adminRequirePermission("users.security", s.adminReleaseQuarantine))
 
@@ -546,6 +545,7 @@ func (s *Server) adminBootstrap(w http.ResponseWriter, r *http.Request) {
 		"catalog":      adminPermissionCatalog,
 		"server":       s.adminServerPayload(),
 		"capabilities": adminCapabilities(),
+		"enterprise":   s.enterpriseAvailable(),
 	})
 }
 
