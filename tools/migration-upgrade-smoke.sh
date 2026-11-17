@@ -1,24 +1,21 @@
 #!/usr/bin/env bash
 # Verify the Phase 1 upgrade path on a disposable PostgreSQL.
 #
-# Applies the migrations shipped at the v0.27.6 tag, upgrades with the current
-# working tree migrations, rolls the new migrations back, reapplies them and
-# checks schema_migrations. Requires git, docker and the v0.27.6 tag.
+# Applies the current migration files up to a baseline version, upgrades with
+# the remaining current migrations, rolls the new migrations back, reapplies
+# them and checks schema_migrations. This keeps the smoke test self-contained
+# after the public history reset removed the historical release tags.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_TAG="${A8M_UPGRADE_BASE_TAG:-v0.27.6}"
+BASE_VERSION="${A8M_UPGRADE_BASE_VERSION:-0060}"
 IMAGE="${A8M_UPGRADE_POSTGRES_IMAGE:-postgres:15}"
 CONTAINER="a8m-upgrade-smoke-$$"
 DB="a8m" # migrations grant CONNECT on the deployment database name
 PASSWORD="upgrade-smoke-password"
 
-command -v git >/dev/null || { echo "git is required" >&2; exit 2; }
+[[ "$BASE_VERSION" =~ ^[0-9]{4}$ ]] || { echo "invalid upgrade base version: $BASE_VERSION" >&2; exit 2; }
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 2; }
-git -C "$ROOT" rev-parse -q --verify "refs/tags/$BASE_TAG" >/dev/null || {
-  echo "missing git tag $BASE_TAG" >&2
-  exit 2
-}
 
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -46,17 +43,17 @@ CREATE DATABASE $DB OWNER postgres;
 SQL
 
 base_files=()
-while IFS= read -r name; do
-  base_files+=("$name")
-done < <(git -C "$ROOT" ls-tree -r --name-only "$BASE_TAG" backend/migrations \
-  | grep -E '^backend/migrations/[0-9]{4}_.*\.sql$' \
-  | sed 's#^backend/migrations/##' \
-  | sort)
+for path in "$ROOT"/backend/migrations/[0-9][0-9][0-9][0-9]_*.sql; do
+  name="$(basename "$path")"
+  version="${name:0:4}"
+  [[ "$version" < "$BASE_VERSION" || "$version" == "$BASE_VERSION" ]] && base_files+=("$name")
+done
+[[ ${#base_files[@]} -gt 0 ]] || { echo "no migrations at or below $BASE_VERSION" >&2; exit 1; }
 
-echo "== applying ${#base_files[@]} migrations from $BASE_TAG"
+echo "== applying ${#base_files[@]} migrations up to $BASE_VERSION"
 for name in "${base_files[@]}"; do
   echo "   base $name"
-  git -C "$ROOT" show "$BASE_TAG:backend/migrations/$name" | psql_db >/dev/null
+  psql_db < "$ROOT/backend/migrations/$name" >/dev/null
 done
 base_max="${base_files[${#base_files[@]}-1]:0:4}"
 echo "== base migration head: $base_max"
