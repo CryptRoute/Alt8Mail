@@ -7537,5 +7537,8 @@
   "Installing the enterprise release and restarting services...": "Ettevõtte väljalaske installimine ja teenuste taaskäivitamine...",
   "Enterprise release installed and services restarted.": "Ettevõtte väljalase on installitud ja teenused taaskäivitatud.",
   "Portal": "Portaal",
-  "Enterprise": "Ettevõtlus"
+  "Enterprise": "Ettevõtlus",
+  "Open the licensing portal": "Avage litsentsiportaal",
+  "Portal link unavailable": "Portaali link pole saadaval",
+  "The upgrade started but no portal URL was returned.": "Uuendamine algas, kuid portaali URL-i ei tagastatud."
 }

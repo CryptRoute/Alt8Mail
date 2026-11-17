@@ -510,5 +510,8 @@
   "Enterprise release installed and services restarted.": "엔터프라이즈 릴리스가 설치되고 서비스가 다시 시작되었습니다.",
   "Portal": "포털",
   "Enterprise": "기업",
-  "Governance": "통치"
+  "Governance": "통치",
+  "Open the licensing portal": "라이선스 포털 열기",
+  "Portal link unavailable": "포털 링크를 사용할 수 없습니다.",
+  "The upgrade started but no portal URL was returned.": "업그레이드가 시작되었지만 포털 URL이 반환되지 않았습니다."
 }

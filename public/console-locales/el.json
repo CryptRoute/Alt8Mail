@@ -7537,5 +7537,8 @@
   "Installing the enterprise release and restarting services...": "Εγκατάσταση της εταιρικής έκδοσης και επανεκκίνηση των υπηρεσιών...",
   "Enterprise release installed and services restarted.": "Εγκαταστάθηκε η έκδοση Enterprise και επανεκκινήθηκαν οι υπηρεσίες.",
   "Portal": "Πύλη",
-  "Enterprise": "Επιχείρηση"
+  "Enterprise": "Επιχείρηση",
+  "Open the licensing portal": "Ανοίξτε την πύλη αδειοδότησης",
+  "Portal link unavailable": "Ο σύνδεσμος πύλης δεν είναι διαθέσιμος",
+  "The upgrade started but no portal URL was returned.": "Η αναβάθμιση ξεκίνησε αλλά δεν επιστράφηκε διεύθυνση URL πύλης."
 }

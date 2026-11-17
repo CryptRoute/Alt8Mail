@@ -507,5 +507,8 @@
   "Enterprise release installed and services restarted.": "安装企业版本并重新启动服务。",
   "Portal": "门户网站",
   "Enterprise": "企业",
-  "Governance": "治理"
+  "Governance": "治理",
+  "Open the licensing portal": "打开许可门户",
+  "Portal link unavailable": "门户链接不可用",
+  "The upgrade started but no portal URL was returned.": "升级已开始，但未返回门户 URL。"
 }

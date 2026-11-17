@@ -7773,5 +7773,8 @@
   "Installing the enterprise release and restarting services...": "جارٍ تثبيت إصدار المؤسسة وإعادة تشغيل الخدمات...",
   "Enterprise release installed and services restarted.": "تم تثبيت إصدار المؤسسة وإعادة تشغيل الخدمات.",
   "Portal": "البوابة",
-  "Enterprise": "المؤسسة"
+  "Enterprise": "المؤسسة",
+  "Open the licensing portal": "فتح بوابة الترخيص",
+  "Portal link unavailable": "رابط البوابة غير متاح",
+  "The upgrade started but no portal URL was returned.": "بدأت الترقية ولكن لم يتم إرجاع عنوان URL للبوابة الإلكترونية."
 }

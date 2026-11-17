@@ -8138,5 +8138,8 @@
   "Installing the enterprise release and restarting services...": "Installing the enterprise release and restarting services...",
   "Enterprise release installed and services restarted.": "Enterprise release installed and services restarted.",
   "Portal": "Portal",
-  "Enterprise": "Enterprise"
+  "Enterprise": "Enterprise",
+  "Open the licensing portal": "Open the licensing portal",
+  "Portal link unavailable": "Portal link unavailable",
+  "The upgrade started but no portal URL was returned.": "The upgrade started but no portal URL was returned."
 }

@@ -488,5 +488,8 @@
   "Portal": "Portal",
   "Enterprise": "Enterprise",
   "Governance": "Styring",
-  "System": "System"
+  "System": "System",
+  "Open the licensing portal": "Åpne lisensieringsportalen",
+  "Portal link unavailable": "Portallinken er utilgjengelig",
+  "The upgrade started but no portal URL was returned.": "Oppgraderingen startet, men ingen portal-URL ble returnert."
 }

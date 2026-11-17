@@ -7537,5 +7537,8 @@
   "Installing the enterprise release and restarting services...": "התקנת המהדורה הארגונית והפעלה מחדש של שירותים...",
   "Enterprise release installed and services restarted.": "מהדורה ארגונית הותקנה והשירותים הופעלו מחדש.",
   "Portal": "פורטל",
-  "Enterprise": "Enterprise"
+  "Enterprise": "Enterprise",
+  "Open the licensing portal": "פתח את פורטל הרישוי",
+  "Portal link unavailable": "קישור לפורטל אינו זמין",
+  "The upgrade started but no portal URL was returned.": "השדרוג התחיל אך לא הוחזרה כתובת אתר של פורטל."
 }

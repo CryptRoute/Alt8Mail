@@ -7058,5 +7058,8 @@
   "Installing the enterprise release and restarting services...": "Instalace podnikové verze a restartování služeb...",
   "Enterprise release installed and services restarted.": "Enterprise verze nainstalována a služby restartovány.",
   "Portal": "Portál",
-  "Enterprise": "Enterprise"
+  "Enterprise": "Enterprise",
+  "Open the licensing portal": "Otevřete licenční portál",
+  "Portal link unavailable": "Odkaz na portál není dostupný",
+  "The upgrade started but no portal URL was returned.": "Upgrade byl zahájen, ale nebyla vrácena žádná adresa URL portálu."
 }

@@ -493,5 +493,8 @@
   "Enterprise release installed and services restarted.": "Zainstalowano wersję Enterprise i ponownie uruchomiono usługi.",
   "Portal": "Portalu",
   "Enterprise": "Przedsiębiorstwo",
-  "Governance": "Zarządzanie"
+  "Governance": "Zarządzanie",
+  "Open the licensing portal": "Otwórz portal licencyjny",
+  "Portal link unavailable": "Link do portalu niedostępny",
+  "The upgrade started but no portal URL was returned.": "Rozpoczęto aktualizację, ale nie zwrócono adresu URL portalu."
 }

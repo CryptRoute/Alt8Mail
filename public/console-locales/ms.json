@@ -490,5 +490,8 @@
   "Enterprise release installed and services restarted.": "Keluaran perusahaan dipasang dan perkhidmatan dimulakan semula.",
   "Portal": "Portal",
   "Enterprise": "Perusahaan",
-  "Governance": "Tadbir urus"
+  "Governance": "Tadbir urus",
+  "Open the licensing portal": "Buka portal pelesenan",
+  "Portal link unavailable": "Pautan portal tidak tersedia",
+  "The upgrade started but no portal URL was returned.": "Peningkatan bermula tetapi tiada URL portal dikembalikan."
 }

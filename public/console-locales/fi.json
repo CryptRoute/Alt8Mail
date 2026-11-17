@@ -7537,5 +7537,8 @@
   "Installing the enterprise release and restarting services...": "Yritysjulkaisua asennetaan ja palveluita käynnistetään uudelleen...",
   "Enterprise release installed and services restarted.": "Yritysjulkaisu asennettu ja palvelut käynnistetty uudelleen.",
   "Portal": "Portaali",
-  "Enterprise": "Yritys"
+  "Enterprise": "Yritys",
+  "Open the licensing portal": "Open the licensing portal",
+  "Portal link unavailable": "Portaalilinkki ei ole käytettävissä",
+  "The upgrade started but no portal URL was returned.": "Päivitys aloitettiin, mutta portaalin URL-osoitetta ei palautettu."
 }

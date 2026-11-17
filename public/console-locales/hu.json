@@ -4098,5 +4098,8 @@
   "Installing the enterprise release and restarting services...": "A vállalati kiadás telepítése és a szolgáltatások újraindítása...",
   "Enterprise release installed and services restarted.": "Vállalati kiadás telepítve, és a szolgáltatások újraindultak.",
   "Portal": "Portál",
-  "Enterprise": "Enterprise"
+  "Enterprise": "Enterprise",
+  "Open the licensing portal": "Nyissa meg a licencportált",
+  "Portal link unavailable": "A portállink nem érhető el",
+  "The upgrade started but no portal URL was returned.": "A frissítés elindult, de nem érkezett vissza a portál URL-je."
 }

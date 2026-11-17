@@ -4378,5 +4378,8 @@
   "Installing the enterprise release and restarting services...": "Installazione della versione Enterprise e riavvio dei servizi in corso...",
   "Enterprise release installed and services restarted.": "Versione Enterprise installata e servizi riavviati.",
   "Portal": "Portale",
-  "Enterprise": "Impresa"
+  "Enterprise": "Impresa",
+  "Open the licensing portal": "Apri il portale delle licenze",
+  "Portal link unavailable": "Collegamento al portale non disponibile",
+  "The upgrade started but no portal URL was returned.": "L'aggiornamento è iniziato ma non è stato restituito l'URL del portale."
 }

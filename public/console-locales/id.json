@@ -4375,5 +4375,8 @@
   "Installing the enterprise release and restarting services...": "Menginstal rilis perusahaan dan memulai ulang layanan...",
   "Enterprise release installed and services restarted.": "Rilis perusahaan diinstal dan layanan dimulai ulang.",
   "Portal": "Pintu gerbang",
-  "Enterprise": "Perusahaan"
+  "Enterprise": "Perusahaan",
+  "Open the licensing portal": "Buka portal lisensi",
+  "Portal link unavailable": "Tautan portal tidak tersedia",
+  "The upgrade started but no portal URL was returned.": "Peningkatan dimulai tetapi tidak ada URL portal yang dikembalikan."
 }

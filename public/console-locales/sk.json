@@ -492,5 +492,8 @@
   "Enterprise release installed and services restarted.": "Enterprise verzia nainštalovaná a služby reštartované.",
   "Portal": "Portál",
   "Enterprise": "Enterprise",
-  "Governance": "riadenie"
+  "Governance": "riadenie",
+  "Open the licensing portal": "Otvorte licenčný portál",
+  "Portal link unavailable": "Odkaz na portál je nedostupný",
+  "The upgrade started but no portal URL was returned.": "Inovácia sa začala, ale nevrátila sa žiadna adresa URL portálu."
 }

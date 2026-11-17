@@ -509,5 +509,8 @@
   "Enterprise release installed and services restarted.": "Установлена корпоративная версия и перезапущены службы.",
   "Portal": "Портал",
   "Enterprise": "Предприятие",
-  "Governance": "Управление"
+  "Governance": "Управление",
+  "Open the licensing portal": "Откройте портал лицензирования",
+  "Portal link unavailable": "Ссылка на портал недоступна",
+  "The upgrade started but no portal URL was returned.": "Обновление началось, но URL-адрес портала не был возвращен."
 }

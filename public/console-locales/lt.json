@@ -503,5 +503,8 @@
   "Enterprise release installed and services restarted.": "Įdiegtas įmonės leidimas ir paslaugos paleistos iš naujo.",
   "Portal": "portalas",
   "Enterprise": "Įmonė",
-  "Governance": "Valdymas"
+  "Governance": "Valdymas",
+  "Open the licensing portal": "Atidarykite licencijavimo portalą",
+  "Portal link unavailable": "Portalo nuoroda nepasiekiama",
+  "The upgrade started but no portal URL was returned.": "Naujinimas pradėtas, bet portalo URL nebuvo grąžintas."
 }

@@ -7537,5 +7537,8 @@
   "Installing the enterprise release and restarting services...": "Installerer virksomhedsudgivelsen og genstarter tjenester...",
   "Enterprise release installed and services restarted.": "Enterprise-udgivelse installeret og tjenester genstartet.",
   "Portal": "Portal",
-  "Enterprise": "Enterprise"
+  "Enterprise": "Enterprise",
+  "Open the licensing portal": "Åbn licensportalen",
+  "Portal link unavailable": "Portallinket er ikke tilgængeligt",
+  "The upgrade started but no portal URL was returned.": "Opgraderingen startede, men ingen portal-URL blev returneret."
 }

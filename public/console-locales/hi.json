@@ -512,5 +512,8 @@
   "Enterprise release installed and services restarted.": "एंटरप्राइज़ रिलीज़ स्थापित हो गई और सेवाएँ पुनः प्रारंभ हो गईं।",
   "Portal": "पोर्टल",
   "Enterprise": "उद्यम",
-  "Governance": "शासन"
+  "Governance": "शासन",
+  "Open the licensing portal": "लाइसेंसिंग पोर्टल खोलें",
+  "Portal link unavailable": "पोर्टल लिंक अनुपलब्ध है",
+  "The upgrade started but no portal URL was returned.": "अपग्रेड शुरू हुआ लेकिन कोई पोर्टल यूआरएल वापस नहीं आया।"
 }

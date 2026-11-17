@@ -470,5 +470,8 @@
   "Enterprise release installed and services restarted.": "Enterprise-release geïnstalleerd en services opnieuw gestart.",
   "Portal": "Portaal",
   "Enterprise": "Onderneming",
-  "Governance": "Bestuur"
+  "Governance": "Bestuur",
+  "Open the licensing portal": "Open het licentieportaal",
+  "Portal link unavailable": "Portallink niet beschikbaar",
+  "The upgrade started but no portal URL was returned.": "De upgrade is gestart, maar er is geen portal-URL geretourneerd."
 }

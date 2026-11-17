@@ -503,5 +503,8 @@
   "Enterprise release installed and services restarted.": "エンタープライズ リリースがインストールされ、サービスが再開されました。",
   "Portal": "ポータル",
   "Enterprise": "エンタープライズ",
-  "Governance": "ガバナンス"
+  "Governance": "ガバナンス",
+  "Open the licensing portal": "ライセンスポータルを開く",
+  "Portal link unavailable": "ポータルリンクが利用不可",
+  "The upgrade started but no portal URL was returned.": "アップグレードが開始されましたが、ポータル URL が返されませんでした。"
 }

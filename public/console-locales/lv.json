@@ -500,5 +500,8 @@
   "Enterprise release installed and services restarted.": "Uzņēmuma laidiens ir instalēts un pakalpojumi ir restartēti.",
   "Portal": "Portāls",
   "Enterprise": "Uzņēmums",
-  "Governance": "Pārvaldība"
+  "Governance": "Pārvaldība",
+  "Open the licensing portal": "Atveriet licencēšanas portālu",
+  "Portal link unavailable": "Portāla saite nav pieejama",
+  "The upgrade started but no portal URL was returned.": "Jaunināšana tika sākta, taču netika atgriezts portāla URL."
 }

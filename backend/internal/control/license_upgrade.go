@@ -80,7 +80,11 @@ func (s *Server) handleLicenseUpgradeStart(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "UPGRADE_STATE", "Could not persist the upgrade request.")
 		return
 	}
-	callback := requestBaseURL(r) + "/control/api/license/upgrade/callback"
+	base := strings.TrimRight(strings.TrimSpace(s.cfg.PublicURL), "/")
+	if base == "" {
+		base = requestBaseURL(r)
+	}
+	callback := base + "/control/api/license/upgrade/callback"
 	query := url.Values{}
 	query.Set("deployment", deployment)
 	query.Set("return", callback)

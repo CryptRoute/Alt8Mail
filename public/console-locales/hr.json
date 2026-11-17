@@ -4240,5 +4240,8 @@
   "Installing the enterprise release and restarting services...": "Instaliranje poslovnog izdanja i ponovno pokretanje usluga...",
   "Enterprise release installed and services restarted.": "Izdanje za poduzeće je instalirano i usluge su ponovno pokrenute.",
   "Portal": "Portal",
-  "Enterprise": "Poduzeće"
+  "Enterprise": "Poduzeće",
+  "Open the licensing portal": "Otvorite portal za licenciranje",
+  "Portal link unavailable": "Link portala nije dostupan",
+  "The upgrade started but no portal URL was returned.": "Nadogradnja je započela, ali URL portala nije vraćen."
 }

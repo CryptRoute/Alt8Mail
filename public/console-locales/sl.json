@@ -497,5 +497,8 @@
   "Enterprise release installed and services restarted.": "Nameščena izdaja za podjetja in storitve so se znova zagnale.",
   "Portal": "Portal",
   "Enterprise": "Podjetje",
-  "Governance": "Upravljanje"
+  "Governance": "Upravljanje",
+  "Open the licensing portal": "Odprite portal za licenciranje",
+  "Portal link unavailable": "Povezava do portala ni na voljo",
+  "The upgrade started but no portal URL was returned.": "Nadgradnja se je začela, vendar URL portala ni bil vrnjen."
 }

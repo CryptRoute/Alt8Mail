@@ -503,5 +503,8 @@
   "Enterprise release installed and services restarted.": "Kurumsal sürüm yüklendi ve hizmetler yeniden başlatıldı.",
   "Portal": "Portal",
   "Enterprise": "kurumsal",
-  "Governance": "Yönetişim"
+  "Governance": "Yönetişim",
+  "Open the licensing portal": "Lisans portalını açın",
+  "Portal link unavailable": "Portal bağlantısı kullanılamıyor",
+  "The upgrade started but no portal URL was returned.": "Yükseltme başladı ancak portal URL'si döndürülmedi."
 }

@@ -452,12 +452,26 @@ export async function renderLicense(ctx) {
 
   upgradeStart?.addEventListener('click', async () => {
     upgradeStart.disabled = true;
+    let portalTab = null;
+    try {
+      portalTab = window.open('about:blank', '_blank');
+      if (portalTab) portalTab.opener = null;
+    } catch (_) { portalTab = null; }
     try {
       const data = await ctx.api('/control/api/license/upgrade/start', { method: 'POST', body: {} });
-      if (data?.portalUrl) window.open(data.portalUrl, '_blank', 'noopener');
-      if (upgradeStatus) upgradeStatus.innerHTML = ui.inlineNotice('info', 'Portal opened', 'Complete the trial or purchase in the licensing portal. This page updates automatically.');
+      if (data?.portalUrl) {
+        if (portalTab) portalTab.location.href = data.portalUrl;
+        else window.open(data.portalUrl, '_blank', 'noopener');
+        if (upgradeStatus) {
+          upgradeStatus.innerHTML = ui.inlineNotice('info', 'Portal opened', 'Complete the trial or purchase in the licensing portal. This page updates automatically.') +
+            `<p class="form-note"><a href="${esc(data.portalUrl)}" target="_blank" rel="noopener noreferrer">Open the licensing portal</a></p>`;
+        }
+      } else if (upgradeStatus) {
+        upgradeStatus.innerHTML = ui.inlineNotice('warning', 'Portal link unavailable', 'The upgrade started but no portal URL was returned.');
+      }
       upgradeTimer = setTimeout(pollUpgrade, 2500);
     } catch (error) {
+      if (portalTab) portalTab.close();
       if (upgradeStatus) upgradeStatus.innerHTML = ui.inlineNotice('critical', 'Could not start the upgrade', esc(error.message || 'Try again.'));
     } finally {
       upgradeStart.disabled = false;

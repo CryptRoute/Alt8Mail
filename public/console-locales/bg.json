@@ -7771,5 +7771,8 @@
   "Installing the enterprise release and restarting services...": "Инсталиране на корпоративната версия и рестартиране на услуги...",
   "Enterprise release installed and services restarted.": "Корпоративна версия е инсталирана и услугите са рестартирани.",
   "Portal": "Портал",
-  "Enterprise": "Предприятие"
+  "Enterprise": "Предприятие",
+  "Open the licensing portal": "Отворете портала за лицензиране",
+  "Portal link unavailable": "Връзката към портала е недостъпна",
+  "The upgrade started but no portal URL was returned.": "Надстройката започна, но не беше върнат URL адрес на портала."
 }

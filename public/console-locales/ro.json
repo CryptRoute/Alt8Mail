@@ -484,5 +484,8 @@
   "Enterprise release installed and services restarted.": "Versiunea Enterprise instalată și serviciile repornite.",
   "Portal": "Portal",
   "Enterprise": "Întreprindere",
-  "Governance": "Guvernare"
+  "Governance": "Guvernare",
+  "Open the licensing portal": "Deschideți portalul de licențiere",
+  "Portal link unavailable": "Linkul portalului nu este disponibil",
+  "The upgrade started but no portal URL was returned.": "Actualizarea a început, dar nu a fost returnată nicio adresă URL a portalului."
 }
