@@ -1,5 +1,5 @@
 /* System-wide add-on catalog policy. */
-import * as ui from './ui.js?v=3.9.4';
+import * as ui from './ui.js?v=3.9.5';
 
 const esc = ui.esc;
 

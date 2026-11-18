@@ -1,3 +1,23 @@
+# Alt8Mail 3.9.5
+
+Release date: 2026-11-18. Enterprise activation recovery and installer UX.
+
+## 3.9.5 activation fixes
+
+- **Executable bits are normalized after the enterprise overlay.** An
+  enterprise bundle produced on a non-POSIX build host could extract with mode
+  `0644`; systemd then failed the webmail and admin services with
+  `203/EXEC`. Control now makes every installed binary executable before it
+  switches the release, and the bundle build normalizes the same mode.
+- **No duplicate upgrade prompts after activation.** The portal upgrade card is
+  hidden once a valid enterprise license is activating or the binary is
+  already enterprise. The remaining paid-capability action is labelled
+  **Upgrade plan**, not another binary install.
+- **Installer-style activation modal.** The activation flow now shows a
+  segmented progress meter, numbered steps with completed/active/pending
+  markers, a live status panel and retry-safe progress across the Control
+  restart.
+
 # Alt8Mail 3.9.4
 
 Release date: 2026-11-18. Honest license state and in-place enterprise activation.
