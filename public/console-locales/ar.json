@@ -7801,5 +7801,6 @@
   "Waiting for the enterprise installer…": "في انتظار تثبيت المؤسسة...",
   "The control plane is restarting; reconnecting to the enterprise installer…": "تتم إعادة تشغيل مستوى التحكم؛ جارٍ إعادة الاتصال بمثبت المؤسسة...",
   "Authorizing the enterprise release download with the licensing portal…": "السماح بتنزيل إصدار المؤسسة باستخدام بوابة الترخيص...",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "لم يتم تثبيت إصدار المؤسسة. إصدار Alt8Mail الحالي لم يتغير."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "لم يتم تثبيت إصدار المؤسسة. إصدار Alt8Mail الحالي لم يتغير.",
+  "Control is restarting; reconnecting to the installer…": "يتم إعادة تشغيل التحكم؛ جارٍ إعادة الاتصال ببرنامج التثبيت..."
 }

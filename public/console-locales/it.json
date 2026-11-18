@@ -4407,5 +4407,6 @@
   "Waiting for the enterprise installer…": "In attesa del programma di installazione aziendale...",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Il piano di controllo si sta riavviando; riconnessione al programma di installazione aziendale…",
   "Authorizing the enterprise release download with the licensing portal…": "Autorizzazione del download della versione Enterprise con il portale delle licenze…",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "La versione aziendale non è stata installata. La versione esistente di Alt8Mail è rimasta invariata."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "La versione aziendale non è stata installata. La versione esistente di Alt8Mail è rimasta invariata.",
+  "Control is restarting; reconnecting to the installer…": "Il controllo sta riavviando; ricollegandosi all'installatore..."
 }

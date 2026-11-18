@@ -540,5 +540,6 @@
   "Waiting for the enterprise installer…": "엔터프라이즈 설치 프로그램을 기다리는 중…",
   "The control plane is restarting; reconnecting to the enterprise installer…": "제어 영역이 다시 시작됩니다. 엔터프라이즈 설치 프로그램에 다시 연결하는 중…",
   "Authorizing the enterprise release download with the licensing portal…": "라이센싱 포털을 통해 엔터프라이즈 릴리스 다운로드 승인 중…",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "엔터프라이즈 릴리스가 설치되지 않았습니다. 기존 Alt8Mail 릴리스는 변경되지 않았습니다."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "엔터프라이즈 릴리스가 설치되지 않았습니다. 기존 Alt8Mail 릴리스는 변경되지 않았습니다.",
+  "Control is restarting; reconnecting to the installer…": "제어가 다시 시작됩니다. 설치 프로그램에 다시 연결하는 중…"
 }

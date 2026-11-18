@@ -500,5 +500,6 @@
   "Waiting for the enterprise installer…": "Wachten op het bedrijfsinstallatieprogramma...",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Het besturingsvlak wordt opnieuw opgestart; opnieuw verbinding maken met het bedrijfsinstallatieprogramma...",
   "Authorizing the enterprise release download with the licensing portal…": "Het downloaden van de zakelijke release autoriseren via de licentieportal...",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "De enterprise-release is niet geïnstalleerd. De bestaande Alt8Mail-release is ongewijzigd."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "De enterprise-release is niet geïnstalleerd. De bestaande Alt8Mail-release is ongewijzigd.",
+  "Control is restarting; reconnecting to the installer…": "De besturing wordt opnieuw gestart; opnieuw verbinding maken met het installatieprogramma..."
 }

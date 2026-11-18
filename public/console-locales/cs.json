@@ -7086,5 +7086,6 @@
   "Waiting for the enterprise installer…": "Čekání na podnikový instalační program…",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Řídicí rovina se restartuje; opětovné připojení k podnikovému instalačnímu programu…",
   "Authorizing the enterprise release download with the licensing portal…": "Autorizace stažení podnikové verze pomocí licenčního portálu…",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Podniková verze nebyla nainstalována. Stávající vydání Alt8Mail se nezměnilo."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Podniková verze nebyla nainstalována. Stávající vydání Alt8Mail se nezměnilo.",
+  "Control is restarting; reconnecting to the installer…": "Řízení se restartuje; opětovné připojení k instalačnímu programu…"
 }

@@ -533,5 +533,6 @@
   "Waiting for the enterprise installer…": "Kurumsal yükleyici bekleniyor…",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Kontrol düzlemi yeniden başlatılıyor; kurumsal yükleyiciye yeniden bağlanılıyor…",
   "Authorizing the enterprise release download with the licensing portal…": "Lisanslama portalı ile kurumsal sürümün indirilmesine yetki veriliyor…",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Kurumsal sürüm yüklenmedi. Mevcut Alt8Mail sürümü değişmedi."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Kurumsal sürüm yüklenmedi. Mevcut Alt8Mail sürümü değişmedi.",
+  "Control is restarting; reconnecting to the installer…": "Kontrol yeniden başlatılıyor; yükleyiciye yeniden bağlanılıyor…"
 }

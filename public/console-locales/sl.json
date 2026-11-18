@@ -527,5 +527,6 @@
   "Waiting for the enterprise installer…": "Čakanje na namestitveni program za podjetja ...",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Nadzorna ravnina se znova zaganja; ponovno povezovanje z namestitvenim programom podjetja ...",
   "Authorizing the enterprise release download with the licensing portal…": "Odobritev prenosa izdaje za podjetja s portalom za licenciranje ...",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Izdaja za podjetja ni bila nameščena. Obstoječa izdaja Alt8Mail je nespremenjena."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Izdaja za podjetja ni bila nameščena. Obstoječa izdaja Alt8Mail je nespremenjena.",
+  "Control is restarting; reconnecting to the installer…": "Nadzor se znova zažene; ponovna povezava z namestitvenim programom …"
 }

@@ -7565,5 +7565,6 @@
   "Waiting for the enterprise installer…": "ממתין למתקין הארגוני...",
   "The control plane is restarting; reconnecting to the enterprise installer…": "מטוס הבקרה מופעל מחדש; מתחבר מחדש למתקין הארגוני...",
   "Authorizing the enterprise release download with the licensing portal…": "אישור הורדת הגרסה הארגונית באמצעות פורטל הרישוי...",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "המהדורה הארגונית לא הותקנה. מהדורת Alt8Mail הקיימת ללא שינוי."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "המהדורה הארגונית לא הותקנה. מהדורת Alt8Mail הקיימת ללא שינוי.",
+  "Control is restarting; reconnecting to the installer…": "הבקרה מופעלת מחדש; מתחבר מחדש למתקין..."
 }

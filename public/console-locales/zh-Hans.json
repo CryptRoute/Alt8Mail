@@ -537,5 +537,6 @@
   "Waiting for the enterprise installer…": "等待企业安装程序...",
   "The control plane is restarting; reconnecting to the enterprise installer…": "控制平面正在重启；正在重新连接到企业安装程序...",
   "Authorizing the enterprise release download with the licensing portal…": "使用许可门户授权企业版本下载...",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "未安装企业版本。现有的 Alt8Mail 版本保持不变。"
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "未安装企业版本。现有的 Alt8Mail 版本保持不变。",
+  "Control is restarting; reconnecting to the installer…": "控制正在重新启动；正在重新连接到安装程序..."
 }

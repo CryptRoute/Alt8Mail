@@ -530,5 +530,6 @@
   "Waiting for the enterprise installer…": "Gaida uzņēmuma instalētāju…",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Vadības plakne tiek restartēta; tiek atkārtoti izveidots savienojums ar uzņēmuma instalētāju…",
   "Authorizing the enterprise release download with the licensing portal…": "Uzņēmuma laidiena lejupielādes autorizācija, izmantojot licencēšanas portālu…",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Uzņēmuma laidiens netika instalēts. Esošais Alt8Mail laidiens ir nemainīgs."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Uzņēmuma laidiens netika instalēts. Esošais Alt8Mail laidiens ir nemainīgs.",
+  "Control is restarting; reconnecting to the installer…": "Vadība tiek restartēta; notiek atkārtots savienojums ar instalētāju…"
 }

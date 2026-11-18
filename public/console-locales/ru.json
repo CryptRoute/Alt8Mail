@@ -539,5 +539,6 @@
   "Waiting for the enterprise installer…": "Ожидание корпоративного установщика…",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Плоскость управления перезапускается; повторное подключение к корпоративному установщику…",
   "Authorizing the enterprise release download with the licensing portal…": "Авторизация загрузки корпоративной версии с помощью портала лицензирования…",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Корпоративная версия не установлена. Существующая версия Alt8Mail не изменилась."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Корпоративная версия не установлена. Существующая версия Alt8Mail не изменилась.",
+  "Control is restarting; reconnecting to the installer…": "Управление перезапускается; повторное подключение к установщику…"
 }

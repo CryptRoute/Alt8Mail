@@ -7565,5 +7565,6 @@
   "Waiting for the enterprise installer…": "Venter på virksomhedsinstallatøren...",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Kontrolplanet genstarter; genopretter forbindelse til virksomhedsinstallationsprogrammet...",
   "Authorizing the enterprise release download with the licensing portal…": "Godkender download af virksomhedsudgivelsen med licensportalen...",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Virksomhedsudgivelsen blev ikke installeret. Den eksisterende Alt8Mail-udgivelse er uændret."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Virksomhedsudgivelsen blev ikke installeret. Den eksisterende Alt8Mail-udgivelse er uændret.",
+  "Control is restarting; reconnecting to the installer…": "Kontrol genstarter; genopretter forbindelse til installationsprogrammet..."
 }

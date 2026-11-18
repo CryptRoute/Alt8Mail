@@ -533,5 +533,6 @@
   "Waiting for the enterprise installer…": "Laukiama įmonės montuotojo…",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Valdymo plokštuma paleidžiama iš naujo; iš naujo jungiamasi prie įmonės diegimo programos...",
   "Authorizing the enterprise release download with the licensing portal…": "Įgaliojama įmonės leidimo atsisiuntimą naudojant licencijavimo portalą…",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Įmonės leidimas nebuvo įdiegtas. Esamas Alt8Mail leidimas nesikeičia."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Įmonės leidimas nebuvo įdiegtas. Esamas Alt8Mail leidimas nesikeičia.",
+  "Control is restarting; reconnecting to the installer…": "Valdymas paleidžiamas iš naujo; vėl jungiamasi prie diegimo programos..."
 }

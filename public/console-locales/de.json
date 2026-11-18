@@ -7800,5 +7800,6 @@
   "Waiting for the enterprise installer…": "Warten auf den Enterprise-Installer…",
   "The control plane is restarting; reconnecting to the enterprise installer…": "Die Steuerungsebene wird neu gestartet. Verbindung zum Unternehmensinstallationsprogramm wird wiederhergestellt …",
   "Authorizing the enterprise release download with the licensing portal…": "Autorisieren des Downloads der Unternehmensversion über das Lizenzierungsportal…",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Die Enterprise-Version wurde nicht installiert. Die bestehende Alt8Mail-Version bleibt unverändert."
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Die Enterprise-Version wurde nicht installiert. Die bestehende Alt8Mail-Version bleibt unverändert.",
+  "Control is restarting; reconnecting to the installer…": "Die Steuerung wird neu gestartet. Erneute Verbindung zum Installationsprogramm..."
 }

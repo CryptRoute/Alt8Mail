@@ -542,5 +542,6 @@
   "Waiting for the enterprise installer…": "एंटरप्राइज़ इंस्टॉलर की प्रतीक्षा की जा रही है...",
   "The control plane is restarting; reconnecting to the enterprise installer…": "नियंत्रण विमान पुनः प्रारंभ हो रहा है; एंटरप्राइज़ इंस्टॉलर से पुनः कनेक्ट हो रहा है...",
   "Authorizing the enterprise release download with the licensing portal…": "लाइसेंसिंग पोर्टल के साथ एंटरप्राइज़ रिलीज़ डाउनलोड को अधिकृत करना…",
-  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "एंटरप्राइज़ रिलीज़ स्थापित नहीं किया गया था. मौजूदा Alt8Mail रिलीज़ अपरिवर्तित है।"
+  "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "एंटरप्राइज़ रिलीज़ स्थापित नहीं किया गया था. मौजूदा Alt8Mail रिलीज़ अपरिवर्तित है।",
+  "Control is restarting; reconnecting to the installer…": "नियंत्रण पुनः प्रारंभ हो रहा है; इंस्टॉलर से पुनः कनेक्ट हो रहा है…"
 }

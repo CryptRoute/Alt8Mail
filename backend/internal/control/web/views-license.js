@@ -325,6 +325,7 @@ function installProgressMarkup(job) {
 function openEnterpriseInstall(ctx, license, reload) {
   let timer = null;
   let closed = false;
+  let retries = 0;
   const modal = ui.openModal({
     title: 'Activate Alt8Mail Enterprise',
     subtitle: 'Your license is valid. This server is still running the community build.',
@@ -348,6 +349,7 @@ function openEnterpriseInstall(ctx, license, reload) {
     try {
       const job = await ctx.api('/control/api/license/upgrade/status');
       if (closed) return;
+      retries = 0;
       if (host) host.innerHTML = installProgressMarkup(job);
       if (job.phase === 'complete') {
         setBusy(false);
@@ -363,6 +365,16 @@ function openEnterpriseInstall(ctx, license, reload) {
       }
     } catch (error) {
       if (closed || error?.name === 'AbortError') return;
+      // The installer restarts the control service, so a short run of
+      // network/session errors is expected. Keep reconnecting instead of
+      // reporting a failed install.
+      const transient = !error?.status || error.status >= 500 || error.code === 'UNAUTHENTICATED';
+      if (transient && retries < 20) {
+        retries += 1;
+        if (host) host.innerHTML = installProgressMarkup({ phase: 'installing', message: 'Control is restarting; reconnecting to the installer…' });
+        timer = setTimeout(poll, 3000);
+        return;
+      }
       if (host) host.innerHTML = installProgressMarkup({ phase: 'error', error: error.message || 'Could not read the install status.' });
       setBusy(false);
       return;
