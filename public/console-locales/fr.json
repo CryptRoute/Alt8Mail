@@ -7798,5 +7798,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Le plan de contrôle redémarre ; reconnexion au programme d'installation d'entreprise…",
   "Authorizing the enterprise release download with the licensing portal…": "Autoriser le téléchargement de la version entreprise avec le portail de licences…",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "La version entreprise n'a pas été installée. La version Alt8Mail existante est inchangée.",
-  "Control is restarting; reconnecting to the installer…": "Le contrôle redémarre ; reconnexion à l'installateur…"
+  "Control is restarting; reconnecting to the installer…": "Le contrôle redémarre ; reconnexion à l'installateur…",
+  "Upgrade plan": "Plan de mise à niveau",
+  "Renew plan": "Renouveler le forfait"
 }

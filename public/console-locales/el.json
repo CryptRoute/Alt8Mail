@@ -7566,5 +7566,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Το επίπεδο ελέγχου επανεκκινείται. επανασύνδεση στο εταιρικό πρόγραμμα εγκατάστασης…",
   "Authorizing the enterprise release download with the licensing portal…": "Εξουσιοδότηση λήψης έκδοσης για επιχειρήσεις με την πύλη αδειοδότησης…",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Η εταιρική έκδοση δεν εγκαταστάθηκε. Η υπάρχουσα έκδοση Alt8Mail παραμένει αμετάβλητη.",
-  "Control is restarting; reconnecting to the installer…": "Ο έλεγχος επανεκκινείται. επανασύνδεση στο πρόγραμμα εγκατάστασης…"
+  "Control is restarting; reconnecting to the installer…": "Ο έλεγχος επανεκκινείται. επανασύνδεση στο πρόγραμμα εγκατάστασης…",
+  "Upgrade plan": "Σχέδιο αναβάθμισης",
+  "Renew plan": "Ανανεώστε το σχέδιο"
 }

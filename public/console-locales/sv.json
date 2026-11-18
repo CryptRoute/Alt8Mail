@@ -519,5 +519,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Kontrollplanet startar om; återansluter till företagsinstallationsprogrammet...",
   "Authorizing the enterprise release download with the licensing portal…": "Godkänner nedladdningen av företagsversionen med licensportalen...",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Enterprise-versionen installerades inte. Den befintliga Alt8Mail-versionen är oförändrad.",
-  "Control is restarting; reconnecting to the installer…": "Kontrollen startar om; återansluter till installationsprogrammet..."
+  "Control is restarting; reconnecting to the installer…": "Kontrollen startar om; återansluter till installationsprogrammet...",
+  "Upgrade plan": "Uppgradera plan",
+  "Renew plan": "Förnya planen"
 }

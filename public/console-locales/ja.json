@@ -534,5 +534,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "コントロール プレーンが再起動中です。エンタープライズ インストーラーに再接続しています…",
   "Authorizing the enterprise release download with the licensing portal…": "ライセンス ポータルを使用してエンタープライズ リリースのダウンロードを承認しています…",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "エンタープライズ リリースがインストールされていませんでした。既存の Alt8Mail リリースは変更されていません。",
-  "Control is restarting; reconnecting to the installer…": "制御が再起動されます。インストーラーに再接続中…"
+  "Control is restarting; reconnecting to the installer…": "制御が再起動されます。インストーラーに再接続中…",
+  "Upgrade plan": "アップグレードプラン",
+  "Renew plan": "リニューアルプラン"
 }

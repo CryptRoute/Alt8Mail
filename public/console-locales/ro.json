@@ -515,5 +515,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Planul de control repornește; reconectare la programul de instalare pentru companie...",
   "Authorizing the enterprise release download with the licensing portal…": "Se autorizează descărcarea versiunii enterprise cu portalul de licențiere...",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Versiunea enterprise nu a fost instalată. Versiunea existentă Alt8Mail este neschimbată.",
-  "Control is restarting; reconnecting to the installer…": "Controlul repornește; reconectare la programul de instalare..."
+  "Control is restarting; reconnecting to the installer…": "Controlul repornește; reconectare la programul de instalare...",
+  "Upgrade plan": "Plan de upgrade",
+  "Renew plan": "Reînnoiți planul"
 }

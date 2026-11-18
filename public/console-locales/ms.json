@@ -521,5 +521,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Pesawat kawalan dimulakan semula; menyambung semula kepada pemasang perusahaan…",
   "Authorizing the enterprise release download with the licensing portal…": "Membenarkan muat turun keluaran perusahaan dengan portal pelesenan…",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Keluaran perusahaan tidak dipasang. Keluaran Alt8Mail sedia ada tidak berubah.",
-  "Control is restarting; reconnecting to the installer…": "Kawalan dimulakan semula; menyambung semula kepada pemasang…"
+  "Control is restarting; reconnecting to the installer…": "Kawalan dimulakan semula; menyambung semula kepada pemasang…",
+  "Upgrade plan": "Naik taraf pelan",
+  "Renew plan": "Perbaharui rancangan"
 }

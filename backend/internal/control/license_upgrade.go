@@ -521,6 +521,20 @@ func installEnterpriseRelease(ctx context.Context, root, bundlePath, version str
 	if output, err := exec.CommandContext(ctx, "cp", "-a", bundleRoot+"/.", newRelease+"/").CombinedOutput(); err != nil {
 		return fmt.Errorf("install enterprise release: %s", strings.TrimSpace(string(output)))
 	}
+	// Tar metadata produced on a non-POSIX build host can lose the executable
+	// bit. systemd refuses a non-executable binary with status 203/EXEC, so
+	// normalize every installed binary before switching the release.
+	binDir := filepath.Join(newRelease, "bin")
+	if entries, err := os.ReadDir(binDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			if err := os.Chmod(filepath.Join(binDir, entry.Name()), 0o755); err != nil {
+				return fmt.Errorf("make %s executable: %w", entry.Name(), err)
+			}
+		}
+	}
 	marker := map[string]any{"version": version, "installedAt": time.Now().UTC(), "kind": "enterprise"}
 	markerRaw, _ := json.MarshalIndent(marker, "", "  ")
 	if err := os.WriteFile(filepath.Join(newRelease, "enterprise.json"), markerRaw, 0o644); err != nil {

@@ -4405,5 +4405,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Bidang kendali dimulai ulang; menghubungkan kembali ke penginstal perusahaan…",
   "Authorizing the enterprise release download with the licensing portal…": "Mengotorisasi unduhan rilis perusahaan dengan portal lisensi…",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Rilis perusahaan tidak diinstal. Rilis Alt8Mail yang ada tidak berubah.",
-  "Control is restarting; reconnecting to the installer…": "Kontrol dimulai ulang; menghubungkan kembali ke penginstal…"
+  "Control is restarting; reconnecting to the installer…": "Kontrol dimulai ulang; menghubungkan kembali ke penginstal…",
+  "Upgrade plan": "Paket peningkatan",
+  "Renew plan": "Perbarui rencana"
 }

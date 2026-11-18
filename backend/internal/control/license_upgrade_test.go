@@ -387,6 +387,9 @@ func TestInstallEnterpriseReleaseOverlaysCurrentRelease(t *testing.T) {
 	if strings.TrimSpace(string(version)) != "9.9.9" {
 		t.Fatalf("release VERSION = %q", version)
 	}
+	if info, err := os.Stat(filepath.Join(target, "bin", "a8m-server")); err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("installed binary is not executable: %v", err)
+	}
 	marker, err := os.ReadFile(filepath.Join(target, "enterprise.json"))
 	if err != nil || !strings.Contains(string(marker), `"9.9.9"`) {
 		t.Fatalf("enterprise marker = %q err=%v", marker, err)
@@ -403,7 +406,7 @@ func buildTestEnterpriseBundle(t *testing.T, version string) []byte {
 	tw := tar.NewWriter(gz)
 	base := fmt.Sprintf("alt8mail-enterprise-%s-linux-amd64", version)
 	add := func(name, body string) {
-		_ = tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body))})
+		_ = tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))})
 		_, _ = tw.Write([]byte(body))
 	}
 	add(base+"/bin/a8m-server", "server")

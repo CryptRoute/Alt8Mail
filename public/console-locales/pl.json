@@ -524,5 +524,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Płaszczyzna sterująca uruchamia się ponownie; ponowne łączenie się z instalatorem korporacyjnym…",
   "Authorizing the enterprise release download with the licensing portal…": "Autoryzuję pobieranie wersji korporacyjnej za pomocą portalu licencyjnego…",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Wersja dla przedsiębiorstw nie została zainstalowana. Istniejąca wersja Alt8Mail pozostaje niezmieniona.",
-  "Control is restarting; reconnecting to the installer…": "Sterowanie uruchamia się ponownie; ponowne łączenie się z instalatorem…"
+  "Control is restarting; reconnecting to the installer…": "Sterowanie uruchamia się ponownie; ponowne łączenie się z instalatorem…",
+  "Upgrade plan": "Plan aktualizacji",
+  "Renew plan": "Odnów plan"
 }

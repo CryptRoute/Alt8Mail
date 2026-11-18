@@ -112,7 +112,7 @@ function featureChips(license) {
       : license?.state === 'expired'
         ? 'Paid capabilities are disabled while the license is expired.'
         : 'The active license does not include every paid capability.';
-  const action = `${upgradeButton(license, license?.state === 'expired' ? 'Renew license' : 'Upgrade')} ${docsLink()}`;
+  const action = `${upgradeButton(license, license?.state === 'expired' ? 'Renew plan' : 'Upgrade plan')} ${docsLink()}`;
   return `${entitled}
     <div class="mt-3">${ui.inlineNotice('info', 'Paid capabilities', `${detail} Locked: ${shown.join(', ')}${more}.`, action)}</div>`;
 }
@@ -304,22 +304,42 @@ const INSTALL_PHASES = [
 
 function installProgressMarkup(job) {
   const phase = String(job?.phase || 'requesting');
-  const order = INSTALL_PHASES.map(([key]) => key);
-  const index = order.indexOf(phase === 'error' ? 'requesting' : phase);
   const failed = phase === 'error';
+  const order = INSTALL_PHASES.map(([key]) => key);
+  const index = Math.max(0, order.indexOf(failed ? 'requesting' : phase));
+  const percent = phase === 'complete' ? 100 : Math.round((index / INSTALL_PHASES.length) * 100);
+  const descriptions = {
+    requesting: 'Confirming this license with the licensing portal.',
+    downloading: 'Transferring the signed archive and checking its SHA-256.',
+    installing: 'Overlaying the release and restarting the Alt8Mail services.',
+    complete: 'The enterprise binaries and matching assets are active.',
+  };
   const items = INSTALL_PHASES.map(([key, label], i) => {
-    const done = !failed && index > i || phase === 'complete';
+    const done = phase === 'complete' || (!failed && index > i);
     const active = !failed && index === i && phase !== 'complete';
-    const iconName = done ? 'check-circle' : active ? 'refresh' : 'circle-dot';
-    const tone = done ? 'good' : active ? 'info' : 'neutral';
-    return `<li class="check-item"><span class="check-dot ${tone}">${ui.icon(iconName, 13)}</span>${esc(label)}</li>`;
+    const errored = failed && key === 'requesting';
+    const stateClass = done ? 'is-done' : active ? 'is-active' : errored ? 'is-error' : 'is-pending';
+    const marker = done ? ui.icon('check', 13) : errored ? ui.icon('alert', 13) : String(i + 1);
+    return `<li class="installer-step ${stateClass}">
+      <span class="installer-marker">${marker}</span>
+      <div class="installer-step-copy"><strong>${esc(label)}</strong><span>${esc(descriptions[key] || '')}</span></div>
+    </li>`;
   }).join('');
-  const detail = failed
-    ? ui.inlineNotice('critical', 'Enterprise install failed', esc(job.error || job.message || 'The install did not complete.'))
+  const message = failed
+    ? (job.error || job.message || 'The install did not complete.')
     : phase === 'complete'
-      ? ui.inlineNotice('good', 'Enterprise edition installed', esc(job.message || 'The enterprise release is active.'))
-      : ui.inlineNotice('info', 'Installing Alt8Mail Enterprise', esc(job.message || 'Working…'));
-  return `<div class="stack"><ul class="check-list">${items}</ul>${detail}</div>`;
+      ? (job.message || 'Enterprise edition installed.')
+      : (job.message || 'Working…');
+  return `<div class="installer">
+    <div class="installer-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" aria-label="Enterprise install progress">
+      <span style="width:${percent}%"></span>
+    </div>
+    <ol class="installer-steps">${items}</ol>
+    <div class="installer-status ${failed ? 'is-error' : phase === 'complete' ? 'is-done' : 'is-active'}" role="status">
+      <span class="installer-spinner" aria-hidden="true"></span>
+      <div><strong>${failed ? 'Enterprise install failed' : phase === 'complete' ? 'Enterprise edition active' : 'Installing Alt8Mail Enterprise'}</strong><p>${esc(message)}</p></div>
+    </div>
+  </div>`;
 }
 
 function openEnterpriseInstall(ctx, license, reload) {
@@ -602,7 +622,8 @@ export async function renderLicense(ctx) {
 
   const paint = () => {
     const upgradeCard = document.getElementById('license-upgrade-card');
-    if (upgradeCard) upgradeCard.hidden = license?.binaryEdition === 'enterprise';
+    const directInstall = license?.edition && license.edition !== 'oss' && LOADED_STATES.has(license?.state);
+    if (upgradeCard) upgradeCard.hidden = license?.binaryEdition === 'enterprise' || directInstall;
     if (statusBody) statusBody.innerHTML = statusMarkup(license);
     if (seatBody) seatBody.innerHTML = seatMarkup(license);
     if (tenantBody) tenantBody.innerHTML = tenantSeatMarkup(license, byTenant);

@@ -523,5 +523,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Riadiaca rovina sa reštartuje; opätovné pripojenie k podnikovému inštalačnému programu…",
   "Authorizing the enterprise release download with the licensing portal…": "Autorizácia sťahovania podnikovej verzie pomocou licenčného portálu...",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Podnikové vydanie nebolo nainštalované. Existujúce vydanie Alt8Mail je nezmenené.",
-  "Control is restarting; reconnecting to the installer…": "Riadenie sa reštartuje; opätovné pripojenie k inštalačnému programu..."
+  "Control is restarting; reconnecting to the installer…": "Riadenie sa reštartuje; opätovné pripojenie k inštalačnému programu...",
+  "Upgrade plan": "Plán aktualizácie",
+  "Renew plan": "Obnoviť plán"
 }

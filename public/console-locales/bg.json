@@ -7800,5 +7800,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Контролната равнина се рестартира; повторно свързване към корпоративния инсталатор...",
   "Authorizing the enterprise release download with the licensing portal…": "Упълномощаване на изтеглянето на корпоративната версия с портала за лицензиране...",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Корпоративната версия не беше инсталирана. Съществуващото издание на Alt8Mail е непроменено.",
-  "Control is restarting; reconnecting to the installer…": "Контролът се рестартира; повторно свързване с инсталатора..."
+  "Control is restarting; reconnecting to the installer…": "Контролът се рестартира; повторно свързване с инсталатора...",
+  "Upgrade plan": "План за надграждане",
+  "Renew plan": "Подновете плана"
 }

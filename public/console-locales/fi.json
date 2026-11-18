@@ -7566,5 +7566,7 @@
   "The control plane is restarting; reconnecting to the enterprise installer…": "Ohjaustaso käynnistyy uudelleen; yhdistetään uudelleen yrityksen asennusohjelmaan…",
   "Authorizing the enterprise release download with the licensing portal…": "Valtuutetaan yritysjulkaisun lataus lisenssiportaalin kautta…",
   "The enterprise release was not installed. The existing Alt8Mail release is unchanged.": "Yritysjulkaisua ei asennettu. Nykyinen Alt8Mail-julkaisu on ennallaan.",
-  "Control is restarting; reconnecting to the installer…": "Ohjaus käynnistyy uudelleen; yhdistetään uudelleen asennusohjelmaan…"
+  "Control is restarting; reconnecting to the installer…": "Ohjaus käynnistyy uudelleen; yhdistetään uudelleen asennusohjelmaan…",
+  "Upgrade plan": "Päivityssuunnitelma",
+  "Renew plan": "Uusi suunnitelma"
 }

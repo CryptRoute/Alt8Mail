@@ -2023,3 +2023,34 @@ a.security-report-alert:hover { filter: brightness(.985); }
 .menu-language{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line)}
 .menu-language label{font-size:11px;color:var(--muted);white-space:nowrap}
 .menu-language select{flex:1;min-width:0;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:inherit;padding:6px 8px;font:inherit;font-size:12px}
+
+/* --------------------------------------------------- enterprise installer */
+.installer { display: grid; gap: 16px; }
+.installer-meter { height: 7px; border-radius: 999px; background: var(--track); overflow: hidden; }
+.installer-meter > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--series-3)); transition: width 0.45s cubic-bezier(0.2, 0.8, 0.3, 1); }
+.installer-steps { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.installer-step { position: relative; display: flex; gap: 12px; padding: 0 0 18px; }
+.installer-step:last-child { padding-bottom: 0; }
+.installer-step::before { content: ""; position: absolute; left: 12px; top: 26px; bottom: 2px; width: 2px; background: var(--border); }
+.installer-step:last-child::before { display: none; }
+.installer-step.is-done::before { background: var(--status-good-line); }
+.installer-marker { position: relative; z-index: 1; display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-3); font-size: 11px; font-weight: 700; }
+.installer-step.is-active .installer-marker { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); box-shadow: 0 0 0 4px var(--focus); }
+.installer-step.is-active .installer-marker::after { content: ""; position: absolute; inset: -7px; border-radius: inherit; border: 2px solid var(--accent); border-right-color: transparent; animation: installer-spin 0.9s linear infinite; }
+.installer-step.is-done .installer-marker { border-color: var(--status-good); background: var(--status-good-bg); color: var(--status-good-ink); }
+.installer-step.is-error .installer-marker { border-color: var(--status-critical); background: var(--status-critical-bg); color: var(--status-critical-ink); }
+.installer-step-copy { min-width: 0; padding-top: 2px; }
+.installer-step-copy strong { display: block; font-size: 12.5px; font-weight: 650; color: var(--ink); }
+.installer-step-copy span { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: var(--text-3); }
+.installer-step.is-pending .installer-step-copy { opacity: 0.62; }
+.installer-status { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid var(--status-info-line); border-radius: var(--radius); background: var(--status-info-bg); }
+.installer-status strong { display: block; font-size: 12px; color: var(--status-info-ink); }
+.installer-status p { margin-top: 2px; font-size: 11.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.installer-status.is-done { border-color: var(--status-good-line); background: var(--status-good-bg); }
+.installer-status.is-done strong { color: var(--status-good-ink); }
+.installer-status.is-error { border-color: var(--status-critical-line); background: var(--status-critical-bg); }
+.installer-status.is-error strong { color: var(--status-critical-ink); }
+.installer-spinner { flex: none; width: 15px; height: 15px; margin-top: 1px; border-radius: 50%; border: 2px solid var(--status-info-line); border-top-color: var(--accent); animation: installer-spin 0.8s linear infinite; }
+.installer-status.is-done .installer-spinner { border-color: var(--status-good); border-top-color: transparent; animation: none; }
+.installer-status.is-error .installer-spinner { border-color: var(--status-critical); border-top-color: transparent; animation: none; }
+@keyframes installer-spin { to { transform: rotate(360deg); } }
