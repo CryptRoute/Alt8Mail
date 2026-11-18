@@ -498,13 +498,13 @@ func installEnterpriseRelease(ctx context.Context, root, bundlePath, version str
 	if err := extractTarGz(bundlePath, extractDir); err != nil {
 		return err
 	}
-	binSource := filepath.Join(extractDir, "alt8mail-enterprise-"+version+"-linux-amd64", "bin")
-	if _, err := os.Stat(filepath.Join(binSource, "a8m-server")); err != nil {
+	bundleRoot := filepath.Join(extractDir, "alt8mail-enterprise-"+version+"-linux-amd64")
+	if _, err := os.Stat(filepath.Join(bundleRoot, "bin", "a8m-server")); err != nil {
 		matches, _ := filepath.Glob(filepath.Join(extractDir, "*", "bin", "a8m-server"))
 		if len(matches) == 0 {
 			return errors.New("enterprise bundle does not contain bin/a8m-server")
 		}
-		binSource = filepath.Dir(matches[0])
+		bundleRoot = filepath.Dir(filepath.Dir(matches[0]))
 	}
 	newRelease := filepath.Join(root, "releases", version+"-enterprise-"+time.Now().UTC().Format("20060102150405"))
 	_ = os.RemoveAll(newRelease)
@@ -514,11 +514,12 @@ func installEnterpriseRelease(ctx context.Context, root, bundlePath, version str
 	if output, err := exec.CommandContext(ctx, "cp", "-a", current+"/.", newRelease+"/").CombinedOutput(); err != nil {
 		return fmt.Errorf("copy current release: %s", strings.TrimSpace(string(output)))
 	}
-	if err := os.MkdirAll(filepath.Join(newRelease, "bin"), 0o755); err != nil {
-		return err
-	}
-	if output, err := exec.CommandContext(ctx, "cp", "-a", binSource+"/.", filepath.Join(newRelease, "bin")+"/").CombinedOutput(); err != nil {
-		return fmt.Errorf("install enterprise binaries: %s", strings.TrimSpace(string(output)))
+	// The enterprise archive carries the matching public assets, migrations
+	// and VERSION, not just the paid binaries. Overlay it as a full release so
+	// an activation from an older community build cannot leave stale UI assets
+	// or an old version marker behind.
+	if output, err := exec.CommandContext(ctx, "cp", "-a", bundleRoot+"/.", newRelease+"/").CombinedOutput(); err != nil {
+		return fmt.Errorf("install enterprise release: %s", strings.TrimSpace(string(output)))
 	}
 	marker := map[string]any{"version": version, "installedAt": time.Now().UTC(), "kind": "enterprise"}
 	markerRaw, _ := json.MarshalIndent(marker, "", "  ")

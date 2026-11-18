@@ -383,6 +383,10 @@ func TestInstallEnterpriseReleaseOverlaysCurrentRelease(t *testing.T) {
 	if string(server) != "server" || string(control) != "control" || string(storage) != "community-storage" {
 		t.Fatalf("overlay server=%q control=%q storage=%q", server, control, storage)
 	}
+	version, _ := os.ReadFile(filepath.Join(target, "VERSION"))
+	if strings.TrimSpace(string(version)) != "9.9.9" {
+		t.Fatalf("release VERSION = %q", version)
+	}
 	marker, err := os.ReadFile(filepath.Join(target, "enterprise.json"))
 	if err != nil || !strings.Contains(string(marker), `"9.9.9"`) {
 		t.Fatalf("enterprise marker = %q err=%v", marker, err)
@@ -405,6 +409,7 @@ func buildTestEnterpriseBundle(t *testing.T, version string) []byte {
 	add(base+"/bin/a8m-server", "server")
 	add(base+"/bin/a8m-admin-server", "admin")
 	add(base+"/bin/alt8mail-control", "control")
+	add(base+"/VERSION", version)
 	_ = tw.Close()
 	_ = gz.Close()
 	return buffer.Bytes()
