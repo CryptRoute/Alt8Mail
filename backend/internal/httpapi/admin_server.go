@@ -546,6 +546,8 @@ func (s *Server) adminBootstrap(w http.ResponseWriter, r *http.Request) {
 		"server":       s.adminServerPayload(),
 		"capabilities": adminCapabilities(),
 		"enterprise":   s.enterpriseAvailable(),
+		"paidUI":       s.paidUIDescriptors(),
+		"license":      s.licenseSnapshot(r.Context()),
 	})
 }
 

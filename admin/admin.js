@@ -29,6 +29,8 @@ const state = {
   tenants: [],
   activeTenant: null,
   enterprise: false,
+  paidUI: [],
+  license: null,
   stats: null,
   policy: null,
   catalog: [],
@@ -179,6 +181,7 @@ function updateChrome() {
   $$(".nav-link[data-view]").forEach((element) => {
     if (!state.enterprise && paidViews.has(element.dataset.view)) element.hidden = true;
   });
+  $("#enterpriseNav").hidden = !state.enterprise;
   $("#systemNav").hidden = !can("system.tenants.manage");
   const activeTenant = state.activeTenant?.status;
   $("#tenantPicker").title = activeTenant === "suspended" ? "This organization is suspended" : "Switch organization";
@@ -228,6 +231,8 @@ async function loadBootstrap() {
   state.catalog = data.catalog || [];
   state.permissions = data.permissions || [];
   state.enterprise = data.enterprise === true;
+  state.paidUI = Array.isArray(data.paidUI) ? data.paidUI : [];
+  state.license = data.license || null;
   state.scimURL = String(data.server?.scimURL || "");
   if (window.A8M_I18N) {
     let language = data.admin?.language || "";
@@ -323,9 +328,9 @@ async function logout() {
 /* ------------------------------------------------------------
    Navigation / route
 ------------------------------------------------------------ */
-const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "team-inboxes", "org-units", "domains", "roles", "provisioning", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "tenants", "settings"]);
-const paidViews = new Set(["team-inboxes", "import-mailboxes", "provisioning", "ai", "compliance", "integrations"]);
-const enterpriseViewTitles = { "team-inboxes": "Team inboxes", "import-mailboxes": "Import mailboxes", provisioning: "Provisioning", ai: "AI assistant", compliance: "Compliance", integrations: "Integrations" };
+const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "team-inboxes", "org-units", "domains", "roles", "provisioning", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "enterprise-features", "tenants", "settings"]);
+const paidViews = new Set(["team-inboxes", "import-mailboxes", "provisioning", "ai", "compliance", "integrations", "enterprise-features"]);
+const enterpriseViewTitles = { "team-inboxes": "Team inboxes", "import-mailboxes": "Import mailboxes", provisioning: "Provisioning", ai: "AI assistant", compliance: "Compliance", integrations: "Integrations", "enterprise-features": "Enterprise features" };
 
 function route() {
   if (!state.admin) return;
@@ -364,6 +369,7 @@ function route() {
     case "audit": renderAudit(); break;
     case "compliance": renderCompliance(); break;
     case "integrations": renderIntegrations(); break;
+    case "enterprise-features": renderEnterpriseFeatures(); break;
     case "tenants": renderTenants(); break;
     case "settings": renderSettings(); break;
   }
@@ -2678,6 +2684,107 @@ function showSIEMSecret(secret) {
 /* ------------------------------------------------------------
    Tenants (system admin)
 ------------------------------------------------------------ */
+
+/* ------------------------------------------------------------
+   Enterprise feature catalog
+------------------------------------------------------------ */
+const ENTERPRISE_GROUPS = [
+  { label: "Identity & access", features: ["sso", "saml", "scim", "byok", "mcp_governance"] },
+  { label: "Collaboration & productivity", features: ["shared_inbox", "shared_drafts", "team_templates", "template_gallery", "automation", "booking_pages", "mail_merge", "campaign_tracking"] },
+  { label: "AI & intelligence", features: ["ai_triage", "ai_search", "ai_meeting_prep", "ai_obligations", "ai_policy_assist", "ai_budget", "office_ai"] },
+  { label: "Governance & operations", features: ["dlp_advanced", "ediscovery", "file_governance", "deliverability", "audit_export", "analytics", "crm_sync", "support_ops", "security_awareness", "migration", "white_label"] }
+];
+
+const ENTERPRISE_MANAGEMENT = {
+  shared_inbox: { view: "team-inboxes", label: "Team inboxes" },
+  migration: { view: "import-mailboxes", label: "Mail migration" },
+  scim: { view: "provisioning", label: "SCIM tokens" },
+  dlp_advanced: { view: "policies", label: "DLP rules" },
+  ediscovery: { view: "compliance", label: "eDiscovery" },
+  file_governance: { view: "compliance", label: "File governance" },
+  security_awareness: { view: "compliance", label: "Security awareness" },
+  deliverability: { view: "domains", label: "Deliverability & DMARC" },
+  audit_export: { view: "integrations", label: "SIEM & exports" },
+  byok: { view: "ai", label: "Customer-managed keys" },
+  ai_budget: { view: "ai", label: "AI settings & budget" },
+  ai_triage: { view: "ai", label: "AI triage settings" },
+  ai_search: { view: "ai", label: "AI settings" },
+  ai_meeting_prep: { view: "ai", label: "AI settings" },
+  ai_obligations: { view: "ai", label: "AI obligations" },
+  ai_policy_assist: { view: "ai", label: "AI policy assist" },
+  office_ai: { view: "ai", label: "Office AI" },
+  white_label: { view: "policies", label: "Branding" }
+};
+
+const ENTERPRISE_ENVIRONMENT_ONLY = new Set(["sso", "saml"]);
+const ENTERPRISE_WORKSPACE = new Set(["shared_drafts", "team_templates", "template_gallery", "automation", "booking_pages", "mail_merge", "campaign_tracking", "mcp_governance"]);
+
+function enterpriseEntitled(feature) {
+  const features = Array.isArray(state.license?.features) ? state.license.features : [];
+  return features.includes("all") || features.includes("*") || features.includes(feature);
+}
+
+function enterpriseFeatureCard(item) {
+  const management = ENTERPRISE_MANAGEMENT[item.feature];
+  const entitled = enterpriseEntitled(item.feature);
+  const environmentOnly = ENTERPRISE_ENVIRONMENT_ONLY.has(item.feature);
+  const workspace = ENTERPRISE_WORKSPACE.has(item.feature);
+  const manage = management
+    ? `<a class="btn btn-secondary btn-sm" href="#/${management.view}">${icon("sliders")}Open ${esc(management.label)}</a>`
+    : environmentOnly
+      ? `<span class="badge neutral">${icon("key")}Deployment configuration</span>`
+      : workspace
+        ? `<span class="badge neutral">${icon("mail")}User workspace</span>`
+        : `<span class="badge warning">${icon("alert")}No admin screen yet</span>`;
+  const plan = entitled
+    ? `<span class="badge active">${icon("check")}In plan</span>`
+    : `<span class="badge neutral">Not in plan</span>${state.license?.portalUrl ? ` <a class="btn btn-ghost btn-sm" href="${esc(state.license.portalUrl)}/upgrade" target="_blank" rel="noopener noreferrer">View plans</a>` : ""}`;
+  return `<article class="entity-card enterprise-feature-card" data-enterprise-feature="${esc(item.feature)}">
+    <div class="entity-head"><span class="entity-icon">${icon(management ? "sliders" : workspace ? "mail" : environmentOnly ? "terminal" : "sparkles")}</span><div class="entity-title"><b>${esc(item.label || item.feature)}</b><small>${esc(item.description || "")}</small></div>${plan}</div>
+    <div class="entity-meta"><span>${esc(management ? "Admin console" : environmentOnly ? "Environment" : workspace ? "Webmail workspace" : "API only")}</span><span class="spacer"></span>${manage}</div>
+  </article>`;
+}
+
+async function renderEnterpriseFeatures() {
+  loading("Enterprise features");
+  if (!state.enterprise) { renderEnterpriseRequired("enterprise-features"); return; }
+  const catalog = Array.isArray(state.license?.featureCatalog) ? state.license.featureCatalog : [];
+  const descriptors = new Map();
+  for (const item of state.paidUI || []) {
+    if (item?.feature && !descriptors.has(item.feature)) descriptors.set(item.feature, item);
+  }
+  const groups = new Map();
+  for (const feature of catalog) {
+    const group = feature.group || "Other";
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(feature);
+  }
+  const total = catalog.length;
+  const included = catalog.filter((feature) => enterpriseEntitled(feature.key)).length;
+  const adminSurfaces = catalog.filter((feature) => ENTERPRISE_MANAGEMENT[feature.key]).length;
+  const noAdmin = catalog.filter((feature) => !ENTERPRISE_MANAGEMENT[feature.key] && !ENTERPRISE_ENVIRONMENT_ONLY.has(feature.key)).length;
+  const groupLabel = (value) => String(value || "Other").split(/[-_]/).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+  const cards = Array.from(groups.entries()).map(([group, features]) => `<section class="mini-section" style="margin-top:18px"><h3>${esc(groupLabel(group))}</h3><div class="entity-grid">${features.map((feature) => enterpriseFeatureCard({ ...(descriptors.get(feature.key) || {}), ...feature, feature: feature.key })).join("")}</div></section>`).join("");
+  $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Enterprise features</h1><p>Every capability in the paid catalog, whether this license includes it, and where it is managed.</p></div><div class="view-actions"><input class="input" id="enterpriseFeatureSearch" type="search" placeholder="Search features" aria-label="Search enterprise features"></div></div>
+    <div class="stat-grid">
+      <div class="stat-card"><span class="stat-label">${icon("sparkles")}Catalog</span><span class="stat-value">${total}</span><span class="stat-meta">Paid capabilities in this release</span></div>
+      <div class="stat-card"><span class="stat-label">${icon("check")}In license</span><span class="stat-value">${included}</span><span class="stat-meta">${total - included} require a plan change</span></div>
+      <div class="stat-card"><span class="stat-label">${icon("sliders")}Admin surfaces</span><span class="stat-value">${adminSurfaces}</span><span class="stat-meta">Open from this console</span></div>
+      <div class="stat-card"><span class="stat-label">${icon("mail")}Workspace / environment</span><span class="stat-value">${noAdmin}</span><span class="stat-meta">No organization admin screen yet</span></div>
+    </div>
+    <div id="enterpriseFeatureGroups">${cards || `<div class="card card-pad"><div class="empty">${icon("sparkles")}<h3>No paid feature catalog</h3><p>The license snapshot did not include feature metadata.</p></div></div>`}</div>`;
+  const search = $("#enterpriseFeatureSearch");
+  search?.addEventListener("input", () => {
+    const query = search.value.trim().toLowerCase();
+    $$(".enterprise-feature-card").forEach((card) => {
+      card.hidden = query && !card.textContent.toLowerCase().includes(query);
+    });
+    $$("#enterpriseFeatureGroups .mini-section").forEach((section) => {
+      section.hidden = !Array.from(section.querySelectorAll(".enterprise-feature-card")).some((card) => !card.hidden);
+    });
+  });
+}
+
 async function renderTenants() {
   if (!can("system.tenants.manage")) { $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Organizations</h1><p>System administrator access is required.</p></div></div>`; return; }
   loading("Organizations");

@@ -1,3 +1,20 @@
+# Alt8Mail 3.9.6
+
+Release date: 2026-11-19. Enterprise feature discoverability in the admin console.
+
+## 3.9.6 enterprise catalog
+
+- **The admin console now has an Enterprise → Enterprise features page.**
+  It lists the complete paid feature catalog registered by the installed
+  enterprise module, not just the six static admin pages.
+- Each capability shows whether the signed license includes it, and where it is
+  managed: an admin console page, the webmail workspace, deployment
+  configuration, or a backend API with no admin screen yet.
+- The catalog separates "not in this license" from "not yet exposed in the
+  admin UI", so a plan limitation is no longer mistaken for a missing product.
+- Counts summarise registered capabilities, licensed capabilities, admin
+  surfaces and capabilities that still need an admin surface.
+
 # Alt8Mail 3.9.5
 
 Release date: 2026-11-18. Enterprise activation recovery and installer UX.
