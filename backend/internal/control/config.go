@@ -138,7 +138,7 @@ func LoadConfig() (Config, error) {
 		LicensePublicKey:      strings.TrimSpace(os.Getenv("CONTROL_LICENSE_PUBLIC_KEY")),
 		LicensePublicKeys:     strings.TrimSpace(os.Getenv("CONTROL_LICENSE_PUBLIC_KEYS")),
 		LicenseAllowConfigKey: envBool("CONTROL_LICENSE_ALLOW_CONFIG_KEY", false),
-		LicensePortalURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("CONTROL_LICENSE_PORTAL_URL")), "/"),
+		LicensePortalURL:      strings.TrimRight(env("CONTROL_LICENSE_PORTAL_URL", "https://licensing.a8m.altgence.net"), "/"),
 		LicenseGroup:          env("CONTROL_LICENSE_GROUP", "a8m"),
 		LicenseWarningPercent: 80,
 		EnterpriseInstallRoot: env("CONTROL_ENTERPRISE_INSTALL_ROOT", "/opt/a8m"),

@@ -19,7 +19,7 @@ func TestControlLicenseTrustAndPortalConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LicenseAllowConfigKey || cfg.LicensePortalURL != "" {
+	if cfg.LicenseAllowConfigKey || cfg.LicensePortalURL != "https://licensing.a8m.altgence.net" {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
 }
