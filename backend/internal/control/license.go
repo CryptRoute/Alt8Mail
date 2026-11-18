@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CryptRoute/Alt8Mail/backend/internal/enterprise"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/licensing"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -44,41 +45,54 @@ type licenseFileOwner struct {
 // file. It never contains the token or signature. error is one of the fixed
 // categories not_configured, unreadable, malformed or signature.
 type licenseStatus struct {
-	Configured         bool                `json:"configured"`
-	FilePath           string              `json:"filePath"`
-	State              string              `json:"state"`
-	Edition            string              `json:"edition"`
-	InGrace            bool                `json:"inGrace"`
-	Expired            bool                `json:"expired"`
-	Seats              int                 `json:"seats"`
-	LicensedSeats      int                 `json:"licensedSeats"`
-	UsedSeats          int                 `json:"usedSeats"`
-	RemainingSeats     int                 `json:"remainingSeats"`
-	SeatSource         string              `json:"seatSource"`
-	CommunitySeatLimit int                 `json:"communitySeatLimit"`
-	Warning            bool                `json:"warning"`
-	WarningPercent     int                 `json:"warningPercent"`
-	Features           []string            `json:"features"`
-	AvailableFeatures  []string            `json:"availableFeatures"`
-	MissingFeatures    []string            `json:"missingFeatures"`
-	FeatureCatalog     []licensing.Feature `json:"featureCatalog"`
-	TrustAnchor        string              `json:"trustAnchor"`
-	PortalURL          string              `json:"portalUrl"`
-	ExpiresAt          *time.Time          `json:"expiresAt"`
-	Tenant             string              `json:"tenant"`
-	LicenseID          string              `json:"licenseId"`
-	Plan               string              `json:"plan"`
-	DeploymentID       string              `json:"deploymentId,omitempty"`
-	Trial              bool                `json:"trial"`
-	Limits             *licensing.Limits   `json:"limits,omitempty"`
-	LastModified       *time.Time          `json:"lastModified"`
-	Error              string              `json:"error"`
+	Configured          bool                `json:"configured"`
+	FilePath            string              `json:"filePath"`
+	State               string              `json:"state"`
+	Edition             string              `json:"edition"`
+	BinaryEdition       string              `json:"binaryEdition"`
+	EnterpriseInstalled bool                `json:"enterpriseInstalled"`
+	InGrace             bool                `json:"inGrace"`
+	Expired             bool                `json:"expired"`
+	Seats               int                 `json:"seats"`
+	LicensedSeats       int                 `json:"licensedSeats"`
+	UsedSeats           int                 `json:"usedSeats"`
+	RemainingSeats      int                 `json:"remainingSeats"`
+	SeatSource          string              `json:"seatSource"`
+	CommunitySeatLimit  int                 `json:"communitySeatLimit"`
+	Warning             bool                `json:"warning"`
+	WarningPercent      int                 `json:"warningPercent"`
+	Features            []string            `json:"features"`
+	AvailableFeatures   []string            `json:"availableFeatures"`
+	MissingFeatures     []string            `json:"missingFeatures"`
+	FeatureCatalog      []licensing.Feature `json:"featureCatalog"`
+	TrustAnchor         string              `json:"trustAnchor"`
+	PortalURL           string              `json:"portalUrl"`
+	ExpiresAt           *time.Time          `json:"expiresAt"`
+	Tenant              string              `json:"tenant"`
+	LicenseID           string              `json:"licenseId"`
+	Plan                string              `json:"plan"`
+	DeploymentID        string              `json:"deploymentId,omitempty"`
+	Trial               bool                `json:"trial"`
+	Limits              *licensing.Limits   `json:"limits,omitempty"`
+	LastModified        *time.Time          `json:"lastModified"`
+	Error               string              `json:"error"`
 }
 
 func (s *Server) registerLicenseRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /control/api/license", s.require("settings.write", s.handleLicenseStatus))
 	mux.HandleFunc("POST /control/api/license", s.require("settings.write", s.handleLicenseUpload))
 	s.registerLicenseUpgradeRoutes(mux)
+}
+
+func (s *Server) enterpriseBinary() bool {
+	return enterprise.Registered() != nil
+}
+
+func (s *Server) binaryEdition() string {
+	if s.enterpriseBinary() {
+		return "enterprise"
+	}
+	return "community"
 }
 
 func (s *Server) hasPaidFeature(feature string) bool {
@@ -182,6 +196,9 @@ func (s *Server) handleLicenseUpload(w http.ResponseWriter, r *http.Request, ses
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "restartRequired": true, "license": status,
+		"binaryEdition": s.binaryEdition(),
+		"enterpriseInstallRequired": !s.enterpriseBinary() && status.Edition != "oss" &&
+			(status.State == "valid" || status.State == "grace"),
 	})
 }
 
@@ -224,20 +241,22 @@ func (s *Server) licenseStatusView(ctx context.Context) (licenseStatus, []map[st
 		warningPercent = 80
 	}
 	status := licenseStatus{
-		FilePath:           s.cfg.LicenseFile,
-		State:              "unlicensed",
-		Edition:            "oss",
-		Seats:              communitySeatLimit,
-		CommunitySeatLimit: communitySeatLimit,
-		SeatSource:         "community",
-		Plan:               "community",
-		Features:           []string{},
-		AvailableFeatures:  append([]string{}, licensing.PaidFeatureKeys...),
-		MissingFeatures:    append([]string{}, licensing.PaidFeatureKeys...),
-		FeatureCatalog:     licensing.Catalog(),
-		TrustAnchor:        s.licenseTrustSource(),
-		PortalURL:          s.cfg.LicensePortalURL,
-		WarningPercent:     warningPercent,
+		FilePath:            s.cfg.LicenseFile,
+		State:               "unlicensed",
+		Edition:             "oss",
+		BinaryEdition:       s.binaryEdition(),
+		EnterpriseInstalled: s.enterpriseBinary(),
+		Seats:               communitySeatLimit,
+		CommunitySeatLimit:  communitySeatLimit,
+		SeatSource:          "community",
+		Plan:                "community",
+		Features:            []string{},
+		AvailableFeatures:   append([]string{}, licensing.PaidFeatureKeys...),
+		MissingFeatures:     append([]string{}, licensing.PaidFeatureKeys...),
+		FeatureCatalog:      licensing.Catalog(),
+		TrustAnchor:         s.licenseTrustSource(),
+		PortalURL:           s.cfg.LicensePortalURL,
+		WarningPercent:      warningPercent,
 	}
 
 	path := strings.TrimSpace(s.cfg.LicenseFile)

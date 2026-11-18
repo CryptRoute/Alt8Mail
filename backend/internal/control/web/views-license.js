@@ -1,5 +1,5 @@
 /* System Control — offline license status, seat metering and token upload. */
-import * as ui from './ui.js?v=3.9.3';
+import * as ui from './ui.js?v=3.9.4';
 
 const esc = ui.esc;
 const fmt = {
@@ -138,12 +138,12 @@ function statusNotice(license) {
         <p class="form-note license-file-note">Configured path: <span class="mono break-all">${esc(filePathText(license))}</span></p>`;
     }
     case 'grace':
-      return ui.inlineNotice(
+      return `${binaryMismatchNotice(license)}${ui.inlineNotice(
         'warning',
         'The license is in its grace period',
         `Paid features remain available during grace, but the license expired on ${fmt.dateOnly(license.expiresAt)}. Renew before the grace period ends to avoid losing paid entitlements.`,
         docs,
-      );
+      )}`;
     case 'expired':
       return ui.inlineNotice(
         'critical',
@@ -152,12 +152,12 @@ function statusNotice(license) {
         `${upgradeButton(license, 'Renew')} ${docs}`,
       );
     case 'valid':
-      return ui.inlineNotice(
+      return `${binaryMismatchNotice(license)}${ui.inlineNotice(
         'good',
         'The license is active',
         `The license is valid. The webmail enables paid features after it loads this file. It expires on ${fmt.dateOnly(license.expiresAt)} (${expirySummary(license)}).`,
         docs,
-      );
+      )}`;
     default:
       return ui.inlineNotice('info', 'License state is unknown', 'Reload the page or check the Control service log.', docs);
   }
@@ -168,6 +168,9 @@ function statusMarkup(license) {
   const hasSeats = Number(license?.seats) > 0;
   const rows = [
     ['Edition', esc(editionLabel(license?.edition))],
+    ['Binary edition', license?.binaryEdition === 'enterprise'
+      ? ui.badge('Enterprise', 'good', 'check-circle')
+      : ui.badge('Community', license?.edition === 'oss' ? 'neutral' : 'warning', 'layers')],
     ['State', statePill(license?.state)],
     ['License file', `<span class="mono break-all">${esc(filePathText(license))}</span>`],
   ];
@@ -292,13 +295,117 @@ function tenantSeatMarkup(license, byTenant) {
     <p class="form-note">Rows are ordered by tenant name. ${license?.seatSource === 'community' ? 'The community allowance' : 'This license'} counts active users across every tenant.</p>`;
 }
 
+const INSTALL_PHASES = [
+  ['requesting', 'Authorize the release download'],
+  ['downloading', 'Download and checksum the signed release'],
+  ['installing', 'Install binaries and restart services'],
+  ['complete', 'Enterprise edition active'],
+];
+
+function installProgressMarkup(job) {
+  const phase = String(job?.phase || 'requesting');
+  const order = INSTALL_PHASES.map(([key]) => key);
+  const index = order.indexOf(phase === 'error' ? 'requesting' : phase);
+  const failed = phase === 'error';
+  const items = INSTALL_PHASES.map(([key, label], i) => {
+    const done = !failed && index > i || phase === 'complete';
+    const active = !failed && index === i && phase !== 'complete';
+    const iconName = done ? 'check-circle' : active ? 'refresh' : 'circle-dot';
+    const tone = done ? 'good' : active ? 'info' : 'neutral';
+    return `<li class="check-item"><span class="check-dot ${tone}">${ui.icon(iconName, 13)}</span>${esc(label)}</li>`;
+  }).join('');
+  const detail = failed
+    ? ui.inlineNotice('critical', 'Enterprise install failed', esc(job.error || job.message || 'The install did not complete.'))
+    : phase === 'complete'
+      ? ui.inlineNotice('good', 'Enterprise edition installed', esc(job.message || 'The enterprise release is active.'))
+      : ui.inlineNotice('info', 'Installing Alt8Mail Enterprise', esc(job.message || 'Working…'));
+  return `<div class="stack"><ul class="check-list">${items}</ul>${detail}</div>`;
+}
+
+function openEnterpriseInstall(ctx, license, reload) {
+  let timer = null;
+  let closed = false;
+  const modal = ui.openModal({
+    title: 'Activate Alt8Mail Enterprise',
+    subtitle: 'Your license is valid. This server is still running the community build.',
+    size: 'small',
+    body: `<div class="stack">
+      <p class="form-note">Control will fetch the signed enterprise release from the licensing portal, verify its checksum and Ed25519 signature, install it beside the current release and restart the services. If any step fails, the community release keeps running.</p>
+      <div id="enterprise-install-progress">${installProgressMarkup({ phase: 'requesting', message: 'Starting the installer…' })}</div>
+    </div>`,
+    footer: `<button type="button" class="btn btn-ghost" data-modal-close>Close</button><button type="button" class="btn btn-primary" id="enterprise-install-start">${ui.icon('sparkles', 15)} Install enterprise release</button>`,
+    onClose: () => { closed = true; if (timer) clearTimeout(timer); },
+  });
+  const host = modal.root.querySelector('#enterprise-install-progress');
+  const button = modal.root.querySelector('#enterprise-install-start');
+  const setBusy = (busy) => {
+    if (!button) return;
+    button.disabled = busy;
+    button.innerHTML = busy ? `${ui.icon('refresh', 15)} Installing…` : `${ui.icon('sparkles', 15)} Install enterprise release`;
+  };
+  const poll = async () => {
+    if (closed) return;
+    try {
+      const job = await ctx.api('/control/api/license/upgrade/status');
+      if (closed) return;
+      if (host) host.innerHTML = installProgressMarkup(job);
+      if (job.phase === 'complete') {
+        setBusy(false);
+        if (button) button.hidden = true;
+        ui.toast(`Alt8Mail Enterprise ${job.version || ''} installed.`, 'good');
+        setTimeout(() => { if (!closed) modal.close(); }, 1200);
+        if (reload) await reload();
+        return;
+      }
+      if (job.phase === 'error') {
+        setBusy(false);
+        return;
+      }
+    } catch (error) {
+      if (closed || error?.name === 'AbortError') return;
+      if (host) host.innerHTML = installProgressMarkup({ phase: 'error', error: error.message || 'Could not read the install status.' });
+      setBusy(false);
+      return;
+    }
+    timer = setTimeout(poll, 2500);
+  };
+  const start = async () => {
+    setBusy(true);
+    if (host) host.innerHTML = installProgressMarkup({ phase: 'requesting', message: 'Authorizing the release download…' });
+    try {
+      await ctx.api('/control/api/license/enterprise/install', { method: 'POST', body: {} });
+      poll();
+    } catch (error) {
+      if (host) host.innerHTML = installProgressMarkup({ phase: 'error', error: error.message || 'Could not start the install.' });
+      setBusy(false);
+    }
+  };
+  button?.addEventListener('click', start);
+  start();
+}
+
+function binaryMismatchNotice(license) {
+  if (!license || license.binaryEdition === 'enterprise') return '';
+  if (license.edition === 'oss' || !LOADED_STATES.has(license.state)) return '';
+  return ui.inlineNotice(
+    'warning',
+    'Enterprise license installed, community binary running',
+    'This token unlocks enterprise entitlements, but the running binaries are the community build. Install the enterprise release to activate shared inboxes, SSO, SCIM, migration, AI and the other paid capabilities.',
+    `<button class="btn btn-primary btn-sm" type="button" data-install-enterprise>${ui.icon('sparkles', 13)} Install enterprise release</button>`,
+  );
+}
+
 function uploadSuccessMarkup(result) {
   const license = result?.license || {};
   const restart = result?.restartRequired !== false;
+  const mismatch = result?.enterpriseInstallRequired
+    ? `<p><strong>This server is still running the community binary.</strong> The license is valid; install the enterprise release below to activate its paid capabilities.</p>`
+    : '';
   return `<div class="notice tone-good" role="status">
       ${ui.icon('check-circle', 17)}
       <div>
         <strong>License uploaded and verified</strong>
+        ${mismatch}
         <p>${restart ? 'Restart the Alt8Mail webmail service to activate this license.' : 'The new license is ready to use.'}</p>
         <p>Seat usage below updates immediately. The running webmail keeps using the token it loaded at startup until it restarts.</p>
         <p>Control does not validate <span class="mono">ALT8MAIL_LICENSE_TENANT</span>. In a tenant-pinned deployment, a token whose tenant claim differs from the webmail pin will be rejected by the webmail after restart.</p>
@@ -411,6 +518,9 @@ export async function renderLicense(ctx) {
     </div>`;
 
   const statusBody = document.getElementById('license-status-body');
+  statusBody?.addEventListener('click', (event) => {
+    if (event.target.closest('[data-install-enterprise]')) openEnterpriseInstall(ctx, license, load);
+  });
   const seatBody = document.getElementById('license-seat-body');
   const tenantBody = document.getElementById('license-tenant-body');
   const stateChip = document.getElementById('license-state-chip');
@@ -479,6 +589,8 @@ export async function renderLicense(ctx) {
   });
 
   const paint = () => {
+    const upgradeCard = document.getElementById('license-upgrade-card');
+    if (upgradeCard) upgradeCard.hidden = license?.binaryEdition === 'enterprise';
     if (statusBody) statusBody.innerHTML = statusMarkup(license);
     if (seatBody) seatBody.innerHTML = seatMarkup(license);
     if (tenantBody) tenantBody.innerHTML = tenantSeatMarkup(license, byTenant);
@@ -549,7 +661,12 @@ export async function renderLicense(ctx) {
       clearInputs();
       if (!ctx.isCurrent()) return;
       if (resultHost) resultHost.innerHTML = uploadSuccessMarkup(result);
-      ui.toast('License uploaded. Restart the Alt8Mail webmail service to activate it.', 'good', { title: 'License updated' });
+      if (result.enterpriseInstallRequired) {
+        ui.toast('Enterprise license accepted. Installing the enterprise release…', 'info', { title: 'License updated' });
+        openEnterpriseInstall(ctx, result.license || {}, load);
+      } else {
+        ui.toast('License uploaded. Restart the Alt8Mail webmail service to activate it.', 'good', { title: 'License updated' });
+      }
       try {
         await load();
       } catch {

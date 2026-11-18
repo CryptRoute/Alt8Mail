@@ -189,6 +189,9 @@ func TestLicenseStatusUnlicensed(t *testing.T) {
 	if status.State != "unlicensed" || status.Configured || status.Edition != "oss" {
 		t.Fatalf("unexpected unlicensed status: %#v", status)
 	}
+	if status.BinaryEdition != "community" || status.EnterpriseInstalled {
+		t.Fatalf("binary edition = %q/%v, want community", status.BinaryEdition, status.EnterpriseInstalled)
+	}
 	if status.Error != "not_configured" {
 		t.Fatalf("error = %q, want not_configured", status.Error)
 	}

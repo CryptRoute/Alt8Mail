@@ -270,6 +270,69 @@ func TestExtractEnterpriseBundleRejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestEnterpriseInstallUsesUploadedLicense(t *testing.T) {
+	token, _ := signedCoverageLicense(t)
+	bundle := buildTestEnterpriseBundle(t, "9.9.9")
+	sum := sha256.Sum256(bundle)
+	releasePublic, releasePrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := base64.RawURLEncoding.EncodeToString(
+		ed25519.Sign(releasePrivate, []byte("a8m-enterprise-release-sha256:"+hex.EncodeToString(sum[:]))))
+	bundleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(bundle)
+	}))
+	defer bundleServer.Close()
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/enterprise/install" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"bundle": map[string]any{
+				"url": bundleServer.URL + "/enterprise.tar.gz", "sha256": hex.EncodeToString(sum[:]),
+				"version": "9.9.9", "signature": signature,
+				"publicKey": base64.RawURLEncoding.EncodeToString(releasePublic),
+			},
+		})
+	}))
+	defer portal.Close()
+	licenseFile := filepath.Join(t.TempDir(), "license.token")
+	if err := os.WriteFile(licenseFile, []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := testUpgradeServer(t, portal.URL, licenseFile, "")
+	server.cfg.EnterpriseReleaseKey = base64.RawURLEncoding.EncodeToString(releasePublic)
+	installed := ""
+	server.enterpriseInstall = func(_ context.Context, path, version string) error {
+		installed = version
+		if _, err := os.Stat(path); err != nil {
+			return err
+		}
+		return nil
+	}
+	job, err := server.beginEnterpriseInstall()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		current, _ := server.loadUpgradeJob()
+		if current != nil && (current.Phase == "complete" || current.Phase == "error") {
+			job = current
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if job.Phase != "complete" || job.Error != "" || job.Version != "9.9.9" {
+		t.Fatalf("job = %#v", job)
+	}
+	if installed != "9.9.9" {
+		t.Fatalf("installed = %q", installed)
+	}
+}
+
 func TestInstallEnterpriseReleaseOverlaysCurrentRelease(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("release symlink semantics are POSIX")
@@ -284,7 +347,7 @@ func TestInstallEnterpriseReleaseOverlaysCurrentRelease(t *testing.T) {
 		"bin/a8m-admin-server":   "community-admin",
 		"bin/alt8mail-control":   "community-control",
 		"bin/a8m-storage-runner": "community-storage",
-		"VERSION":                "3.9.3",
+		"VERSION":                "3.9.4",
 	} {
 		if err := os.WriteFile(filepath.Join(base, name), []byte(body), 0o755); err != nil {
 			t.Fatal(err)

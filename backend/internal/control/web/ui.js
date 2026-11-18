@@ -1,5 +1,5 @@
 /* Alt8Mail System Control — shared UI primitives. No inline scripts: CSP-safe. */
-import { currentLocale, t } from './i18n.js?v=3.9.3';
+import { currentLocale, t } from './i18n.js?v=3.9.4';
 
 export const esc = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (ch) => ({

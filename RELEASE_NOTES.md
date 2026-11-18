@@ -1,3 +1,27 @@
+# Alt8Mail 3.9.4
+
+Release date: 2026-11-18. Honest license state and in-place enterprise activation.
+
+## 3.9.4 enterprise activation
+
+- **The license page no longer pretends a community binary is enterprise.**
+  Status now reports `binaryEdition` separately from the licensed edition. A
+  valid enterprise token on a community build shows a warning and an
+  **Install enterprise release** action instead of silently claiming the paid
+  features are active.
+- **License upload offers immediate activation.** After a valid enterprise
+  token is uploaded, Control opens an activation modal, authorizes the signed
+  release with the licensing portal, downloads it, verifies the checksum and
+  Ed25519 signature, installs it beside the running release and restarts the
+  services. Failure leaves the community release running.
+- **Enterprise updates come from the licensing portal.** Once the enterprise
+  binary is installed, Software updates checks the portal's enterprise channel
+  and installs the newest signed bundle through the same transactional flow;
+  it no longer queries the public community repository.
+- **New portal endpoints.** `GET /api/v1/enterprise/version` publishes the
+  available enterprise version and `POST /api/v1/enterprise/install` exchanges
+  a valid license token for a one-time, deployment-bound bundle download.
+
 # Alt8Mail 3.9.3
 
 Release date: 2026-11-18. One-click community-to-enterprise upgrades and a

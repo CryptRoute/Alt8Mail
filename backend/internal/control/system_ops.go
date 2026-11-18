@@ -295,6 +295,28 @@ func (s *Server) handleSystemOverview(w http.ResponseWriter, r *http.Request, se
 }
 
 func (s *Server) handleAppUpdateCheck(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
+	if s.enterpriseBinary() {
+		latest, err := s.enterpriseLatestRelease(r.Context())
+		if err != nil {
+			s.actorAudit(r, sess, "system.app_update_check_failed", "release", "Enterprise release check failed",
+				map[string]any{"error": truncateText(err.Error(), 800)})
+			writeError(w, http.StatusBadGateway, "APP_UPDATE_CHECK", "Could not check the licensing portal for an enterprise release: "+truncateText(err.Error(), 400))
+			return
+		}
+		current := s.currentReleaseVersion()
+		checkedAt := time.Now().UTC().Format(time.RFC3339)
+		_ = s.setSetting(r.Context(), "system.latest_version", latest, sess.User.ID)
+		_ = s.setSetting(r.Context(), "system.update_checked_at", checkedAt, sess.User.ID)
+		updateAvailable := compareVersions(latest, current) > 0
+		s.actorAudit(r, sess, "system.app_update_checked", "release", "Checked the licensing portal for an enterprise release",
+			map[string]any{"current": current, "latest": latest, "updateAvailable": updateAvailable, "channel": "enterprise"})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "channel": "enterprise", "currentVersion": current, "latestVersion": latest,
+			"updateAvailable": updateAvailable, "checkedAt": checkedAt,
+			"output": "installed=" + current + " latest=" + latest + " channel=enterprise",
+		})
+		return
+	}
 	result, err := runCommand(r.Context(), 120*time.Second, updateBinary, "--check")
 	output := strings.TrimSpace(result.Stdout + "\n" + result.Stderr)
 	current, latest, ok := parseUpdateCheck(output)
@@ -352,11 +374,33 @@ func (s *Server) handleAppUpdateStart(w http.ResponseWriter, r *http.Request, se
 		writeError(w, http.StatusBadRequest, "CONFIRM", "Type UPDATE to confirm the release update")
 		return
 	}
+	if s.pendingReboot(r.Context()) != nil {
+		writeError(w, http.StatusConflict, "REBOOT_PENDING", "A reboot is pending. Complete the reboot before updating the application.")
+		return
+	}
+	if s.enterpriseBinary() {
+		if job, err := s.loadUpgradeJob(); err == nil && job != nil &&
+			(job.Phase == "requesting" || job.Phase == "downloading" || job.Phase == "installing") {
+			writeError(w, http.StatusConflict, "UPDATE_RUNNING", "An enterprise release install is already running.")
+			return
+		}
+		job, err := s.beginEnterpriseInstall()
+		if err != nil {
+			writeFromError(w, err)
+			return
+		}
+		latest := s.settingString(r.Context(), "system.latest_version", job.Version)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"ok": true, "channel": "enterprise", "jobId": "enterprise",
+			"targetVersion": latest, "phase": job.Phase,
+		})
+		return
+	}
 	target := strings.TrimSpace(body.Target)
 	if target == "" || strings.EqualFold(target, "latest") {
 		target = s.settingString(r.Context(), "system.latest_version", "")
 	}
-	if target == "" {
+	if target == "" && !s.enterpriseBinary() {
 		writeError(w, http.StatusBadRequest, "TARGET", "Check for an available release before starting the update")
 		return
 	}

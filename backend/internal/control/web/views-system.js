@@ -1,5 +1,5 @@
 /* System Control — release updates, version history, host reboot tracking. */
-import * as ui from './ui.js?v=3.9.3';
+import * as ui from './ui.js?v=3.9.4';
 
 const esc = ui.esc;
 const fmt = {
@@ -270,6 +270,40 @@ export async function renderSystem(ctx) {
     tick();
   };
 
+  const watchEnterpriseInstall = () => {
+    if (activeJobTimer) clearTimeout(activeJobTimer);
+    const tick = async () => {
+      if (!ctx.isCurrent()) return;
+      try {
+        const job = await ctx.api('/control/api/license/upgrade/status');
+        if (!ctx.isCurrent()) return;
+        const failed = job.phase === 'error';
+        const complete = job.phase === 'complete';
+        paintConsole({
+          status: complete ? 'completed' : failed ? 'failed' : 'running',
+          detail: failed ? (job.error || job.message) : job.message,
+          targetVersion: job.version || overview?.latestVersion || '',
+          log: [job.message, job.error].filter(Boolean).join('\n'),
+        });
+        if (complete) {
+          ui.toast(`Alt8Mail enterprise ${job.version || ''} installed.`, 'good');
+          await load(true);
+          return;
+        }
+        if (failed) {
+          ui.toast(job.error || 'The enterprise release install failed.', 'critical', { title: 'Enterprise install failed' });
+          await load(true);
+          return;
+        }
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+        setConsoleState('running', 'The control plane is restarting; reconnecting to the enterprise installer…');
+      }
+      activeJobTimer = setTimeout(tick, 2500);
+    };
+    tick();
+  };
+
   const startUpdate = async () => {
     if (!canManage || !overview) return;
     let target = overview.latestVersion;
@@ -296,6 +330,12 @@ export async function renderSystem(ctx) {
     try {
       const result = await ctx.api('/control/api/system/update', { method: 'POST', body: { target, confirm: 'UPDATE' } });
       ui.toast(`Update to ${result.targetVersion} started.`, 'info');
+      if (result.channel === 'enterprise') {
+        setConsoleState('queued', 'Waiting for the enterprise installer…');
+        watchEnterpriseInstall();
+        await load(true);
+        return;
+      }
       activeJobId = result.jobId;
       setConsoleState('queued', 'Waiting for updater output…');
       watchUpdate(result.jobId);

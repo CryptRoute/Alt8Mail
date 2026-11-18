@@ -13,7 +13,7 @@ offline signing device. Set `A8M_LICENSE_PUBLIC_KEY` (and optionally
 `A8M_LICENSE_PUBLIC_KEY_ID`) when building a release:
 
 ```bash
-A8M_LICENSE_PUBLIC_KEY=<base64-ed25519-public-key> A8M_LICENSE_PUBLIC_KEY_ID=2026-11 A8M_LICENSE_PORTAL_URL=https://licenses.example.com   bash scripts/build-release.sh 3.9.3 dist
+A8M_LICENSE_PUBLIC_KEY=<base64-ed25519-public-key> A8M_LICENSE_PUBLIC_KEY_ID=2026-11 A8M_LICENSE_PORTAL_URL=https://licenses.example.com   bash scripts/build-release.sh 3.9.4 dist
 ```
 
 The GitHub release workflow reads the public key from the repository secret
@@ -376,7 +376,6 @@ or signature. `GET /api/entitlements` returns the same snapshot.
 A release built with `A8M_LICENSE_PORTAL_URL` and the vendor trust anchors
 offers **Infrastructure → License → One-click upgrade** in System Control.
 The flow is:
-
 1. Control creates a deployment id, records a pending upgrade under
    `/var/lib/alt8mail-control/license-upgrade.json` and opens the portal's
    `/upgrade` page with the deployment id and a Control callback URL.
@@ -392,6 +391,15 @@ The flow is:
    the enterprise binaries and switches `/opt/a8m/current` to the new release.
 5. Control restarts the webmail, admin and control services. The previous
    release stays on disk, and a failed step leaves the running release untouched.
+
+Only the presence of the enterprise binary makes the paid capabilities execute.
+A valid enterprise token on a community binary is reported as
+`binaryEdition: community`; the licence page shows an **Install enterprise
+release** action instead of claiming the paid features are active. That action
+sends the uploaded token to `POST /api/v1/enterprise/install` on the portal,
+which authorizes a one-time bundle claim without reissuing the licence. The
+same portal endpoint is the source for Software updates after the enterprise
+binary is installed.
 
 The portal serves the newest
 `alt8mail-enterprise-<version>-linux-amd64.tar.gz` from

@@ -35,6 +35,14 @@ type licenseUpgradeJob struct {
 	ExpiresAt    time.Time `json:"expiresAt"`
 }
 
+type enterpriseBundlePayload struct {
+	URL       string `json:"url"`
+	SHA256    string `json:"sha256"`
+	Version   string `json:"version"`
+	Signature string `json:"signature"`
+	PublicKey string `json:"publicKey"`
+}
+
 type upgradeClaimPayload struct {
 	License struct {
 		ID               string `json:"id"`
@@ -45,19 +53,18 @@ type upgradeClaimPayload struct {
 		Seats            int    `json:"seats"`
 		SigningPublicKey string `json:"signingPublicKey"`
 	} `json:"license"`
-	Bundle *struct {
-		URL       string `json:"url"`
-		SHA256    string `json:"sha256"`
-		Version   string `json:"version"`
-		Signature string `json:"signature"`
-		PublicKey string `json:"publicKey"`
-	} `json:"bundle"`
+	Bundle *enterpriseBundlePayload `json:"bundle"`
+}
+
+type enterpriseInstallPayload struct {
+	Bundle *enterpriseBundlePayload `json:"bundle"`
 }
 
 func (s *Server) registerLicenseUpgradeRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /control/api/license/upgrade/start", s.require("settings.write", s.handleLicenseUpgradeStart))
 	mux.HandleFunc("GET /control/api/license/upgrade/status", s.require("settings.write", s.handleLicenseUpgradeStatus))
 	mux.HandleFunc("GET /control/api/license/upgrade/callback", s.require("settings.write", s.handleLicenseUpgradeCallback))
+	mux.HandleFunc("POST /control/api/license/enterprise/install", s.require("settings.write", s.handleEnterpriseInstall))
 }
 
 func (s *Server) handleLicenseUpgradeStart(w http.ResponseWriter, r *http.Request, _ *sessionRecord) {
@@ -142,6 +149,157 @@ func (s *Server) handleLicenseUpgradeCallback(w http.ResponseWriter, r *http.Req
 	http.Redirect(w, r, "/#/license?upgrade=1", http.StatusSeeOther)
 }
 
+func (s *Server) handleEnterpriseInstall(w http.ResponseWriter, r *http.Request, _ *sessionRecord) {
+	if s.enterpriseBinary() {
+		writeError(w, http.StatusConflict, "ALREADY_ENTERPRISE", "This server is already running the enterprise release.")
+		return
+	}
+	job, err := s.beginEnterpriseInstall()
+	if err != nil {
+		writeFromError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "phase": job.Phase, "deploymentId": job.DeploymentID})
+}
+
+func (s *Server) beginEnterpriseInstall() (*licenseUpgradeJob, error) {
+	if strings.TrimSpace(s.cfg.LicensePortalURL) == "" {
+		return nil, fail(http.StatusServiceUnavailable, "PORTAL_NOT_CONFIGURED", "Set CONTROL_LICENSE_PORTAL_URL to the licensing portal URL first.")
+	}
+	token, err := readLicenseTokenFile(s.cfg.LicenseFile)
+	if err != nil || strings.TrimSpace(string(token)) == "" {
+		return nil, fail(http.StatusConflict, "LICENSE_REQUIRED", "Upload a valid enterprise license before installing the enterprise release.")
+	}
+	deployment, err := ensureDeploymentID(s.cfg.DeploymentIDFile)
+	if err != nil {
+		return nil, fail(http.StatusInternalServerError, "DEPLOYMENT_ID", "Could not read or create the deployment id.")
+	}
+	job, _ := s.loadUpgradeJob()
+	now := time.Now().UTC()
+	if job == nil || job.Phase == "complete" || job.Phase == "error" {
+		job = &licenseUpgradeJob{DeploymentID: deployment, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+	}
+	if job.DeploymentID == "" {
+		job.DeploymentID = deployment
+	}
+	job.Phase = "requesting"
+	job.Message = "Authorizing the enterprise release download with the licensing portal..."
+	job.Error = ""
+	job.UpdatedAt = now
+	if err := s.saveUpgradeJob(job); err != nil {
+		return nil, fail(http.StatusInternalServerError, "UPGRADE_STATE", "Could not persist the upgrade request.")
+	}
+	go s.runEnterpriseInstall(job, strings.TrimSpace(string(token)))
+	return job, nil
+}
+
+func (s *Server) runEnterpriseInstall(job *licenseUpgradeJob, token string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	fail := func(err error) {
+		job.Phase = "error"
+		job.Error = err.Error()
+		job.Message = "The enterprise release was not installed. The existing Alt8Mail release is unchanged."
+		job.UpdatedAt = time.Now().UTC()
+		_ = s.saveUpgradeJob(job)
+	}
+	bundle, err := s.requestEnterpriseBundle(ctx, token, job.DeploymentID)
+	if err != nil {
+		fail(err)
+		return
+	}
+	if err := s.installBundlePayload(ctx, job, bundle); err != nil {
+		fail(err)
+		return
+	}
+	job.Phase = "complete"
+	job.Enterprise = true
+	job.Message = "Enterprise release installed and services restarted."
+	job.UpdatedAt = time.Now().UTC()
+	_ = s.saveUpgradeJob(job)
+}
+
+func (s *Server) enterpriseLatestRelease(ctx context.Context) (string, error) {
+	base := strings.TrimRight(strings.TrimSpace(s.cfg.LicensePortalURL), "/")
+	if base == "" {
+		return "", errors.New("CONTROL_LICENSE_PORTAL_URL is not configured")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/enterprise/version", nil)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("contact the licensing portal: %w", err)
+	}
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("the licensing portal returned HTTP %d", response.StatusCode)
+	}
+	var payload struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || strings.TrimSpace(payload.Version) == "" {
+		return "", errors.New("the licensing portal returned no enterprise release version")
+	}
+	return strings.TrimSpace(payload.Version), nil
+}
+
+func (s *Server) requestEnterpriseBundle(ctx context.Context, token, deployment string) (*enterpriseBundlePayload, error) {
+	base := strings.TrimRight(s.cfg.LicensePortalURL, "/")
+	body, _ := json.Marshal(map[string]string{"licenseToken": token, "deploymentId": deployment})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v1/enterprise/install", strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 60 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("contact the licensing portal: %w", err)
+	}
+	defer response.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("the licensing portal refused the enterprise install: HTTP %d", response.StatusCode)
+	}
+	var payload enterpriseInstallPayload
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Bundle == nil {
+		return nil, errors.New("the licensing portal returned no enterprise release")
+	}
+	return payload.Bundle, nil
+}
+
+func (s *Server) installBundlePayload(ctx context.Context, job *licenseUpgradeJob, bundle *enterpriseBundlePayload) error {
+	if bundle == nil || strings.TrimSpace(bundle.URL) == "" {
+		return errors.New("the portal does not publish an enterprise release")
+	}
+	job.Phase = "downloading"
+	job.Message = "Downloading the signed enterprise release..."
+	job.UpdatedAt = time.Now().UTC()
+	_ = s.saveUpgradeJob(job)
+	bundlePath, err := s.downloadEnterpriseBundle(ctx, bundle.URL, bundle.SHA256)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(bundlePath)
+	releaseKey := strings.TrimSpace(s.cfg.EnterpriseReleaseKey)
+	if releaseKey == "" {
+		releaseKey = strings.TrimSpace(bundle.PublicKey)
+	}
+	if err := verifyEnterpriseBundleSignature(releaseKey, bundle.Signature, bundle.SHA256); err != nil {
+		return err
+	}
+	job.Phase = "installing"
+	job.Message = "Installing the enterprise release and restarting services..."
+	job.Version = bundle.Version
+	job.UpdatedAt = time.Now().UTC()
+	_ = s.saveUpgradeJob(job)
+	return s.installEnterpriseBundle(ctx, bundlePath, bundle.Version)
+}
+
 func (s *Server) runLicenseUpgrade(job *licenseUpgradeJob, code string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -187,30 +345,7 @@ func (s *Server) runLicenseUpgrade(job *licenseUpgradeJob, code string) {
 		_ = s.saveUpgradeJob(job)
 		return
 	}
-	job.Phase = "downloading"
-	job.Message = "Downloading the signed enterprise release..."
-	job.UpdatedAt = time.Now().UTC()
-	_ = s.saveUpgradeJob(job)
-	bundlePath, err := s.downloadEnterpriseBundle(ctx, claim.Bundle.URL, claim.Bundle.SHA256)
-	if err != nil {
-		fail(err)
-		return
-	}
-	defer os.Remove(bundlePath)
-	releaseKey := strings.TrimSpace(s.cfg.EnterpriseReleaseKey)
-	if releaseKey == "" {
-		releaseKey = strings.TrimSpace(claim.Bundle.PublicKey)
-	}
-	if err := verifyEnterpriseBundleSignature(releaseKey, claim.Bundle.Signature, claim.Bundle.SHA256); err != nil {
-		fail(err)
-		return
-	}
-	job.Phase = "installing"
-	job.Message = "Installing the enterprise release and restarting services..."
-	job.Version = claim.Bundle.Version
-	job.UpdatedAt = time.Now().UTC()
-	_ = s.saveUpgradeJob(job)
-	if err := s.installEnterpriseBundle(ctx, bundlePath, claim.Bundle.Version); err != nil {
+	if err := s.installBundlePayload(ctx, job, claim.Bundle); err != nil {
 		fail(err)
 		return
 	}
