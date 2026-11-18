@@ -548,6 +548,16 @@ func installEnterpriseRelease(ctx context.Context, root, bundlePath, version str
 	if err := os.Rename(tmpLink, current); err != nil {
 		return err
 	}
+	// The systemd unit runs /opt/alt8mail/bin/alt8mail-control, not the
+	// current-release path directly. Repoint that stable link so the new
+	// Control binary (and its embedded UI) is what restarts.
+	controlLink := filepath.Join(filepath.Dir(root), "alt8mail", "bin", "alt8mail-control")
+	if _, err := os.Stat(filepath.Dir(controlLink)); err == nil {
+		_ = os.Remove(controlLink)
+		if err := os.Symlink(filepath.Join(current, "bin", "alt8mail-control"), controlLink); err != nil {
+			return err
+		}
+	}
 	return enterpriseRestart(ctx, version)
 }
 

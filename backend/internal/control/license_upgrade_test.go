@@ -338,6 +338,10 @@ func TestInstallEnterpriseReleaseOverlaysCurrentRelease(t *testing.T) {
 		t.Skip("release symlink semantics are POSIX")
 	}
 	root := t.TempDir()
+	controlBin := filepath.Join(filepath.Dir(root), "alt8mail", "bin")
+	if err := os.MkdirAll(controlBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	base := filepath.Join(root, "releases", "base")
 	if err := os.MkdirAll(filepath.Join(base, "bin"), 0o755); err != nil {
 		t.Fatal(err)
@@ -396,6 +400,9 @@ func TestInstallEnterpriseReleaseOverlaysCurrentRelease(t *testing.T) {
 	}
 	if restarted != "9.9.9" {
 		t.Fatalf("restart = %q", restarted)
+	}
+	if link, err := os.Readlink(filepath.Join(controlBin, "alt8mail-control")); err != nil || link != filepath.Join(root, "current", "bin", "alt8mail-control") {
+		t.Fatalf("control link = %q err=%v", link, err)
 	}
 }
 
