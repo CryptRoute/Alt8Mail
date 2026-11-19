@@ -483,8 +483,13 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
   log "installing release $VERSION"
   install -d -m 0755 "$RELEASE_DIR"
   cp -a "$SOURCE_DIR/." "$RELEASE_DIR/"
-  chmod 0755 "$RELEASE_DIR/bin/"* 2>/dev/null || true
 fi
+# A source build inherits the installer's umask (027) from the build tree. A
+# bin/ directory left at 0750 blocks the a8m service from traversing to its
+# binary, so normalize the release tree on every run, including a retry over a
+# release directory created by an earlier failed install.
+chmod -R a+rX "$RELEASE_DIR"
+chmod 0755 "$RELEASE_DIR/bin/"* 2>/dev/null || true
 ln -sfn "$RELEASE_DIR" "$INSTALL_ROOT/current"
 ln -sfn "$INSTALL_ROOT/current/bin" "$INSTALL_ROOT/bin"
 ln -sfn "$INSTALL_ROOT/current/admin" "$INSTALL_ROOT/admin"
