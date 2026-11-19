@@ -58,18 +58,19 @@ type License struct {
 	ID      string `json:"id"`
 	// KeyID names the signing key (v2). A verifier with a configured key id
 	// rejects a token signed under a different key id.
-	KeyID        string    `json:"kid,omitempty"`
-	Tenant       string    `json:"tenant,omitempty"`
-	Edition      string    `json:"edition"`
-	Plan         string    `json:"plan,omitempty"`
-	Seats        int       `json:"seats"`
-	Limits       *Limits   `json:"limits,omitempty"`
-	DeploymentID string    `json:"deploymentId,omitempty"`
-	Trial        bool      `json:"trial,omitempty"`
-	Features     []string  `json:"features"`
-	IssuedAt     time.Time `json:"issuedAt"`
-	ExpiresAt    time.Time `json:"expiresAt"`
-	GraceDays    int       `json:"graceDays"`
+	KeyID          string    `json:"kid,omitempty"`
+	Tenant         string    `json:"tenant,omitempty"`
+	Edition        string    `json:"edition"`
+	Plan           string    `json:"plan,omitempty"`
+	Seats          int       `json:"seats"`
+	Limits         *Limits   `json:"limits,omitempty"`
+	DeploymentID   string    `json:"deploymentId,omitempty"`
+	Infrastructure string    `json:"infrastructure,omitempty"`
+	Trial          bool      `json:"trial,omitempty"`
+	Features       []string  `json:"features"`
+	IssuedAt       time.Time `json:"issuedAt"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+	GraceDays      int       `json:"graceDays"`
 }
 
 // EffectivePlan returns the signed plan, falling back to the edition for v1
@@ -83,17 +84,18 @@ func (l License) EffectivePlan() string {
 
 // Status is the lifecycle view of a verified license at a point in time.
 type Status struct {
-	State         string
-	InGrace       bool
-	Expired       bool
-	SeatLimit     int
-	Features      []string
-	DaysRemaining int
-	ExpiresAt     time.Time
-	Plan          string
-	DeploymentID  string
-	Trial         bool
-	Limits        *Limits
+	State          string
+	InGrace        bool
+	Expired        bool
+	SeatLimit      int
+	Features       []string
+	DaysRemaining  int
+	ExpiresAt      time.Time
+	Plan           string
+	DeploymentID   string
+	Infrastructure string
+	Trial          bool
+	Limits         *Limits
 }
 
 // Verifier checks license envelopes against one Ed25519 public key, optionally
@@ -268,13 +270,14 @@ func normalizeAndValidate(license *License) error {
 // Status reports valid, grace or expired state at the supplied time.
 func (l License) Status(now time.Time) Status {
 	status := Status{
-		State:        "valid",
-		SeatLimit:    l.Seats,
-		Features:     append([]string(nil), l.Features...),
-		ExpiresAt:    l.ExpiresAt,
-		Plan:         l.EffectivePlan(),
-		DeploymentID: l.DeploymentID,
-		Trial:        l.Trial,
+		State:          "valid",
+		SeatLimit:      l.Seats,
+		Features:       append([]string(nil), l.Features...),
+		ExpiresAt:      l.ExpiresAt,
+		Plan:           l.EffectivePlan(),
+		DeploymentID:   l.DeploymentID,
+		Infrastructure: l.Infrastructure,
+		Trial:          l.Trial,
 	}
 	if l.Limits != nil {
 		limits := *l.Limits

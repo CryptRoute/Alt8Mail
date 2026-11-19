@@ -1,3 +1,21 @@
+# Alt8Mail 3.9.7
+
+Release date: 2026-11-19. Trial and infrastructure clarity on the licence page.
+
+## 3.9.7 licence display
+
+- **Trial licences are visibly trials.** The licence page shows a Trial badge,
+  a Trial licence type row and a trial-specific notice with the exact expiry,
+  instead of the generic full-licence message.
+- **Infrastructure type is carried in the signed token.** On-premise or cloud
+  is shown as a licence claim and on the portal licence record, so an offline
+  token and the online audit trail agree.
+- **Verification wording is accurate.** The page now says local Ed25519 token
+  verification with the portal used only for activation, enterprise bundle
+  delivery and update checks. It no longer claims that no network call exists.
+- Infrastructure changes are audited in the licensing portal and copied into
+  subsequently issued or reissued licence tokens.
+
 # Alt8Mail 3.9.6
 
 Release date: 2026-11-19. Enterprise feature discoverability in the admin console.

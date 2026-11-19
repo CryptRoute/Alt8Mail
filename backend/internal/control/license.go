@@ -72,6 +72,7 @@ type licenseStatus struct {
 	LicenseID           string              `json:"licenseId"`
 	Plan                string              `json:"plan"`
 	DeploymentID        string              `json:"deploymentId,omitempty"`
+	Infrastructure      string              `json:"infrastructure,omitempty"`
 	Trial               bool                `json:"trial"`
 	Limits              *licensing.Limits   `json:"limits,omitempty"`
 	LastModified        *time.Time          `json:"lastModified"`
@@ -307,6 +308,7 @@ func (s *Server) licenseStatusView(ctx context.Context) (licenseStatus, []map[st
 	status.Tenant = license.Tenant
 	status.Plan = license.EffectivePlan()
 	status.DeploymentID = license.DeploymentID
+	status.Infrastructure = license.Infrastructure
 	status.Trial = license.Trial
 	status.Limits = lifecycle.Limits
 	expiresAt := license.ExpiresAt.UTC()

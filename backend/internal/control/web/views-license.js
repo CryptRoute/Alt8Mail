@@ -1,5 +1,5 @@
 /* System Control — offline license status, seat metering and token upload. */
-import * as ui from './ui.js?v=3.9.6';
+import * as ui from './ui.js?v=3.9.7';
 
 const esc = ui.esc;
 const fmt = {
@@ -71,6 +71,13 @@ function statePill(state) {
 function editionLabel(edition) {
   const value = String(edition || 'oss');
   return value.toLowerCase() === 'oss' ? 'Community' : ui.humanTitle(value);
+}
+
+function infrastructureLabel(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (v === 'on_premise' || v === 'on-premise' || v === 'self_hosted') return 'On-premise';
+  if (v === 'cloud' || v === 'on_cloud' || v === 'public_cloud' || v === 'private_cloud') return 'Cloud';
+  return v ? ui.humanTitle(v) : 'Not recorded';
 }
 
 function filePathText(license) {
@@ -153,9 +160,11 @@ function statusNotice(license) {
       );
     case 'valid':
       return `${binaryMismatchNotice(license)}${ui.inlineNotice(
-        'good',
-        'The license is active',
-        `The license is valid. The webmail enables paid features after it loads this file. It expires on ${fmt.dateOnly(license.expiresAt)} (${expirySummary(license)}).`,
+        license?.trial ? 'warning' : 'good',
+        license?.trial ? 'Trial license active' : 'The license is active',
+        license?.trial
+          ? `This is a ${esc(license?.plan || 'enterprise')} trial. It ends on ${fmt.dateOnly(license.expiresAt)} — ${expirySummary(license)}. Upload a full license before the trial expires to keep paid capabilities.`
+          : `The license is valid. The webmail enables paid features after it loads this file. It expires on ${fmt.dateOnly(license.expiresAt)} (${expirySummary(license)}).`,
         docs,
       )}`;
     default:
@@ -180,6 +189,8 @@ function statusMarkup(license) {
       ['Remaining', esc(expirySummary(license))],
       ['Seats', `${fmt.num(license.seats || 0)} ${license.seatSource === 'community' ? 'community' : 'licensed'}`],
       ['Tenant scope', esc(tenantScopeText(license))],
+      ['Infrastructure', esc(infrastructureLabel(license.infrastructure))],
+      ['License type', license.trial ? ui.badge('Trial', 'warning', 'clock') : 'Full license'],
       ['License ID', `<span class="mono break-all">${esc(license.licenseId || '—')}</span>`],
       ['File updated', license.lastModified ? esc(fmt.dateTime(license.lastModified)) : '—'],
     );
@@ -202,6 +213,7 @@ function statusMarkup(license) {
   return `<div class="diagnostic-summary">
       ${statePill(license?.state)}
       ${ui.badge(editionLabel(license?.edition), license?.state === 'unlicensed' ? 'neutral' : 'info', 'layers')}
+      ${license?.trial ? ui.badge('Trial', 'warning', 'clock') : ''}
       ${hasSeats ? `<span class="summary-pill">${ui.icon('users', 12)} ${fmt.num(license.usedSeats || 0)} / ${fmt.num(license.seats || 0)} ${license.seatSource === 'community' ? 'community' : 'licensed'} seats used</span>` : ''}
       ${license?.warning ? `<span class="summary-pill">${ui.icon('alert-circle', 12)} Seat warning</span>` : ''}
     </div>
@@ -478,7 +490,7 @@ export async function renderLicense(ctx) {
     eyebrow: 'Infrastructure',
     title: 'License',
     description: 'See the community or licensed seat limit, monitor live usage, compare paid capabilities and upload a signed license.',
-    meta: `<span class="icon-text">${ui.icon('key', 13)} Offline Ed25519 verification · no network call</span>`,
+    meta: `<span class="icon-text">${ui.icon('key', 13)} Local Ed25519 verification · portal used for activation and updates</span>`,
     actions: `<button class="btn btn-secondary" type="button" id="license-refresh">${ui.icon('refresh', 15)} Refresh</button>${docsLink()}`,
   })}
     <div class="grid grid-main">
@@ -541,8 +553,9 @@ export async function renderLicense(ctx) {
             <div class="tile-link"><span>${ui.icon('refresh', 15)} Activation</span><span class="value">Webmail restart required</span></div>
             <div class="tile-link"><span>${ui.icon('users', 15)} Seat counting</span><span class="value">Active · non-deleted · non-admin</span></div>
             <div class="tile-link"><span>${ui.icon('shield', 15)} Community limit</span><span class="value">25 active users, enforced in webmail, admin, SCIM and Control</span></div>
-            <div class="tile-link"><span>${ui.icon('activity', 15)} Verification</span><span class="value">Offline Ed25519 · compiled trust anchor</span></div>
-            <div class="note-strip" style="margin-top:11px">${ui.icon('info', 13)} <span>The webmail reads and verifies the token at startup. Control re-reads the same path on every status request, so uploaded state and seat usage appear here immediately. Restarting the webmail does not affect queued mail.</span></div>
+            <div class="tile-link"><span>${ui.icon('activity', 15)} Verification</span><span class="value">Ed25519 token · compiled trust anchor</span></div>
+            <div class="tile-link"><span>${ui.icon('globe', 15)} Portal contact</span><span class="value">Activation, bundle and update checks only</span></div>
+            <div class="note-strip" style="margin-top:11px">${ui.icon('info', 13)} <span>The webmail verifies the token locally at startup and does not need the portal to deliver mail. Control verifies the same token on every status request; the licensing portal is contacted only for activation, enterprise bundle delivery and update checks.</span></div>
             <p class="form-note" style="margin-top:10px"><a href="${DOCS_URL}" target="_blank" rel="noopener noreferrer">Read the full licensing guide ${ui.icon('arrow-up-right', 11)}</a></p>
           </div>
         </section>

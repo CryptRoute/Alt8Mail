@@ -1,5 +1,5 @@
 /* Webmail language availability and the system default locale. */
-import * as ui from './ui.js?v=3.9.6';
+import * as ui from './ui.js?v=3.9.7';
 
 const esc = ui.esc;
 
