@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -556,10 +557,30 @@ func (s *Server) adminBootstrap(w http.ResponseWriter, r *http.Request) {
 // split-origin admin console never advertises the wrong provisioning host; a
 // missing or invalid public URL merely omits the field instead of failing the
 // whole bootstrap.
+// controlPublicURL is the host-side System Control origin. Hosts that do not
+// set ALT8MAIL_CONTROL_URL still get a working backup link because Control
+// listens on the webmail host at port 8808 by default.
+func (s *Server) controlPublicURL() string {
+	if value := strings.TrimRight(strings.TrimSpace(s.cfg.ControlPublicURL), "/"); value != "" {
+		return value
+	}
+	parsed, err := url.Parse(strings.TrimSpace(s.cfg.PublicURL))
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	port := parsed.Port()
+	if port == "" {
+		port = "8808"
+	}
+	parsed.Host = net.JoinHostPort(parsed.Hostname(), port)
+	parsed.Path, parsed.RawPath, parsed.RawQuery, parsed.Fragment = "", "", "", ""
+	return strings.TrimRight(parsed.String(), "/")
+}
+
 func (s *Server) adminServerPayload() map[string]any {
 	payload := map[string]any{
 		"version": s.version, "env": s.cfg.Env, "time": time.Now().UTC().Format(time.RFC3339),
-		"adminURL": s.cfg.AdminPublicURL, "controlURL": s.cfg.ControlPublicURL,
+		"adminURL": s.cfg.AdminPublicURL, "controlURL": s.controlPublicURL(),
 		"publicUrl": s.cfg.PublicURL,
 	}
 	if scimURL, err := s.scimBaseURL(); err == nil {
