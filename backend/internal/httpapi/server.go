@@ -40,57 +40,57 @@ const (
 )
 
 type Server struct {
-	cfg                 config.Config
-	store               *store.Store
-	logger              *slog.Logger
-	version             string
-	limit               *loginLimiter
-	davLimit            *loginLimiter
-	adminLimit          *loginLimiter
-	accountLimit        *loginLimiter
-	stateLocksMu        sync.Mutex
-	stateLocks          map[string]*sync.Mutex
-	mailUserMu          sync.Mutex
-	mailLocks           map[string]*sync.Mutex
-	davAuthMu           sync.Mutex
-	davAuthCache        map[string]davAuthEntry
-	sieveSyncMu         sync.Mutex
-	sieveSyncActive     map[string]bool
-	sieveSyncAgain      map[string]bool
-	importMu            sync.Mutex
-	activeImports       map[string]bool
-	webAuthn            *webauthn.WebAuthn
-	realtime            *realtimeHub
-	avatarMu            sync.Mutex
-	avatarCache         map[string]senderAvatarCacheEntry
-	license             *licensing.License
-	i18n                *serveri18n.Bundle
-	licenseError        string
-	licenseConfigured   bool
-	licenseTrustAnchor  string
-	licenseNow          func() time.Time
-	enterpriseWorkersMu sync.Mutex
-	enterpriseWorkers   []func(context.Context)
-	paidUIMu            sync.Mutex
-	paidUI              []enterprise.PaidUI
-	legalHoldCheck      enterprise.LegalHoldCheck
-	legalHoldSnapshot   enterprise.LegalHoldSnapshot
-	fileHooksMu         sync.RWMutex
-	fileHooks           enterprise.FileHooks
-	campaignTrackMu     sync.RWMutex
-	campaignTrackHook   enterprise.CampaignTrackFunc
-	aiBudgetMu          sync.RWMutex
-	aiBudgetCheckHook   enterprise.AIBudgetCheck
-	aiUsageHook         enterprise.AIRecordUsage
-	officeAIEnabledHook func(context.Context, enterprise.Principal) bool
-	brandingPublicHook  func(enterprise.BrandingFields) map[string]any
+	cfg                  config.Config
+	store                *store.Store
+	logger               *slog.Logger
+	version              string
+	limit                *loginLimiter
+	davLimit             *loginLimiter
+	adminLimit           *loginLimiter
+	accountLimit         *loginLimiter
+	stateLocksMu         sync.Mutex
+	stateLocks           map[string]*sync.Mutex
+	mailUserMu           sync.Mutex
+	mailLocks            map[string]*sync.Mutex
+	davAuthMu            sync.Mutex
+	davAuthCache         map[string]davAuthEntry
+	sieveSyncMu          sync.Mutex
+	sieveSyncActive      map[string]bool
+	sieveSyncAgain       map[string]bool
+	importMu             sync.Mutex
+	activeImports        map[string]bool
+	webAuthn             *webauthn.WebAuthn
+	realtime             *realtimeHub
+	avatarMu             sync.Mutex
+	avatarCache          map[string]senderAvatarCacheEntry
+	license              *licensing.License
+	i18n                 *serveri18n.Bundle
+	licenseError         string
+	licenseConfigured    bool
+	licenseTrustAnchor   string
+	licenseNow           func() time.Time
+	enterpriseWorkersMu  sync.Mutex
+	enterpriseWorkers    []func(context.Context)
+	paidUIMu             sync.Mutex
+	paidUI               []enterprise.PaidUI
+	legalHoldCheck       enterprise.LegalHoldCheck
+	legalHoldSnapshot    enterprise.LegalHoldSnapshot
+	fileHooksMu          sync.RWMutex
+	fileHooks            enterprise.FileHooks
+	campaignTrackMu      sync.RWMutex
+	campaignTrackHook    enterprise.CampaignTrackFunc
+	aiBudgetMu           sync.RWMutex
+	aiBudgetCheckHook    enterprise.AIBudgetCheck
+	aiUsageHook          enterprise.AIRecordUsage
+	officeAIEnabledHook  func(context.Context, enterprise.Principal) bool
+	brandingPublicHook   func(enterprise.BrandingFields) map[string]any
 	brandingValidateHook func(context.Context, string, []string) []string
-	brandingSyncHook    func(context.Context, pgx.Tx, string, []string) error
-	tenantKeyHooks      enterprise.TenantKeyHooks
-	followUpViewsHook   enterprise.FollowUpViews
-	oidcLimit           *loginLimiter
-	scimLimit           *loginLimiter
-	samlLimit           *loginLimiter
+	brandingSyncHook     func(context.Context, pgx.Tx, string, []string) error
+	tenantKeyHooks       enterprise.TenantKeyHooks
+	followUpViewsHook    enterprise.FollowUpViews
+	oidcLimit            *loginLimiter
+	scimLimit            *loginLimiter
+	samlLimit            *loginLimiter
 	// adminSeatRaceHook is a test seam invoked after an admin activation has
 	// pre-read its target(s) and before the seat-locked transaction. It is nil
 	// in production.

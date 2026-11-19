@@ -201,8 +201,8 @@ func TestLicenseStatusUnlicensed(t *testing.T) {
 	if status.ExpiresAt != nil || status.LastModified != nil || status.LicenseID != "" || status.Tenant != "" {
 		t.Fatalf("unlicensed status leaked license fields: %#v", status)
 	}
-	if status.UsedSeats != 0 || status.Seats != 25 || status.RemainingSeats != 25 || status.Warning {
-		t.Fatalf("unlicensed seat fields = %#v", status)
+	if status.UsedSeats != 0 || status.Seats != 0 || status.RemainingSeats != 0 || !status.UnlimitedUsers || status.Warning {
+		t.Fatalf("unlicensed user fields = %#v", status)
 	}
 }
 
@@ -381,10 +381,13 @@ func TestLicenseStatusLifecycle(t *testing.T) {
 			}
 			wantSeats := 50
 			if testCase.wantExpired {
-				wantSeats = 25
+				wantSeats = 0
 			}
 			if status.Edition != "enterprise" || status.Seats != wantSeats || status.LicenseID != "lic_control_test" || status.Tenant != "tenant_a" {
 				t.Fatalf("license claims not reflected: %#v", status)
+			}
+			if testCase.wantExpired && !status.UnlimitedUsers {
+				t.Fatalf("expired license should fall back to unlimited community users: %#v", status)
 			}
 			if status.ExpiresAt == nil || !status.ExpiresAt.Equal(testCase.expiresAt) {
 				t.Fatalf("expiresAt = %#v, want %v", status.ExpiresAt, testCase.expiresAt)
@@ -396,6 +399,9 @@ func TestLicenseStatusLifecycle(t *testing.T) {
 				t.Fatalf("features = %#v, want %d entries", status.Features, testCase.wantFeatures)
 			}
 			wantRemaining := wantSeats - 3
+			if wantSeats == 0 {
+				wantRemaining = 0
+			}
 			if status.UsedSeats != 3 || status.RemainingSeats != wantRemaining || status.Warning {
 				t.Fatalf("seat fields = %#v", status)
 			}

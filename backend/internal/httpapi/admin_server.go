@@ -537,18 +537,19 @@ func (s *Server) adminBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	policy := tenantPolicyFromSettings(sess.ActiveTenant.Settings)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"admin":        s.adminPayload(sess),
-		"tenants":      tenants,
-		"activeTenant": adminTenantPayload(sess.ActiveTenant),
-		"stats":        stats,
-		"policy":       policy,
-		"permissions":  sortedPermissionNames(sess.Permissions),
-		"catalog":      adminPermissionCatalog,
-		"server":       s.adminServerPayload(),
-		"capabilities": adminCapabilities(),
-		"enterprise":   s.enterpriseAvailable(),
-		"paidUI":       s.paidUIDescriptors(),
-		"license":      s.licenseSnapshot(r.Context()),
+		"admin":             s.adminPayload(sess),
+		"tenants":           tenants,
+		"activeTenant":      adminTenantPayload(sess.ActiveTenant),
+		"stats":             stats,
+		"policy":            policy,
+		"permissions":       sortedPermissionNames(sess.Permissions),
+		"catalog":           adminPermissionCatalog,
+		"server":            s.adminServerPayload(),
+		"capabilities":      adminCapabilities(),
+		"enterprise":        s.enterpriseAvailable(),
+		"enterprisePrompts": s.cfg.EnterprisePrompts,
+		"paidUI":            s.paidUIDescriptors(),
+		"license":           s.licenseSnapshot(r.Context()),
 	})
 }
 

@@ -251,6 +251,11 @@ func (s *Server) performConfigSync(ctx context.Context, actorID, trigger string)
 	} else {
 		warnings = append(warnings, "DKIM selector map: "+err.Error())
 	}
+	if policyChanged, err := s.syncPolicyServiceConfig(ctx); err != nil {
+		warnings = append(warnings, "Policy service: "+err.Error())
+	} else if policyChanged {
+		filesChanged++
+	}
 	if filesChanged > 0 {
 		if _, err := runCommand(ctx, 20*time.Second, "postmap", filepath.Join(s.cfg.PostfixDir, "suppressions")); err != nil {
 			warnings = append(warnings, "postmap suppressions failed")
@@ -266,17 +271,18 @@ func (s *Server) performConfigSync(ctx context.Context, actorID, trigger string)
 		if _, err := runCommand(ctx, 20*time.Second, "postmap", filepath.Join(s.cfg.PostfixDir, "sender_transport")); err != nil {
 			warnings = append(warnings, "postmap sender_transport failed")
 		}
-		if err := reloadPostfix(ctx); err != nil {
+		// Validate before reloading. A rejected configuration must not replace
+		// the running Postfix instance; keep the old configuration live and
+		// surface the exact check error so the operator can fix it.
+		if result, err := runCommand(ctx, 20*time.Second, "postfix", "check"); err != nil {
+			detail := strings.TrimSpace(result.Stderr + "\n" + result.Stdout)
+			if detail == "" {
+				detail = err.Error()
+			}
+			warnings = append(warnings, "postfix check rejected the generated configuration; reload skipped: "+detail)
+		} else if err := reloadPostfix(ctx); err != nil {
 			warnings = append(warnings, err.Error())
 		}
-	}
-	if policyChanged, err := s.syncPolicyServiceConfig(ctx); err != nil {
-		warnings = append(warnings, "Policy service: "+err.Error())
-	} else if policyChanged {
-		filesChanged++
-	}
-	if result, err := runCommand(ctx, 20*time.Second, "postfix", "check"); err != nil {
-		warnings = append(warnings, "postfix check: "+strings.TrimSpace(result.Stderr))
 	}
 	drift := s.configDrift(ctx)
 	warningsJSON, _ := json.Marshal(warnings)

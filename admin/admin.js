@@ -29,6 +29,7 @@ const state = {
   tenants: [],
   activeTenant: null,
   enterprise: false,
+  enterprisePrompts: true,
   paidUI: [],
   license: null,
   stats: null,
@@ -181,10 +182,32 @@ function updateChrome() {
   const pending = state.stats?.domains?.pending ?? 0;
   $("#navDomainState").textContent = pending > 0 ? String(pending) : "";
   $$("[data-permission]").forEach((element) => { element.hidden = !can(element.dataset.permission); });
+  const showPaidDiscovery = state.enterprise || state.enterprisePrompts;
   $$(".nav-link[data-view]").forEach((element) => {
-    if (!state.enterprise && paidViews.has(element.dataset.view)) element.hidden = true;
+    const paid = paidViews.has(element.dataset.view);
+    const permitted = !element.dataset.permission || can(element.dataset.permission);
+    if (!permitted || (paid && !showPaidDiscovery)) {
+      element.hidden = true;
+      return;
+    }
+    element.hidden = false;
+    const locked = paid && !state.enterprise;
+    element.classList.toggle("nav-locked", locked);
+    let lock = element.querySelector(".nav-lock");
+    if (locked && !lock) {
+      const ns = "http://www.w3.org/2000/svg";
+      lock = document.createElementNS(ns, "svg");
+      lock.setAttribute("class", "icon nav-lock");
+      lock.setAttribute("aria-hidden", "true");
+      const use = document.createElementNS(ns, "use");
+      use.setAttribute("href", "#i-lock");
+      lock.appendChild(use);
+      element.appendChild(lock);
+    } else if (!locked && lock) {
+      lock.remove();
+    }
   });
-  $("#enterpriseNav").hidden = !state.enterprise;
+  $("#enterpriseNav").hidden = !showPaidDiscovery;
   $("#systemNav").hidden = !can("system.tenants.manage");
   const activeTenant = state.activeTenant?.status;
   $("#tenantPicker").title = activeTenant === "suspended" ? "This organization is suspended" : "Switch organization";
@@ -234,6 +257,7 @@ async function loadBootstrap() {
   state.catalog = data.catalog || [];
   state.permissions = data.permissions || [];
   state.enterprise = data.enterprise === true;
+  state.enterprisePrompts = data.enterprisePrompts !== false;
   state.paidUI = Array.isArray(data.paidUI) ? data.paidUI : [];
   state.license = data.license || null;
   state.server = data.server || {};
@@ -351,7 +375,11 @@ function route() {
   state.view = views.has(view) ? view : "overview";
   const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "team-inboxes": "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", provisioning: "roles.manage", policies: "policies.read", addons: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", analytics: "analytics.read", crm: "crm.read", workspace: "groups.read", mcp: "policies.read", identity: "policies.read", "support-ops": "tenant.read", backup: "tenant.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
   if (required && !can(required)) { state.view = "overview"; location.hash = "#/overview"; return; }
-  if (!state.enterprise && paidViews.has(state.view)) { renderEnterpriseRequired(state.view); return; }
+  if (!state.enterprise && paidViews.has(state.view)) {
+    if (state.enterprisePrompts && state.view !== "enterprise-features") renderEnterprisePreview(state.view);
+    else renderEnterpriseRequired(state.view);
+    return;
+  }
   const navView = ["user-detail", "import-users", "import-mailboxes"].includes(state.view) ? "users" : state.view;
   $$(".nav-link[data-view]").forEach((link) => link.classList.toggle("active", link.dataset.view === navView));
   $("#sidebar").classList.remove("open");
@@ -505,6 +533,11 @@ async function renderOverview() {
         <div><h1>Good ${greeting()}, ${esc((state.admin.name || "admin").split(" ")[0])}</h1><p>Here is the security and administration posture for ${esc(state.activeTenant.name)}.</p></div>
         <div class="view-actions">${can("policies.manage") ? `<button class="btn secondary" data-action="go-policies">${icon("sliders")}Review policies</button>` : ""}${can("users.create") ? `<button class="btn primary" data-action="new-user">${icon("plus")}Add user</button>` : ""}</div>
       </div>
+      ${state.license?.overLimit
+        ? `<div class="group-role-notice" style="margin-bottom:14px;border-color:var(--warn)">${icon("alert")}<span><b>Licensed-user count exceeded.</b> This organization is using ${Number(state.license.usedSeats || 0).toLocaleString()} of ${Number(state.license.seats || 0).toLocaleString()} licensed users. Mail delivery and user creation continue; update the license to cover the additional users.${state.license.portalUrl ? ` <a href="${esc(state.license.portalUrl)}/pricing" target="_blank" rel="noopener noreferrer">Update license</a>` : ""}</span></div>`
+        : state.license?.warning
+          ? `<div class="group-role-notice" style="margin-bottom:14px">${icon("alert")}<span><b>Approaching the licensed-user count.</b> This organization is using ${Number(state.license.usedSeats || 0).toLocaleString()} of ${Number(state.license.seats || 0).toLocaleString()} licensed users. No action is required yet.${state.license.portalUrl ? ` <a href="${esc(state.license.portalUrl)}/pricing" target="_blank" rel="noopener noreferrer">View plans</a>` : ""}</span></div>`
+          : ""}
       <div class="stat-grid">
         <div class="stat-card"><span class="stat-label">${icon("users")}Active users</span><span class="stat-value">${users.active ?? 0}</span><span class="stat-meta">${users.total ?? 0} total · ${users.suspended ?? 0} suspended</span></div>
         <div class="stat-card"><span class="stat-label">${icon("group")}Groups</span><span class="stat-value">${stats.groups ?? 0}</span><span class="stat-meta">${stats.orgUnits ?? 0} org units configured</span></div>
@@ -2701,6 +2734,79 @@ function showSIEMSecret(secret) {
 /* ------------------------------------------------------------
    Enterprise feature catalog
 ------------------------------------------------------------ */
+const VIEW_FEATURES = {
+  "team-inboxes": "shared_inbox",
+  "import-mailboxes": "migration",
+  provisioning: "scim",
+  ai: "ai_triage",
+  compliance: "ediscovery",
+  integrations: "audit_export",
+  analytics: "analytics",
+  crm: "crm_sync",
+  workspace: "automation",
+  mcp: "mcp_governance",
+  identity: "sso",
+  "support-ops": "support_ops",
+  backup: "backup_restore"
+};
+
+function enterpriseFeatureForView(view) {
+  const key = VIEW_FEATURES[view] || "";
+  const catalog = Array.isArray(state.license?.featureCatalog) ? state.license.featureCatalog : [];
+  return catalog.find((feature) => feature.key === key) || { key, label: enterpriseViewTitles[view] || "Enterprise feature", description: "This capability is part of Alt8Mail Enterprise." };
+}
+
+function enterprisePreviewSkeleton(view) {
+  const disabled = "disabled aria-disabled=\"true\"";
+  switch (view) {
+    case "identity":
+      return state.identityTab === "saml"
+        ? `<div class="preview-pane"><div class="preview-pane-head"><b>SAML 2.0</b><span class="badge neutral">Preview</span></div><label class="field"><span>IdP metadata URL</span><input class="input" placeholder="https://idp.example.com/metadata" ${disabled}></label><div class="field-row"><label class="field"><span>SP entity ID</span><input class="input" placeholder="https://mail.example.com/api/auth/saml/metadata" ${disabled}></label><label class="field"><span>Email attribute</span><input class="input" placeholder="email" ${disabled}></label></div><label class="field"><span>SP certificate</span><textarea class="input mono" rows="3" placeholder="-----BEGIN CERTIFICATE-----" ${disabled}></textarea></label></div>`
+        : `<div class="preview-pane"><div class="preview-pane-head"><b>OpenID Connect</b><span class="badge neutral">Preview</span></div><label class="field"><span>Issuer URL</span><input class="input" placeholder="https://login.example.com" ${disabled}></label><div class="field-row"><label class="field"><span>Client ID</span><input class="input" placeholder="a8m-client" ${disabled}></label><label class="field"><span>Client secret</span><input class="input" type="password" placeholder="••••••••" ${disabled}></label></div><label class="field"><span>Allowed email domains</span><input class="input" placeholder="example.com, example.org" ${disabled}></label></div>`;
+    case "analytics":
+      return `<div class="stat-grid preview-stats"><div class="stat-card"><span class="stat-label">${icon("users")}Users</span><span class="stat-value">—</span><span class="stat-meta">Active accounts</span></div><div class="stat-card"><span class="stat-label">${icon("drive")}Storage</span><span class="stat-value">—</span><span class="stat-meta">Across mailboxes</span></div><div class="stat-card"><span class="stat-label">${icon("mail")}Sent · 30 days</span><span class="stat-value">—</span><span class="stat-meta">Outbound events</span></div><div class="stat-card"><span class="stat-label">${icon("sparkles")}AI usage</span><span class="stat-value">—</span><span class="stat-meta">Requests and budget</span></div></div><div class="preview-chart" aria-hidden="true">${Array.from({ length: 24 }, (_, index) => `<span style="height:${18 + ((index * 13) % 72)}%"></span>`).join("")}</div>`;
+    case "crm":
+      return `<div class="entity-grid"><article class="entity-card"><div class="entity-head"><span class="entity-icon">${icon("users")}</span><div class="entity-title"><b>HubSpot</b><small>Contacts, companies and deals</small></div><span class="badge neutral">Preview</span></div></article><article class="entity-card"><div class="entity-head"><span class="entity-icon">${icon("users")}</span><div class="entity-title"><b>Salesforce</b><small>Sender intelligence records</small></div><span class="badge neutral">Preview</span></div></article></div><div class="preview-table">${["Contact", "Company", "Stage", "Amount"].map((label) => `<div><span>${label}</span><span>—</span></div>`).join("")}</div>`;
+    case "workspace":
+      return `<div class="preview-tabs"><span>Shared drafts</span><span>Team templates</span><span>Automation</span><span>Booking</span><span>Mail merge</span></div><div class="preview-table">${["Team", "Rule", "Priority", "Status"].map((label) => `<div><span>${label}</span><span>—</span></div>`).join("")}</div>`;
+    case "mcp":
+      return `<div class="preview-table">${["Client", "User", "Scopes", "Status"].map((label) => `<div><span>${label}</span><span>—</span></div>`).join("")}</div>`;
+    case "support-ops":
+      return `<div class="preview-pane"><div class="preview-pane-head"><b>Support bundle</b><span class="badge neutral">Preview</span></div><p class="muted">Download a diagnostic bundle with version, licence, migration and usage counts — no mailbox content or credentials.</p><button class="btn secondary" type="button" ${disabled}>${icon("download")}Download support bundle</button></div>`;
+    case "backup":
+      return `<div class="preview-pane"><div class="preview-pane-head"><b>Backup and restore</b><span class="badge neutral">Preview</span></div><p class="muted">Create, download and restore audited archives from System Control. Mailbox restore includes preview and legal-hold checks.</p><button class="btn secondary" type="button" ${disabled}>${icon("external")}Open System Control backups</button></div>`;
+    case "compliance":
+      return `<div class="preview-table">${["Matter", "Custodian", "Status", "Created"].map((label) => `<div><span>${label}</span><span>—</span></div>`).join("")}</div>`;
+    case "ai":
+      return `<div class="preview-pane"><div class="preview-pane-head"><b>AI provider</b><span class="badge neutral">Preview</span></div><label class="field"><span>Provider</span><select class="input" ${disabled}><option>OpenAI-compatible</option></select></label><label class="field"><span>Organization prompt</span><textarea class="input" rows="3" placeholder="Writing rules, tone and compliance guidance" ${disabled}></textarea></label></div>`;
+    default:
+      return `<div class="preview-table">${["Name", "Owner", "Status", "Updated"].map((label) => `<div><span>${label}</span><span>—</span></div>`).join("")}</div>`;
+  }
+}
+
+function renderEnterprisePreview(view, featureKey) {
+  const feature = featureKey
+    ? (Array.isArray(state.license?.featureCatalog) ? state.license.featureCatalog : []).find((item) => item.key === featureKey) || { key: featureKey, label: enterpriseViewTitles[view] || "Enterprise feature", description: "This capability is part of Alt8Mail Enterprise." }
+    : enterpriseFeatureForView(view);
+  const title = enterpriseViewTitles[view] || feature.label || "Enterprise feature";
+  const portal = String(state.license?.portalUrl || "").replace(/\/$/, "");
+  const actions = portal
+    ? `<a class="btn primary" href="${esc(portal)}/trial" target="_blank" rel="noopener noreferrer">${icon("sparkles")}Start a free trial</a><a class="btn secondary" href="${esc(portal)}/pricing" target="_blank" rel="noopener noreferrer">${icon("external")}Compare plans</a>`
+    : `<span class="badge neutral">${icon("info")}Licensing portal not configured</span>`;
+  $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>${esc(title)}</h1><p>${esc(feature.description || "Preview this capability in Alt8Mail Enterprise.")}</p></div><div class="view-actions"><span class="badge warning">${icon("lock")}Enterprise</span></div></div>
+    <div class="card card-pad enterprise-preview">
+      <div class="preview-banner"><span class="entity-icon">${icon("sparkles")}</span><div><b>This is a preview of ${esc(title)}</b><p>The community edition keeps unlimited users, core mail, webmail and administration. ${esc(title)} runs in the enterprise release with a valid licence.</p></div></div>
+      <div class="preview-body" aria-hidden="true">${enterprisePreviewSkeleton(view)}</div>
+      <div class="preview-cta"><div><b>Unlock ${esc(title)} and every paid capability</b><p>Start a trial or compare the exact entitlements. Your community mailboxes stay in place.</p></div><div class="preview-cta-actions">${actions}</div></div>
+    </div>`;
+}
+
+function renderEnterpriseFeaturePreview(featureKey) {
+  const management = ENTERPRISE_MANAGEMENT[featureKey];
+  const view = management && paidViews.has(management.view) ? management.view : "generic";
+  renderEnterprisePreview(view, featureKey);
+}
+
 const ENTERPRISE_GROUPS = [
   { label: "Identity & access", features: ["sso", "saml", "scim", "byok", "mcp_governance"] },
   { label: "Collaboration & productivity", features: ["shared_inbox", "shared_drafts", "team_templates", "template_gallery", "automation", "booking_pages", "mail_merge", "campaign_tracking"] },
@@ -2751,24 +2857,31 @@ function enterpriseEntitled(feature) {
 }
 
 function enterpriseFeatureCard(item) {
+  const community = !state.enterprise;
   const management = ENTERPRISE_MANAGEMENT[item.feature];
   const entitled = enterpriseEntitled(item.feature);
   const href = management ? `#/${management.view}${management.tab ? "/" + management.tab : ""}` : "#/enterprise-features";
+  const directPreview = community && management && !paidViews.has(management.view);
   const manage = management
-    ? `<a class="btn btn-secondary btn-sm" href="${href}">${icon("sliders")}Open ${esc(management.label)}</a>`
+    ? directPreview
+      ? `<button class="btn btn-secondary btn-sm" type="button" data-feature-preview="${esc(item.feature)}">${icon("sliders")}Preview ${esc(management.label)}</button>`
+      : `<a class="btn btn-secondary btn-sm" href="${href}">${icon("sliders")}${community ? "Preview" : "Open"} ${esc(management.label)}</a>`
     : `<span class="badge warning">${icon("alert")}No management screen</span>`;
-  const plan = entitled
-    ? `<span class="badge active">${icon("check")}In plan</span>`
-    : `<span class="badge neutral">Not in plan</span>${state.license?.portalUrl ? ` <a class="btn btn-ghost btn-sm" href="${esc(state.license.portalUrl)}/upgrade" target="_blank" rel="noopener noreferrer">View plans</a>` : ""}`;
+  const plan = community
+    ? `<span class="badge warning">${icon("lock")}Enterprise</span>`
+    : entitled
+      ? `<span class="badge active">${icon("check")}In plan</span>`
+      : `<span class="badge neutral">Not in plan</span>${state.license?.portalUrl ? ` <a class="btn btn-ghost btn-sm" href="${esc(state.license.portalUrl)}/pricing" target="_blank" rel="noopener noreferrer">View plans</a>` : ""}`;
   return `<article class="entity-card enterprise-feature-card" data-enterprise-feature="${esc(item.feature)}">
     <div class="entity-head"><span class="entity-icon">${icon(management ? "sliders" : "sparkles")}</span><div class="entity-title"><b>${esc(item.label || item.feature)}</b><small>${esc(item.description || "")}</small></div>${plan}</div>
-    <div class="entity-meta"><span>${esc(management ? "Admin console" : "Not exposed")}</span><span class="spacer"></span>${manage}</div>
+    <div class="entity-meta"><span>${esc(community ? "Enterprise preview" : management ? "Admin console" : "Not exposed")}</span><span class="spacer"></span>${manage}</div>
   </article>`;
 }
 
 async function renderEnterpriseFeatures() {
   loading("Enterprise features");
-  if (!state.enterprise) { renderEnterpriseRequired("enterprise-features"); return; }
+  if (!state.enterprise && !state.enterprisePrompts) { renderEnterpriseRequired("enterprise-features"); return; }
+  const community = !state.enterprise;
   const catalog = Array.isArray(state.license?.featureCatalog) ? state.license.featureCatalog : [];
   const descriptors = new Map();
   for (const item of state.paidUI || []) {
@@ -2786,14 +2899,26 @@ async function renderEnterpriseFeatures() {
   const uncovered = catalog.filter((feature) => !ENTERPRISE_MANAGEMENT[feature.key]).length;
   const groupLabel = (value) => String(value || "Other").split(/[-_]/).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
   const cards = Array.from(groups.entries()).map(([group, features]) => `<section class="mini-section" style="margin-top:18px"><h3>${esc(groupLabel(group))}</h3><div class="entity-grid">${features.map((feature) => enterpriseFeatureCard({ ...(descriptors.get(feature.key) || {}), ...feature, feature: feature.key })).join("")}</div></section>`).join("");
-  $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Enterprise features</h1><p>Every capability in the paid catalog, whether this license includes it, and where it is managed.</p></div><div class="view-actions"><input class="input" id="enterpriseFeatureSearch" type="search" placeholder="Search features" aria-label="Search enterprise features"></div></div>
+  const portal = String(state.license?.portalUrl || "").replace(/\/$/, "");
+  const communityActions = community
+    ? `<a class="btn primary" href="${portal ? `${esc(portal)}/trial` : "#/enterprise-features"}" ${portal ? `target="_blank" rel="noopener noreferrer"` : `aria-disabled="true"`}>${icon("sparkles")}Start a free trial</a><a class="btn secondary" href="${portal ? `${esc(portal)}/pricing` : "#/enterprise-features"}" ${portal ? `target="_blank" rel="noopener noreferrer"` : `aria-disabled="true"`}>${icon("external")}Compare plans</a>`
+    : `<input class="input" id="enterpriseFeatureSearch" type="search" placeholder="Search features" aria-label="Search enterprise features">`;
+  const communityBanner = community
+    ? `<div class="notice tone-info" style="margin-bottom:16px">${icon("lock")}<div><strong>Enterprise preview</strong><p>The community edition keeps unlimited users, core mail and administration. Open any card to preview the paid screen; the forms are illustrative until the enterprise release and a licence are installed.</p></div></div>`
+    : "";
+  $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Enterprise features</h1><p>${community ? "Explore every paid capability with a live preview of its administration screen." : "Every capability in the paid catalog, whether this license includes it, and where it is managed."}</p></div><div class="view-actions">${community ? communityActions : ""}</div></div>
+    ${communityBanner}
     <div class="stat-grid">
       <div class="stat-card"><span class="stat-label">${icon("sparkles")}Catalog</span><span class="stat-value">${total}</span><span class="stat-meta">Paid capabilities in this release</span></div>
-      <div class="stat-card"><span class="stat-label">${icon("check")}In license</span><span class="stat-value">${included}</span><span class="stat-meta">${total - included} require a plan change</span></div>
-      <div class="stat-card"><span class="stat-label">${icon("sliders")}Admin surfaces</span><span class="stat-value">${adminSurfaces}</span><span class="stat-meta">Open from this console</span></div>
+      ${community
+        ? `<div class="stat-card"><span class="stat-label">${icon("lock")}Enterprise</span><span class="stat-value">${total}</span><span class="stat-meta">Unlock with a licence or trial</span></div>`
+        : `<div class="stat-card"><span class="stat-label">${icon("check")}In license</span><span class="stat-value">${included}</span><span class="stat-meta">${total - included} require a plan change</span></div>`}
+      <div class="stat-card"><span class="stat-label">${icon("sliders")}Admin surfaces</span><span class="stat-value">${adminSurfaces}</span><span class="stat-meta">${community ? "Preview from this console" : "Open from this console"}</span></div>
       <div class="stat-card"><span class="stat-label">${icon("check")}Coverage</span><span class="stat-value">${total - uncovered}/${total}</span><span class="stat-meta">Catalog entries with a management screen</span></div>
     </div>
+    ${community ? "" : `<div style="margin-bottom:4px"><input class="input" id="enterpriseFeatureSearch" type="search" placeholder="Search features" aria-label="Search enterprise features"></div>`}
     <div id="enterpriseFeatureGroups">${cards || `<div class="card card-pad"><div class="empty">${icon("sparkles")}<h3>No paid feature catalog</h3><p>The license snapshot did not include feature metadata.</p></div></div>`}</div>`;
+  $$("[data-feature-preview]").forEach((button) => button.addEventListener("click", () => renderEnterpriseFeaturePreview(button.dataset.featurePreview)));
   const search = $("#enterpriseFeatureSearch");
   search?.addEventListener("input", () => {
     const query = search.value.trim().toLowerCase();

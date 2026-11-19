@@ -1,3 +1,32 @@
+# Alt8Mail 3.9.8.3
+
+Release date: 2026-11-20. Licensing, service supervision and community
+feature discovery.
+
+## 3.9.8.3 licensing and operations
+
+- **Community edition has unlimited users.** The 25-active-user cap and its
+  database trigger are removed. A paid license overage is a soft true-up
+  warning in Control and the administration overview; mail delivery and user
+  creation are never refused.
+- **Seat language is now user language.** The licence page reports active
+  users and licensed users, not seats. The administrative details paragraph
+  and the token-ownership paragraph were removed, and the verification note is
+  now accurate for the whole system.
+- **Enterprise feature discovery in the community admin.** Paid menu entries
+  appear with a lock and open a polished preview page with a trial/upgrade
+  call to action. Set `HIDE_ENTERPRISE_PROMPTS=true` to hide the previews
+  entirely. The webmail never shows upgrade prompts.
+- **Postfix supervision is correct.** Control monitors `postfix.service`
+  instead of the unused `postfix@-.service` template, reloads through systemd,
+  validates `postfix check` before reloading and keeps the old configuration
+  live if validation fails.
+- **All monitored units are enabled by default.** The installer enables
+  `clamav-freshclam.service` and the PostgreSQL 15 instance unit alongside the
+  existing services.
+- New strings and the rewritten verification sentence have locale entries,
+  including translations for all shipped admin languages.
+
 # Alt8Mail 3.9.8.1
 
 Release date: 2026-11-19. Fresh-install fix for source checkouts.

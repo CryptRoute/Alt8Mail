@@ -59,6 +59,8 @@ type licenseStatus struct {
 	RemainingSeats      int                 `json:"remainingSeats"`
 	SeatSource          string              `json:"seatSource"`
 	CommunitySeatLimit  int                 `json:"communitySeatLimit"`
+	UnlimitedUsers      bool                `json:"unlimitedUsers"`
+	OverLimit           bool                `json:"overLimit"`
 	Warning             bool                `json:"warning"`
 	WarningPercent      int                 `json:"warningPercent"`
 	Features            []string            `json:"features"`
@@ -343,11 +345,19 @@ func (s *Server) finalizeLicenseStatus(ctx context.Context, status licenseStatus
 		perTenant = []map[string]any{}
 	}
 	status.UsedSeats = used
-	status.RemainingSeats = status.Seats - used
-	if status.RemainingSeats < 0 {
+	if status.Seats <= 0 {
+		status.UnlimitedUsers = true
 		status.RemainingSeats = 0
+		status.Warning = false
+		status.OverLimit = false
+	} else {
+		status.RemainingSeats = status.Seats - used
+		if status.RemainingSeats < 0 {
+			status.RemainingSeats = 0
+		}
+		status.OverLimit = used > status.Seats
+		status.Warning = used*100 >= status.Seats*status.WarningPercent
 	}
-	status.Warning = status.Seats > 0 && used*100 >= status.Seats*status.WarningPercent
 	byTenant := []map[string]any{}
 	if tenant == "" {
 		byTenant = perTenant
@@ -387,7 +397,9 @@ var errControlSeatLimit = errors.New("license seat limit reached")
 
 const (
 	controlSeatLockClass = 0x41384D31
-	communitySeatLimit   = 25
+	// Zero means unlimited. The community edition does not cap active users;
+	// paid licenses use their seat count only for a soft true-up warning.
+	communitySeatLimit = 0
 )
 
 type controlSeatPolicy struct {
@@ -439,30 +451,10 @@ func (s *Server) controlSeatPolicy() controlSeatPolicy {
 	return policy
 }
 
-// syncSeatPolicy publishes the Control-side view to the database trigger. The
-// trigger is a backstop, not a replacement for the application checks.
+// syncSeatPolicy is retained as a compatibility hook. The database trigger
+// that enforced seat counts was removed; overage is now a soft warning.
 func (s *Server) syncSeatPolicy(ctx context.Context) {
-	if s.db == nil {
-		return
-	}
-	policy := s.controlSeatPolicy()
-	var expires any
-	if policy.ExpiresAt != nil {
-		expires = policy.ExpiresAt.UTC()
-	}
-	_, err := s.db.Exec(ctx, `
-		INSERT INTO control.seat_policy
-		  (id, seats, tenant_id, expires_at, grace_days, lock_key, source, updated_at)
-		VALUES (true, $1, $2, $3, $4, $5, $6, now())
-		ON CONFLICT (id) DO UPDATE SET
-		  seats = EXCLUDED.seats, tenant_id = EXCLUDED.tenant_id,
-		  expires_at = EXCLUDED.expires_at, grace_days = EXCLUDED.grace_days,
-		  lock_key = EXCLUDED.lock_key, source = EXCLUDED.source,
-		  updated_at = now()
-	`, policy.Limit, policy.Tenant, expires, policy.GraceDays, policy.LockKey, policy.Source)
-	if err != nil && s.logger != nil {
-		s.logger.Warn("seat policy sync failed", "err", err)
-	}
+	_ = ctx
 }
 
 func (s *Server) lockControlSeatScope(ctx context.Context, tx pgx.Tx, tenantID string) (controlSeatPolicy, int, error) {
@@ -498,12 +490,12 @@ func (s *Server) ensureControlSeatCapacity(ctx context.Context, tx pgx.Tx, tenan
 	if err != nil {
 		return 0, err
 	}
+	_ = additional
 	if policy.Tenant != "" && policy.Tenant != tenantID {
 		return 0, nil
 	}
-	if used+additional > policy.Limit {
-		return used, errControlSeatLimit
-	}
+	// Never block an activation on the licensed user count. The license page
+	// shows a true-up warning when active users exceed the paid allowance.
 	return used, nil
 }
 

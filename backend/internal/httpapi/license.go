@@ -122,9 +122,9 @@ func (s *Server) licenseSnapshot(ctx context.Context) map[string]any {
 		return map[string]any{
 			"edition": "oss", "state": state, "inGrace": false, "expired": false,
 			"seats": communitySeatLimit, "seatLimit": communitySeatLimit, "usedSeats": used,
-			"remainingSeats": maxInt(communitySeatLimit-used, 0), "seatSource": "community",
-			"communitySeatLimit": communitySeatLimit,
-			"plan":               "community", "trial": false, "deploymentId": "", "limits": nil,
+			"remainingSeats": 0, "seatSource": "community",
+			"communitySeatLimit": communitySeatLimit, "unlimitedUsers": true, "overLimit": false,
+			"plan": "community", "trial": false, "deploymentId": "", "limits": nil,
 			"features": []string{}, "daysRemaining": 0, "expiresAt": "",
 			"availableFeatures": append([]string{}, paidFeatureKeys...),
 			"missingFeatures":   append([]string{}, paidFeatureKeys...),
@@ -148,6 +148,7 @@ func (s *Server) licenseSnapshot(ctx context.Context) map[string]any {
 		"seats": limit, "seatLimit": limit, "licensedSeats": status.SeatLimit,
 		"usedSeats": used, "remainingSeats": maxInt(limit-used, 0),
 		"seatSource": s.seatSource(), "communitySeatLimit": communitySeatLimit,
+		"unlimitedUsers": limit <= 0, "overLimit": limit > 0 && used > limit,
 		"plan": status.Plan, "trial": status.Trial,
 		"deploymentId": status.DeploymentID, "limits": status.Limits,
 		"features":          features,
@@ -176,45 +177,12 @@ func (s *Server) licenseSeatUsageCount(ctx context.Context) int {
 	return used
 }
 
-// syncSeatPolicy publishes the effective policy to PostgreSQL for the
-// defense-in-depth trigger. The application remains the first line of
-// enforcement; this row lets a missed activation path or a direct SQL insert
-// still hit the same limit. A root operator can change the row deliberately.
+// syncSeatPolicy is retained as a compatibility hook. Licensing is now
+// instance-wide and soft: the community edition has unlimited users and a
+// paid license overage is reported to administrators for true-up, never
+// enforced by a database trigger or an activation refusal.
 func (s *Server) syncSeatPolicy(ctx context.Context) {
-	if s.store == nil || s.store.DB == nil {
-		return
-	}
-	seats := communitySeatLimit
-	tenant := ""
-	source := "community"
-	var expires any
-	grace := 0
-	hash := fnv.New32a()
-	if s.license != nil {
-		seats = s.license.Seats
-		tenant = strings.TrimSpace(s.license.Tenant)
-		source = "license"
-		expires = s.license.ExpiresAt.UTC()
-		grace = s.license.GraceDays
-		_, _ = hash.Write([]byte(s.license.ID))
-	}
-	if seats < 1 {
-		seats = communitySeatLimit
-		source = "community"
-	}
-	_, err := s.store.DB.Exec(ctx, `
-		INSERT INTO control.seat_policy
-		  (id, seats, tenant_id, expires_at, grace_days, lock_key, source, updated_at)
-		VALUES (true, $1, $2, $3, $4, $5, $6, now())
-		ON CONFLICT (id) DO UPDATE SET
-		  seats = EXCLUDED.seats, tenant_id = EXCLUDED.tenant_id,
-		  expires_at = EXCLUDED.expires_at, grace_days = EXCLUDED.grace_days,
-		  lock_key = EXCLUDED.lock_key, source = EXCLUDED.source,
-		  updated_at = now()
-	`, seats, tenant, expires, grace, int32(hash.Sum32()), source)
-	if err != nil && s.logger != nil {
-		s.logger.Warn("seat policy sync failed", "err", err)
-	}
+	_ = ctx
 }
 
 func maxInt(value, floor int) int {
@@ -224,10 +192,10 @@ func maxInt(value, floor int) int {
 	return value
 }
 
-// communitySeatLimit is the free-edition active-user allowance. It applies to
-// every tenant when no valid paid license is loaded. This is the public
-// commercial boundary; it is not a tamper-proof security control.
-const communitySeatLimit = 25
+// communitySeatLimit is the free-edition active-user allowance. The community
+// edition has no user limit: zero means unlimited. Paid licenses use the
+// signed seat claim as a commercial true-up target, not a hard activation cap.
+const communitySeatLimit = 0
 
 // licenseSeatLimit is the effective active-user limit: the signed seat claim
 // while a license is valid or in grace, otherwise the community allowance.
@@ -271,7 +239,9 @@ func (s *Server) licenseSeatTenant() string {
 // user creation. OSS, unlicensed, invalid and expired deployments keep core
 // user creation available; expired paid features are gated separately.
 func (s *Server) seatEnforced() bool {
-	return true
+	// Kept for callers that still ask the question. No edition blocks user
+	// activation on a seat count anymore.
+	return false
 }
 
 // seatAppliesToTenant reports whether seat enforcement covers this tenant. The
@@ -317,14 +287,11 @@ func (s *Server) countActiveSeats(ctx context.Context, q rowQuerier, tenantID st
 // It is a read-only convenience for callers outside a provisioning transaction;
 // activation paths must use ensureSeatCapacityTx after locking.
 func (s *Server) seatAvailable(ctx context.Context, tenantID string) (bool, error) {
-	if !s.seatAppliesToTenant(tenantID) {
-		return true, nil
-	}
-	used, err := s.activeSeatCount(ctx, tenantID)
-	if err != nil {
-		return false, err
-	}
-	return used < s.licenseSeatLimit(), nil
+	// User activation is never refused on a licensed-user count. The admin
+	// console reports an overage for true-up instead.
+	_ = ctx
+	_ = tenantID
+	return true, nil
 }
 
 // lockSeatScopeTx serializes seat-consuming changes before they re-count. The
@@ -361,6 +328,7 @@ func (s *Server) globalSeatLockKey() int32 {
 // errSeatLimit when adding `additional` active users would exceed the license.
 // It returns the current usage for audit metadata on both success and failure.
 func (s *Server) ensureSeatCapacityTx(ctx context.Context, tx pgx.Tx, tenantID string, additional int) (int, error) {
+	_ = additional
 	if !s.seatAppliesToTenant(tenantID) {
 		return 0, nil
 	}
@@ -368,9 +336,9 @@ func (s *Server) ensureSeatCapacityTx(ctx context.Context, tx pgx.Tx, tenantID s
 	if err != nil {
 		return 0, err
 	}
-	if used+additional > s.licenseSeatLimit() {
-		return used, errSeatLimit
-	}
+	// Instance-wide licensing is a commercial true-up target, not a hard cap.
+	// Never refuse an activation because usage is at or above the license
+	// count; the administrator sees an overage warning instead.
 	return used, nil
 }
 

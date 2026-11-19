@@ -1,5 +1,5 @@
 /* System Control — offline license status, seat metering and token upload. */
-import * as ui from './ui.js?v=3.9.8.1';
+import * as ui from './ui.js?v=3.9.8.3';
 
 const esc = ui.esc;
 const fmt = {
@@ -134,9 +134,9 @@ function statusNotice(license) {
   switch (license?.state) {
     case 'unlicensed': {
       const detail = license?.filePath
-        ? `Alt8Mail is running in the free community edition: 25 active users are included. No license file was found at ${license.filePath}. Upload a signed token to raise the seat limit and unlock paid capabilities.`
-        : 'Alt8Mail is running in the free community edition: 25 active users are included. No license path is configured (CONTROL_LICENSE_FILE is empty). Upload cannot be stored until a path is configured.';
-      return `${ui.emptyState('Community edition · 25 active users', detail, `${upgradeButton(license, 'View plans')} ${docsLink()}`, 'key')}
+        ? `Alt8Mail is running in the free community edition with unlimited users. No license file was found at ${license.filePath}. Upload a signed token to unlock paid capabilities and set a licensed-user true-up target.`
+        : 'Alt8Mail is running in the free community edition with unlimited users. No license path is configured (CONTROL_LICENSE_FILE is empty). Upload cannot be stored until a path is configured.';
+      return `${ui.emptyState('Community edition · unlimited users', detail, `${upgradeButton(license, 'View plans')} ${docsLink()}`, 'key')}
         <p class="form-note license-file-note">Configured path: <span class="mono break-all">${esc(filePathText(license))}</span></p>`;
     }
     case 'invalid': {
@@ -155,7 +155,7 @@ function statusNotice(license) {
       return ui.inlineNotice(
         'critical',
         'The license has expired',
-        `Paid features are disabled and the deployment has fallen back to the 25-user community limit. Core mail delivery continues. The license expired on ${fmt.dateOnly(license.expiresAt)}. Upload a renewed token to restore paid capabilities and the licensed seat count.`,
+        `Paid features are disabled and the deployment has fallen back to the community edition, which has unlimited users. Core mail delivery continues. The license expired on ${fmt.dateOnly(license.expiresAt)}. Upload a renewed token to restore paid capabilities and the licensed-user true-up target.`,
         `${upgradeButton(license, 'Renew')} ${docs}`,
       );
     case 'valid':
@@ -187,7 +187,9 @@ function statusMarkup(license) {
     rows.push(
       ['Expires', license.expiresAt ? esc(fmt.dateOnly(license.expiresAt)) : '—'],
       ['Remaining', esc(expirySummary(license))],
-      ['Seats', `${fmt.num(license.seats || 0)} ${license.seatSource === 'community' ? 'community' : 'licensed'}`],
+      ['Users', hasSeats
+        ? `${fmt.num(license.usedSeats || 0)} active / ${fmt.num(license.seats || 0)} licensed`
+        : 'Unlimited (community edition)'],
       ['Tenant scope', esc(tenantScopeText(license))],
       ['Infrastructure', esc(infrastructureLabel(license.infrastructure))],
       ['License type', license.trial ? ui.badge('Trial', 'warning', 'clock') : 'Full license'],
@@ -200,9 +202,6 @@ function statusMarkup(license) {
       ['File updated', license.lastModified ? esc(fmt.dateTime(license.lastModified)) : '—'],
     );
   }
-  if (!loaded && hasSeats) {
-    rows.push(['Seats', `${fmt.num(license.seats || 0)} community`], ['Limit source', 'Community edition']);
-  }
   if (license?.trustAnchor === 'config') {
     rows.push(['Trust anchor', 'Configuration (development/migration only)']);
   } else if (license?.trustAnchor === 'missing') {
@@ -214,8 +213,10 @@ function statusMarkup(license) {
       ${statePill(license?.state)}
       ${ui.badge(editionLabel(license?.edition), license?.state === 'unlicensed' ? 'neutral' : 'info', 'layers')}
       ${license?.trial ? ui.badge('Trial', 'warning', 'clock') : ''}
-      ${hasSeats ? `<span class="summary-pill">${ui.icon('users', 12)} ${fmt.num(license.usedSeats || 0)} / ${fmt.num(license.seats || 0)} ${license.seatSource === 'community' ? 'community' : 'licensed'} seats used</span>` : ''}
-      ${license?.warning ? `<span class="summary-pill">${ui.icon('alert-circle', 12)} Seat warning</span>` : ''}
+      ${hasSeats
+        ? `<span class="summary-pill">${ui.icon('users', 12)} ${fmt.num(license.usedSeats || 0)} / ${fmt.num(license.seats || 0)} licensed users</span>`
+        : `<span class="summary-pill">${ui.icon('users', 12)} Unlimited users</span>`}
+      ${license?.warning ? `<span class="summary-pill">${ui.icon('alert-circle', 12)} User allowance warning</span>` : ''}
     </div>
     <div class="mt-3">${statusNotice(license)}</div>
     <div class="mt-4">${ui.kv(rows, 'is-3')}</div>
@@ -223,9 +224,9 @@ function statusMarkup(license) {
 }
 
 function seatTone(license, used, seats) {
-  if (used > seats) return 'critical';
+  if (seats <= 0) return 'good';
+  if (used > seats) return 'warning';
   if (license?.warning) return 'warning';
-  if (used >= seats) return 'critical';
   return 'good';
 }
 
@@ -234,69 +235,80 @@ function seatMarkup(license) {
   const used = Math.max(0, Number(license.usedSeats) || 0);
   const remaining = Math.max(0, Number(license.remainingSeats) || 0);
   if (seats === 0) {
-    return ui.emptyState('No seat limit is available', 'The license or community policy did not provide a seat allowance. Core mail remains available.', docsLink(), 'users');
+    return `<div class="seat-meter tone-good" role="meter" tabindex="0" aria-label="Active users; no limit in the community edition"
+      aria-valuenow="${used}" aria-valuemin="0" aria-valuemax="${Math.max(used, 1)}" aria-valuetext="${used} active users, unlimited">
+      <div class="seat-meter-head"><span>Active users</span><strong>${fmt.num(used)} · unlimited</strong></div>
+      <div class="seat-meter-track"><div class="seat-meter-fill" style="width:100%"></div></div>
+      <div class="seat-meter-legend"><span>No user limit</span><span>Community edition</span></div>
+    </div>
+    <div class="mt-3">${ui.kv([
+      ['Active users', fmt.num(used)],
+      ['User limit', 'Unlimited (community edition)'],
+      ['Counting rule', 'Active, non-deleted users; platform system administrators excluded'],
+    ], 'is-3')}</div>
+    <div class="mt-3">${upgradeButton(license, 'Unlock paid features')}</div>
+    <p class="form-note">The community edition does not limit active users. Paid plans use a licensed-user count for true-up and never block mail delivery or user creation.</p>`;
   }
   const source = license?.seatSource === 'community' ? 'community' : 'licensed';
-  const enforcing = source === 'community' || license.state === 'valid' || license.state === 'grace';
   const over = Math.max(0, used - seats);
   // Floor the displayed percentage: rounding up would show 80% for 199/250
   // while the server's exact comparison correctly reports no warning.
   const percent = Math.min(100, Math.floor((used / seats) * 100));
   const warningPercent = Math.min(100, Math.max(1, Number(license.warningPercent) || 80));
   const tone = seatTone(license, used, seats);
-  const valueText = `${used} of ${seats} ${source} seats used, ${remaining} remaining${over ? `, ${over} over the limit` : ''}`;
-  const warningDetail = `Usage is at or above the configured ${warningPercent}% warning threshold (CONTROL_LICENSE_WARNING_PERCENT). When every seat is in use, new activations in webmail, administration, SCIM and System Control are refused until a seat is freed or the license is upgraded.`;
-  const overDetail = `${over} more active seat${over === 1 ? '' : 's'} than the ${source} limit. Existing users are not deactivated automatically; new activations are refused until usage falls below ${seats}.`;
+  const valueText = `${used} active users, ${seats} licensed, ${remaining} remaining${over ? `, ${over} above the licensed count` : ''}`;
+  const warningDetail = `Usage is at or above the configured ${warningPercent}% warning threshold (CONTROL_LICENSE_WARNING_PERCENT). This is a true-up warning; mail delivery and user activation continue.`;
+  const overDetail = `${over} more active user${over === 1 ? '' : 's'} than the licensed count. Mail delivery and user activation continue. Update the license to cover the additional users.`;
   const warnings = [
-    license.warning ? ui.inlineNotice('warning', 'Seat warning threshold reached', warningDetail) : '',
-    over ? ui.inlineNotice('critical', 'Seat limit exceeded', overDetail) : '',
+    license.warning && !over ? ui.inlineNotice('warning', 'Approaching the licensed-user count', warningDetail) : '',
+    over ? ui.inlineNotice('warning', 'Licensed-user count exceeded', overDetail) : '',
   ].join('');
   const ariaNow = Math.min(used, seats);
   return `${warnings}
-    <div class="seat-meter tone-${tone}" role="meter" tabindex="0" aria-label="License seat usage"
+    <div class="seat-meter tone-${tone}" role="meter" tabindex="0" aria-label="Active users compared with licensed users"
       aria-valuenow="${ariaNow}" aria-valuemin="0" aria-valuemax="${seats}" aria-valuetext="${esc(valueText)}">
-      <div class="seat-meter-head"><span>Active seats</span><strong>${fmt.num(used)} / ${fmt.num(seats)}</strong></div>
+      <div class="seat-meter-head"><span>Active users</span><strong>${fmt.num(used)} / ${fmt.num(seats)} licensed</strong></div>
       <div class="seat-meter-track">
         <div class="seat-meter-fill" style="width:${percent}%"></div>
         <div class="seat-meter-threshold" style="${warningPercent >= 100 ? 'right:0' : `left:${warningPercent}%`}" title="Warning threshold ${warningPercent}%" aria-hidden="true"></div>
       </div>
       <div class="seat-meter-legend">
-        <span>${fmt.num(used)} used</span>
+        <span>${fmt.num(used)} active</span>
         <span>${fmt.num(remaining)} remaining</span>
-        <span>${percent}% of available seats</span>
+        <span>${percent}% of licensed users</span>
         <span>Warning at ${warningPercent}%</span>
       </div>
     </div>
     <div class="mt-3">${ui.kv([
-      ['Seats used', fmt.num(used)],
-      ['Seat limit', fmt.num(seats)],
-      ['Seats remaining', over ? `0 (${fmt.num(over)} over limit)` : fmt.num(remaining)],
-      ['Limit source', source === 'community' ? 'Community edition (25 users)' : 'Active license'],
+      ['Active users', fmt.num(used)],
+      ['Licensed users', fmt.num(seats)],
+      ['Remaining licensed users', over ? `0 (${fmt.num(over)} above the licensed count)` : fmt.num(remaining)],
+      ['Limit source', source === 'community' ? 'Community edition (unlimited)' : 'Active license'],
       ['Warning threshold', `${warningPercent}% · ${license.warning ? 'reached' : 'not reached'}`],
-      ['Enforcement', enforcing ? 'Active' : 'Inactive'],
+      ['Enforcement', 'Soft true-up warning'],
       ['Counting rule', 'Active, non-deleted users; platform system administrators excluded'],
     ], 'is-3')}</div>
-    ${source === 'community' ? `<div class="mt-3">${upgradeButton(license, 'Raise the seat limit')}</div>` : ''}
-    <p class="form-note">Seat usage is read live from PostgreSQL and does not require a restart. Counted users are <span class="mono">status='active'</span>, not deleted, and not platform system administrators.</p>`;
+    ${over ? `<div class="mt-3">${upgradeButton(license, 'Update the license')}</div>` : ''}
+    <p class="form-note">The licensed-user count is a commercial true-up target. It never blocks mail delivery or user activation.</p>`;
 }
 
 function tenantSeatMarkup(license, byTenant) {
   if (license?.tenant && LOADED_STATES.has(license?.state)) {
     return ui.emptyState(
       'Tenant-scoped license',
-      `This license counts and enforces seats only for tenant ${license.tenant}. Other tenants are not counted or limited by it, and per-tenant rows are intentionally hidden so other usage cannot leak here.`,
+      `This license counts users only for tenant ${license.tenant}. Overage is a true-up warning, not a block. Other tenants are not limited by it, and per-tenant rows are intentionally hidden so other usage cannot leak here.`,
       docsLink(),
       'users',
     );
   }
   const rows = Array.isArray(byTenant) ? byTenant : [];
   if (!rows.length) {
-    return ui.emptyState('No tenant seat data', 'Per-tenant usage appears when tenants have active users.', '', 'users');
+    return ui.emptyState('No tenant user data', 'Per-tenant usage appears when tenants have active users.', '', 'users');
   }
   const total = rows.reduce((sum, row) => sum + Math.max(0, Number(row.activeSeats) || 0), 0);
   return `<div class="table-wrap"><table class="data compact">
-      <caption class="sr-only">Active seats by tenant</caption>
-      <thead><tr><th scope="col">Tenant</th><th scope="col">Tenant ID</th><th scope="col" class="num">Active seats</th></tr></thead>
+      <caption class="sr-only">Active users by tenant</caption>
+      <thead><tr><th scope="col">Tenant</th><th scope="col">Tenant ID</th><th scope="col" class="num">Active users</th></tr></thead>
       <tbody>${rows.map((row) => `<tr>
         <td>${esc(row.name || 'Unnamed tenant')}</td>
         <td class="mono break-all">${esc(row.tenantId || '—')}</td>
@@ -304,7 +316,7 @@ function tenantSeatMarkup(license, byTenant) {
       </tr>`).join('')}</tbody>
       <tfoot><tr><th scope="row" colspan="2">Total</th><td class="num">${fmt.num(total)}</td></tr></tfoot>
     </table></div>
-    <p class="form-note">Rows are ordered by tenant name. ${license?.seatSource === 'community' ? 'The community allowance' : 'This license'} counts active users across every tenant.</p>`;
+    <p class="form-note">Rows are ordered by tenant name. ${license?.seatSource === 'community' ? 'The community edition has no user limit' : 'This license uses the licensed-user count for true-up'} and counts active users across every tenant.</p>`;
 }
 
 const INSTALL_PHASES = [
@@ -451,9 +463,9 @@ function uploadSuccessMarkup(result) {
         <strong>License uploaded and verified</strong>
         ${mismatch}
         <p>${restart ? 'Restart the Alt8Mail webmail service to activate this license.' : 'The new license is ready to use.'}</p>
-        <p>Seat usage below updates immediately. The running webmail keeps using the token it loaded at startup until it restarts.</p>
+        <p>Active-user usage below updates immediately. The running webmail keeps using the token it loaded at startup until it restarts.</p>
         <p>Control does not validate <span class="mono">ALT8MAIL_LICENSE_TENANT</span>. In a tenant-pinned deployment, a token whose tenant claim differs from the webmail pin will be rejected by the webmail after restart.</p>
-        <p class="mono">${esc(editionLabel(license.edition))} · ${esc(stateMeta(license.state).label)} · ${fmt.num(license.seats || 0)} seats · expires ${esc(license.expiresAt ? fmt.dateOnly(license.expiresAt) : '—')}</p>
+        <p class="mono">${esc(editionLabel(license.edition))} · ${esc(stateMeta(license.state).label)} · ${Number(license.seats) > 0 ? `${fmt.num(license.seats || 0)} licensed users` : 'Unlimited users'} · expires ${esc(license.expiresAt ? fmt.dateOnly(license.expiresAt) : '—')}</p>
       </div>
     </div>`;
 }
@@ -489,7 +501,7 @@ export async function renderLicense(ctx) {
   ctx.root.innerHTML = `${ui.pageHeader({
     eyebrow: 'Infrastructure',
     title: 'License',
-    description: 'See the community or licensed seat limit, monitor live usage, compare paid capabilities and upload a signed license.',
+    description: 'See the community edition or licensed-user allowance, monitor active users, compare paid capabilities and upload a signed license.',
     meta: `<span class="icon-text">${ui.icon('key', 13)} Local Ed25519 verification · portal used for activation and updates</span>`,
     actions: `<button class="btn btn-secondary" type="button" id="license-refresh">${ui.icon('refresh', 15)} Refresh</button>${docsLink()}`,
   })}
@@ -500,11 +512,11 @@ export async function renderLicense(ctx) {
           <div class="card-body" id="license-status-body">${ui.loadingState('Reading license state…', 4)}</div>
         </section>
         <section class="card">
-          <header class="card-head"><div><h3>Seat usage</h3><p>Live active-user count against the licensed allowance</p></div><span id="license-seat-chip"></span></header>
-          <div class="card-body" id="license-seat-body">${ui.loadingState('Counting active seats…', 3)}</div>
+          <header class="card-head"><div><h3>User usage</h3><p>Active users and the licensed-user true-up target</p></div><span id="license-seat-chip"></span></header>
+          <div class="card-body" id="license-seat-body">${ui.loadingState('Counting active users…', 3)}</div>
         </section>
         <section class="card">
-          <header class="card-head"><div><h3>Per-tenant seats</h3><p>Shown for global licenses only</p></div></header>
+          <header class="card-head"><div><h3>Per-tenant users</h3><p>Shown for global licenses only</p></div></header>
           <div class="card-body" id="license-tenant-body">${ui.loadingState('Reading tenant usage…', 3)}</div>
         </section>
       </div>
@@ -541,8 +553,6 @@ export async function renderLicense(ctx) {
             </form>
             <div class="divider"></div>
             <p class="form-note license-file-note">Configured path: <span class="mono break-all" id="license-upload-path">—</span></p>
-            <p class="form-note">The webmail reads the same token through <span class="mono">ALT8MAIL_LICENSE_FILE</span> and verifies it with <span class="mono">ALT8MAIL_LICENSE_PUBLIC_KEY</span>. Both services must point at the same path/key. Control does not validate <span class="mono">ALT8MAIL_LICENSE_TENANT</span>; a tenant-pinned webmail rejects a token with a different claim after restart.</p>
-            <p class="form-note">The Control Plane writes the token atomically with mode <span class="mono">0640</span> and normalizes its group to <span class="mono">a8m</span> (or <span class="mono">CONTROL_LICENSE_GROUP</span>). An existing file's owner is preserved, so a legacy root-owned token becomes webmail-readable after the upload. A rejected upload leaves the existing file byte-for-byte unchanged.</p>
           </div>
         </section>
         <section class="card">
@@ -551,11 +561,11 @@ export async function renderLicense(ctx) {
             <div class="tile-link"><span>${ui.icon('file-code', 15)} Shared file</span><span class="value mono">CONTROL_LICENSE_FILE = ALT8MAIL_LICENSE_FILE</span></div>
             <div class="tile-link"><span>${ui.icon('lock', 15)} Ownership</span><span class="value">group a8m · 0640</span></div>
             <div class="tile-link"><span>${ui.icon('refresh', 15)} Activation</span><span class="value">Webmail restart required</span></div>
-            <div class="tile-link"><span>${ui.icon('users', 15)} Seat counting</span><span class="value">Active · non-deleted · non-admin</span></div>
-            <div class="tile-link"><span>${ui.icon('shield', 15)} Community limit</span><span class="value">25 active users, enforced in webmail, admin, SCIM and Control</span></div>
+            <div class="tile-link"><span>${ui.icon('users', 15)} User counting</span><span class="value">Active · non-deleted · non-admin</span></div>
+            <div class="tile-link"><span>${ui.icon('shield', 15)} Community edition</span><span class="value">Unlimited users · no activation cap</span></div>
             <div class="tile-link"><span>${ui.icon('activity', 15)} Verification</span><span class="value">Ed25519 token · compiled trust anchor</span></div>
             <div class="tile-link"><span>${ui.icon('globe', 15)} Portal contact</span><span class="value">Activation, bundle and update checks only</span></div>
-            <div class="note-strip" style="margin-top:11px">${ui.icon('info', 13)} <span>The webmail verifies the token locally at startup and does not need the portal to deliver mail. Control verifies the same token on every status request; the licensing portal is contacted only for activation, enterprise bundle delivery and update checks.</span></div>
+            <div class="note-strip" style="margin-top:11px">${ui.icon('info', 13)} <span>The Alt8Mail system verifies the token locally at startup and does not need the portal to deliver mail. Control verifies the same token on every status request; the licensing portal is contacted only for activation, enterprise bundle delivery and update checks.</span></div>
             <p class="form-note" style="margin-top:10px"><a href="${DOCS_URL}" target="_blank" rel="noopener noreferrer">Read the full licensing guide ${ui.icon('arrow-up-right', 11)}</a></p>
           </div>
         </section>

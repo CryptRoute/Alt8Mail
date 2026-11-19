@@ -136,6 +136,7 @@ type Config struct {
 	AdminDir          string
 	AdminPublicURL    string
 	ControlPublicURL  string
+	EnterprisePrompts bool
 	AdminSessionTTL   time.Duration
 	AdminRateLimitMax int
 	AdminRateWindow   time.Duration
@@ -266,6 +267,7 @@ func Load() (Config, error) {
 		AdminDir:                   env("ALT8MAIL_ADMIN_DIR", "./admin"),
 		AdminPublicURL:             strings.TrimRight(env("ALT8MAIL_ADMIN_URL", ""), "/"),
 		ControlPublicURL:           strings.TrimRight(env("ALT8MAIL_CONTROL_URL", ""), "/"),
+		EnterprisePrompts:          !(envBool("HIDE_ENTERPRISE_PROMPTS", false) || envBool("ALT8MAIL_HIDE_ENTERPRISE_PROMPTS", false)),
 		AdminSessionTTL:            8 * time.Hour,
 		AdminRateLimitMax:          10,
 		AdminRateWindow:            10 * time.Minute,

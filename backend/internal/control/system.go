@@ -18,7 +18,10 @@ import (
 )
 
 var coreServiceUnits = []string{
-	"postfix@-.service",
+	// Debian's standard Postfix unit is postfix.service. postfix@-.service is
+	// a template instance that the installer never enables; monitoring it
+	// reports a false failure and directs operators to start the wrong unit.
+	"postfix.service",
 	"dovecot.service",
 	"rspamd.service",
 	"clamav-daemon.service",

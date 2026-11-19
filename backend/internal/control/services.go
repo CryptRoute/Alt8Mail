@@ -156,9 +156,8 @@ func (s *Server) handlePostfixConfigSave(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusBadRequest, "POSTFIX", "postfix check rejected the edit: "+strings.TrimSpace(result.Stderr+"\n"+result.Stdout))
 		return
 	}
-	reloadResult, reloadErr := runCommand(r.Context(), 30*time.Second, "postfix", "reload")
-	if reloadErr != nil {
-		writeError(w, http.StatusBadGateway, "RELOAD", "Configuration saved but reload failed: "+strings.TrimSpace(reloadResult.Stderr))
+	if reloadErr := reloadPostfix(r.Context()); reloadErr != nil {
+		writeError(w, http.StatusBadGateway, "RELOAD", "Configuration saved but reload failed: "+reloadErr.Error())
 		return
 	}
 	s.actorAudit(r, sess, "services.postfix_config_saved", body.File, "Edited Postfix configuration", map[string]any{"backup": backup})
@@ -166,9 +165,8 @@ func (s *Server) handlePostfixConfigSave(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) handlePostfixReload(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
-	result, err := runCommand(r.Context(), 30*time.Second, "postfix", "reload")
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "RELOAD", strings.TrimSpace(result.Stderr))
+	if err := reloadPostfix(r.Context()); err != nil {
+		writeError(w, http.StatusBadGateway, "RELOAD", err.Error())
 		return
 	}
 	s.actorAudit(r, sess, "services.postfix_reload", "Postfix", "Reloaded Postfix", nil)
@@ -176,7 +174,7 @@ func (s *Server) handlePostfixReload(w http.ResponseWriter, r *http.Request, ses
 }
 
 func (s *Server) handlePostfixRestart(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
-	result, err := runCommand(r.Context(), 60*time.Second, "systemctl", "restart", "postfix@-.service")
+	result, err := runCommand(r.Context(), 60*time.Second, "systemctl", "restart", "postfix.service")
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "RESTART", strings.TrimSpace(result.Stderr))
 		return

@@ -90,11 +90,22 @@ func postconf(ctx context.Context, args ...string) (commandResult, error) {
 }
 
 func reloadPostfix(ctx context.Context) error {
-	result, err := runCommand(ctx, 30*time.Second, "postfix", "reload")
-	if err != nil {
-		return fmt.Errorf("postfix reload: %s", strings.TrimSpace(result.Stderr))
+	// Reload through systemd so the unit's state stays authoritative. Calling
+	// /usr/sbin/postfix directly can leave postfix.service marked failed even
+	// when the master is still running.
+	result, err := runCommand(ctx, 60*time.Second, "systemctl", "reload", "postfix.service")
+	if err == nil {
+		return nil
 	}
-	return nil
+	fallback, fallbackErr := runCommand(ctx, 30*time.Second, "postfix", "reload")
+	if fallbackErr == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(result.Stderr + "\n" + fallback.Stderr)
+	if detail == "" {
+		detail = fallbackErr.Error()
+	}
+	return fmt.Errorf("postfix reload: %s", detail)
 }
 
 // movePath archives or relocates a file tree across filesystems. os.Rename is

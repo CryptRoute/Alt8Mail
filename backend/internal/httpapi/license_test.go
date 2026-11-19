@@ -166,7 +166,7 @@ func TestLicenseSnapshotAndEntitlements(t *testing.T) {
 	if oss["edition"] != "oss" || oss["state"] != "unlicensed" || server.entitled("sso") {
 		t.Fatalf("unexpected OSS snapshot: %#v", oss)
 	}
-	if oss["usedSeats"] != 0 || oss["seatLimit"] != 25 || oss["seats"] != 25 {
+	if oss["usedSeats"] != 0 || oss["seatLimit"] != 0 || oss["seats"] != 0 || oss["unlimitedUsers"] != true {
 		t.Fatalf("unexpected OSS seat fields: %#v", oss)
 	}
 
@@ -176,7 +176,7 @@ func TestLicenseSnapshotAndEntitlements(t *testing.T) {
 	if invalid["edition"] != "oss" || invalid["state"] != "invalid" {
 		t.Fatalf("unexpected invalid snapshot: %#v", invalid)
 	}
-	if invalid["usedSeats"] != 0 || invalid["seatLimit"] != 25 {
+	if invalid["usedSeats"] != 0 || invalid["seatLimit"] != 0 {
 		t.Fatalf("unexpected invalid seat fields: %#v", invalid)
 	}
 
@@ -222,8 +222,8 @@ func TestLicenseSnapshotAndEntitlements(t *testing.T) {
 	if !ok || len(features) != 0 {
 		t.Fatalf("expired snapshot advertises features: %#v", expired["features"])
 	}
-	if expired["seatLimit"] != 25 || expired["seatSource"] != "community" {
-		t.Fatalf("expired snapshot must fall back to the community policy: %#v", expired)
+	if expired["seatLimit"] != 0 || expired["seatSource"] != "community" || expired["unlimitedUsers"] != true {
+		t.Fatalf("expired snapshot must fall back to unlimited community users: %#v", expired)
 	}
 }
 
@@ -370,12 +370,12 @@ func TestLicenseSeatEnforcementStateMatrix(t *testing.T) {
 		server   *Server
 		enforced bool
 	}{
-		{name: "oss (missing or unconfigured file)", server: &Server{}, enforced: true},
-		{name: "invalid (configured file failed to load)", server: &Server{licenseConfigured: true, licenseError: "verify license: signature"}, enforced: true},
-		{name: "valid", server: seatTestServer(seatTestLicense(10, "", now.Add(time.Hour), 0), now), enforced: true},
-		{name: "grace", server: seatTestServer(seatTestLicense(10, "", now.Add(-time.Hour), 7), now), enforced: true},
-		{name: "expired", server: seatTestServer(seatTestLicense(10, "", now.Add(-8*24*time.Hour), 7), now), enforced: true},
-		{name: "valid without seats", server: seatTestServer(seatTestLicense(0, "", now.Add(time.Hour), 0), now), enforced: true},
+		{name: "oss (missing or unconfigured file)", server: &Server{}, enforced: false},
+		{name: "invalid (configured file failed to load)", server: &Server{licenseConfigured: true, licenseError: "verify license: signature"}, enforced: false},
+		{name: "valid", server: seatTestServer(seatTestLicense(10, "", now.Add(time.Hour), 0), now), enforced: false},
+		{name: "grace", server: seatTestServer(seatTestLicense(10, "", now.Add(-time.Hour), 7), now), enforced: false},
+		{name: "expired", server: seatTestServer(seatTestLicense(10, "", now.Add(-8*24*time.Hour), 7), now), enforced: false},
+		{name: "valid without seats", server: seatTestServer(seatTestLicense(0, "", now.Add(time.Hour), 0), now), enforced: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -393,20 +393,20 @@ func TestSeatAvailableTenantScope(t *testing.T) {
 	if available, err := scoped.seatAvailable(ctx, "tenant-b"); err != nil || !available {
 		t.Fatalf("unlicensed tenant available = %v, %v; want true, nil", available, err)
 	}
-	// The licensed tenant needs a real count; without a database the helper
-	// fails closed instead of granting a seat.
-	if available, err := scoped.seatAvailable(ctx, "tenant-a"); err == nil || available {
-		t.Fatalf("licensed tenant without database available = %v, %v; want false, error", available, err)
+	// No edition refuses an activation on a licensed-user count, so the helper
+	// stays available even when usage is at or above the license.
+	if available, err := scoped.seatAvailable(ctx, "tenant-a"); err != nil || !available {
+		t.Fatalf("licensed tenant available = %v, %v; want true, nil", available, err)
 	}
 
 	expired := seatTestServer(seatTestLicense(2, "tenant-a", now.Add(-8*24*time.Hour), 7), now)
-	if available, err := expired.seatAvailable(ctx, "tenant-a"); err == nil || available {
-		t.Fatalf("expired license without database available = %v, %v; want false, error", available, err)
+	if available, err := expired.seatAvailable(ctx, "tenant-a"); err != nil || !available {
+		t.Fatalf("expired license available = %v, %v; want true, nil", available, err)
 	}
 
 	global := seatTestServer(seatTestLicense(2, "", now.Add(time.Hour), 0), now)
-	if available, err := global.seatAvailable(ctx, "tenant-a"); err == nil || available {
-		t.Fatalf("global license without database available = %v, %v; want false, error", available, err)
+	if available, err := global.seatAvailable(ctx, "tenant-a"); err != nil || !available {
+		t.Fatalf("global license available = %v, %v; want true, nil", available, err)
 	}
 }
 

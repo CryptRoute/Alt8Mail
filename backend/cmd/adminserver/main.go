@@ -38,6 +38,14 @@ func main() {
 	}
 	defer st.Close()
 
+	// Licensing is instance-wide and soft. Remove the legacy database trigger
+	// that enforced a hard active-user cap; a newer installer drops it too, but
+	// an in-place enterprise upgrade does not run migrations. The table owner
+	// (a8m_app) may drop its own trigger; any remaining function/table is inert.
+	if _, err := st.DB.Exec(ctx, `DROP TRIGGER IF EXISTS users_active_seat_limit ON public.users`); err != nil {
+		logger.Warn("soft user licensing trigger cleanup failed", "err", err)
+	}
+
 	api := httpapi.New(httpapi.Options{Config: cfg, Store: st, Logger: logger, Version: version})
 	server := &http.Server{
 		Addr:              cfg.AdminListen,

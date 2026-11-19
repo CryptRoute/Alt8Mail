@@ -920,7 +920,8 @@ for unit in "$SOURCE_DIR"/deploy/systemd/*.service "$SOURCE_DIR"/deploy/systemd/
 done
 systemctl daemon-reload
 
-systemctl enable --now postgresql redis-server dovecot rspamd clamav-daemon >/dev/null
+systemctl enable --now postgresql redis-server dovecot rspamd clamav-daemon clamav-freshclam >/dev/null
+systemctl enable postgresql@15-main.service >/dev/null 2>&1 || warn "could not enable the PostgreSQL 15 instance unit"
 systemctl restart dovecot rspamd clamav-daemon
 systemctl enable --now postfix >/dev/null
 postfix check

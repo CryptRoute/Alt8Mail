@@ -129,7 +129,7 @@ func freeBrandingPayload(fields enterprise.BrandingFields) map[string]any {
 		"productName": product, "primaryColor": safeBrandColor(fields.PrimaryColor),
 		"supportEmail": truncate(strings.TrimSpace(fields.SupportEmail), 200),
 		"loginMessage": truncate(strings.TrimSpace(fields.LoginMessage), 240),
-		"logoUrl": "", "supportUrl": "", "legalUrl": "", "hideAttribution": false,
+		"logoUrl":      "", "supportUrl": "", "legalUrl": "", "hideAttribution": false,
 	}
 }
 
