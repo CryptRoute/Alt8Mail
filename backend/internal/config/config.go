@@ -135,6 +135,7 @@ type Config struct {
 	AdminListen       string
 	AdminDir          string
 	AdminPublicURL    string
+	ControlPublicURL  string
 	AdminSessionTTL   time.Duration
 	AdminRateLimitMax int
 	AdminRateWindow   time.Duration
@@ -264,6 +265,7 @@ func Load() (Config, error) {
 		AdminListen:                env("ALT8MAIL_ADMIN_LISTEN", "127.0.0.1:8081"),
 		AdminDir:                   env("ALT8MAIL_ADMIN_DIR", "./admin"),
 		AdminPublicURL:             strings.TrimRight(env("ALT8MAIL_ADMIN_URL", ""), "/"),
+		ControlPublicURL:           strings.TrimRight(env("ALT8MAIL_CONTROL_URL", ""), "/"),
 		AdminSessionTTL:            8 * time.Hour,
 		AdminRateLimitMax:          10,
 		AdminRateWindow:            10 * time.Minute,

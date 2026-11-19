@@ -9,7 +9,7 @@
   <link rel="icon" href="brand/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="icon" href="brand/favicon-48.png" sizes="48x48" type="image/png">
   <link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
-  <link rel="stylesheet" href="./admin.css?v=3.9.7">
+  <link rel="stylesheet" href="./admin.css?v=3.9.8">
 </head>
 <body>
   <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -142,6 +142,13 @@
         <div class="nav-group" id="enterpriseNav" hidden>
           <span class="nav-label">Enterprise</span>
           <a class="nav-link" href="#/enterprise-features" data-view="enterprise-features"><svg class="icon"><use href="#i-sparkles"/></svg><span>Enterprise features</span></a>
+          <a class="nav-link" href="#/analytics" data-view="analytics" data-permission="analytics.read"><svg class="icon"><use href="#i-grid"/></svg><span>Analytics</span></a>
+          <a class="nav-link" href="#/crm" data-view="crm" data-permission="crm.read"><svg class="icon"><use href="#i-users"/></svg><span>CRM sync</span></a>
+          <a class="nav-link" href="#/workspace" data-view="workspace" data-permission="groups.read"><svg class="icon"><use href="#i-mail"/></svg><span>Workspace features</span></a>
+          <a class="nav-link" href="#/mcp" data-view="mcp" data-permission="policies.read"><svg class="icon"><use href="#i-plug"/></svg><span>MCP governance</span></a>
+          <a class="nav-link" href="#/identity" data-view="identity" data-permission="policies.read"><svg class="icon"><use href="#i-shield"/></svg><span>Identity &amp; SSO</span></a>
+          <a class="nav-link" href="#/support-ops" data-view="support-ops" data-permission="tenant.read"><svg class="icon"><use href="#i-alert"/></svg><span>Support operations</span></a>
+          <a class="nav-link" href="#/backup" data-view="backup" data-permission="tenant.read"><svg class="icon"><use href="#i-drive"/></svg><span>Backup &amp; restore</span></a>
         </div>
         <div class="nav-group" id="systemNav" hidden>
           <span class="nav-label">System</span>
@@ -181,10 +188,10 @@
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
   <div id="commandPalette" class="command-palette" hidden></div>
 
-  <script src="./i18n.js?v=3.9.7" defer></script>
-  <script src="./import.js?v=3.9.7" defer></script>
-  <script src="./users-page.js?v=3.9.7" defer></script>
-  <script src="./import-views.js?v=3.9.7" defer></script>
-  <script src="./admin.js?v=3.9.7" defer></script>
+  <script src="./i18n.js?v=3.9.8" defer></script>
+  <script src="./import.js?v=3.9.8" defer></script>
+  <script src="./users-page.js?v=3.9.8" defer></script>
+  <script src="./import-views.js?v=3.9.8" defer></script>
+  <script src="./admin.js?v=3.9.8" defer></script>
 </body>
 </html>

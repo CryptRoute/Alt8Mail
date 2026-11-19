@@ -559,7 +559,8 @@ func (s *Server) adminBootstrap(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminServerPayload() map[string]any {
 	payload := map[string]any{
 		"version": s.version, "env": s.cfg.Env, "time": time.Now().UTC().Format(time.RFC3339),
-		"adminURL": s.cfg.AdminPublicURL,
+		"adminURL": s.cfg.AdminPublicURL, "controlURL": s.cfg.ControlPublicURL,
+		"publicUrl": s.cfg.PublicURL,
 	}
 	if scimURL, err := s.scimBaseURL(); err == nil {
 		payload["scimURL"] = scimURL

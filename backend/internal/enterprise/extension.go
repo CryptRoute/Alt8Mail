@@ -313,6 +313,8 @@ type SSOConfig struct {
 	SAMLSPEntityID      string
 	SAMLSPCertFile      string
 	SAMLSPKeyFile       string
+	SAMLSPCertPEM       string
+	SAMLSPKeyPEM        string
 	SAMLIDPMetadataURL  string
 	SAMLIDPMetadataFile string
 	SAMLEmailAttribute  string

@@ -68,7 +68,12 @@ var tenantAdminPermissionKeys = []string{
 	"groups.read", "groups.manage", "orgunits.read", "orgunits.manage",
 	"roles.read", "roles.manage", "policies.read", "policies.manage",
 	"domains.read", "domains.manage", "audit.read", "sessions.manage",
-	"legal.read", "legal.manage", "siem.read", "siem.manage",
+	"legal.read", "legal.manage", "legal.review",
+	"encryption.read", "encryption.manage",
+	"siem.read", "siem.manage",
+	"analytics.read", "crm.read", "crm.manage", "telemetry.manage",
+	"phishing.read", "phishing.manage",
+	"api.read", "api.manage", "webhooks.manage",
 }
 
 func adminPermissionKeys() map[string]bool {

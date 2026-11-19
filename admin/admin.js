@@ -37,6 +37,9 @@ const state = {
   permissions: [],
   view: "overview",
   routeParam: "",
+  workspaceTab: "shared-drafts",
+  identityTab: "oidc",
+  crmQuery: { email: "", provider: "" },
   csrf: "",
   selectedUsers: new Set(),
   userFilter: { q: "", status: "", role: "", page: 1, limit: 25, admin: false, deleted: false },
@@ -233,6 +236,7 @@ async function loadBootstrap() {
   state.enterprise = data.enterprise === true;
   state.paidUI = Array.isArray(data.paidUI) ? data.paidUI : [];
   state.license = data.license || null;
+  state.server = data.server || {};
   state.scimURL = String(data.server?.scimURL || "");
   if (window.A8M_I18N) {
     let language = data.admin?.language || "";
@@ -328,9 +332,9 @@ async function logout() {
 /* ------------------------------------------------------------
    Navigation / route
 ------------------------------------------------------------ */
-const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "team-inboxes", "org-units", "domains", "roles", "provisioning", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "enterprise-features", "tenants", "settings"]);
-const paidViews = new Set(["team-inboxes", "import-mailboxes", "provisioning", "ai", "compliance", "integrations", "enterprise-features"]);
-const enterpriseViewTitles = { "team-inboxes": "Team inboxes", "import-mailboxes": "Import mailboxes", provisioning: "Provisioning", ai: "AI assistant", compliance: "Compliance", integrations: "Integrations", "enterprise-features": "Enterprise features" };
+const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "team-inboxes", "org-units", "domains", "roles", "provisioning", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "enterprise-features", "analytics", "crm", "workspace", "mcp", "identity", "support-ops", "backup", "tenants", "settings"]);
+const paidViews = new Set(["team-inboxes", "import-mailboxes", "provisioning", "ai", "compliance", "integrations", "enterprise-features", "analytics", "crm", "workspace", "mcp", "identity", "support-ops", "backup"]);
+const enterpriseViewTitles = { "team-inboxes": "Team inboxes", "import-mailboxes": "Import mailboxes", provisioning: "Provisioning", ai: "AI assistant", compliance: "Compliance", integrations: "Integrations", "enterprise-features": "Enterprise features", analytics: "Usage analytics", crm: "CRM sync", workspace: "Workspace features", mcp: "MCP governance", identity: "Identity & SSO", "support-ops": "Support operations", backup: "Backup & restore" };
 
 function route() {
   if (!state.admin) return;
@@ -341,9 +345,11 @@ function route() {
   if (view === "users" && parts[1] === "import") view = "import-users";
   else if (view === "users" && parts[1]) { view = "user-detail"; routeParam = parts[1]; }
   else if (view === "mailboxes" && parts[1] === "import") view = "import-mailboxes";
+  else if (view === "workspace" && parts[1]) state.workspaceTab = parts[1];
+  else if (view === "identity" && parts[1]) state.identityTab = parts[1];
   state.routeParam = routeParam;
   state.view = views.has(view) ? view : "overview";
-  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "team-inboxes": "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", provisioning: "roles.manage", policies: "policies.read", addons: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
+  const required = { overview: "tenant.read", users: "users.read", "user-detail": "users.read", "import-users": "users.create", "import-mailboxes": "users.create", groups: "groups.read", "team-inboxes": "groups.read", "org-units": "orgunits.read", domains: "domains.read", roles: "roles.read", provisioning: "roles.manage", policies: "policies.read", addons: "policies.read", storage: "policies.read", ai: "policies.read", quarantine: "users.security", audit: "audit.read", compliance: "legal.read", integrations: "siem.read", analytics: "analytics.read", crm: "crm.read", workspace: "groups.read", mcp: "policies.read", identity: "policies.read", "support-ops": "tenant.read", backup: "tenant.read", tenants: "system.tenants.manage", settings: "tenant.read" }[state.view];
   if (required && !can(required)) { state.view = "overview"; location.hash = "#/overview"; return; }
   if (!state.enterprise && paidViews.has(state.view)) { renderEnterpriseRequired(state.view); return; }
   const navView = ["user-detail", "import-users", "import-mailboxes"].includes(state.view) ? "users" : state.view;
@@ -370,6 +376,13 @@ function route() {
     case "compliance": renderCompliance(); break;
     case "integrations": renderIntegrations(); break;
     case "enterprise-features": renderEnterpriseFeatures(); break;
+    case "analytics": renderAnalytics(); break;
+    case "crm": renderCRM(); break;
+    case "workspace": renderWorkspaceFeatures(); break;
+    case "mcp": renderMCPGovernance(); break;
+    case "identity": renderIdentityProviders(); break;
+    case "support-ops": renderSupportOps(); break;
+    case "backup": renderBackupRestore(); break;
     case "tenants": renderTenants(); break;
     case "settings": renderSettings(); break;
   }
@@ -2713,11 +2726,24 @@ const ENTERPRISE_MANAGEMENT = {
   ai_obligations: { view: "ai", label: "AI obligations" },
   ai_policy_assist: { view: "ai", label: "AI policy assist" },
   office_ai: { view: "ai", label: "Office AI" },
-  white_label: { view: "policies", label: "Branding" }
+  white_label: { view: "policies", label: "Branding" },
+  sso: { view: "identity", tab: "oidc", label: "OIDC settings" },
+  saml: { view: "identity", tab: "saml", label: "SAML settings" },
+  backup_restore: { view: "backup", label: "Backups & restore" },
+  analytics: { view: "analytics", label: "Usage analytics" },
+  crm_sync: { view: "crm", label: "CRM sync" },
+  support_ops: { view: "support-ops", label: "Support operations" },
+  mcp_governance: { view: "mcp", label: "MCP governance" },
+  shared_drafts: { view: "workspace", tab: "shared-drafts", label: "Shared drafts" },
+  team_templates: { view: "workspace", tab: "team-templates", label: "Team templates" },
+  template_gallery: { view: "workspace", tab: "gallery", label: "Template gallery" },
+  automation: { view: "workspace", tab: "automation", label: "Automation" },
+  booking_pages: { view: "workspace", tab: "booking", label: "Booking pages" },
+  mail_merge: { view: "workspace", tab: "mail-merge", label: "Mail merge" },
+  campaign_tracking: { view: "workspace", tab: "campaign-tracking", label: "Campaign tracking" },
+  recipient_scheduling: { view: "policies", label: "Sending policy" },
+  mail_followups: { view: "workspace", tab: "followups", label: "Follow-ups" }
 };
-
-const ENTERPRISE_ENVIRONMENT_ONLY = new Set(["sso", "saml"]);
-const ENTERPRISE_WORKSPACE = new Set(["shared_drafts", "team_templates", "template_gallery", "automation", "booking_pages", "mail_merge", "campaign_tracking", "mcp_governance"]);
 
 function enterpriseEntitled(feature) {
   const features = Array.isArray(state.license?.features) ? state.license.features : [];
@@ -2727,21 +2753,16 @@ function enterpriseEntitled(feature) {
 function enterpriseFeatureCard(item) {
   const management = ENTERPRISE_MANAGEMENT[item.feature];
   const entitled = enterpriseEntitled(item.feature);
-  const environmentOnly = ENTERPRISE_ENVIRONMENT_ONLY.has(item.feature);
-  const workspace = ENTERPRISE_WORKSPACE.has(item.feature);
+  const href = management ? `#/${management.view}${management.tab ? "/" + management.tab : ""}` : "#/enterprise-features";
   const manage = management
-    ? `<a class="btn btn-secondary btn-sm" href="#/${management.view}">${icon("sliders")}Open ${esc(management.label)}</a>`
-    : environmentOnly
-      ? `<span class="badge neutral">${icon("key")}Deployment configuration</span>`
-      : workspace
-        ? `<span class="badge neutral">${icon("mail")}User workspace</span>`
-        : `<span class="badge warning">${icon("alert")}No admin screen yet</span>`;
+    ? `<a class="btn btn-secondary btn-sm" href="${href}">${icon("sliders")}Open ${esc(management.label)}</a>`
+    : `<span class="badge warning">${icon("alert")}No management screen</span>`;
   const plan = entitled
     ? `<span class="badge active">${icon("check")}In plan</span>`
     : `<span class="badge neutral">Not in plan</span>${state.license?.portalUrl ? ` <a class="btn btn-ghost btn-sm" href="${esc(state.license.portalUrl)}/upgrade" target="_blank" rel="noopener noreferrer">View plans</a>` : ""}`;
   return `<article class="entity-card enterprise-feature-card" data-enterprise-feature="${esc(item.feature)}">
-    <div class="entity-head"><span class="entity-icon">${icon(management ? "sliders" : workspace ? "mail" : environmentOnly ? "terminal" : "sparkles")}</span><div class="entity-title"><b>${esc(item.label || item.feature)}</b><small>${esc(item.description || "")}</small></div>${plan}</div>
-    <div class="entity-meta"><span>${esc(management ? "Admin console" : environmentOnly ? "Environment" : workspace ? "Webmail workspace" : "API only")}</span><span class="spacer"></span>${manage}</div>
+    <div class="entity-head"><span class="entity-icon">${icon(management ? "sliders" : "sparkles")}</span><div class="entity-title"><b>${esc(item.label || item.feature)}</b><small>${esc(item.description || "")}</small></div>${plan}</div>
+    <div class="entity-meta"><span>${esc(management ? "Admin console" : "Not exposed")}</span><span class="spacer"></span>${manage}</div>
   </article>`;
 }
 
@@ -2762,7 +2783,7 @@ async function renderEnterpriseFeatures() {
   const total = catalog.length;
   const included = catalog.filter((feature) => enterpriseEntitled(feature.key)).length;
   const adminSurfaces = catalog.filter((feature) => ENTERPRISE_MANAGEMENT[feature.key]).length;
-  const noAdmin = catalog.filter((feature) => !ENTERPRISE_MANAGEMENT[feature.key] && !ENTERPRISE_ENVIRONMENT_ONLY.has(feature.key)).length;
+  const uncovered = catalog.filter((feature) => !ENTERPRISE_MANAGEMENT[feature.key]).length;
   const groupLabel = (value) => String(value || "Other").split(/[-_]/).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
   const cards = Array.from(groups.entries()).map(([group, features]) => `<section class="mini-section" style="margin-top:18px"><h3>${esc(groupLabel(group))}</h3><div class="entity-grid">${features.map((feature) => enterpriseFeatureCard({ ...(descriptors.get(feature.key) || {}), ...feature, feature: feature.key })).join("")}</div></section>`).join("");
   $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Enterprise features</h1><p>Every capability in the paid catalog, whether this license includes it, and where it is managed.</p></div><div class="view-actions"><input class="input" id="enterpriseFeatureSearch" type="search" placeholder="Search features" aria-label="Search enterprise features"></div></div>
@@ -2770,7 +2791,7 @@ async function renderEnterpriseFeatures() {
       <div class="stat-card"><span class="stat-label">${icon("sparkles")}Catalog</span><span class="stat-value">${total}</span><span class="stat-meta">Paid capabilities in this release</span></div>
       <div class="stat-card"><span class="stat-label">${icon("check")}In license</span><span class="stat-value">${included}</span><span class="stat-meta">${total - included} require a plan change</span></div>
       <div class="stat-card"><span class="stat-label">${icon("sliders")}Admin surfaces</span><span class="stat-value">${adminSurfaces}</span><span class="stat-meta">Open from this console</span></div>
-      <div class="stat-card"><span class="stat-label">${icon("mail")}Workspace / environment</span><span class="stat-value">${noAdmin}</span><span class="stat-meta">No organization admin screen yet</span></div>
+      <div class="stat-card"><span class="stat-label">${icon("check")}Coverage</span><span class="stat-value">${total - uncovered}/${total}</span><span class="stat-meta">Catalog entries with a management screen</span></div>
     </div>
     <div id="enterpriseFeatureGroups">${cards || `<div class="card card-pad"><div class="empty">${icon("sparkles")}<h3>No paid feature catalog</h3><p>The license snapshot did not include feature metadata.</p></div></div>`}</div>`;
   const search = $("#enterpriseFeatureSearch");
@@ -2783,6 +2804,308 @@ async function renderEnterpriseFeatures() {
       section.hidden = !Array.from(section.querySelectorAll(".enterprise-feature-card")).some((card) => !card.hidden);
     });
   });
+}
+
+/* ------------------------------------------------------------
+   Enterprise operations screens
+------------------------------------------------------------ */
+function opsStat(label, value, meta, iconName = "check") {
+  return `<div class="stat-card"><span class="stat-label">${icon(iconName)}${esc(label)}</span><span class="stat-value">${esc(String(value))}</span><span class="stat-meta">${esc(meta)}</span></div>`;
+}
+
+function opsTone(status) {
+  const value = String(status || "").toLowerCase();
+  if (["active", "success", "completed", "sent", "approved", "confirmed"].includes(value)) return "active";
+  if (["failed", "error", "denied", "revoked", "cancelled", "critical"].includes(value)) return "failed";
+  if (["running", "queued", "pending", "draft", "warning"].includes(value)) return "pending";
+  return "neutral";
+}
+
+function opsTable(headers, rows, emptyTitle, emptyCopy) {
+  const body = rows.length
+    ? rows.join("")
+    : `<tr><td colspan="${headers.length}"><div class="empty">${icon("list")}<h3>${esc(emptyTitle)}</h3><p>${esc(emptyCopy)}</p></div></td></tr>`;
+  return `<div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr>${headers.map((head) => `<th>${esc(head)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+}
+
+function opsSwitch(id, checked, label) {
+  return `<button class="switch" type="button" id="${id}" role="switch" aria-checked="${checked ? "true" : "false"}" aria-label="${esc(label)}"></button>`;
+}
+
+async function renderAnalytics() {
+  loading("Usage analytics");
+  try {
+    const data = await api("usage/analytics");
+    const series = Array.isArray(data.sendSeries) ? data.sendSeries : [];
+    const peak = Math.max(1, ...series.map((point) => Number(point.sent) || 0));
+    const bars = series.map((point) => {
+      const sent = Number(point.sent) || 0;
+      const height = Math.max(2, Math.round((sent / peak) * 100));
+      return `<div title="${esc(point.day)}: ${sent} sent" style="flex:1;min-width:3px;height:${height}%;background:var(--accent,#0f6cbd);border-radius:3px 3px 0 0"></div>`;
+    }).join("");
+    const seriesRows = series.map((point) => `<tr><td>${esc(point.day)}</td><td>${Number(point.sent) || 0}</td></tr>`).join("");
+    const cost = (Number(data.aiCostMicrosThisMonth) || 0) / 1000000;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Usage analytics</h1><p>Storage, mail volume, collaboration and AI adoption for ${esc(data.tenant?.name || state.activeTenant.name)}.</p></div><div class="view-actions"><button class="btn secondary" type="button" data-action="refresh-analytics">${icon("refresh")}Refresh</button></div></div>
+      <div class="stat-grid">
+        ${opsStat("Users", Number(data.users || 0).toLocaleString(), "Active accounts in this organization", "users")}
+        ${opsStat("Storage used", formatBytes(data.storageBytes), "Across every mailbox", "drive")}
+        ${opsStat("Mail messages", Number(data.mailMessages || 0).toLocaleString(), "Non-draft messages retained", "mail")}
+        ${opsStat("Sent · 30 days", Number(data.sentLast30Days || 0).toLocaleString(), "Outbound events", "send")}
+        ${opsStat("Files", Number(data.files || 0).toLocaleString(), "Drive and attachment records", "drive")}
+        ${opsStat("Tasks", Number(data.tasks || 0).toLocaleString(), "Open and completed tasks", "check")}
+        ${opsStat("Calendar events", Number(data.calendarEvents || 0).toLocaleString(), "Stored events", "clock")}
+        ${opsStat("AI requests", `${Number(data.aiRequestsThisMonth || 0).toLocaleString()} · $${cost.toFixed(4)}`, "This calendar month", "sparkles")}
+      </div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Outbound mail · last 30 days</h2><p>Messages recorded by the outbound event ledger.</p></div><span class="badge neutral">${Number(data.sentLast30Days || 0).toLocaleString()} sent</span></div><div class="card-pad">
+        ${series.length ? `<div role="img" aria-label="Bar chart of outbound messages per day for the last 30 days" style="display:flex;align-items:flex-end;gap:3px;height:140px;padding:6px 0 0">${bars}</div><details style="margin-top:12px"><summary class="muted" style="font-size:11px;cursor:pointer">View daily figures</summary><div class="table-wrap" style="margin-top:8px"><div class="table-scroll"><table class="data"><thead><tr><th>Day</th><th>Sent</th></tr></thead><tbody>${seriesRows}</tbody></table></div></div></details>` : `<div class="empty">${icon("mail")}<h3>No outbound events yet</h3><p>The send series appears after the first outbound message is recorded.</p></div>`}
+      </div></div>`;
+    $('[data-action="refresh-analytics"]')?.addEventListener("click", renderAnalytics);
+  } catch (error) { viewError(error); }
+}
+
+async function renderCRM() {
+  loading("CRM sync");
+  try {
+    const syncState = await api("crm/state");
+    const providers = Array.isArray(syncState.providers) ? syncState.providers : [];
+    const params = new URLSearchParams();
+    if (state.crmQuery.email) params.set("email", state.crmQuery.email);
+    if (state.crmQuery.provider) params.set("provider", state.crmQuery.provider);
+    const recordsData = await api("crm/records" + (params.toString() ? "?" + params.toString() : ""));
+    const records = Array.isArray(recordsData.records) ? recordsData.records : [];
+    const states = Array.isArray(syncState.states) ? syncState.states : [];
+    const stateByProvider = new Map(states.map((item) => [item.provider, item]));
+    const cards = providers.map((provider) => {
+      const item = stateByProvider.get(provider) || {};
+      return `<article class="entity-card"><div class="entity-head"><span class="entity-icon">${icon("users")}</span><div class="entity-title"><b>${esc(provider[0].toUpperCase() + provider.slice(1))}</b><small>${esc(item.lastSyncAt ? "Last synced " + formatDate(item.lastSyncAt, { time: true }) : "Not synced yet")}</small></div><span class="badge ${opsTone(item.status || "idle")}">${esc(item.status || "idle")}</span></div><div class="entity-meta"><span>${Number(item.records || 0).toLocaleString()} cached records</span><span class="spacer"></span><button class="btn small secondary" type="button" data-crm-sync="${esc(provider)}">${icon("refresh")}Sync now</button></div>${item.lastError ? `<p class="form-error" style="margin:10px 0 0;font-size:11px">${esc(item.lastError)}</p>` : ""}</article>`;
+    }).join("");
+    const rows = records.map((record) => `<tr><td><b>${esc(record.name || record.email || "—")}</b><small class="cell-sub">${esc(record.email || "")}</small></td><td>${esc(record.company || "—")}<small class="cell-sub">${esc(record.title || "")}</small></td><td>${esc(record.stage || "—")}</td><td>${record.amount ? "$" + Number(record.amount).toLocaleString() : "—"}</td><td><span class="badge neutral">${esc(record.provider)}</span></td><td class="cell-sub">${esc(record.lastSyncedAt ? formatDate(record.lastSyncedAt, { time: true }) : "—")}</td></tr>`).join("");
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>CRM sync</h1><p>Connector state and the synchronized contact, company and deal cache used by sender intelligence.</p></div><div class="view-actions"><a class="btn secondary" href="#/addons">${icon("plug")}Connector credentials</a></div></div>
+      <div class="entity-grid">${cards || `<div class="entity-card"><div class="empty">${icon("plug")}<h3>No CRM provider state</h3><p>Connect a provider in Add-ons, then run a sync.</p></div></div>`}</div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Cached records</h2><p>${Number(recordsData.count || 0).toLocaleString()} records shown · newest sync first</p></div></div><div class="card-pad"><div class="toolbar"><div class="search-box">${icon("search")}<input id="crmEmailFilter" type="search" placeholder="Filter by email…" value="${esc(state.crmQuery.email)}"></div><label class="field" style="margin:0;min-width:170px"><span>Provider</span><select id="crmProviderFilter"><option value="">All providers</option>${providers.map((provider) => `<option value="${esc(provider)}" ${state.crmQuery.provider === provider ? "selected" : ""}>${esc(provider[0].toUpperCase() + provider.slice(1))}</option>`).join("")}</select></label></div><div class="table-wrap"><div class="table-scroll"><table class="data"><thead><tr><th>Contact</th><th>Company</th><th>Stage</th><th>Amount</th><th>Provider</th><th>Synced</th></tr></thead><tbody>${rows || `<tr><td colspan="6"><div class="empty">${icon("users")}<h3>No CRM records</h3><p>Run a sync or clear the filter.</p></div></td></tr>`}</tbody></table></div></div></div></div>`;
+    $$("[data-crm-sync]").forEach((button) => button.addEventListener("click", () => syncCRM(button.dataset.crmSync, button)));
+    $("#crmEmailFilter")?.addEventListener("input", (event) => {
+      clearTimeout(state.crmQuery.timer);
+      state.crmQuery.timer = setTimeout(() => { state.crmQuery.email = event.target.value.trim(); renderCRM(); }, 350);
+    });
+    $("#crmProviderFilter")?.addEventListener("change", (event) => { state.crmQuery.provider = event.target.value; renderCRM(); });
+  } catch (error) { viewError(error); }
+}
+
+async function syncCRM(provider, button) {
+  setBusy(button, true, "Syncing…");
+  try {
+    const data = await api("crm/sync?provider=" + encodeURIComponent(provider), { method: "POST", body: {} });
+    toast(`${provider[0].toUpperCase() + provider.slice(1)} sync completed · ${Number(data.records || 0).toLocaleString()} records`);
+    renderCRM();
+  } catch (error) { showError(error); setBusy(button, false); }
+}
+
+async function renderSupportOps() {
+  loading("Support operations");
+  try {
+    const [bundle, telemetry] = await Promise.all([api("support-bundle"), api("telemetry").catch(() => ({ enabled: false, endpoint: "" }))]);
+    const counts = bundle.counts || {};
+    const license = bundle.license || {};
+    const checks = bundle.checks || {};
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Support operations</h1><p>Generate a support bundle and control the optional telemetry heartbeat for this organization.</p></div><div class="view-actions"><a class="btn primary" href="./api/support-bundle" download>${icon("download")}Download support bundle</a></div></div>
+      <div class="stat-grid">
+        ${opsStat("Release", bundle.version || "—", "Running server version", "grid")}
+        ${opsStat("License", license.loaded ? (license.state || license.plan || "Loaded") : "Not loaded", license.loaded ? (license.trial ? "Trial · " + esc(license.expiresAt || "") : "Full license") : "No verified license", "shield")}
+        ${opsStat("Users", Number(counts.users || 0).toLocaleString(), "Accounts in this organization", "users")}
+        ${opsStat("Mail messages", Number(counts.mailMessages || 0).toLocaleString(), "Non-draft messages", "mail")}
+      </div>
+      <div class="dashboard-grid" style="margin-top:16px">
+        <div class="card card-pad"><div class="card-head" style="padding:0 0 12px"><div><h2>Support bundle</h2><p>Counts, license state, migrations and safe diagnostics. No mailbox content or credentials.</p></div><span class="badge active">${icon("check")}Ready</span></div>
+          <div class="detail-list"><div class="detail-row"><span>Generated</span><b>${esc(bundle.generatedAt ? formatDate(bundle.generatedAt, { time: true }) : "—")}</b></div><div class="detail-row"><span>Deployment ID</span><b>${esc(license.deploymentId || "—")}</b></div><div class="detail-row"><span>License loaded</span><b>${license.loaded ? "Yes" : "No"}</b></div><div class="detail-row"><span>AI configured</span><b>${checks.aiConfigured ? "Yes" : "No"}</b></div><div class="detail-row"><span>Migrations shown</span><b>${(bundle.migrations || []).length}</b></div></div>
+          <p class="muted" style="font-size:11px;margin:12px 0 0">Share the downloaded JSON with Alt8Mail support only. It contains organization identifiers but no message bodies or passwords.</p>
+        </div>
+        <div class="card card-pad"><div class="card-head" style="padding:0 0 12px"><div><h2>Optional telemetry</h2><p>A periodic heartbeat with version and usage counts. Disabled by default.</p></div><span class="badge ${telemetry.enabled ? "active" : "neutral"}">${telemetry.enabled ? "Enabled" : "Disabled"}</span></div>
+          <label class="field" style="display:flex;align-items:center;gap:8px"><input id="supportTelemetryEnabled" type="checkbox" ${telemetry.enabled ? "checked" : ""}><span>Send the optional telemetry heartbeat</span></label>
+          <label class="field"><span>Endpoint URL</span><input class="input" id="supportTelemetryEndpoint" type="url" value="${esc(telemetry.endpoint || "")}" placeholder="https://telemetry.example.com/a8m"><small class="muted">HTTPS is required. The endpoint receives a signed JSON heartbeat, not mailbox data.</small></label>
+          <div class="detail-list"><div class="detail-row"><span>Last sent</span><b>${esc(telemetry.lastSentAt ? formatDate(telemetry.lastSentAt, { time: true }) : "Never")}</b></div><div class="detail-row"><span>Last error</span><b>${esc(telemetry.lastError || "None")}</b></div></div>
+          <div class="policy-save" style="margin-top:14px"><span>Optional telemetry can be disabled at any time.</span><button class="btn secondary" type="button" data-action="send-telemetry">${icon("send")}Send heartbeat</button><button class="btn primary" type="button" data-action="save-telemetry">${icon("check")}Save telemetry</button></div>
+        </div>
+      </div>`;
+    $('[data-action="save-telemetry"]')?.addEventListener("click", async (event) => {
+      setBusy(event.currentTarget, true, "Saving…");
+      try {
+        await api("telemetry", { method: "PUT", body: { enabled: $("#supportTelemetryEnabled").checked, endpoint: $("#supportTelemetryEndpoint").value.trim() } });
+        toast("Telemetry settings saved");
+        renderSupportOps();
+      } catch (error) { showError(error); setBusy(event.currentTarget, false); }
+    });
+    $('[data-action="send-telemetry"]')?.addEventListener("click", async (event) => {
+      setBusy(event.currentTarget, true, "Sending…");
+      try { await api("telemetry/send", { method: "POST", body: {} }); toast("Telemetry heartbeat sent"); renderSupportOps(); } catch (error) { showError(error); setBusy(event.currentTarget, false); }
+    });
+  } catch (error) { viewError(error); }
+}
+
+async function renderIdentityProviders() {
+  loading("Identity & SSO");
+  try {
+    const data = await api("identity");
+    const oidc = data.oidc || {};
+    const saml = data.saml || {};
+    const tab = state.identityTab === "saml" ? "saml" : "oidc";
+    const source = data.managed ? "Admin console" : "Environment";
+    const oidcRedirect = oidc.redirectUrl || (saml.publicUrl ? saml.publicUrl + "/api/auth/oidc/callback" : "");
+    const oidcForm = `<div class="card card-pad"><div class="card-head" style="padding:0 0 12px"><div><h2>OpenID Connect</h2><p>OIDC sign-in and just-in-time provisioning for this deployment.</p></div><span class="badge ${oidc.enabled ? "active" : "neutral"}">${oidc.enabled ? "Enabled" : "Disabled"}</span></div>
+      <label class="field" style="display:flex;align-items:center;gap:8px"><input id="oidcEnabled" type="checkbox" ${oidc.enabled ? "checked" : ""}><span>Enable OIDC sign-in</span></label>
+      <label class="field"><span>Issuer URL</span><input class="input" id="oidcIssuer" type="url" value="${esc(oidc.issuer || "")}" placeholder="https://login.example.com"></label>
+      <div class="field-row"><label class="field"><span>Client ID</span><input class="input" id="oidcClientId" value="${esc(oidc.clientId || "")}"></label><label class="field"><span>Client secret ${oidc.clientSecretSet ? '<small class="muted">— configured; leave blank to keep</small>' : ""}</span><input class="input" id="oidcClientSecret" type="password" autocomplete="new-password" placeholder="${oidc.clientSecretSet ? "••••••••••••" : "Client secret"}"></label></div>
+      <label class="field"><span>Redirect URL</span><input class="input" id="oidcRedirectUrl" type="url" value="${esc(oidcRedirect)}" placeholder="https://mail.example.com/api/auth/oidc/callback"></label>
+      <div class="field-row"><label class="field"><span>Button label</span><input class="input" id="oidcDisplayName" value="${esc(oidc.displayName || "")}" placeholder="Continue with SSO"></label><label class="field"><span>Allowed email domains</span><input class="input" id="oidcEmailDomains" value="${esc((oidc.emailDomains || []).join(", "))}" placeholder="example.com, example.org"><small class="muted">Leave blank to allow any domain the identity provider verifies.</small></label></div>
+      <div class="policy-save" style="margin-top:14px"><span>Saved changes take effect without a restart. Existing password and passkey sign-in remains available.</span><button class="btn primary" type="button" data-action="save-oidc">${icon("check")}Save OIDC settings</button></div>
+    </div>`;
+    const samlForm = `<div class="card card-pad"><div class="card-head" style="padding:0 0 12px"><div><h2>SAML 2.0</h2><p>Service-provider metadata and IdP trust for this deployment.</p></div><span class="badge ${saml.enabled ? "active" : "neutral"}">${saml.enabled ? "Enabled" : "Disabled"}</span></div>
+      <label class="field" style="display:flex;align-items:center;gap:8px"><input id="samlEnabled" type="checkbox" ${saml.enabled ? "checked" : ""}><span>Enable SAML sign-in</span></label>
+      <div class="field-row"><label class="field"><span>Button label</span><input class="input" id="samlDisplayName" value="${esc(saml.displayName || "")}" placeholder="Continue with SAML"></label><label class="field"><span>IdP metadata URL</span><input class="input" id="samlMetadataUrl" type="url" value="${esc(saml.metadataUrl || "")}" placeholder="https://idp.example.com/metadata"></label></div>
+      <div class="field-row"><label class="field"><span>SP entity ID <small class="muted">optional</small></span><input class="input" id="samlSpEntityId" value="${esc(saml.spEntityId || "")}" placeholder="${esc(saml.spMetadataUrl || "SP metadata URL")}"></label><label class="field"><span>Email attribute</span><input class="input" id="samlEmailAttribute" value="${esc(saml.emailAttribute || "")}" placeholder="email"></label></div>
+      <label class="field"><span>Allowed email domains</span><input class="input" id="samlEmailDomains" value="${esc((saml.emailDomains || []).join(", "))}" placeholder="example.com, example.org"></label>
+      <div class="detail-list" style="margin-top:12px"><div class="detail-row"><span>SP metadata URL</span><b class="mono" style="font-size:10.5px;word-break:break-all">${esc(saml.spMetadataUrl || "Configure ALT8MAIL_PUBLIC_URL first")}</b></div><div class="detail-row"><span>SP key pair</span><b>${saml.keySet ? "Configured" : "Not generated"}</b></div></div>
+      <label class="field" style="margin-top:12px"><span>SP certificate (PEM)</span><textarea class="input mono" id="samlCertificate" rows="4" readonly>${esc(saml.certificatePEM || "")}</textarea><small class="muted">Add this certificate or the SP metadata URL to your identity provider.</small></label>
+      <div class="policy-save" style="margin-top:14px"><span>Generating a key pair replaces the current SP certificate. Update the identity provider before saving and enabling SAML.</span><button class="btn secondary" type="button" data-action="generate-saml">${icon("key")}Generate SP key pair</button><button class="btn primary" type="button" data-action="save-saml">${icon("check")}Save SAML settings</button></div>
+    </div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Identity &amp; SSO</h1><p>Deployment-wide identity providers used by the webmail, admin and calendar sign-in pages.</p></div><div class="view-actions"><span class="badge neutral">${icon("sliders")}Source: ${esc(source)}</span></div></div>
+      <div class="card card-pad" style="margin-bottom:16px"><div class="detail-list"><div class="detail-row"><span>Scope</span><b>Deployment-wide</b></div><div class="detail-row"><span>Password and passkey sign-in</span><b>Always available</b></div><div class="detail-row"><span>Provisioning</span><b>JIT users need an existing organization domain</b></div></div><p class="muted" style="font-size:11px;margin:10px 0 0">Changes are audited and applied by the webmail process without a restart. Test with a dedicated account before disabling other sign-in methods.</p></div>
+      <div style="display:flex;gap:6px;margin-bottom:14px"><button class="btn small ${tab === "oidc" ? "primary" : "secondary"}" type="button" data-identity-tab="oidc">OIDC</button><button class="btn small ${tab === "saml" ? "primary" : "secondary"}" type="button" data-identity-tab="saml">SAML 2.0</button></div>
+      <div id="identityTabBody">${tab === "saml" ? samlForm : oidcForm}</div>`;
+    $$("[data-identity-tab]").forEach((button) => button.addEventListener("click", () => { state.identityTab = button.dataset.identityTab; renderIdentityProviders(); }));
+    $('[data-action="save-oidc"]')?.addEventListener("click", async (event) => {
+      setBusy(event.currentTarget, true, "Saving…");
+      try {
+        await api("identity/oidc", { method: "PUT", body: {
+          enabled: $("#oidcEnabled").checked, issuer: $("#oidcIssuer").value.trim(), clientId: $("#oidcClientId").value.trim(),
+          clientSecret: $("#oidcClientSecret").value.trim(), redirectUrl: $("#oidcRedirectUrl").value.trim(),
+          displayName: $("#oidcDisplayName").value.trim(), emailDomains: $("#oidcEmailDomains").value.split(",").map((value) => value.trim()).filter(Boolean)
+        } });
+        toast("OIDC settings saved"); renderIdentityProviders();
+      } catch (error) { showError(error); setBusy(event.currentTarget, false); }
+    });
+    $('[data-action="save-saml"]')?.addEventListener("click", async (event) => {
+      setBusy(event.currentTarget, true, "Saving…");
+      try {
+        await api("identity/saml", { method: "PUT", body: {
+          enabled: $("#samlEnabled").checked, displayName: $("#samlDisplayName").value.trim(),
+          metadataUrl: $("#samlMetadataUrl").value.trim(), spEntityId: $("#samlSpEntityId").value.trim(),
+          emailAttribute: $("#samlEmailAttribute").value.trim(),
+          emailDomains: $("#samlEmailDomains").value.split(",").map((value) => value.trim()).filter(Boolean)
+        } });
+        toast("SAML settings saved"); renderIdentityProviders();
+      } catch (error) { showError(error); setBusy(event.currentTarget, false); }
+    });
+    $('[data-action="generate-saml"]')?.addEventListener("click", async (event) => {
+      if (!(await confirmDialog("Generate an SP key pair", "A new self-signed certificate and private key will replace the current SP key pair. Update the identity provider with the new certificate before enabling SAML.", "Generate key pair"))) return;
+      setBusy(event.currentTarget, true, "Generating…");
+      try { await api("identity/saml/keypair", { method: "POST", body: {} }); toast("SP key pair generated"); renderIdentityProviders(); } catch (error) { showError(error); setBusy(event.currentTarget, false); }
+    });
+  } catch (error) { viewError(error); }
+}
+
+const WORKSPACE_TABS = [
+  { key: "shared-drafts", label: "Shared drafts", endpoint: "workspace/shared-drafts" },
+  { key: "team-templates", label: "Team templates", endpoint: "workspace/team-templates" },
+  { key: "gallery", label: "Template gallery", endpoint: "workspace/template-gallery" },
+  { key: "automation", label: "Automation", endpoint: "workspace/automation" },
+  { key: "booking", label: "Booking pages", endpoint: "workspace/booking" },
+  { key: "mail-merge", label: "Mail merge", endpoint: "workspace/mail-merge" },
+  { key: "campaign-tracking", label: "Campaign tracking", endpoint: "workspace/campaign-tracking" },
+  { key: "followups", label: "Follow-ups", endpoint: "workspace/followups" }
+];
+
+async function renderWorkspaceFeatures() {
+  const current = WORKSPACE_TABS.some((tab) => tab.key === state.workspaceTab) ? state.workspaceTab : "shared-drafts";
+  state.workspaceTab = current;
+  loading("Workspace features");
+  const data = await api(WORKSPACE_TABS.find((tab) => tab.key === current).endpoint).catch((error) => ({ __error: error }));
+  const tabs = WORKSPACE_TABS.map((tab) => `<button class="btn small ${tab.key === current ? "primary" : "secondary"}" type="button" data-workspace-tab="${tab.key}">${esc(tab.label)}</button>`).join("");
+  if (data && data.__error) {
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Workspace features</h1><p>Organization-wide oversight for capabilities managed in the webmail workspace.</p></div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${tabs}</div><div class="card card-pad"><div class="empty">${icon("alert")}<h3>This capability is not available</h3><p>${esc(data.__error.message || "The feature is not included in the active license.")}</p></div></div>`;
+    $$("[data-workspace-tab]").forEach((button) => button.addEventListener("click", () => { state.workspaceTab = button.dataset.workspaceTab; location.hash = "#/workspace/" + button.dataset.workspaceTab; renderWorkspaceFeatures(); }));
+    return;
+  }
+  const publicUrl = state.server?.publicUrl || "";
+  const openWorkspace = publicUrl ? `<a class="btn secondary" href="${esc(publicUrl)}" target="_blank" rel="noopener noreferrer">${icon("external")}Open webmail</a>` : "";
+  $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Workspace features</h1><p>Real tenant-wide data and safe organization actions for features authored in the webmail workspace.</p></div><div class="view-actions">${openWorkspace}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${tabs}</div><div id="workspaceTabBody"></div>`;
+  $$("[data-workspace-tab]").forEach((button) => button.addEventListener("click", () => { state.workspaceTab = button.dataset.workspaceTab; location.hash = "#/workspace/" + button.dataset.workspaceTab; renderWorkspaceFeatures(); }));
+  const body = $("#workspaceTabBody");
+  if (current === "shared-drafts") {
+    const items = data.items || [];
+    body.innerHTML = `<div class="stat-grid">${opsStat("Drafts", data.count || 0, "Active shared drafts", "mail")}${opsStat("Leased", data.leased || 0, "Currently checked out", "lock")}${opsStat("Open comments", data.openComments || 0, "Unresolved inline comments", "list")}</div>` + opsTable(["Team", "Draft", "Version", "Open comments", "Updated by", "Updated", "Lease"], items.map((item) => `<tr><td>${esc(item.team)}</td><td><b>${esc(item.subject || "(no subject)")}</b></td><td>${item.version}</td><td>${item.openComments}</td><td>${esc(item.updatedBy || item.updatedByEmail || "—")}</td><td class="cell-sub">${esc(formatDate(item.updatedAt, { time: true }))}</td><td>${item.leaseUntil ? `<span class="badge pending">Leased until ${esc(formatDate(item.leaseUntil, { time: true }))}</span>` : `<span class="badge neutral">Free</span>`}</td></tr>`), "No shared drafts", "Team members create shared drafts from a shared inbox in the webmail.");
+  } else if (current === "team-templates") {
+    const items = data.items || [];
+    body.innerHTML = `<div class="stat-grid">${opsStat("Templates", data.count || 0, "Across every team inbox", "list")}${opsStat("Inactive", data.inactive || 0, "Hidden from agents", "pause")}${opsStat("Teams", new Set(items.map((item) => item.team)).size, "Team inboxes represented", "users")}</div>` + opsTable(["Team", "Template", "Category", "Version", "Status", "Updated"], items.map((item) => `<tr><td>${esc(item.team)}</td><td><b>${esc(item.name)}</b></td><td>${esc(item.category || "—")}</td><td>${item.version} <small class="muted">(${item.versions} saved)</small></td><td><span class="badge ${item.active ? "active" : "neutral"}">${item.active ? "Active" : "Inactive"}</span></td><td class="cell-sub">${esc(formatDate(item.updatedAt, { time: true }))}</td></tr>`), "No team templates", "Agents create team templates from the webmail composer.");
+  } else if (current === "gallery") {
+    const items = data.items || [];
+    body.innerHTML = `<div class="stat-grid">${opsStat("Gallery templates", data.count || 0, "Packaged and ready to install", "sparkles")}${opsStat("Installed", data.installedTemplates || 0, "Team templates in this organization", "check")}</div>` + opsTable(["Template", "Category", "Description", "Version", "Status"], items.map((item) => `<tr><td><b>${esc(item.name)}</b></td><td>${esc(item.category || "—")}</td><td>${esc(item.description || "—")}</td><td>${item.version}</td><td><span class="badge ${item.active ? "active" : "neutral"}">${item.active ? "Available" : "Hidden"}</span></td></tr>`), "No gallery templates", "The packaged gallery is empty in this release.");
+  } else if (current === "automation") {
+    const items = data.items || [];
+    body.innerHTML = `<div class="stat-grid">${opsStat("Rules", data.count || 0, "Across every team inbox", "sliders")}${opsStat("Disabled", data.disabled || 0, "Paused rules", "pause")}${opsStat("Runs · 30 days", items.reduce((sum, item) => sum + Number(item.completedRuns || 0), 0), "Completed execution records", "refresh")}</div>` + opsTable(["Team", "Rule", "Priority", "Completed · 30d", "Failed · 30d", "Status", ""], items.map((item) => `<tr><td>${esc(item.team)}</td><td><b>${esc(item.name)}</b></td><td>${item.priority}</td><td>${item.completedRuns}</td><td>${item.failedRuns}</td><td><span class="badge ${item.enabled ? "active" : "neutral"}">${item.enabled ? "Enabled" : "Disabled"}</span></td><td><button class="btn small secondary" type="button" data-workspace-toggle="automation" data-id="${esc(item.id)}">${item.enabled ? "Disable" : "Enable"}</button></td></tr>`), "No automation rules", "Team members create rules from a shared inbox in the webmail.");
+  } else if (current === "booking") {
+    const items = data.items || [];
+    body.innerHTML = `<div class="stat-grid">${opsStat("Booking pages", data.count || 0, "Public scheduling links", "clock")}${opsStat("Upcoming bookings", data.upcomingBookings || 0, "Confirmed future slots", "check")}</div>` + opsTable(["Page", "Owner", "Duration", "Upcoming", "Total", "Status", ""], items.map((item) => `<tr><td><b>${esc(item.title)}</b><small class="cell-sub">/book/${esc(item.slug)}</small></td><td>${esc(item.ownerEmail || "—")}</td><td>${item.durationMinutes} min${item.roundRobin ? " · round-robin" : ""}</td><td>${item.upcomingBookings}</td><td>${item.totalBookings}</td><td><span class="badge ${item.active ? "active" : "neutral"}">${item.active ? "Active" : "Paused"}</span></td><td><button class="btn small secondary" type="button" data-workspace-toggle="booking" data-id="${esc(item.id)}">${item.active ? "Pause" : "Activate"}</button></td></tr>`), "No booking pages", "Users create booking pages from the webmail calendar.");
+  } else if (current === "mail-merge") {
+    const items = data.items || [];
+    body.innerHTML = `<div class="stat-grid">${opsStat("Campaigns", data.count || 0, "Draft, queued and completed", "send")}${opsStat("Active", data.activeCampaigns || 0, "Queued or running", "refresh")}${opsStat("Recipients", items.reduce((sum, item) => sum + Number(item.recipients || 0), 0), "Across all campaigns", "users")}</div>` + opsTable(["Campaign", "Owner", "Status", "Recipients", "Sent", "Failed", "Created", ""], items.map((item) => `<tr><td><b>${esc(item.name || item.subject)}</b><small class="cell-sub">${esc(item.subject || "")}</small></td><td>${esc(item.ownerEmail || "—")}</td><td><span class="badge ${opsTone(item.status)}">${esc(item.status)}</span></td><td>${item.recipients}</td><td>${item.sent}</td><td>${item.failed}</td><td class="cell-sub">${esc(formatDate(item.createdAt, { time: true }))}</td><td>${["draft", "queued", "running"].includes(item.status) ? `<button class="btn small secondary" type="button" data-mail-merge-cancel="${esc(item.id)}">Cancel</button>` : ""}</td></tr>`), "No mail merges", "Users create mail merges from the webmail composer.");
+  } else if (current === "followups") {
+    const items = data.items || [];
+    body.innerHTML = `<div class="stat-grid">${opsStat("Open follow-ups", data.pending || 0, "Awaiting a reply or reminder", "clock")}${opsStat("Overdue", data.overdue || 0, "Past the requested reminder time", "alert")}${opsStat("Total shown", data.count || 0, "Most recent follow-ups", "list")}</div>` + opsTable(["Owner", "Type", "Due", "Note", "Status", "Created"], items.map((item) => `<tr><td>${esc(item.ownerName || item.ownerEmail || "—")}<small class="cell-sub">${esc(item.ownerEmail || "")}</small></td><td>${esc(item.kind === "remind_me" ? "Reminder" : "Awaiting reply")}</td><td class="${new Date(item.dueAt) < new Date() && ["pending", "notified"].includes(item.status) ? "cell-sub" : ""}" style="${new Date(item.dueAt) < new Date() && ["pending", "notified"].includes(item.status) ? "color:var(--danger,#b42318);font-weight:600" : ""}">${esc(formatDate(item.dueAt, { time: true }))}</td><td>${esc(item.note || "—")}</td><td><span class="badge ${opsTone(item.status)}">${esc(item.status)}</span></td><td class="cell-sub">${esc(formatDate(item.createdAt, { time: true }))}</td></tr>`), "No follow-ups", "Users create follow-ups from the webmail reading pane.");
+  } else {
+    const items = data.items || [];
+    body.innerHTML = `<div class="stat-grid">${opsStat("Campaigns", data.count || 0, "With tracking records", "mail")}${opsStat("Opens", items.reduce((sum, item) => sum + Number(item.opens || 0), 0), "Recorded open events", "check")}${opsStat("Clicks", items.reduce((sum, item) => sum + Number(item.clicks || 0), 0), "Recorded link clicks", "external")}</div>` + opsTable(["Campaign", "Status", "Tracked recipients", "Opens", "Clicks", "Last event"], items.map((item) => `<tr><td><b>${esc(item.name)}</b></td><td><span class="badge ${opsTone(item.status)}">${esc(item.status)}</span></td><td>${item.tracked}</td><td>${item.opens}</td><td>${item.clicks}</td><td class="cell-sub">${esc(item.lastEventAt ? formatDate(item.lastEventAt, { time: true }) : "—")}</td></tr>`), "No tracking records", "Campaign tracking records appear after a tracked mail merge is opened or clicked.");
+  }
+  $$("[data-workspace-toggle]").forEach((button) => button.addEventListener("click", async () => {
+    setBusy(button, true, "Saving…");
+    try {
+      const kind = button.dataset.workspaceToggle;
+      await api(`workspace/${kind}/${encodeURIComponent(button.dataset.id)}/toggle`, { method: "POST", body: {} });
+      toast(kind === "automation" ? "Automation rule updated" : "Booking page updated");
+      renderWorkspaceFeatures();
+    } catch (error) { showError(error); setBusy(button, false); }
+  }));
+  $$("[data-mail-merge-cancel]").forEach((button) => button.addEventListener("click", async () => {
+    if (!(await confirmDialog("Cancel mail merge", "Queued recipients and outbox messages will be skipped. Sent messages are unaffected.", "Cancel campaign", true))) return;
+    setBusy(button, true, "Cancelling…");
+    try { await api(`workspace/mail-merge/${encodeURIComponent(button.dataset.mailMergeCancel)}/cancel`, { method: "POST", body: {} }); toast("Campaign cancelled"); renderWorkspaceFeatures(); } catch (error) { showError(error); setBusy(button, false); }
+  }));
+}
+
+async function renderMCPGovernance() {
+  loading("MCP governance");
+  try {
+    const data = await api("workspace/mcp");
+    const connections = Array.isArray(data.connections) ? data.connections : [];
+    const requests = Array.isArray(data.actionRequests) ? data.actionRequests : [];
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>MCP governance</h1><p>Model Context Protocol clients, granted scopes and write-approval requests across the organization.</p></div></div>
+      <div class="stat-grid">${opsStat("Connections", data.connectionCount || 0, "OAuth clients connected to Alt8Mail", "plug")}${opsStat("Pending approvals", data.pendingActions || 0, "Write actions waiting for a decision", "clock")}${opsStat("Action requests", requests.length, "Most recent 100 decisions and requests", "list")}</div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Connected clients</h2><p>Revoking a connection invalidates its access and refresh tokens immediately.</p></div></div><div class="card-pad">${opsTable(["Client", "User", "Scopes", "Status", "Active tokens", "Last used", ""], connections.map((item) => `<tr><td><b>${esc(item.clientName)}</b></td><td>${esc(item.userName || item.userEmail || "—")}<small class="cell-sub">${esc(item.userEmail || "")}</small></td><td>${(item.scopes || []).map((scope) => `<span class="badge neutral">${esc(scope)}</span>`).join(" ") || "—"}</td><td><span class="badge ${opsTone(item.status)}">${esc(item.status)}</span></td><td>${item.activeTokens}</td><td class="cell-sub">${esc(item.lastUsedAt ? formatDate(item.lastUsedAt, { time: true }) : "Never")}</td><td>${item.status === "active" ? `<button class="btn small secondary" type="button" data-mcp-revoke="${esc(item.id)}">Revoke</button>` : ""}</td></tr>`), "No MCP connections", "Users connect MCP clients from their account security settings.")}</div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><div><h2>Write-action requests</h2><p>Recent tool calls that required explicit approval.</p></div></div><div class="card-pad">${opsTable(["Tool", "User", "Status", "Requested", "Decided"], requests.map((item) => `<tr><td><b>${esc(item.tool)}</b></td><td>${esc(item.userName || item.userEmail || "—")}<small class="cell-sub">${esc(item.userEmail || "")}</small></td><td><span class="badge ${opsTone(item.status)}">${esc(item.status)}</span></td><td class="cell-sub">${esc(formatDate(item.createdAt, { time: true }))}</td><td class="cell-sub">${esc(item.decidedAt ? formatDate(item.decidedAt, { time: true }) : "—")}</td></tr>`), "No action requests", "MCP write actions that need approval appear here.")}</div></div>`;
+    $$("[data-mcp-revoke]").forEach((button) => button.addEventListener("click", async () => {
+      if (!(await confirmDialog("Revoke MCP connection", "The client loses access immediately and its tokens are invalidated. It can reconnect only after a new approval.", "Revoke connection", true))) return;
+      setBusy(button, true, "Revoking…");
+      try { await api(`workspace/mcp/${encodeURIComponent(button.dataset.mcpRevoke)}/revoke`, { method: "POST", body: {} }); toast("MCP connection revoked"); renderMCPGovernance(); } catch (error) { showError(error); setBusy(button, false); }
+    }));
+  } catch (error) { viewError(error); }
+}
+
+async function renderBackupRestore() {
+  const controlURL = state.server?.controlURL || "";
+  const contents = [
+    ["Panel and mail database", "PostgreSQL roles, mailboxes, messages metadata, policies and audit"],
+    ["Postfix configuration", "Domains, transport maps and SMTP settings"],
+    ["Dovecot configuration", "Mailbox layout, authentication and quota settings"],
+    ["DKIM signing keys", "Outbound signing material"],
+    ["Let's Encrypt certificates", "TLS material for mail and web hosts"],
+    ["Maildir message stores", "Message files on disk"],
+    ["Webmail uploads", "Attachment and drive upload data"]
+  ];
+  $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>Backup &amp; restore</h1><p>Archives are created, downloaded and restored from System Control, where the operation is audited and signed in as the host administrator.</p></div><div class="view-actions">${controlURL ? `<a class="btn primary" href="${esc(controlURL)}/#/backups" target="_blank" rel="noopener noreferrer">${icon("external")}Open System Control backups</a>` : `<span class="badge pending">${icon("alert")}Control URL not configured</span>`}</div></div>
+    <div class="dashboard-grid">
+      <div class="card card-pad"><div class="card-head" style="padding:0 0 12px"><div><h2>What an archive covers</h2><p>Choose the content set when creating a backup in System Control.</p></div><span class="badge active">${icon("check")}Audited</span></div><div class="detail-list">${contents.map(([label, copy]) => `<div class="detail-row"><span>${esc(label)}</span><b style="font-weight:500;text-align:right;max-width:60%">${esc(copy)}</b></div>`).join("")}</div></div>
+      <div class="card card-pad"><div class="card-head" style="padding:0 0 12px"><div><h2>Restore posture</h2><p>Mailbox restore is a paid Control-plane capability.</p></div></div><div class="detail-list"><div class="detail-row"><span>Archive creation</span><b>System Control → Backups</b></div><div class="detail-row"><span>Download</span><b>Streamed by Control with host-admin authentication</b></div><div class="detail-row"><span>Mailbox restore</span><b>Preview, restore and audit</b></div><div class="detail-row"><span>Retention</span><b>Configured by the host operator</b></div></div>${controlURL ? `<p class="muted" style="font-size:11px;margin:12px 0 0">This console cannot download archives because they require the host administrator's Control session. Use the button above.</p>` : `<div class="card card-pad" style="margin-top:12px;background:var(--surface-2,#f5f7fb)"><b>Set the Control URL</b><p class="muted" style="font-size:11px;margin:6px 0">Add <code>ALT8MAIL_CONTROL_URL=https://your-control-host:8808</code> to the admin service environment, then restart <code>a8m-admin</code>. The button will open the audited backup and restore screens.</p></div>`}</div>
+    </div>`;
 }
 
 async function renderTenants() {

@@ -1,3 +1,31 @@
+# Alt8Mail 3.9.8
+
+Release date: 2026-11-19. Every enterprise catalogue entry now has a real
+management screen.
+
+## 3.9.8 enterprise operations
+
+- **Usage analytics** shows users, storage, mail, files, tasks, calendar and
+  AI adoption with a 30-day outbound send chart and an accessible daily table.
+- **CRM sync** lists connector state and cached contacts, companies and deals,
+  and runs a provider sync from the admin console.
+- **Support operations** generates a downloadable support bundle and manages
+  the optional telemetry heartbeat.
+- **Identity and SSO** manages OIDC and SAML settings, including the SP key
+  pair, from the admin console. Changes apply without a restart and are
+  audited.
+- **Workspace features** gives administrators real tenant-wide inventories and
+  safe actions for shared drafts, team templates, the template gallery,
+  automation rules, booking pages, mail merge campaigns, campaign tracking and
+  follow-ups.
+- **MCP governance** lists connected clients, granted scopes and write-action
+  requests, with immediate connection revocation.
+- **Backup and restore** links to the audited System Control backup surface and
+  states exactly what each archive covers.
+- Tenant administrators now receive the paid operation permissions for
+  analytics, CRM, telemetry, encryption, eDiscovery review, phishing
+  simulations and developer integrations by default.
+
 # Alt8Mail 3.9.7
 
 Release date: 2026-11-19. Trial and infrastructure clarity on the licence page.

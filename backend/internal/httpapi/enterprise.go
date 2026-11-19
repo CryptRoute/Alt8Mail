@@ -512,8 +512,102 @@ func (h enterpriseHost) MCPRateLimit(ip string) bool {
 	return allowed
 }
 
+type identityProviderSettings struct {
+	OIDCEnabled      bool
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCRedirectURL  string
+	OIDCDisplayName  string
+	OIDCEmailDomains []string
+	SAMLEnabled      bool
+	SAMLDisplayName  string
+	SAMLMetadataURL  string
+	SAMLSPEntityID   string
+	SAMLSPCertPEM    string
+	SAMLSPKeyPEM     string
+	SAMLEmailAttr    string
+	SAMLEmailDomains []string
+}
+
+// identityProviderSettings reads the optional admin-managed identity provider
+// row. The table is created by migration 0108; an upgraded binary that starts
+// before the migration runs (or a community build without the table) falls back
+// to the environment configuration instead of failing sign-in.
+func (h enterpriseHost) identityProviderSettings() (identityProviderSettings, bool) {
+	if h.server.store == nil || h.server.store.DB == nil {
+		return identityProviderSettings{}, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var row identityProviderSettings
+	err := h.server.store.DB.QueryRow(ctx, `
+		SELECT oidc_enabled, oidc_issuer, oidc_client_id, oidc_client_secret,
+		       oidc_redirect_url, oidc_display_name, oidc_email_domains,
+		       saml_enabled, saml_display_name, saml_idp_metadata_url,
+		       saml_sp_entity_id, saml_sp_cert_pem, saml_sp_key_pem,
+		       saml_email_attribute, saml_email_domains
+		FROM public.identity_provider_settings WHERE id='default'
+	`).Scan(
+		&row.OIDCEnabled, &row.OIDCIssuer, &row.OIDCClientID, &row.OIDCClientSecret,
+		&row.OIDCRedirectURL, &row.OIDCDisplayName, &row.OIDCEmailDomains,
+		&row.SAMLEnabled, &row.SAMLDisplayName, &row.SAMLMetadataURL,
+		&row.SAMLSPEntityID, &row.SAMLSPCertPEM, &row.SAMLSPKeyPEM,
+		&row.SAMLEmailAttr, &row.SAMLEmailDomains,
+	)
+	if err != nil {
+		return identityProviderSettings{}, false
+	}
+	return row, true
+}
+
+func (h enterpriseHost) openIdentitySecret(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	plain, err := h.server.openSecuritySecret(value)
+	if err != nil {
+		if h.server.logger != nil {
+			h.server.logger.Warn("identity provider secret could not be opened; the provider stays disabled")
+		}
+		return ""
+	}
+	return plain
+}
+
 func (h enterpriseHost) SSOConfig() enterprise.SSOConfig {
 	cfg := h.server.cfg
+	if row, ok := h.identityProviderSettings(); ok {
+		secret := h.openIdentitySecret(row.OIDCClientSecret)
+		keyPEM := h.openIdentitySecret(row.SAMLSPKeyPEM)
+		enabled := h.server.entitled("sso") &&
+			row.OIDCEnabled &&
+			strings.TrimSpace(row.OIDCIssuer) != "" &&
+			strings.TrimSpace(row.OIDCClientID) != "" &&
+			strings.TrimSpace(secret) != "" &&
+			strings.TrimSpace(row.OIDCRedirectURL) != ""
+		samlEnabled := h.server.entitled("saml") &&
+			row.SAMLEnabled &&
+			strings.TrimSpace(row.SAMLMetadataURL) != "" &&
+			strings.TrimSpace(row.SAMLSPCertPEM) != "" &&
+			strings.TrimSpace(keyPEM) != ""
+		return enterprise.SSOConfig{
+			Enabled: enabled, Issuer: row.OIDCIssuer, ClientID: row.OIDCClientID,
+			ClientSecret: secret, RedirectURL: row.OIDCRedirectURL,
+			DisplayName: row.OIDCDisplayName, EmailDomains: append([]string(nil), row.OIDCEmailDomains...),
+			SessionTTL: cfg.SessionTTL, RememberTTL: cfg.RememberTTL, CookieSecure: cfg.CookieSecure,
+			SAMLEnabled:        samlEnabled,
+			SAMLDisplayName:    row.SAMLDisplayName,
+			SAMLPublicURL:      cfg.PublicURL,
+			SAMLSPEntityID:     row.SAMLSPEntityID,
+			SAMLSPCertPEM:      row.SAMLSPCertPEM,
+			SAMLSPKeyPEM:       keyPEM,
+			SAMLIDPMetadataURL: row.SAMLMetadataURL,
+			SAMLEmailAttribute: row.SAMLEmailAttr,
+			SAMLEmailDomains:   append([]string(nil), row.SAMLEmailDomains...),
+			SAMLMFAContexts:    append([]string(nil), cfg.SAMLMFAContexts...),
+		}
+	}
 	enabled := h.server.entitled("sso") &&
 		strings.TrimSpace(cfg.OIDCIssuer) != "" &&
 		strings.TrimSpace(cfg.OIDCClientID) != "" &&
