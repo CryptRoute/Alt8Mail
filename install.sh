@@ -346,10 +346,18 @@ fi
 runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -c 'CREATE EXTENSION IF NOT EXISTS citext; CREATE EXTENSION IF NOT EXISTS pgcrypto;'
 
 log "applying database migrations"
+MIGRATIONS_DIR="$SOURCE_DIR/migrations"
+if [[ ! -d "$MIGRATIONS_DIR" && -d "$SOURCE_DIR/backend/migrations" ]]; then
+  # A git checkout keeps migrations under backend/; a release tarball carries
+  # them at the top level. Support both so a fresh clone can install without
+  # first building a release tarball.
+  MIGRATIONS_DIR="$SOURCE_DIR/backend/migrations"
+fi
+[[ -d "$MIGRATIONS_DIR" ]] || die "migrations directory not found in $SOURCE_DIR"
 MIGRATION_TMP=/tmp/a8m-migrations
 rm -rf "$MIGRATION_TMP"
 install -d -m 0755 "$MIGRATION_TMP"
-cp -a "$SOURCE_DIR/migrations/." "$MIGRATION_TMP/"
+cp -a "$MIGRATIONS_DIR/." "$MIGRATION_TMP/"
 chmod 0644 "$MIGRATION_TMP"/*.sql
 for migration in "$MIGRATION_TMP"/*.sql; do
   migration_version="$(basename "$migration" .sql)"

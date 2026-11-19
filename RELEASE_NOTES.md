@@ -1,3 +1,15 @@
+# Alt8Mail 3.9.8.1
+
+Release date: 2026-11-19. Fresh-install fix for source checkouts.
+
+## 3.9.8.1 installer
+
+- A fresh `git clone` install no longer fails at “applying database
+  migrations” with `cp: cannot stat '.../migrations/.'`.
+- The installer resolves migrations from `migrations/` in a release tarball or
+  `backend/migrations/` in a source checkout.
+- No application binaries or database schema changed in this patch.
+
 # Alt8Mail 3.9.8
 
 Release date: 2026-11-19. Every enterprise catalogue entry now has a real
