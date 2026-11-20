@@ -49,14 +49,14 @@ Ubuntu 22.04 / 24.04.  It will:
 
   • install PostgreSQL, Redis, Postfix, Dovecot, Rspamd, ClamAV and nginx
   • build and install the Alt8Mail release and systemd services
-  • create the first mail domain, owner and System Control account
+  • create the first mail domain, owner, admin portal and System Control account
   • request a Let's Encrypt certificate (or use a self-signed one)
   • configure Fail2Ban and the firewall
 
 Requirements:
   • root access on a fresh supported host
   • at least 2 GB RAM and 20 GB free disk
-  • DNS for the mail domain and hostname
+  • DNS A/AAAA for the domain, mail hostname and admin hostname
   • ports 25/80/443/587/993/995/4190/8808 reachable
 
 Logs:  ${A8M_LOG_DIR:-/var/log/a8m}

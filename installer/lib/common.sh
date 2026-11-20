@@ -10,6 +10,7 @@ A8M_WEB_ROOT="${A8M_WEB_ROOT:-/var/www/a8m}"
 A8M_SECRETS_DIR="$A8M_INSTALL_ROOT/secrets"
 A8M_RELEASES_DIR="$A8M_INSTALL_ROOT/releases"
 A8M_PUBLIC_IP=""
+A8M_PUBLIC_IPV6=""
 A8M_PG_MAJOR=""
 A8M_RELEASE_SOURCE=""
 
@@ -65,6 +66,16 @@ detect_public_ip() {
   ip="$(curl -4fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
   if [[ -z "$ip" ]]; then
     ip="$(ip -4 route get 1.1.1.1 2>/dev/null \
+      | awk '{for (i=1;i<=NF;i++) if (!found && $i=="src") {print $(i+1); found=1}}' || true)"
+  fi
+  printf '%s\n' "$ip"
+}
+
+detect_public_ipv6() {
+  local ip=""
+  ip="$(curl -6 -fsS --max-time 8 https://api64.ipify.org 2>/dev/null || true)"
+  if [[ -z "$ip" ]]; then
+    ip="$(ip -6 route get 2001:4860:4860::8888 2>/dev/null \
       | awk '{for (i=1;i<=NF;i++) if (!found && $i=="src") {print $(i+1); found=1}}' || true)"
   fi
   printf '%s\n' "$ip"

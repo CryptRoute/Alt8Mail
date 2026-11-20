@@ -12,6 +12,7 @@ precheck_all() {
   precheck_arch
   precheck_time
   precheck_network
+  precheck_dns
   precheck_ram
   precheck_disk
   precheck_clean
@@ -66,6 +67,46 @@ precheck_network() {
   ui_ok "DNS and outbound HTTPS OK"
 }
 
+precheck_dns() {
+  local v4="${A8M_PUBLIC_IP:-}" v6="${A8M_PUBLIC_IPV6:-}"
+  if [[ -z "$v4" ]]; then v4="$(detect_public_ip)"; fi
+  if [[ -z "$v6" ]]; then v6="$(detect_public_ipv6)"; fi
+  A8M_PUBLIC_IP="$v4"; A8M_PUBLIC_IPV6="$v6"
+  export A8M_PUBLIC_IP A8M_PUBLIC_IPV6
+  if [[ -z "$v4" && -z "$v6" ]]; then
+    ui_err "Could not determine any public IP address for this server."
+    exit 1
+  fi
+  command -v dig >/dev/null 2>&1 || {
+    ui_err "dig is required for the DNS precheck. Install dnsutils and retry."
+    exit 1
+  }
+
+  local names=("$A8M_DOMAIN" "$A8M_MAIL_HOSTNAME" "$A8M_ADMIN_HOSTNAME")
+  local seen=" " name records ip matched
+  for name in "${names[@]}"; do
+    [[ -n "$name" ]] || continue
+    case "$seen" in *" $name "*) continue ;; esac
+    seen+=" $name"
+    records="$(dig +short +time=3 +tries=2 A "$name" 2>/dev/null | awk '/^[0-9.]+$/')"
+    records+=$'\n'
+    records+="$(dig +short +time=3 +tries=2 AAAA "$name" 2>/dev/null | awk '/:/')"
+    matched=0
+    for ip in $v4 $v6; do
+      [[ -n "$ip" ]] || continue
+      if grep -Fxq "$ip" <<<"$records"; then matched=1; break; fi
+    done
+    if (( ! matched )); then
+      ui_err "DNS precheck failed for $name."
+      ui_err "  Expected one of: ${v4:-none} ${v6:-}"
+      ui_err "  A/AAAA records:  $(printf '%s' "$records" | tr '\n' ' ' | sed 's/  */ /g')"
+      ui_err "Add an A (IPv4) or AAAA (IPv6) record pointing $name at this server, then retry."
+      exit 1
+    fi
+    ui_ok "$name points to this server"
+  done
+}
+
 precheck_ram() {
   local mem_mb
   mem_mb="$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)"
@@ -115,19 +156,20 @@ Continue anyway (not recommended)?"; then
   fi
 }
 
-# Ensure git/curl/whiptail exist so the rest of the installer can run.
+# Ensure git/curl/whiptail/dig exist so the rest of the installer can run.
 precheck_bootstrap_tools() {
-  local missing=()
+  local missing=() packages=()
   for b in git curl whiptail; do
     command -v "$b" >/dev/null 2>&1 || missing+=("$b")
   done
-  if (( ${#missing[@]} > 0 )); then
+  command -v dig >/dev/null 2>&1 || packages+=(dnsutils)
+  if (( ${#missing[@]} > 0 || ${#packages[@]} > 0 )); then
     export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
     run_spin bootstrap "Refreshing package indexes" -- \
       apt-get -o DPkg::Lock::Timeout=300 update -y
     run_spin bootstrap "Installing bootstrap tools" -- \
       apt-get -o DPkg::Lock::Timeout=300 \
       -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
-      install -y --no-install-recommends "${missing[@]}"
+      install -y --no-install-recommends "${missing[@]}" "${packages[@]}"
   fi
 }

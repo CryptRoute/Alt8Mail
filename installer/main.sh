@@ -9,6 +9,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 A8M_DOMAIN="${A8M_DOMAIN:-}"
 A8M_MAIL_HOSTNAME="${A8M_MAIL_HOSTNAME:-${A8M_HOSTNAME:-}}"
 A8M_ADMIN_EMAIL="${A8M_ADMIN_EMAIL:-}"
+A8M_ADMIN_HOSTNAME="${A8M_ADMIN_HOSTNAME:-}"
 A8M_ADMIN_NAME="${A8M_ADMIN_NAME:-Alt8Mail Owner}"
 A8M_CONTROL_EMAIL="${A8M_CONTROL_EMAIL:-sysadmin@alt8mail.local}"
 A8M_TENANT_NAME="${A8M_TENANT_NAME:-Alt8Mail}"
@@ -44,6 +45,7 @@ Usage: $0 [options]
   --domain <d>          Primary mail domain
   --hostname <h>        Mail hostname (default: mail.<domain>)
   --admin-email <e>     Owner/admin email
+  --admin-hostname <h>  Admin portal hostname (default: admin.<domain>)
   --admin-name <n>      Owner display name
   --control-email <e>   First System Control superadmin
   --tenant-name <n>     Organization name
@@ -72,6 +74,7 @@ while (( $# )); do
     --domain) need_arg "$@"; A8M_DOMAIN="$2"; shift 2 ;;
     --hostname) need_arg "$@"; A8M_MAIL_HOSTNAME="$2"; shift 2 ;;
     --admin-email) need_arg "$@"; A8M_ADMIN_EMAIL="$2"; shift 2 ;;
+    --admin-hostname) need_arg "$@"; A8M_ADMIN_HOSTNAME="$2"; shift 2 ;;
     --admin-name) need_arg "$@"; A8M_ADMIN_NAME="$2"; shift 2 ;;
     --control-email) need_arg "$@"; A8M_CONTROL_EMAIL="$2"; shift 2 ;;
     --tenant-name) need_arg "$@"; A8M_TENANT_NAME="$2"; shift 2 ;;
@@ -141,13 +144,14 @@ fi
 log_init
 state_init
 a8m_install_traps
-ui_has_whiptail || precheck_bootstrap_tools
+precheck_bootstrap_tools
 
 # Interactive collection
 if [[ "$A8M_NONINTERACTIVE" != "1" ]]; then
   [[ -z "$A8M_DOMAIN" ]]      && A8M_DOMAIN="$(ui_input 'Configuration' 'Primary mail domain:' 'example.com')"
   [[ -z "$A8M_MAIL_HOSTNAME" ]] && A8M_MAIL_HOSTNAME="$(ui_input 'Configuration' 'Mail hostname:' "mail.${A8M_DOMAIN}")"
   [[ -z "$A8M_ADMIN_EMAIL" ]] && A8M_ADMIN_EMAIL="$(ui_input 'Configuration' 'Admin/owner email:' "owner@${A8M_DOMAIN}")"
+  [[ -z "$A8M_ADMIN_HOSTNAME" ]] && A8M_ADMIN_HOSTNAME="$(ui_input 'Configuration' 'Admin portal hostname:' "admin.${A8M_DOMAIN}")"
   [[ -z "$A8M_TLS_EMAIL" ]]   && A8M_TLS_EMAIL="$A8M_ADMIN_EMAIL"
 elif [[ -z "$A8M_DOMAIN" || -z "$A8M_MAIL_HOSTNAME" || -z "$A8M_ADMIN_EMAIL" ]]; then
   ui_err "--non-interactive requires --domain, --hostname, --admin-email"; exit 2
@@ -157,6 +161,8 @@ A8M_DOMAIN="$(normalize_domain "$A8M_DOMAIN")"
 A8M_MAIL_HOSTNAME="$(normalize_domain "$A8M_MAIL_HOSTNAME")"
 [[ -n "$A8M_MAIL_HOSTNAME" ]] || A8M_MAIL_HOSTNAME="mail.$A8M_DOMAIN"
 A8M_ADMIN_EMAIL="$(normalize_email "$A8M_ADMIN_EMAIL")"
+A8M_ADMIN_HOSTNAME="$(normalize_domain "$A8M_ADMIN_HOSTNAME")"
+[[ -n "$A8M_ADMIN_HOSTNAME" ]] || A8M_ADMIN_HOSTNAME="admin.$A8M_DOMAIN"
 [[ -n "$A8M_ADMIN_EMAIL" ]] || A8M_ADMIN_EMAIL="owner@$A8M_DOMAIN"
 A8M_CONTROL_EMAIL="$(normalize_email "$A8M_CONTROL_EMAIL")"
 A8M_TLS_EMAIL="${A8M_TLS_EMAIL:-$A8M_ADMIN_EMAIL}"
@@ -176,11 +182,11 @@ A8M_TLS_MODE="${A8M_TLS_MODE,,}"
   || { ui_err "--tls must be letsencrypt or selfsigned"; exit 2; }
 [[ "$A8M_TENANT_SLUG" =~ ^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$ ]] \
   || { ui_err "Invalid tenant slug: $A8M_TENANT_SLUG"; exit 2; }
-export A8M_DOMAIN A8M_MAIL_HOSTNAME A8M_ADMIN_EMAIL A8M_ADMIN_NAME
+export A8M_DOMAIN A8M_MAIL_HOSTNAME A8M_ADMIN_EMAIL A8M_ADMIN_HOSTNAME A8M_ADMIN_NAME
 export A8M_CONTROL_EMAIL A8M_TENANT_NAME A8M_TENANT_SLUG
 export A8M_TLS_MODE A8M_TLS_EMAIL A8M_SSH_PORT
 
-ui_info "Domain: ${A8M_DOMAIN} · hostname: ${A8M_MAIL_HOSTNAME} · owner: ${A8M_ADMIN_EMAIL} · Control: ${A8M_CONTROL_EMAIL}"
+ui_info "Domain: ${A8M_DOMAIN} · mail: ${A8M_MAIL_HOSTNAME} · admin: ${A8M_ADMIN_HOSTNAME} · owner: ${A8M_ADMIN_EMAIL} · Control: ${A8M_CONTROL_EMAIL}"
 
 if [[ "$A8M_DRY_RUN" == "1" ]]; then
   ui_msg "Dry run" "Plan:
@@ -190,7 +196,8 @@ if [[ "$A8M_DRY_RUN" == "1" ]]; then
   Source:   ${A8M_SRC_DIR}
   Version:  ${A8M_VERSION}
   Domain:   ${A8M_DOMAIN}
-  Hostname: ${A8M_MAIL_HOSTNAME}
+  Mail:     ${A8M_MAIL_HOSTNAME}
+  Admin:    ${A8M_ADMIN_HOSTNAME}
   Owner:    ${A8M_ADMIN_EMAIL}
   Control:  ${A8M_CONTROL_EMAIL}
   TLS:      ${A8M_TLS_MODE}"
@@ -224,7 +231,7 @@ ui_summary
 ui_msg "Installation complete" "Alt8Mail ${A8M_VERSION} is installed.
 
   Webmail: https://${A8M_MAIL_HOSTNAME}/
-  Admin:   https://${A8M_MAIL_HOSTNAME}/admin/
+  Admin:   https://${A8M_ADMIN_HOSTNAME}/admin/
   Control: https://${A8M_MAIL_HOSTNAME}:8808/
   Owner:   ${A8M_ADMIN_EMAIL}
   Control: ${A8M_CONTROL_EMAIL}

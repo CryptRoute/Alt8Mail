@@ -13,8 +13,11 @@ a8m_copy_letsencrypt_cert() {
 }
 
 a8m_le_cert_usable() {
-  [[ -s "$A8M_LE_LIVE/fullchain.pem" && -s "$A8M_LE_LIVE/privkey.pem" ]] \
-    && openssl x509 -checkend 86400 -noout -in "$A8M_LE_LIVE/fullchain.pem" >/dev/null 2>&1
+  [[ -s "$A8M_LE_LIVE/fullchain.pem" && -s "$A8M_LE_LIVE/privkey.pem" ]] || return 1
+  openssl x509 -checkend 86400 -noout -in "$A8M_LE_LIVE/fullchain.pem" >/dev/null 2>&1 || return 1
+  openssl x509 -checkhost "$A8M_MAIL_HOSTNAME" -noout -in "$A8M_LE_LIVE/fullchain.pem" >/dev/null 2>&1 || return 1
+  openssl x509 -checkhost "$A8M_DOMAIN" -noout -in "$A8M_LE_LIVE/fullchain.pem" >/dev/null 2>&1 || return 1
+  openssl x509 -checkhost "$A8M_ADMIN_HOSTNAME" -noout -in "$A8M_LE_LIVE/fullchain.pem" >/dev/null 2>&1 || return 1
 }
 
 a8m_write_http_nginx() {
@@ -22,7 +25,7 @@ a8m_write_http_nginx() {
 server {
     listen 80;
     listen [::]:80;
-    server_name $A8M_MAIL_HOSTNAME $A8M_DOMAIN ${A8M_PUBLIC_IP:-127.0.0.1} localhost;
+    server_name $A8M_MAIL_HOSTNAME $A8M_ADMIN_HOSTNAME $A8M_DOMAIN ${A8M_PUBLIC_IP:-127.0.0.1} localhost;
 
     location /.well-known/acme-challenge/ { root /var/www/certbot; }
     location / { return 301 https://\$host\$request_uri; }
@@ -39,6 +42,7 @@ EOF
 a8m_render_https_nginx() {
   sed -e "s|@MAIL_HOSTNAME@|$A8M_MAIL_HOSTNAME|g" \
       -e "s|@DOMAIN@|$A8M_DOMAIN|g" \
+      -e "s|@ADMIN_HOSTNAME@|$A8M_ADMIN_HOSTNAME|g" \
       -e "s|@SERVER_IP@|${A8M_PUBLIC_IP:-127.0.0.1}|g" \
       -e "s|@WEB_ROOT@|$A8M_WEB_ROOT|g" \
       -e "s|@TLS_CERT@|/etc/ssl/a8m/mail.crt|g" \
@@ -58,16 +62,9 @@ phase_tls() {
     a8m_copy_letsencrypt_cert || return 1
   fi
   if [[ "$A8M_TLS_MODE" == "letsencrypt" && "$A8M_SKIP_CERTBOT" -eq 0 && "$A8M_TLS_READY" -eq 0 ]]; then
-    if [[ -n "$A8M_PUBLIC_IP" ]]; then
-      local dns_mail dns_domain
-      dns_mail="$(dig +short A "$A8M_MAIL_HOSTNAME" | awk 'NF && $1 ~ /^[0-9.]+$/ && !ip {ip=$1} END {print ip}')"
-      dns_domain="$(dig +short A "$A8M_DOMAIN" | awk 'NF && $1 ~ /^[0-9.]+$/ && !ip {ip=$1} END {print ip}')"
-      if [[ "$dns_mail" == "$A8M_PUBLIC_IP" && "$dns_domain" == "$A8M_PUBLIC_IP" ]]; then
-        tls_attempt=1
-      else
-        ui_warn "DNS for $A8M_MAIL_HOSTNAME/$A8M_DOMAIN does not both point to $A8M_PUBLIC_IP"
-      fi
-    fi
+    # The mandatory preflight DNS check has already confirmed A/AAAA records
+    # for the domain, mail hostname and admin hostname.
+    tls_attempt=1
   fi
 
   ui_task "Writing the HTTP ACME challenge site"
@@ -78,7 +75,8 @@ phase_tls() {
   if [[ "$tls_attempt" -eq 1 ]]; then
     if run_spin tls "Requesting a Let's Encrypt certificate" -- \
         certbot certonly --webroot -w /var/www/certbot \
-        -d "$A8M_MAIL_HOSTNAME" -d "$A8M_DOMAIN" --cert-name "$A8M_MAIL_HOSTNAME" \
+        -d "$A8M_MAIL_HOSTNAME" -d "$A8M_DOMAIN" -d "$A8M_ADMIN_HOSTNAME" \
+        --cert-name "$A8M_MAIL_HOSTNAME" --expand \
         --email "$A8M_TLS_EMAIL" --agree-tos --no-eff-email --non-interactive; then
       a8m_copy_letsencrypt_cert || return 1
     else
@@ -91,8 +89,9 @@ phase_tls() {
 
   if [[ "$A8M_TLS_READY" -eq 0 ]]; then
     ui_task "Generating a self-signed certificate"
-    local san="DNS:$A8M_MAIL_HOSTNAME,DNS:$A8M_DOMAIN,DNS:localhost,IP:127.0.0.1"
+    local san="DNS:$A8M_MAIL_HOSTNAME,DNS:$A8M_ADMIN_HOSTNAME,DNS:$A8M_DOMAIN,DNS:localhost,IP:127.0.0.1"
     [[ -n "$A8M_PUBLIC_IP" ]] && san="$san,IP:$A8M_PUBLIC_IP"
+    [[ -n "$A8M_PUBLIC_IPV6" ]] && san="$san,IP:$A8M_PUBLIC_IPV6"
     install -d -m 0755 /etc/ssl/a8m /etc/ssl/alt8mail
     openssl req -x509 -nodes -newkey rsa:3072 -sha256 -days 825 \
       -subj "/CN=$A8M_MAIL_HOSTNAME/O=Alt8Mail" \

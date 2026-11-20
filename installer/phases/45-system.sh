@@ -56,6 +56,7 @@ phase_system() {
 
   ui_task "Detecting the public IPv4 address and PostgreSQL version"
   A8M_PUBLIC_IP="$(detect_public_ip)"
+  A8M_PUBLIC_IPV6="$(detect_public_ipv6)"
   if [[ -z "$A8M_PUBLIC_IP" ]]; then
     ui_warn "Could not determine the public IPv4 address; TLS will use a self-signed certificate"
   fi
@@ -68,6 +69,6 @@ phase_system() {
   export SESSION_SECRET CRYPTO_SECRET CSRF_SECRET CONTROL_SESSION_SECRET
   export CONTROL_CSRF_SECRET CONTROL_SECRET_KEY IMAP_MASTER_PASSWORD
   export OWNER_WEB_PASSWORD OWNER_MAIL_PASSWORD CONTROL_ADMIN_PASSWORD
-  export A8M_PUBLIC_IP A8M_PG_MAJOR
+  export A8M_PUBLIC_IP A8M_PUBLIC_IPV6 A8M_PG_MAJOR
   ui_task_ok "Users, directories and secrets ready (PostgreSQL ${A8M_PG_MAJOR})"
 }
