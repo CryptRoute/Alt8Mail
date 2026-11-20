@@ -40,10 +40,10 @@ phase_build() {
   local src_dir="$A8M_SRC_DIR"
   local build_root="${A8M_BUILD_ROOT:-/tmp/a8m-build}"
 
-  if [[ -x "$src_dir/bin/a8m-server" ]]; then
+  if normalize_release_bin "$src_dir"; then
     A8M_RELEASE_SOURCE="$src_dir"
     export A8M_RELEASE_SOURCE
-    ui_ok "Using the prebuilt release in $src_dir"
+    ui_task_ok "Using the prebuilt release in $src_dir"
     return 0
   fi
 

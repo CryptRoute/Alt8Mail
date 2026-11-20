@@ -1,3 +1,18 @@
+# Alt8Mail 3.9.8.7
+
+Release date: 2026-11-20. Prebuilt release mode fix.
+
+## 3.9.8.7 installer
+
+- Release tarballs assembled on Windows can carry `bin/` files with mode
+  `0644`. The installer now restores `0755` on the release binaries before
+  deciding whether to use the prebuilt release, so a release install never
+  falls through to a source build in a tree that has no `backend/` directory.
+- The same normalization is applied when resuming a saved build and when
+  installing the release tree.
+- No package-manager output is shown on the terminal; package, build and
+  certbot work stays behind the compact spinner from 3.9.8.6.
+
 # Alt8Mail 3.9.8.6
 
 Release date: 2026-11-20. Clean installer progress display.

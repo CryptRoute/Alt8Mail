@@ -90,17 +90,26 @@ normalize_email() {
   printf '%s\n' "$value"
 }
 
+normalize_release_bin() {  # normalize_release_bin <release-root>
+  local root="$1"
+  [[ -d "$root/bin" && -f "$root/bin/a8m-server" ]] || return 1
+  # Archives assembled on a Windows host can lose the executable bit. The
+  # release is still valid; restore the bit before testing or installing it.
+  chmod 0755 "$root/bin/"* 2>/dev/null || true
+  [[ -x "$root/bin/a8m-server" ]]
+}
+
 resolve_release_source() {
-  if [[ -n "${A8M_RELEASE_SOURCE:-}" && -x "$A8M_RELEASE_SOURCE/bin/a8m-server" ]]; then
+  if [[ -n "${A8M_RELEASE_SOURCE:-}" ]] && normalize_release_bin "$A8M_RELEASE_SOURCE"; then
     return 0
   fi
-  if [[ -x "$A8M_SRC_DIR/bin/a8m-server" ]]; then
+  if normalize_release_bin "$A8M_SRC_DIR"; then
     A8M_RELEASE_SOURCE="$A8M_SRC_DIR"
     export A8M_RELEASE_SOURCE
     return 0
   fi
   local candidate="/tmp/a8m-build/alt8mail-$A8M_VERSION"
-  if [[ -x "$candidate/bin/a8m-server" ]]; then
+  if normalize_release_bin "$candidate"; then
     A8M_RELEASE_SOURCE="$candidate"
     export A8M_RELEASE_SOURCE
     return 0
