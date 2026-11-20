@@ -1,24 +1,26 @@
-# Alt8Mail 3.10.0
+# Alt8Mail 3.10.1
 
-Release date: 2026-11-20. Admin portal hostname and mandatory DNS preflight.
+Release date: 2026-11-20. Admin portal hostname and mail/admin DNS preflight.
 
-## 3.10.0 installer
+## 3.10.1 installer
 
 - **Admin portal hostname field.** Interactive installs ask for an admin
   hostname (default `admin.<domain>`); `--admin-hostname` and
   `A8M_ADMIN_HOSTNAME` are supported. It must differ from the mail hostname
   and primary domain.
-- **Mandatory A/AAAA preflight.** Before any package phase, the installer
-  resolves the primary domain, mail hostname and admin hostname and requires
-  each to contain the server's public IPv4 or IPv6 address. It prints the
-  actual and expected records and stops if DNS is wrong. `dnsutils` is
-  installed automatically when needed.
+- **Mandatory A/AAAA preflight for the mail and admin hostnames only.** The
+  primary domain is not required to point at the mail server because it may
+  host an unrelated website. The installer requires each of the mail and
+  admin names to resolve to the server's public IPv4 or IPv6, prints actual
+  and expected records, and stops if they do not. `dnsutils` is installed
+  automatically when needed.
 - **The admin hostname is used end to end.** It is added to the TLS
   certificate request and SAN, nginx `server_name`, the webmail admin URL and
   WebAuthn origins. `https://admin.<domain>/` redirects to the administration
   panel; `/admin/` on the mail hostname continues to work.
-- Existing certificates are reused only when they cover the mail, domain and
-  admin hostnames; certbot uses `--expand` otherwise.
+- The primary domain is added to the certificate only when its own DNS points
+  at this server. Existing certificates are reused when they cover the mail
+  and admin names; certbot uses `--expand` otherwise.
 - Includes the 3.9.9 license trust-anchor fix and all preceding installer
   fixes.
 

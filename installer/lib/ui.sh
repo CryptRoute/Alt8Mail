@@ -56,7 +56,7 @@ Ubuntu 22.04 / 24.04.  It will:
 Requirements:
   • root access on a fresh supported host
   • at least 2 GB RAM and 20 GB free disk
-  • DNS A/AAAA for the domain, mail hostname and admin hostname
+  • DNS A/AAAA for the mail hostname and admin hostname
   • ports 25/80/443/587/993/995/4190/8808 reachable
 
 Logs:  ${A8M_LOG_DIR:-/var/log/a8m}

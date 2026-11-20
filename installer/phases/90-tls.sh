@@ -16,8 +16,19 @@ a8m_le_cert_usable() {
   [[ -s "$A8M_LE_LIVE/fullchain.pem" && -s "$A8M_LE_LIVE/privkey.pem" ]] || return 1
   openssl x509 -checkend 86400 -noout -in "$A8M_LE_LIVE/fullchain.pem" >/dev/null 2>&1 || return 1
   openssl x509 -checkhost "$A8M_MAIL_HOSTNAME" -noout -in "$A8M_LE_LIVE/fullchain.pem" >/dev/null 2>&1 || return 1
-  openssl x509 -checkhost "$A8M_DOMAIN" -noout -in "$A8M_LE_LIVE/fullchain.pem" >/dev/null 2>&1 || return 1
   openssl x509 -checkhost "$A8M_ADMIN_HOSTNAME" -noout -in "$A8M_LE_LIVE/fullchain.pem" >/dev/null 2>&1 || return 1
+}
+
+a8m_name_points_here() {
+  local name="$1" records ip
+  records="$(dig +short +time=3 +tries=2 A "$name" 2>/dev/null | awk '/^[0-9.]+$/')"
+  records+=$'\n'
+  records+="$(dig +short +time=3 +tries=2 AAAA "$name" 2>/dev/null | awk '/:/')"
+  for ip in "$A8M_PUBLIC_IP" "$A8M_PUBLIC_IPV6"; do
+    [[ -n "$ip" ]] || continue
+    grep -Fxq "$ip" <<<"$records" && return 0
+  done
+  return 1
 }
 
 a8m_write_http_nginx() {
@@ -73,9 +84,15 @@ phase_tls() {
   run tls -- systemctl reload nginx || return 1
 
   if [[ "$tls_attempt" -eq 1 ]]; then
+    local cert_names=(-d "$A8M_MAIL_HOSTNAME" -d "$A8M_ADMIN_HOSTNAME")
+    if a8m_name_points_here "$A8M_DOMAIN"; then
+      # The primary domain often hosts a separate website. Include it only
+      # when its DNS actually points here.
+      cert_names+=(-d "$A8M_DOMAIN")
+    fi
     if run_spin tls "Requesting a Let's Encrypt certificate" -- \
         certbot certonly --webroot -w /var/www/certbot \
-        -d "$A8M_MAIL_HOSTNAME" -d "$A8M_DOMAIN" -d "$A8M_ADMIN_HOSTNAME" \
+        "${cert_names[@]}" \
         --cert-name "$A8M_MAIL_HOSTNAME" --expand \
         --email "$A8M_TLS_EMAIL" --agree-tos --no-eff-email --non-interactive; then
       a8m_copy_letsencrypt_cert || return 1

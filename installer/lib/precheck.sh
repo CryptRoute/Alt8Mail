@@ -82,7 +82,7 @@ precheck_dns() {
     exit 1
   }
 
-  local names=("$A8M_DOMAIN" "$A8M_MAIL_HOSTNAME" "$A8M_ADMIN_HOSTNAME")
+  local names=("$A8M_MAIL_HOSTNAME" "$A8M_ADMIN_HOSTNAME")
   local seen=" " name records ip matched
   for name in "${names[@]}"; do
     [[ -n "$name" ]] || continue
