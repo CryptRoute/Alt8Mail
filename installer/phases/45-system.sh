@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 phase_system() {
-  ui_step "Creating users, directories and secrets"
   umask 027
+  ui_task "Creating the a8m and vmail service users"
 
   if ! getent group "$A8M_SERVICE_USER" >/dev/null; then
     groupadd --system "$A8M_SERVICE_USER"
@@ -34,6 +34,7 @@ phase_system() {
   install -d -m 0750 -o root -g "$A8M_SERVICE_USER" /var/lib/a8m-office
   install -d -m 0750 "$A8M_CONFIG_ROOT/office"
 
+  ui_task "Generating and normalizing service secrets"
   APP_DB_PASSWORD="$(read_or_create_secret "$A8M_SECRETS_DIR/postgres_app_password" 32)"
   MAIL_DB_PASSWORD="$(read_or_create_secret "$A8M_SECRETS_DIR/postgres_mail_password" 32)"
   CONTROL_DB_PASSWORD="$(read_or_create_secret "$A8M_SECRETS_DIR/postgres_control_password" 32)"
@@ -53,6 +54,7 @@ phase_system() {
   chmod 0700 "$A8M_SECRETS_DIR"
   find "$A8M_SECRETS_DIR" -type f -exec chmod 0600 {} \;
 
+  ui_task "Detecting the public IPv4 address and PostgreSQL version"
   A8M_PUBLIC_IP="$(detect_public_ip)"
   if [[ -z "$A8M_PUBLIC_IP" ]]; then
     ui_warn "Could not determine the public IPv4 address; TLS will use a self-signed certificate"
@@ -67,5 +69,5 @@ phase_system() {
   export CONTROL_CSRF_SECRET CONTROL_SECRET_KEY IMAP_MASTER_PASSWORD
   export OWNER_WEB_PASSWORD OWNER_MAIL_PASSWORD CONTROL_ADMIN_PASSWORD
   export A8M_PUBLIC_IP A8M_PG_MAJOR
-  ui_ok "Users, directories and secrets ready (PostgreSQL ${A8M_PG_MAJOR})"
+  ui_task_ok "Users, directories and secrets ready (PostgreSQL ${A8M_PG_MAJOR})"
 }

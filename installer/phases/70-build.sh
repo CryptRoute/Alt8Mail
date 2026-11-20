@@ -37,7 +37,6 @@ alt8mail_install_go() {
 }
 
 phase_build() {
-  ui_step "Building the Alt8Mail release"
   local src_dir="$A8M_SRC_DIR"
   local build_root="${A8M_BUILD_ROOT:-/tmp/a8m-build}"
 
@@ -61,8 +60,8 @@ phase_build() {
   export GOMAXPROCS="${GOMAXPROCS:-1}"
   export PATH="/usr/local/go/bin:$PATH"
 
-  ui_info "Compiling Alt8Mail ${A8M_VERSION}; this can take several minutes"
-  if ! run build -- bash "$src_dir/scripts/build-release.sh" "$A8M_VERSION" "$build_root"; then
+  ui_task "Compiling Alt8Mail ${A8M_VERSION}; this can take several minutes"
+  if ! run_stream build -- bash "$src_dir/scripts/build-release.sh" "$A8M_VERSION" "$build_root"; then
     ui_err "The release build failed. Last 30 log lines:"
     tail -n 30 "$A8M_LOG_DIR/build.log" >&2 || true
     return 1

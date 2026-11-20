@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 phase_swap() {
-  ui_step "Configuring 2 GiB swap"
   local total
   total="$(swapon --show=SIZE --noheadings --bytes 2>/dev/null | awk '{s+=$1} END {print s+0}')"
   if (( total >= 2147483648 )); then

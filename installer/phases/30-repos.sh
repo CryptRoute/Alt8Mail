@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 phase_repos() {
-  ui_step "Configuring Rspamd repository"
   if [[ "${A8M_SKIP_PACKAGES:-0}" == "1" ]]; then
     ui_warn "Skipping repository configuration by request"
     return 0
@@ -18,6 +17,7 @@ phase_repos() {
     chmod 0644 "$key"
   fi
   printf 'deb [signed-by=%s] https://rspamd.com/apt-stable/ %s main\n' "$key" "$codename" >"$list"
-  run repos -- apt-get update -y || return 1
-  ui_ok "Rspamd repository configured"
+  ui_task "Refreshing indexes from the Rspamd repository"
+  run_stream repos -- apt-get -o DPkg::Lock::Timeout=300 update -y || return 1
+  ui_task_ok "Rspamd repository configured"
 }

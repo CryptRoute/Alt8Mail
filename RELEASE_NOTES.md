@@ -1,3 +1,25 @@
+# Alt8Mail 3.9.8.5
+
+Release date: 2026-11-20. Installer experience and progress reporting.
+
+## 3.9.8.5 installer experience
+
+- **A welcome screen explains the install and asks for explicit permission**
+  before any system change. It lists what will be installed, supported
+  operating systems, resource requirements, DNS/ports, log and state paths.
+- **The installer is no longer branded “Enterprise.”** It is the Alt8Mail
+  Installer, used by community and paid deployments alike.
+- **Phases no longer clear the screen.** Every phase prints a numbered header,
+  live task lines and a green completion line with elapsed time; completed
+  phases remain in the transcript, and a final summary lists every phase.
+- **Long operations stream their output** to the terminal and the phase log
+  instead of looking frozen. Package installation uses a five-minute dpkg lock
+  timeout and non-interactive dpkg options so it fails clearly instead of
+  waiting forever.
+- ClamAV signature startup is reported as a warning rather than failing an
+  otherwise healthy install, and `enabled-runtime` template units count as
+  enabled for the final health check.
+
 # Alt8Mail 3.9.8.4
 
 Release date: 2026-11-20. Installer rewrite, release packaging and uninstaller

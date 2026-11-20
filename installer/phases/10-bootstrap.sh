@@ -2,13 +2,18 @@
 set -Eeuo pipefail
 
 phase_bootstrap() {
-  ui_step "Installing base packages"
   export DEBIAN_FRONTEND=noninteractive
+  export NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
 
   if [[ "${A8M_SKIP_PACKAGES:-0}" != "1" ]]; then
-    run bootstrap -- apt-get update -y
+    ui_task "Refreshing package indexes (this can take a minute)"
+    run_stream bootstrap -- apt-get -o DPkg::Lock::Timeout=300 update -y || return 1
+    ui_task "Installing base packages"
     # shellcheck disable=SC2046
-    run bootstrap -- apt-get install -y --no-install-recommends $(distro_base_pkgs)
+    run_stream bootstrap -- apt-get -o DPkg::Lock::Timeout=300 \
+      -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+      install -y --no-install-recommends $(distro_base_pkgs) || return 1
+    ui_task_ok "Base packages installed"
   else
     ui_warn "Skipping apt package installation by request"
   fi

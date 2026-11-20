@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 phase_health() {
-  ui_step "Running health checks"
   local failed=0
   local units=(postgresql "postgresql@${A8M_PG_MAJOR}-main" redis-server dovecot
     postfix rspamd clamav-daemon clamav-freshclam nginx fail2ban cron chrony

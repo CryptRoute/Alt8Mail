@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 phase_tenant() {
-  ui_step "Creating the first tenant, domain and owner"
   local release="$A8M_INSTALL_ROOT/current"
   [[ -x "$release/bin/a8m-admin" ]] \
     || { ui_err "$release/bin/a8m-admin is missing"; return 1; }
@@ -82,6 +81,7 @@ SQL
   "$release/bin/a8m-mailprovision" -all >/dev/null \
     || { ui_err "Maildir provisioning failed"; return 1; }
 
+  ui_task "Creating the System Control superadmin"
   set -a
   # shellcheck disable=SC1090
   . "$A8M_CONFIG_ROOT/control.env"
@@ -154,5 +154,5 @@ DMARC: v=DMARC1; p=none; rua=mailto:dmarc@$A8M_DOMAIN
 DKIM selector a8m: a8m._domainkey.$A8M_DOMAIN. TXT "$dkim_record"
 EOF
   chmod 0600 /root/alt8mail-dns-records.txt
-  ui_ok "Tenant, domain, owner and Control account ready"
+  ui_task_ok "Tenant, domain, owner and Control account ready"
 }

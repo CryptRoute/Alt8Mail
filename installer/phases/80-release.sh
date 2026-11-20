@@ -2,11 +2,11 @@
 set -Eeuo pipefail
 
 phase_release() {
-  ui_step "Installing the release and starting services"
   resolve_release_source || { ui_err "No built release is available"; return 1; }
   local src="$A8M_RELEASE_SOURCE"
   [[ -x "$src/bin/a8m-server" ]] || { ui_err "Release has no bin/a8m-server: $src"; return 1; }
 
+  ui_task "Installing the release into $A8M_RELEASES_DIR/$A8M_VERSION"
   local release_dir="$A8M_RELEASES_DIR/$A8M_VERSION"
   rm -rf "$release_dir"
   install -d -m 0755 "$release_dir"
@@ -25,6 +25,7 @@ phase_release() {
     install -m 0755 "$release_dir/scripts/alt8mail-update.sh" /usr/local/bin/alt8mail-update
   fi
 
+  ui_task "Installing systemd units"
   local unit
   for unit in "$release_dir"/deploy/systemd/*.service "$release_dir"/deploy/systemd/*.timer; do
     [[ -f "$unit" ]] || continue
@@ -33,6 +34,7 @@ phase_release() {
   run release -- systemctl daemon-reload || return 1
 
   # Every monitored unit must be enabled at boot.
+  ui_task "Enabling every monitored unit at boot"
   run release -- systemctl enable --now postgresql redis-server dovecot rspamd \
     nginx postfix fail2ban cron chrony || return 1
   run release -- systemctl enable --now clamav-freshclam \
@@ -52,6 +54,7 @@ phase_release() {
     fi
   fi
 
+  ui_task "Restarting mail services"
   run release -- systemctl restart dovecot rspamd || return 1
   run release -- systemctl restart clamav-daemon \
     || ui_warn "clamav-daemon is not ready yet; the timer/health check will report it"
@@ -62,10 +65,11 @@ phase_release() {
     return 1
   fi
 
+  ui_task "Starting Alt8Mail web, admin and Control services"
   run release -- systemctl enable --now a8m-server a8m-admin alt8mail-control || return 1
   run release -- systemctl enable --now a8m-mailprovision.timer a8m-dkimprovision.timer || return 1
   run release -- systemctl restart a8m-server a8m-admin alt8mail-control || return 1
   run release -- systemctl enable --now a8m-office-agent \
     || ui_warn "Office agent did not start; install Docker, then start a8m-office-agent"
-  ui_ok "Release installed and services started"
+  ui_task_ok "Release installed and services started"
 }

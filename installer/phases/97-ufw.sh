@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 phase_ufw() {
-  ui_step "Configuring firewall and Fail2Ban"
   local ssh_port="${A8M_SSH_PORT:-}"
   if [[ -z "$ssh_port" ]]; then
     ssh_port="$(sshd -T 2>/dev/null | awk '/^port / && !port {port=$2} END {print port}')"
@@ -15,6 +14,7 @@ phase_ufw() {
   ssh_port="${ssh_port:-22}"
   [[ "$ssh_port" =~ ^[0-9]+$ ]] || ssh_port=22
 
+  ui_task "Resetting UFW and allowing SSH, mail and web ports (SSH ${ssh_port}/tcp)"
   run ufw -- ufw --force reset || true
   run ufw -- ufw default deny incoming || return 1
   run ufw -- ufw default allow outgoing || return 1
@@ -25,6 +25,7 @@ phase_ufw() {
   done
   run ufw -- ufw --force enable || return 1
 
+  ui_task "Installing the port-scoped Fail2Ban policy"
   install -d -m 0755 /etc/fail2ban/action.d
   local jail_backup action_backup
   jail_backup="$(mktemp /tmp/a8m-fail2ban-jail.XXXXXX)"
@@ -58,5 +59,5 @@ phase_ufw() {
   run ufw -- systemctl enable --now fail2ban || ui_warn "Fail2Ban is not enabled"
   install -m 0644 "$A8M_SRC_DIR/deploy/sysctl/99-alt8mail-mail.conf" /etc/sysctl.d/99-alt8mail-mail.conf
   sysctl --system >/dev/null 2>&1 || ui_warn "Some sysctl settings could not be applied"
-  ui_ok "Firewall and Fail2Ban configured (SSH ${ssh_port}/tcp)"
+  ui_task_ok "Firewall and Fail2Ban configured (SSH ${ssh_port}/tcp)"
 }

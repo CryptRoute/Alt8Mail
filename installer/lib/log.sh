@@ -44,3 +44,23 @@ run_show() {
   "$@" 2>&1 | tee -a "$plog"
   return "${PIPESTATUS[0]}"
 }
+
+# Stream command output to the terminal and the phase log. Used for package
+# installation and builds so a long-running phase never looks frozen.
+run_stream() {
+  local phase="$1"; shift
+  [[ "${1:-}" == "--" ]] && shift
+  local plog="$A8M_LOG_DIR/${phase}.log"
+  local rc=0
+  log_write "$phase" "exec(stream): $*"
+  set +e
+  "$@" 2>&1 | tee -a "$plog"
+  rc=${PIPESTATUS[0]}
+  set -e
+  if (( rc == 0 )); then
+    log_write "$phase" "ok: $*"
+  else
+    log_write "$phase" "FAIL($rc): $*"
+  fi
+  return "$rc"
+}

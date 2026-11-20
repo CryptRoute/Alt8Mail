@@ -49,7 +49,6 @@ a8m_render_https_nginx() {
 }
 
 phase_tls() {
-  ui_step "Configuring nginx and TLS"
   A8M_LE_LIVE="/etc/letsencrypt/live/$A8M_MAIL_HOSTNAME"
   install -d -m 0755 /var/www/certbot /etc/letsencrypt /etc/letsencrypt/renewal-hooks/deploy
 
@@ -71,13 +70,14 @@ phase_tls() {
     fi
   fi
 
+  ui_task "Writing the HTTP ACME challenge site"
   a8m_write_http_nginx || return 1
   run tls -- systemctl enable --now nginx || return 1
   run tls -- systemctl reload nginx || return 1
 
   if [[ "$tls_attempt" -eq 1 ]]; then
-    ui_info "Requesting a Let's Encrypt certificate"
-    if certbot certonly --webroot -w /var/www/certbot \
+    ui_task "Requesting a Let's Encrypt certificate"
+    if run_stream tls -- certbot certonly --webroot -w /var/www/certbot \
         -d "$A8M_MAIL_HOSTNAME" -d "$A8M_DOMAIN" --cert-name "$A8M_MAIL_HOSTNAME" \
         --email "$A8M_TLS_EMAIL" --agree-tos --no-eff-email --non-interactive; then
       a8m_copy_letsencrypt_cert || return 1
@@ -90,7 +90,7 @@ phase_tls() {
   fi
 
   if [[ "$A8M_TLS_READY" -eq 0 ]]; then
-    ui_info "Generating a self-signed certificate"
+    ui_task "Generating a self-signed certificate"
     local san="DNS:$A8M_MAIL_HOSTNAME,DNS:$A8M_DOMAIN,DNS:localhost,IP:127.0.0.1"
     [[ -n "$A8M_PUBLIC_IP" ]] && san="$san,IP:$A8M_PUBLIC_IP"
     install -d -m 0755 /etc/ssl/a8m /etc/ssl/alt8mail

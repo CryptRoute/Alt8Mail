@@ -2,11 +2,11 @@
 set -Eeuo pipefail
 
 phase_postgres() {
-  ui_step "Configuring PostgreSQL and applying migrations"
   local pg_major="${A8M_PG_MAJOR:?PostgreSQL major version is not set}"
   local pg_conf_dir="/etc/postgresql/${pg_major}/main/conf.d"
   local pg_conf="/etc/postgresql/${pg_major}/main/postgresql.conf"
 
+  ui_task "Preparing PostgreSQL ${pg_major}"
   run postgres -- systemctl enable --now postgresql || return 1
   run postgres -- systemctl restart postgresql || return 1
 
@@ -19,6 +19,7 @@ phase_postgres() {
   fi
   run postgres -- systemctl restart postgresql || return 1
 
+  ui_task "Creating database roles and the a8m database"
   if ! runuser -u postgres -- psql -v ON_ERROR_STOP=1 -q <<SQL
 DO \$\$
 BEGIN
@@ -66,7 +67,9 @@ SQL
   cp -a "$mig_dir/." "$migration_tmp/"
   chmod 0644 "$migration_tmp"/*.sql 2>/dev/null || true
 
-  local migration version applied
+  ui_task "Applying database migrations"
+  local migration version applied total_migrations pending_migrations=0
+  total_migrations="$(find "$migration_tmp" -maxdepth 1 -name '*.sql' | wc -l | tr -d ' ')"
   for migration in "$migration_tmp"/*.sql; do
     [[ -f "$migration" ]] || continue
     version="$(basename "$migration" .sql)"
@@ -75,6 +78,10 @@ SQL
     if [[ "$applied" == "1" ]]; then
       log_write postgres "migration $version already applied"
       continue
+    fi
+    pending_migrations=$((pending_migrations + 1))
+    if (( pending_migrations == 1 || pending_migrations % 10 == 0 )); then
+      printf '  → migrations: %s/%s applied\n' "$pending_migrations" "$total_migrations"
     fi
     if ! runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -f "$migration"; then
       ui_err "Migration failed: $version"

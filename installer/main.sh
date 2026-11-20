@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Alt8Mail Enterprise Installer — orchestrator.
+# Alt8Mail Installer — orchestrator.
 set -Eeuo pipefail
 umask 027
 
@@ -37,7 +37,7 @@ for p in "$HERE"/phases/*.sh; do source "$p"; done
 
 usage() {
   cat <<EOF
-Alt8Mail Enterprise Installer ${A8M_VERSION}
+Alt8Mail Installer ${A8M_VERSION}
 
 Usage: $0 [options]
 
@@ -113,7 +113,7 @@ A8M_VERSION="$(tr -d '[:space:]' < "$A8M_SRC_DIR/VERSION")"
   || { ui_err "Invalid VERSION: $A8M_VERSION"; exit 1; }
 export A8M_VERSION A8M_SRC_DIR
 
-# Vendor defaults for licensing and enterprise updates.
+# Vendor defaults for licensing and update delivery.
 if [[ -f "$A8M_SRC_DIR/deploy/release-license.env" ]]; then
   # shellcheck disable=SC1091
   . "$A8M_SRC_DIR/deploy/release-license.env"
@@ -130,6 +130,9 @@ export A8M_LICENSE_FILE A8M_LICENSE_PUBLIC_KEY A8M_LICENSE_PUBLIC_KEY_ID
 export A8M_LICENSE_PUBLIC_KEYS A8M_LICENSE_GROUP A8M_LICENSE_TENANT A8M_LICENSE_PORTAL_URL
 export A8M_ENTERPRISE_RELEASE_PUBLIC_KEY
 
+if [[ "$A8M_DRY_RUN" != "1" ]]; then
+  ui_welcome
+fi
 log_init
 state_init
 a8m_install_traps
@@ -141,16 +144,6 @@ if [[ "$A8M_NONINTERACTIVE" != "1" ]]; then
   [[ -z "$A8M_MAIL_HOSTNAME" ]] && A8M_MAIL_HOSTNAME="$(ui_input 'Configuration' 'Mail hostname:' "mail.${A8M_DOMAIN}")"
   [[ -z "$A8M_ADMIN_EMAIL" ]] && A8M_ADMIN_EMAIL="$(ui_input 'Configuration' 'Admin/owner email:' "owner@${A8M_DOMAIN}")"
   [[ -z "$A8M_TLS_EMAIL" ]]   && A8M_TLS_EMAIL="$A8M_ADMIN_EMAIL"
-  if [[ "$A8M_YES" != "1" ]]; then
-    ui_yesno "Confirm" "Install Alt8Mail ${A8M_VERSION}?
-
-  Domain:   ${A8M_DOMAIN}
-  Hostname: ${A8M_MAIL_HOSTNAME}
-  Owner:    ${A8M_ADMIN_EMAIL}
-  Control:  ${A8M_CONTROL_EMAIL}
-
-Proceed?" || { ui_info "Aborted by user."; exit 0; }
-  fi
 elif [[ -z "$A8M_DOMAIN" || -z "$A8M_MAIL_HOSTNAME" || -z "$A8M_ADMIN_EMAIL" ]]; then
   ui_err "--non-interactive requires --domain, --hostname, --admin-email"; exit 2
 fi
@@ -181,6 +174,8 @@ A8M_TLS_MODE="${A8M_TLS_MODE,,}"
 export A8M_DOMAIN A8M_MAIL_HOSTNAME A8M_ADMIN_EMAIL A8M_ADMIN_NAME
 export A8M_CONTROL_EMAIL A8M_TENANT_NAME A8M_TENANT_SLUG
 export A8M_TLS_MODE A8M_TLS_EMAIL A8M_SSH_PORT
+
+ui_info "Domain: ${A8M_DOMAIN} · hostname: ${A8M_MAIL_HOSTNAME} · owner: ${A8M_ADMIN_EMAIL} · Control: ${A8M_CONTROL_EMAIL}"
 
 if [[ "$A8M_DRY_RUN" == "1" ]]; then
   ui_msg "Dry run" "Plan:
@@ -216,6 +211,7 @@ phase_run ufw        phase_ufw        "$F"
 phase_run health     phase_health     "$F"
 
 ui_step "Complete"
+ui_summary
 ui_msg "Installation complete" "Alt8Mail ${A8M_VERSION} is installed.
 
   Webmail: https://${A8M_MAIL_HOSTNAME}/

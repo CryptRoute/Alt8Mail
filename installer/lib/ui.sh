@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Alt8Mail enterprise installer UI layer (whiptail).
+# Alt8Mail installer UI layer (whiptail).
 set -Eeuo pipefail
 
 # ---- Brand theme (Virtualmin-style) -----------------------------------------
-A8M_TITLE="Alt8Mail Enterprise Installer"
+A8M_TITLE="Alt8Mail Installer"
 if [[ -z "${A8M_VERSION:-}" ]]; then
   A8M_VERSION="$(tr -d '[:space:]' < "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/VERSION" 2>/dev/null || true)"
 fi
@@ -32,6 +32,55 @@ ui_info()  { printf '%s[i]%s %s\n' "$C_BLUE"   "$C_RESET" "$*"; }
 ui_ok()    { printf '%s[✓]%s %s\n' "$C_GREEN"  "$C_RESET" "$*"; }
 ui_warn()  { printf '%s[!]%s %s\n' "$C_YELLOW" "$C_RESET" "$*"; }
 ui_err()   { printf '%s[✗]%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; }
+ui_task()  { printf '  %s→%s %s\n' "$C_BLUE"   "$C_RESET" "$*"; }
+ui_task_ok() { printf '  %s✓%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+
+ui_welcome() {
+  if [[ -t 1 ]] && [[ "${A8M_QUIET:-0}" != "1" ]]; then
+    clear 2>/dev/null || true
+  fi
+  cat <<EOF
+${C_BOLD}${C_BLUE}Alt8Mail Installer ${A8M_VERSION}${C_RESET}
+
+Welcome to Alt8Mail.
+
+This installer prepares a fresh mail server on Debian 12 or
+Ubuntu 22.04 / 24.04.  It will:
+
+  • install PostgreSQL, Redis, Postfix, Dovecot, Rspamd, ClamAV and nginx
+  • build and install the Alt8Mail release and systemd services
+  • create the first mail domain, owner and System Control account
+  • request a Let's Encrypt certificate (or use a self-signed one)
+  • configure Fail2Ban and the firewall
+
+Requirements:
+  • root access on a fresh supported host
+  • at least 2 GB RAM and 20 GB free disk
+  • DNS for the mail domain and hostname
+  • ports 25/80/443/587/993/995/4190/8808 reachable
+
+Logs:  ${A8M_LOG_DIR:-/var/log/a8m}
+State: /var/lib/a8m/install.state
+
+This installer targets a fresh host.  It does not upgrade the operating
+system beyond the distribution package repositories.
+
+EOF
+  if [[ "${A8M_NONINTERACTIVE:-0}" == "1" ]]; then
+    if [[ "${A8M_YES:-0}" != "1" ]]; then
+      ui_err "Non-interactive installation requires --yes after reviewing this screen."
+      exit 2
+    fi
+    printf 'Non-interactive mode: continuing.\n'
+    return 0
+  fi
+  local answer
+  read -r -p "Continue? (y/N) " answer || true
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *) printf 'Installation cancelled.\n'; exit 0 ;;
+  esac
+}
 
 # Whiptail wrappers (fall back to plain text if whiptail absent)
 ui_msg() {
@@ -92,26 +141,37 @@ ui_menu() {  # ui_menu title prompt tag1 item1 tag2 item2 ...
   fi
 }
 
-# ---- Step banner (Virtualmin-style) -----------------------------------------
+# ---- Step banner (append-only; completed phases stay in the transcript) ----
 A8M_STEP=0; A8M_STEP_TOTAL=15
+A8M_PHASE_STEP=0; A8M_PHASE_LABEL=""
+A8M_COMPLETED_PHASES=()
+
 ui_step() {
   A8M_STEP=$((A8M_STEP+1))
-  local name="$1"
-  local bar=""; local i
-  for i in $(seq 1 "$A8M_STEP_TOTAL"); do
-    (( i <= A8M_STEP )) && bar+="█" || bar+="░"
+  A8M_PHASE_STEP=$A8M_STEP
+  A8M_PHASE_LABEL="$1"
+  printf '\n%s[▶] Phase %s of %s: %s%s\n' \
+    "$C_BLUE" "$A8M_STEP" "$A8M_STEP_TOTAL" "$1" "$C_RESET"
+  printf '%s  %s%s\n' "$C_GRAY" "$(printf '─%.0s' $(seq 1 72))" "$C_RESET"
+}
+
+ui_phase_done() {  # ui_phase_done "label" "seconds" ["already completed"]
+  local label="$1" elapsed="$2" suffix="${3:-}"
+  local extra=""
+  [[ -n "$suffix" ]] || extra=" in ${elapsed}s"
+  printf '%s[✓] Phase %s of %s: %s — %s%s%s\n' \
+    "$C_GREEN" "$A8M_PHASE_STEP" "$A8M_STEP_TOTAL" "$label" \
+    "${suffix:-completed}${extra}" "$C_RESET" ""
+  A8M_COMPLETED_PHASES+=("[✓] ${label} (${suffix:-completed}${extra})")
+}
+
+ui_summary() {
+  printf '\n%s%sInstallation summary%s\n' "$C_BOLD" "$C_BLUE" "$C_RESET"
+  local line
+  for line in "${A8M_COMPLETED_PHASES[@]}"; do
+    printf '  %s\n' "$line"
   done
-  if [[ -t 1 ]] && [[ "${A8M_QUIET:-0}" != "1" ]]; then
-    clear 2>/dev/null || true
-    printf '\n%s%s Alt8Mail Enterprise Installer %s%s\n' "$C_BOLD" "$C_BLUE" "$A8M_VERSION" "$C_RESET"
-    printf '%s┌────────────────────────────────────────────────────────────────────┐%s\n' "$C_GRAY" "$C_RESET"
-    printf '%s│%s %-2s/%-2s  %-40s %s%s│%s\n' \
-      "$C_GRAY" "$C_RESET" "$A8M_STEP" "$A8M_STEP_TOTAL" "$name" \
-      "$C_GREEN" "$bar" "$C_RESET"
-    printf '%s└────────────────────────────────────────────────────────────────────┘%s\n\n' "$C_GRAY" "$C_RESET"
-  else
-    printf '[%s/%s] %s\n' "$A8M_STEP" "$A8M_STEP_TOTAL" "$name"
-  fi
+  printf '\n'
 }
 
 # ---- Spinner for long ops ----------------------------------------------------

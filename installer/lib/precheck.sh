@@ -6,6 +6,7 @@ A8M_MIN_DISK_GB="${A8M_MIN_DISK_GB:-20}"
 
 precheck_all() {
   ui_step "Preflight checks"
+  local started=$SECONDS
   precheck_root
   precheck_os
   precheck_arch
@@ -14,7 +15,7 @@ precheck_all() {
   precheck_ram
   precheck_disk
   precheck_clean
-  ui_ok "All preflight checks passed."
+  ui_phase_done "Preflight checks" "$((SECONDS - started))"
 }
 
 precheck_root() {
@@ -121,9 +122,11 @@ precheck_bootstrap_tools() {
     command -v "$b" >/dev/null 2>&1 || missing+=("$b")
   done
   if (( ${#missing[@]} > 0 )); then
-    ui_info "Installing bootstrap tools: ${missing[*]}"
-    export DEBIAN_FRONTEND=noninteractive
-    run bootstrap -- apt-get update -y
-    run bootstrap -- apt-get install -y --no-install-recommends "${missing[@]}"
+    ui_task "Installing bootstrap tools: ${missing[*]}"
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
+    run_stream bootstrap -- apt-get -o DPkg::Lock::Timeout=300 update -y
+    run_stream bootstrap -- apt-get -o DPkg::Lock::Timeout=300 \
+      -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+      install -y --no-install-recommends "${missing[@]}"
   fi
 }

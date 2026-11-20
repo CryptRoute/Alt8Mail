@@ -2,10 +2,10 @@
 set -Eeuo pipefail
 
 phase_config() {
-  ui_step "Configuring mail services and application environment"
   local deploy="$A8M_SRC_DIR/deploy"
 
   # ---- Redis -------------------------------------------------------------
+  ui_task "Configuring Redis"
   install -d -m 0755 /etc/redis
   sed "s|__REDIS_PASSWORD__|$REDIS_PASSWORD|g" "$deploy/redis/a8m.conf" >/etc/redis/a8m.conf
   chmod 0640 /etc/redis/a8m.conf
@@ -16,6 +16,7 @@ phase_config() {
   run config -- systemctl restart redis-server || return 1
 
   # ---- Dovecot -----------------------------------------------------------
+  ui_task "Configuring Dovecot"
   command -v doveadm >/dev/null 2>&1 || { ui_err "doveadm is not installed"; return 1; }
   local master_hash
   master_hash="$(printf '%s\n%s\n' "$IMAP_MASTER_PASSWORD" "$IMAP_MASTER_PASSWORD" \
@@ -39,6 +40,7 @@ phase_config() {
   umask 027
 
   # ---- Postfix -----------------------------------------------------------
+  ui_task "Configuring Postfix"
   install -m 0644 /etc/postfix/main.cf "/etc/postfix/main.cf.pre-a8m-$(date +%Y%m%d%H%M%S)"
   sed -e "s|__MAIL_HOSTNAME__|$A8M_MAIL_HOSTNAME|g" \
       -e "s|__DOMAIN__|$A8M_DOMAIN|g" "$deploy/postfix/main.cf" >/etc/postfix/main.cf
@@ -62,6 +64,7 @@ phase_config() {
   [[ -n "$(postconf -h smtp_helo_name)" ]] || { ui_err "smtp_helo_name is empty"; return 1; }
 
   # ---- Rspamd and ClamAV -------------------------------------------------
+  ui_task "Configuring Rspamd and ClamAV"
   install -d -m 0755 /etc/rspamd/local.d /var/lib/rspamd/dkim
   install -m 0644 "$deploy/rspamd/antivirus.conf" /etc/rspamd/local.d/antivirus.conf
   install -m 0644 "$deploy/rspamd/dkim_signing.conf" /etc/rspamd/local.d/dkim_signing.conf
@@ -94,6 +97,7 @@ phase_config() {
   run config -- systemctl enable --now clamav-daemon || ui_warn "clamav-daemon will start after its first signature update"
 
   # ---- License and application environment -------------------------------
+  ui_task "Writing application, Control and update configuration"
   resolve_release_source || true
   # A source checkout does not carry deploy/release-license.env; the build
   # phase generates it inside the release tree. Pick up the vendor defaults
@@ -365,5 +369,5 @@ EOF
   export APP_LICENSE_FILE APP_LICENSE_PUBLIC_KEY APP_LICENSE_PUBLIC_KEY_ID
   export APP_LICENSE_PUBLIC_KEYS APP_LICENSE_TENANT APP_LICENSE_PORTAL_URL
   export APP_LICENSE_ALLOW_CONFIG_KEY
-  ui_ok "Mail services and application environment configured"
+  ui_task_ok "Mail services and application environment configured"
 }
