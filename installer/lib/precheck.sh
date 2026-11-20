@@ -122,10 +122,11 @@ precheck_bootstrap_tools() {
     command -v "$b" >/dev/null 2>&1 || missing+=("$b")
   done
   if (( ${#missing[@]} > 0 )); then
-    ui_task "Installing bootstrap tools: ${missing[*]}"
     export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
-    run_stream bootstrap -- apt-get -o DPkg::Lock::Timeout=300 update -y
-    run_stream bootstrap -- apt-get -o DPkg::Lock::Timeout=300 \
+    run_spin bootstrap "Refreshing package indexes" -- \
+      apt-get -o DPkg::Lock::Timeout=300 update -y
+    run_spin bootstrap "Installing bootstrap tools" -- \
+      apt-get -o DPkg::Lock::Timeout=300 \
       -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
       install -y --no-install-recommends "${missing[@]}"
   fi

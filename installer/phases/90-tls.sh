@@ -76,8 +76,8 @@ phase_tls() {
   run tls -- systemctl reload nginx || return 1
 
   if [[ "$tls_attempt" -eq 1 ]]; then
-    ui_task "Requesting a Let's Encrypt certificate"
-    if run_stream tls -- certbot certonly --webroot -w /var/www/certbot \
+    if run_spin tls "Requesting a Let's Encrypt certificate" -- \
+        certbot certonly --webroot -w /var/www/certbot \
         -d "$A8M_MAIL_HOSTNAME" -d "$A8M_DOMAIN" --cert-name "$A8M_MAIL_HOSTNAME" \
         --email "$A8M_TLS_EMAIL" --agree-tos --no-eff-email --non-interactive; then
       a8m_copy_letsencrypt_cert || return 1

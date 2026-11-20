@@ -1,5 +1,5 @@
 /* Domains, mailboxes, aliases and import views. */
-import * as ui from './ui.js?v=3.9.8.5';
+import * as ui from './ui.js?v=3.9.8.6';
 
 const esc = ui.esc;
 const fmt = {

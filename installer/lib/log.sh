@@ -45,22 +45,46 @@ run_show() {
   return "${PIPESTATUS[0]}"
 }
 
-# Stream command output to the terminal and the phase log. Used for package
-# installation and builds so a long-running phase never looks frozen.
-run_stream() {
-  local phase="$1"; shift
+# Run a command quietly and keep a single compact spinner/elapsed line visible.
+# The command's output belongs in the phase log; only a failure tail is shown.
+run_spin() {  # run_spin <phase> <message> -- cmd...
+  local phase="$1" msg="$2"; shift 2
   [[ "${1:-}" == "--" ]] && shift
   local plog="$A8M_LOG_DIR/${phase}.log"
-  local rc=0
-  log_write "$phase" "exec(stream): $*"
-  set +e
-  "$@" 2>&1 | tee -a "$plog"
-  rc=${PIPESTATUS[0]}
-  set -e
+  local rc=0 started=$SECONDS
+  log_write "$phase" "exec(spin): $*"
+  if [[ ! -t 1 ]]; then
+    ui_task "$msg"
+    if "$@" >>"$plog" 2>&1; then
+      log_write "$phase" "ok: $*"
+      ui_task_ok "$msg"
+      return 0
+    fi
+    rc=$?
+    log_write "$phase" "FAIL($rc): $*"
+    ui_err "$msg failed (see $plog)"
+    tail -n 25 "$plog" >&2 || true
+    return "$rc"
+  fi
+
+  "$@" >>"$plog" 2>&1 &
+  local pid=$! frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏') i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    printf '\r\033[K  %s%s%s %s (%ss)' \
+      "$C_BLUE" "${frames[i % ${#frames[@]}]}" "$C_RESET" "$msg" "$((SECONDS - started))"
+    i=$((i + 1))
+    sleep 0.12
+  done
+  if wait "$pid"; then rc=0; else rc=$?; fi
+  printf '\r\033[K'
   if (( rc == 0 )); then
     log_write "$phase" "ok: $*"
-  else
-    log_write "$phase" "FAIL($rc): $*"
+    ui_task_ok "$msg ($((SECONDS - started))s)"
+    return 0
   fi
+  log_write "$phase" "FAIL($rc): $*"
+  ui_err "$msg failed (see $plog)"
+  tail -n 25 "$plog" >&2 || true
   return "$rc"
 }
+

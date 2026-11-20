@@ -13,10 +13,9 @@ phase_mailstack() {
   echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections
   echo "postfix postfix/mailname string ${A8M_MAIL_HOSTNAME}" | debconf-set-selections
 
-  ui_task "Installing Postfix, Dovecot, Rspamd, ClamAV, PostgreSQL, Redis and nginx"
   # shellcheck disable=SC2046
-  run_stream mailstack -- apt-get -o DPkg::Lock::Timeout=300 \
+  run_spin mailstack "Installing the mail stack" -- \
+    apt-get -o DPkg::Lock::Timeout=300 \
     -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
     install -y --no-install-recommends $(distro_mailstack_pkgs) || return 1
-  ui_task_ok "Mail stack packages installed"
 }

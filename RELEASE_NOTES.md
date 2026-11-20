@@ -1,3 +1,19 @@
+# Alt8Mail 3.9.8.6
+
+Release date: 2026-11-20. Clean installer progress display.
+
+## 3.9.8.6 installer display
+
+- Package installation, repository refreshes, the release build and certbot
+  now run behind a single compact spinner with elapsed time. Their verbose
+  output goes to the phase log instead of flooding the terminal.
+- The screen keeps the phase headers, task lines and green completion lines;
+  there is no background package-manager noise during a normal install.
+- On failure, only the last 25 log lines are printed, followed by the phase
+  error and log path.
+- Welcome screen, append-only phase transcript and non-Enterprise branding
+  remain from 3.9.8.5.
+
 # Alt8Mail 3.9.8.5
 
 Release date: 2026-11-20. Installer experience and progress reporting.

@@ -17,7 +17,6 @@ phase_repos() {
     chmod 0644 "$key"
   fi
   printf 'deb [signed-by=%s] https://rspamd.com/apt-stable/ %s main\n' "$key" "$codename" >"$list"
-  ui_task "Refreshing indexes from the Rspamd repository"
-  run_stream repos -- apt-get -o DPkg::Lock::Timeout=300 update -y || return 1
-  ui_task_ok "Rspamd repository configured"
+  run_spin repos "Refreshing indexes from the Rspamd repository" -- \
+    apt-get -o DPkg::Lock::Timeout=300 update -y || return 1
 }

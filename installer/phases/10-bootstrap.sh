@@ -6,14 +6,13 @@ phase_bootstrap() {
   export NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
 
   if [[ "${A8M_SKIP_PACKAGES:-0}" != "1" ]]; then
-    ui_task "Refreshing package indexes (this can take a minute)"
-    run_stream bootstrap -- apt-get -o DPkg::Lock::Timeout=300 update -y || return 1
-    ui_task "Installing base packages"
+    run_spin bootstrap "Refreshing package indexes" -- \
+      apt-get -o DPkg::Lock::Timeout=300 update -y || return 1
     # shellcheck disable=SC2046
-    run_stream bootstrap -- apt-get -o DPkg::Lock::Timeout=300 \
+    run_spin bootstrap "Installing base packages" -- \
+      apt-get -o DPkg::Lock::Timeout=300 \
       -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
       install -y --no-install-recommends $(distro_base_pkgs) || return 1
-    ui_task_ok "Base packages installed"
   else
     ui_warn "Skipping apt package installation by request"
   fi
@@ -27,5 +26,5 @@ phase_bootstrap() {
   fi
   printf '%s\n' "$A8M_DOMAIN" >/etc/mailname
   install -d -m 0755 /var/www/certbot /etc/letsencrypt /var/lib/letsencrypt
-  ui_ok "Base packages and host identity configured"
+  ui_task_ok "Host identity configured"
 }

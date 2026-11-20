@@ -60,10 +60,8 @@ phase_build() {
   export GOMAXPROCS="${GOMAXPROCS:-1}"
   export PATH="/usr/local/go/bin:$PATH"
 
-  ui_task "Compiling Alt8Mail ${A8M_VERSION}; this can take several minutes"
-  if ! run_stream build -- bash "$src_dir/scripts/build-release.sh" "$A8M_VERSION" "$build_root"; then
-    ui_err "The release build failed. Last 30 log lines:"
-    tail -n 30 "$A8M_LOG_DIR/build.log" >&2 || true
+  if ! run_spin build "Compiling Alt8Mail ${A8M_VERSION}" -- \
+    bash "$src_dir/scripts/build-release.sh" "$A8M_VERSION" "$build_root"; then
     return 1
   fi
   A8M_RELEASE_SOURCE="$build_root/alt8mail-$A8M_VERSION"
