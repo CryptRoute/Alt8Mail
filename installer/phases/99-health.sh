@@ -8,15 +8,14 @@ phase_health() {
     postfix rspamd clamav-daemon clamav-freshclam nginx fail2ban cron chrony
     a8m-server a8m-admin alt8mail-control)
 
-  local unit
+  local unit enabled_state
   for unit in "${units[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
-    if systemctl is-enabled --quiet "$unit"; then
-      ui_ok "service $unit: enabled"
-    else
-      ui_err "service $unit: not enabled at boot"
-      failed=1
-    fi
+    enabled_state="$(systemctl is-enabled "$unit" 2>/dev/null || true)"
+    case "$enabled_state" in
+      enabled|enabled-runtime) ui_ok "service $unit: enabled" ;;
+      *) ui_err "service $unit: not enabled at boot"; failed=1 ;;
+    esac
     if systemctl is-active --quiet "$unit"; then
       ui_ok "service $unit: active"
     elif [[ "$unit" == clamav-* ]]; then
