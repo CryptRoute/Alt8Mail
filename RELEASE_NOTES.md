@@ -1,3 +1,33 @@
+# Alt8Mail 3.9.8.4
+
+Release date: 2026-11-20. Installer rewrite, release packaging and uninstaller
+fixes.
+
+## 3.9.8.4 installer
+
+- **The modular installer is now complete and packaged in the release.**
+  `install.sh` invokes `installer/main.sh`, and release tarballs now include
+  the whole `installer/` tree plus `uninstall.sh`.
+- **Release layout is correct.** The installer builds through
+  `scripts/build-release.sh`, installs into `/opt/a8m/releases/<version>`,
+  maintains `current`/`bin`/`admin`/`app` links, installs the real
+  `deploy/systemd` units and starts the correct `a8m-admin-server` binary as
+  the unprivileged `a8m` user.
+- **Full provisioning is restored.** The phases create the `a8m` and `vmail`
+  users, secrets, `app.env`, `control.env`, PostgreSQL roles and grants,
+  migrations, Dovecot/Postfix/Rspamd/ClamAV/Redis configuration, nginx and
+  TLS, the first tenant/owner/Control account, Fail2Ban and UFW.
+- **PostgreSQL is detected, not assumed.** Debian 12 (15), Ubuntu 22.04 (14)
+  and Ubuntu 24.04 (16) are supported, and every monitored unit is enabled at
+  boot.
+- **The uninstaller mirrors the installed footprint.** It stops the timers and
+  office agent, drops the database and roles, removes Alt8Mail units, nginx
+  sites, Fail2Ban/sysctl/Redis fragments and application directories, while
+  preserving `/var/vmail`, `/srv/a8m-storage`, PostgreSQL data, logs and
+  backups.
+- `--non-interactive`, `--yes`, `--dry-run`, `--force` and the resume journal
+  now behave consistently without opening whiptail prompts.
+
 # Alt8Mail 3.9.8.3
 
 Release date: 2026-11-20. Licensing, service supervision and community

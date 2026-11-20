@@ -44,7 +44,7 @@ func licenseEnvResolutionBlock(t *testing.T, source string) string {
 // the exact shipped lines and asserts the shared default path and empty
 // key/tenant.
 func TestInstallScriptPreservesLicenseSettings(t *testing.T) {
-	source := readRepositoryScript(t, "install.sh")
+	source := readRepositoryScript(t, filepath.Join("installer", "phases", "60-config.sh"))
 	for _, want := range []string{
 		`PRESERVE_ALT8MAIL_LICENSE_FILE=""`,
 		`PRESERVE_ALT8MAIL_LICENSE_PUBLIC_KEY=""`,

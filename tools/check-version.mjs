@@ -7,7 +7,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const version = read("VERSION").trim();
 const problems = [];
 
-if (!/^\d+\.\d+\.\d+$/.test(version)) problems.push(`VERSION is not semver: ${version}`);
+if (!/^\d+\.\d+\.\d+(\.\d+)?$/.test(version)) problems.push(`VERSION is not semver: ${version}`);
 
 const pkg = JSON.parse(read("package.json"));
 if (pkg.version !== version) problems.push(`package.json is ${pkg.version}, expected ${version}`);

@@ -200,7 +200,7 @@ func TestLegacyFail2BanHostWideRules(t *testing.T) {
 }
 
 func TestInstallerAndUpdaterInstallPortScopedAction(t *testing.T) {
-	installer, err := os.ReadFile(filepath.Join("..", "..", "..", "install.sh"))
+	installer, err := os.ReadFile(filepath.Join("..", "..", "..", "installer", "phases", "97-ufw.sh"))
 	if err != nil {
 		t.Skipf("installer is outside the module test working directory: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestInstallerAndUpdaterInstallPortScopedAction(t *testing.T) {
 	if err != nil {
 		t.Skipf("updater is outside the module test working directory: %v", err)
 	}
-	for name, text := range map[string]string{"install.sh": string(installer), "alt8mail-update.sh": string(updater)} {
+	for name, text := range map[string]string{"installer/phases/97-ufw.sh": string(installer), "alt8mail-update.sh": string(updater)} {
 		if !strings.Contains(text, "deploy/fail2ban/action.d/a8m-ufw-port.conf") {
 			t.Errorf("%s does not install the port-scoped Fail2Ban action", name)
 		}

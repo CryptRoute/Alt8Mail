@@ -77,7 +77,7 @@ if [[ ! -d "$ROOT/backend" || ! -d "$ROOT/public" ]]; then
 fi
 
 rm -rf "$STAGE" "$OUT_DIR/$NAME.tar.gz" "$OUT_DIR/$NAME.tar.gz.sha256"
-mkdir -p "$STAGE/bin" "$STAGE/public" "$STAGE/admin" "$STAGE/migrations" "$STAGE/deploy" "$STAGE/scripts"
+mkdir -p "$STAGE/bin" "$STAGE/public" "$STAGE/admin" "$STAGE/migrations" "$STAGE/deploy" "$STAGE/scripts" "$STAGE/installer"
 
 echo "building Alt8Mail $VERSION for $GOOS_TARGET/$GOARCH_TARGET"
 (
@@ -101,11 +101,14 @@ cp -a "$ROOT/admin/." "$STAGE/admin/"
 cp -a "$ROOT/backend/migrations/." "$STAGE/migrations/"
 cp -a "$ROOT/deploy/." "$STAGE/deploy/"
 cp -a "$ROOT/scripts/." "$STAGE/scripts/"
-install -m 0644 "$ROOT/install.sh" "$STAGE/install.sh"
+cp -a "$ROOT/installer/." "$STAGE/installer/"
+install -m 0755 "$ROOT/install.sh" "$STAGE/install.sh"
+install -m 0755 "$ROOT/uninstall.sh" "$STAGE/uninstall.sh"
 printf '%s
 ' "$VERSION" > "$STAGE/VERSION"
 chmod 0644 "$STAGE/VERSION"
-chmod 0755 "$STAGE/install.sh" "$STAGE/scripts/"*.sh
+chmod 0755 "$STAGE/install.sh" "$STAGE/uninstall.sh" "$STAGE/scripts/"*.sh
+chmod 0755 "$STAGE/installer/main.sh" "$STAGE/installer/lib/"*.sh "$STAGE/installer/phases/"*.sh
 
 # Keep the control-plane config template with the deployment assets.
 install -d "$STAGE/deploy/control"
