@@ -27,6 +27,10 @@ fixes.
   backups.
 - `--non-interactive`, `--yes`, `--dry-run`, `--force` and the resume journal
   now behave consistently without opening whiptail prompts.
+- Phrase translation now prefers the most specific catalog pattern, so combined
+  audit phrases such as “Ruleset saved · revision 4 · vacation responder
+  enabled” translate in full. The seat-policy rollback also tolerates the
+  soft-licensing migration that removes its table.
 
 # Alt8Mail 3.9.8.3
 

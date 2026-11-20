@@ -40,6 +40,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME is already published; leaving its signed assets in place."
+            exit 0
+          fi
           gh release create "$GITHUB_REF_NAME" \
             "dist/alt8mail-$version.tar.gz" \
             "dist/alt8mail-$version.tar.gz.sha256" \

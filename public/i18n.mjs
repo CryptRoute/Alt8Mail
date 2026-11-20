@@ -243,12 +243,15 @@ function buildPhrasePatterns(map) {
     });
     if (!names.length) continue;
     try {
-      patterns.push({ regex: new RegExp(`^${regexSource}$`, "i"), names, translation });
+      patterns.push({ regex: new RegExp(`^${regexSource}$`, "i"), names, translation, source });
     } catch {
       // Ignore malformed catalog entries; they fall back to the source text.
     }
   }
-  return patterns;
+  // A longer pattern is more specific. Without this, the short
+  // "Ruleset saved · revision {value}" pattern can consume the whole
+  // "… · vacation responder enabled" phrase as its value.
+  return patterns.sort((left, right) => right.source.length - left.source.length);
 }
 
 function phraseText(source, vars, depth) {
