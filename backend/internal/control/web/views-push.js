@@ -1,5 +1,5 @@
 /* Browser push settings for webmail notifications. */
-import * as ui from './ui.js?v=3.9.8.8';
+import * as ui from './ui.js?v=3.9.8.9';
 
 const esc = ui.esc;
 

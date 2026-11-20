@@ -199,6 +199,10 @@ fi
 
 F=""; [[ "$A8M_FORCE" == "1" ]] && F="--force"
 
+# Apply the requested identity before preflight dialogs so every subsequent
+# backtitle and prompt shows the hostname being installed, not the old one.
+apply_install_hostname "$A8M_MAIL_HOSTNAME" "$A8M_DOMAIN"
+
 precheck_all
 
 phase_run bootstrap  phase_bootstrap  "$F"

@@ -120,3 +120,27 @@ resolve_release_source() {
 psql_postgres() {
   runuser -u postgres -- env "PGOPTIONS=${PGOPTIONS:-}" psql "$@"
 }
+
+apply_install_hostname() {  # apply_install_hostname <hostname> [domain]
+  local new="$1" domain="${2:-}"
+  [[ -n "$new" ]] || return 0
+  if command -v hostnamectl >/dev/null 2>&1 \
+      && hostnamectl set-hostname "$new" >/dev/null 2>&1; then
+    :
+  else
+    printf '%s\n' "$new" >/etc/hostname 2>/dev/null || true
+    hostname "$new" >/dev/null 2>&1 || true
+  fi
+  if [[ -f /etc/hosts ]]; then
+    sed -i '/^127\.0\.1\.1[[:space:]]/d' /etc/hosts
+    if [[ -n "$domain" ]]; then
+      printf '127.0.1.1 %s %s\n' "$new" "$domain" >>/etc/hosts
+    else
+      printf '127.0.1.1 %s\n' "$new" >>/etc/hosts
+    fi
+  fi
+  HOSTNAME="$new"
+  export HOSTNAME
+  A8M_BACKTITLE="Alt8Mail ${A8M_VERSION:-}  |  https://alt8mail.com  |  ${new}"
+  export A8M_BACKTITLE
+}

@@ -109,11 +109,14 @@ SQL
     return 1
   fi
   if [[ -f "$A8M_SRC_DIR/deploy/postgresql/grants.sql" ]]; then
-    if ! psql_postgres -d a8m -v ON_ERROR_STOP=1 -q \
-      -f "$A8M_SRC_DIR/deploy/postgresql/grants.sql"; then
+    local grants_file=/tmp/a8m-grants.sql
+    install -m 0644 "$A8M_SRC_DIR/deploy/postgresql/grants.sql" "$grants_file"
+    if ! psql_postgres -d a8m -v ON_ERROR_STOP=1 -q -f "$grants_file"; then
+      rm -f "$grants_file"
       ui_err "Could not apply PostgreSQL grants"
       return 1
     fi
+    rm -f "$grants_file"
   fi
   ui_ok "PostgreSQL ready; migrations applied"
 }

@@ -18,12 +18,7 @@ phase_bootstrap() {
   fi
 
   run bootstrap -- timedatectl set-timezone UTC || ui_warn "Could not set timezone to UTC"
-  run bootstrap -- hostnamectl set-hostname "$A8M_MAIL_HOSTNAME" \
-    || ui_warn "Could not set the system hostname"
-  if ! grep -qE "^127\\.0\\.1\\.1[[:space:]]+$A8M_MAIL_HOSTNAME([[:space:]]|$)" /etc/hosts; then
-    sed -i '/^127\.0\.1\.1[[:space:]]/d' /etc/hosts
-    printf '127.0.1.1 %s %s\n' "$A8M_MAIL_HOSTNAME" "$A8M_DOMAIN" >>/etc/hosts
-  fi
+  apply_install_hostname "$A8M_MAIL_HOSTNAME" "$A8M_DOMAIN"
   printf '%s\n' "$A8M_DOMAIN" >/etc/mailname
   install -d -m 0755 /var/www/certbot /etc/letsencrypt /var/lib/letsencrypt
   ui_task_ok "Host identity configured"

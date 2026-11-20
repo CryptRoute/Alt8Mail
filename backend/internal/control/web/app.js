@@ -1,6 +1,6 @@
 /* Alt8Mail System Control — application shell, authentication and core views. */
-import * as ui from './ui.js?v=3.9.8.8';
-import * as i18n from './i18n.js?v=3.9.8.8';
+import * as ui from './ui.js?v=3.9.8.9';
+import * as i18n from './i18n.js?v=3.9.8.9';
 import {
   renderDomains, renderDomainDetail, renderMailboxes, renderMailboxDetail,
   renderAliases, renderImports,
@@ -16,17 +16,17 @@ import { renderWebPush } from './views-push.js';
 import { renderWebNet } from './views-webnet.js';
 import { renderSystem } from './views-system.js';
 import { renderLicense } from './views-license.js';
-import { renderAddons } from './views-addons.js?v=3.9.8.8';
-import { renderOffice } from './views-office.js?v=3.9.8.8';
-import { renderStorage } from './views-storage.js?v=3.9.8.8';
-import { renderMailOAuth } from './views-mail-oauth.js?v=3.9.8.8';
-import { renderLanguages } from './views-languages.js?v=3.9.8.8';
+import { renderAddons } from './views-addons.js?v=3.9.8.9';
+import { renderOffice } from './views-office.js?v=3.9.8.9';
+import { renderStorage } from './views-storage.js?v=3.9.8.9';
+import { renderMailOAuth } from './views-mail-oauth.js?v=3.9.8.9';
+import { renderLanguages } from './views-languages.js?v=3.9.8.9';
 import {
   renderServices, renderPorts, renderPostfix, renderLogs, renderBackups,
   renderCron, renderServer, renderFirewall, renderDatabase, renderUpdates, renderTerminal,
 } from './views-infra.js';
 
-const APP_VERSION = '3.9.8.8';
+const APP_VERSION = '3.9.8.9';
 
 // A stale admin binary can lack the embedded brand artwork. Hide the broken
 // image rather than letting the browser paint a missing-image glyph.

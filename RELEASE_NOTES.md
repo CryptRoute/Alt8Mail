@@ -1,3 +1,21 @@
+# Alt8Mail 3.9.8.9
+
+Release date: 2026-11-20. Hostname and PostgreSQL grants fixes.
+
+## 3.9.8.9 installer
+
+- **The requested hostname is applied before preflight.** The installer updates
+  the system hostname, `/etc/hostname` and `/etc/hosts`, and refreshes the
+  whiptail backtitle as soon as the configuration is accepted, so subsequent
+  screens show the host being installed instead of the provider's old name.
+- **PostgreSQL grants are copied to `/tmp` before `psql -f` runs.** The
+  `postgres` account cannot traverse `/root`, which caused
+  `grants.sql: Permission denied` after all migrations had applied.
+- Expected migration notices remain suppressed and the migration client runs
+  outside `/root`.
+- Includes the 3.9.8.8 PostgreSQL output cleanup and all earlier installer
+  fixes.
+
 # Alt8Mail 3.9.8.8
 
 Release date: 2026-11-20. Clean PostgreSQL migration output.
