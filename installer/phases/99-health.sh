@@ -11,8 +11,16 @@ phase_health() {
   local unit
   for unit in "${units[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
+    if systemctl is-enabled --quiet "$unit"; then
+      ui_ok "service $unit: enabled"
+    else
+      ui_err "service $unit: not enabled at boot"
+      failed=1
+    fi
     if systemctl is-active --quiet "$unit"; then
       ui_ok "service $unit: active"
+    elif [[ "$unit" == clamav-* ]]; then
+      ui_warn "service $unit is still starting or updating signatures"
     else
       ui_err "service $unit: not active"
       failed=1
