@@ -10,7 +10,7 @@ phase_tenant() {
   [[ -x "$release/bin/a8m-mailprovision" ]] \
     || { ui_err "$release/bin/a8m-mailprovision is missing"; return 1; }
 
-  if ! runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q \
+  if ! psql_postgres -d a8m -v ON_ERROR_STOP=1 -q \
     -v tenant_name="$A8M_TENANT_NAME" -v tenant_slug="$A8M_TENANT_SLUG" \
     -v domain="$A8M_DOMAIN" -v email="$A8M_ADMIN_EMAIL" -v name="$A8M_ADMIN_NAME" <<'SQL'
 INSERT INTO tenants (slug, name, plan, region, billing_email)
@@ -49,7 +49,7 @@ SQL
   set +a
 
   local empty_web
-  empty_web="$(runuser -u postgres -- psql -d a8m -Atqc \
+  empty_web="$(psql_postgres -d a8m -Atqc \
     "SELECT COALESCE(password_hash,'') = '' FROM users WHERE email='$A8M_ADMIN_EMAIL'")"
   if [[ "$empty_web" == "t" ]]; then
     printf '%s\n' "$OWNER_WEB_PASSWORD" | "$release/bin/a8m-admin" -email "$A8M_ADMIN_EMAIL" >/dev/null \
@@ -57,7 +57,7 @@ SQL
   fi
 
   local empty_mail
-  empty_mail="$(runuser -u postgres -- psql -d a8m -Atqc \
+  empty_mail="$(psql_postgres -d a8m -Atqc \
     "SELECT COALESCE(mail_password_hash,'') = '' FROM users WHERE email='$A8M_ADMIN_EMAIL'")"
   if [[ "$empty_mail" == "t" ]]; then
     local mail_hash
@@ -65,14 +65,14 @@ SQL
       | doveadm pw -s SHA512-CRYPT | tr -d '\r' \
       | awk '/^\{SHA512-CRYPT\}/ && !found {print; found=1}')"
     [[ -n "$mail_hash" ]] || { ui_err "Could not create the owner mailbox password hash"; return 1; }
-    runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q \
+    psql_postgres -d a8m -v ON_ERROR_STOP=1 -q \
       -v hash="$mail_hash" -v email="$A8M_ADMIN_EMAIL" <<'SQL'
 UPDATE users SET mail_password_hash = :'hash' WHERE email = :'email';
 SQL
   fi
 
   local app_states
-  app_states="$(runuser -u postgres -- psql -d a8m -Atqc \
+  app_states="$(psql_postgres -d a8m -Atqc \
     "SELECT COUNT(*) FROM app_states s JOIN users u ON u.id=s.user_id WHERE u.email='$A8M_ADMIN_EMAIL'")"
   if [[ "$app_states" == "0" ]]; then
     "$release/bin/a8m-inituser" -email "$A8M_ADMIN_EMAIL" >/dev/null \
@@ -87,7 +87,7 @@ SQL
   . "$A8M_CONFIG_ROOT/control.env"
   set +a
   local control_exists
-  control_exists="$(runuser -u postgres -- psql -d a8m -Atqc \
+  control_exists="$(psql_postgres -d a8m -Atqc \
     "SELECT COUNT(*) FROM control.admin_users WHERE email='$A8M_CONTROL_EMAIL'")"
   if [[ "$control_exists" == "0" ]]; then
     printf '%s\n' "$CONTROL_ADMIN_PASSWORD" \
@@ -97,7 +97,7 @@ SQL
       || { ui_err "Could not create the Control superadmin"; return 1; }
   fi
 
-  if ! runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q \
+  if ! psql_postgres -d a8m -v ON_ERROR_STOP=1 -q \
     -v host="$A8M_MAIL_HOSTNAME" -v webmail="https://$A8M_MAIL_HOSTNAME" \
     -v public_ip="$A8M_PUBLIC_IP" -v mail_from="postmaster@$A8M_DOMAIN" \
     -v ssl_email="$A8M_TLS_EMAIL" <<'SQL'
@@ -127,7 +127,7 @@ SQL
   systemctl try-restart rspamd >/dev/null 2>&1 || true
 
   local dkim_record
-  dkim_record="$(runuser -u postgres -- psql -d a8m -Atqc \
+  dkim_record="$(psql_postgres -d a8m -Atqc \
     "SELECT dkim_record FROM mail_domains WHERE domain='$A8M_DOMAIN'")"
   umask 077
   if [[ ! -s /root/alt8mail-initial-credentials.txt ]]; then

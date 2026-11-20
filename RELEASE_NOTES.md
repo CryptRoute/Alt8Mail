@@ -1,3 +1,18 @@
+# Alt8Mail 3.9.8.8
+
+Release date: 2026-11-20. Clean PostgreSQL migration output.
+
+## 3.9.8.8 installer
+
+- The installer changes to `/tmp` before running PostgreSQL client commands.
+  The `postgres` account can no longer emit “could not change directory to
+  …: Permission denied” for every migration.
+- PostgreSQL client messages are lowered to warnings for installer commands,
+  suppressing expected `NOTICE` lines such as “extension already exists” and
+  “constraint does not exist, skipping”. Real errors still stop the phase.
+- Includes the 3.9.8.7 prebuilt binary mode fix and all 3.9.8.6 progress,
+  welcome and branding changes.
+
 # Alt8Mail 3.9.8.7
 
 Release date: 2026-11-20. Prebuilt release mode fix.

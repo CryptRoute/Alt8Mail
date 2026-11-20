@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 phase_postgres() {
+  export PGOPTIONS="-c client_min_messages=warning"
   local pg_major="${A8M_PG_MAJOR:?PostgreSQL major version is not set}"
   local pg_conf_dir="/etc/postgresql/${pg_major}/main/conf.d"
   local pg_conf="/etc/postgresql/${pg_major}/main/postgresql.conf"
@@ -20,7 +21,7 @@ phase_postgres() {
   run postgres -- systemctl restart postgresql || return 1
 
   ui_task "Creating database roles and the a8m database"
-  if ! runuser -u postgres -- psql -v ON_ERROR_STOP=1 -q <<SQL
+  if ! psql_postgres -v ON_ERROR_STOP=1 -q <<SQL
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'a8m_app') THEN
@@ -43,10 +44,10 @@ SQL
     return 1
   fi
 
-  if ! runuser -u postgres -- psql -Atqc "SELECT 1 FROM pg_database WHERE datname='a8m'" | grep -qx 1; then
+  if ! psql_postgres -Atqc "SELECT 1 FROM pg_database WHERE datname='a8m'" | grep -qx 1; then
     runuser -u postgres -- createdb -O a8m_app a8m || return 1
   fi
-  if ! runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q \
+  if ! psql_postgres -d a8m -v ON_ERROR_STOP=1 -q \
     -c 'CREATE EXTENSION IF NOT EXISTS citext; CREATE EXTENSION IF NOT EXISTS pgcrypto;'; then
     ui_err "Could not create the PostgreSQL extensions"
     return 1
@@ -73,7 +74,7 @@ SQL
   for migration in "$migration_tmp"/*.sql; do
     [[ -f "$migration" ]] || continue
     version="$(basename "$migration" .sql)"
-    applied="$(runuser -u postgres -- psql -d a8m -Atqc \
+    applied="$(psql_postgres -d a8m -Atqc \
       "SELECT COUNT(*) FROM schema_migrations WHERE version = '$version'" 2>/dev/null || echo 0)"
     if [[ "$applied" == "1" ]]; then
       log_write postgres "migration $version already applied"
@@ -83,7 +84,7 @@ SQL
     if (( pending_migrations == 1 || pending_migrations % 10 == 0 )); then
       printf '  → migrations: %s/%s applied\n' "$pending_migrations" "$total_migrations"
     fi
-    if ! runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q -f "$migration"; then
+    if ! psql_postgres -d a8m -v ON_ERROR_STOP=1 -q -f "$migration"; then
       ui_err "Migration failed: $version"
       rm -rf "$migration_tmp"
       return 1
@@ -91,7 +92,7 @@ SQL
   done
   rm -rf "$migration_tmp"
 
-  if ! runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q <<'SQL'
+  if ! psql_postgres -d a8m -v ON_ERROR_STOP=1 -q <<'SQL'
 DO $$
 DECLARE r record;
 BEGIN
@@ -108,7 +109,7 @@ SQL
     return 1
   fi
   if [[ -f "$A8M_SRC_DIR/deploy/postgresql/grants.sql" ]]; then
-    if ! runuser -u postgres -- psql -d a8m -v ON_ERROR_STOP=1 -q \
+    if ! psql_postgres -d a8m -v ON_ERROR_STOP=1 -q \
       -f "$A8M_SRC_DIR/deploy/postgresql/grants.sql"; then
       ui_err "Could not apply PostgreSQL grants"
       return 1

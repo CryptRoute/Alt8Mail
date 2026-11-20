@@ -116,3 +116,7 @@ resolve_release_source() {
   fi
   return 1
 }
+
+psql_postgres() {
+  runuser -u postgres -- env "PGOPTIONS=${PGOPTIONS:-}" psql "$@"
+}

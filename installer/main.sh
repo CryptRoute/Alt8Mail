@@ -113,6 +113,11 @@ A8M_VERSION="$(tr -d '[:space:]' < "$A8M_SRC_DIR/VERSION")"
   || { ui_err "Invalid VERSION: $A8M_VERSION"; exit 1; }
 export A8M_VERSION A8M_SRC_DIR
 
+# The installer runs as root, but PostgreSQL's client switches to the
+# postgres account. Keep the working directory somewhere that account can
+# read; every installer path is absolute.
+cd /tmp
+
 # Vendor defaults for licensing and update delivery.
 if [[ -f "$A8M_SRC_DIR/deploy/release-license.env" ]]; then
   # shellcheck disable=SC1091
