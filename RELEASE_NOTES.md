@@ -1,3 +1,22 @@
+# Alt8Mail 3.9.8.10
+
+Release date: 2026-11-20. License trust anchor and enterprise bundle fix.
+
+## 3.9.8.10 licensing
+
+- **The enterprise-capable binaries now compile the vendor license trust
+  anchor.** The private build previously omitted the public key, so after a
+  community-to-enterprise upgrade Control reported “Trust anchor: Not
+  configured” and refused license uploads even though the token was valid.
+- **Configured keys are accepted as a fallback on fresh installs.** The
+  installer writes `CONTROL_LICENSE_ALLOW_CONFIG_KEY=true` and
+  `ALT8MAIL_LICENSE_ALLOW_CONFIG_KEY=true` when no previous explicit value is
+  preserved, so a root-owned configured vendor key can verify a token if a
+  binary was built without the embedded anchor.
+- Existing deployments can recover without reinstalling by adding the public
+  key and `ALLOW_CONFIG_KEY=true` to `control.env`/`app.env`, then restarting
+  Control and the webmail.
+
 # Alt8Mail 3.9.8.9
 
 Release date: 2026-11-20. Hostname and PostgreSQL grants fixes.
