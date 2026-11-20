@@ -1,8 +1,8 @@
-# Alt8Mail 3.9.8.10
+# Alt8Mail 3.9.9
 
 Release date: 2026-11-20. License trust anchor and enterprise bundle fix.
 
-## 3.9.8.10 licensing
+## 3.9.9 licensing
 
 - **The enterprise-capable binaries now compile the vendor license trust
   anchor.** The private build previously omitted the public key, so after a
