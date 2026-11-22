@@ -1,0 +1,82 @@
+/*
+ * Alt8Mail Office — Collabora Online white-label layer.
+ *
+ * The Office agent mounts this file over the image's
+ * /usr/share/coolwsd/browser/dist/branding.css so branding fixes do not
+ * require rebuilding the Collabora image. Asset URLs stay relative to that
+ * directory and resolve against the image's existing images/ assets.
+ */
+
+:root {
+	--a8m-teal: #00c9bc;
+	--a8m-teal-dark: #00a99e;
+	--a8m-teal-darker: #00877e;
+	--a8m-teal-light: #8fe8e1;
+	--a8m-orange: #fdab0a;
+	--a8m-navy: #011832;
+
+	/* Re-map the engine's primary accent to the Alt8Mail teal. */
+	--color-primary: var(--a8m-teal);
+	--color-primary-dark: var(--a8m-teal-dark);
+	--color-primary-darker: var(--a8m-teal-darker);
+	--color-primary-lighter: var(--a8m-teal-light);
+	--color-primary-text: var(--a8m-navy);
+	--color-warning: var(--a8m-orange);
+}
+
+[data-theme='dark'] {
+	--color-primary: var(--a8m-teal);
+	--color-primary-dark: var(--a8m-teal-dark);
+	--color-primary-darker: var(--a8m-teal-darker);
+	--color-primary-lighter: var(--a8m-teal-light);
+	--color-primary-text: var(--a8m-navy);
+}
+
+/* The webmail editor header carries the Alt8Mail 8 icon. The Collabora
+   toolbar wordmark is intentionally hidden: it duplicated the product mark and
+   overflowed the notebookbar at common window sizes. */
+#toolbar-logo {
+	display: none !important;
+}
+
+/* About dialog: Alt8Mail wordmark, Alt8Mail icon, no vendor mark. */
+#about-dialog-header #integrator-logo {
+	width: 150px;
+	height: 36px;
+	background: url(images/alt8mail-logo-light.svg) no-repeat left center / contain;
+}
+
+[data-theme='dark'] #about-dialog-header #integrator-logo {
+	background-image: url(images/alt8mail-logo-dark.svg);
+}
+
+#about-dialog-header #product-name {
+	color: var(--a8m-navy);
+	font-weight: 750;
+	letter-spacing: -0.01em;
+}
+
+[data-theme='dark'] #about-dialog-header #product-name {
+	color: #fff;
+}
+
+#about-dialog-logos #product-logo {
+	background: url(images/alt8mail-icon.svg) no-repeat right center / 64px 58px;
+}
+
+#about-dialog-logos #lokit-logo {
+	display: none;
+}
+
+/* White-label rule: no Collabora marketing links in the product UI.
+   Attribution is preserved as text in the About dialog by branding.js. */
+a[href*='collaboraonline.com'],
+a[href*='collaboraoffice.com'],
+a[href*='collabora.com'] {
+	display: none !important;
+}
+
+/* The welcome carousel is disabled in coolwsd config; hide stale instances. */
+#user-welcome {
+	display: none !important;
+}

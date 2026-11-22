@@ -4,10 +4,12 @@
 package officeagent
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/x509"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -27,6 +29,9 @@ import (
 	"sync"
 	"time"
 )
+
+//go:embed branding.css
+var officeBrandingCSS []byte
 
 type Runner func(ctx context.Context, timeout time.Duration, name string, args ...string) (stdout, stderr string, err error)
 
@@ -1309,6 +1314,16 @@ func (s *Server) prepareOfficeDirs() error {
 		}
 		_ = os.Chown(dir, 1001, 1001)
 	}
+	brandingDir := filepath.Join(s.cfg.DataDir, "branding")
+	if err := os.MkdirAll(brandingDir, 0o755); err != nil {
+		return fmt.Errorf("could not prepare %s: %w", brandingDir, err)
+	}
+	brandingFile := filepath.Join(brandingDir, "branding.css")
+	if current, err := os.ReadFile(brandingFile); err != nil || !bytes.Equal(current, officeBrandingCSS) {
+		if err := os.WriteFile(brandingFile, officeBrandingCSS, 0o644); err != nil {
+			return fmt.Errorf("could not write %s: %w", brandingFile, err)
+		}
+	}
 	return nil
 }
 
@@ -1331,6 +1346,7 @@ func composeContents(engine, image, secret, adminPassword, container string, por
 	cacheDir := dataDir + "/cache"
 	logsDir := dataDir + "/logs"
 	officeDataDir := dataDir + "/data"
+	brandingFile := dataDir + "/branding/branding.css"
 	if normalizeEngine(engine) == officeEngineCollabora {
 		host, _ := publicHost(publicURL)
 		origin, _ := portalOrigin(portalURL)
@@ -1356,8 +1372,9 @@ func composeContents(engine, image, secret, adminPassword, container string, por
     volumes:
       - %s:/opt/cool/cache
       - %s:/var/log
+      - %s:/usr/share/coolwsd/browser/dist/branding.css:ro
       - %s:/usr/share/fonts/truetype/custom:ro
-`, image, container, port, aliasGroup, origin, host, adminPassword, cacheDir, logsDir, fontsDir)
+`, image, container, port, aliasGroup, origin, host, adminPassword, cacheDir, logsDir, brandingFile, fontsDir)
 	}
 	return fmt.Sprintf(`services:
   documentserver:

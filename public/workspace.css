@@ -1974,11 +1974,11 @@ body.popout .overlay { z-index: 120; }
   flex: none;
   display: grid;
   place-items: center;
+  overflow: hidden;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent-ink);
+  background: #011832;
 }
-.office-editor-mark svg { width: 15px; height: 15px; }
+.office-editor-mark img { width: 24px; height: 24px; object-fit: contain; display: block; }
 .office-editor-body { flex: 1; min-height: 0; position: relative; background: var(--surface); }
 .office-editor-frames { position: absolute; inset: 0; }
 .office-editor-body iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--surface); }

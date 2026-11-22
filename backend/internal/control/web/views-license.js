@@ -1,5 +1,5 @@
 /* System Control — offline license status, seat metering and token upload. */
-import * as ui from './ui.js?v=3.11.6';
+import * as ui from './ui.js?v=3.11.7';
 
 const esc = ui.esc;
 const fmt = {

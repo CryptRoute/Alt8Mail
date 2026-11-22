@@ -1,5 +1,5 @@
 /* Office engine lifecycle and feature flag (ONLYOFFICE or Collabora). */
-import * as ui from './ui.js?v=3.11.6';
+import * as ui from './ui.js?v=3.11.7';
 
 const esc = ui.esc;
 

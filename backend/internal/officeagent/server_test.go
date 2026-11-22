@@ -81,6 +81,7 @@ func TestComposeContentsCollabora(t *testing.T) {
 		`username: "admin"`,
 		`password: "admin-password"`,
 		"MKNOD",
+		"/var/lib/a8m-office/branding/branding.css:/usr/share/coolwsd/browser/dist/branding.css:ro",
 		"/var/lib/a8m-office/fonts:/usr/share/fonts/truetype/custom:ro",
 	} {
 		if !strings.Contains(text, expected) {
@@ -272,6 +273,11 @@ func TestStatusAndInstallWithFakeDocker(t *testing.T) {
 			if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 				t.Fatalf("expected prepared directory %s: %v", dir, err)
 			}
+		}
+		brandingFile := filepath.Join(temp, "office", "branding", "branding.css")
+		data, err := os.ReadFile(brandingFile)
+		if err != nil || !strings.Contains(string(data), "#toolbar-logo") {
+			t.Fatalf("expected branding override at %s: %v", brandingFile, err)
 		}
 	}
 }

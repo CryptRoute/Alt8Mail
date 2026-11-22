@@ -148,6 +148,18 @@ frame inside either origin:
 - `CheckFileInfo` returns the same validated origin as `PostMessageOrigin`, so
   the editor's postMessage bridge targets the iframe parent.
 
+## Editor shell and branding
+
+The webmail Office window opens maximized by default; an explicitly resized or
+moved window is preserved. The Alt8Mail 8 icon sits in the editor window header.
+The Collabora toolbar wordmark is hidden because it duplicated the product mark
+and overflowed the notebookbar. The About dialog keeps the full wordmark and
+mark.
+
+The agent writes `/var/lib/a8m-office/branding/branding.css` and mounts it over
+`/usr/share/coolwsd/browser/dist/branding.css`, so branding changes ship with
+the agent without rebuilding the Collabora image.
+
 On Debian/Ubuntu, the remote prerequisite step installs Docker from the
 distribution and downloads the Docker Compose v2 CLI plugin from Docker's
 GitHub release into `/usr/local/lib/docker/cli-plugins`. Debian 12 does not

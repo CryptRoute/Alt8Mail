@@ -1,3 +1,14 @@
+# Alt8Mail 3.11.7
+
+Release date: 2026-11-23. Enterprise editor shell and branding cleanup.
+
+## 3.11.7 Office editor shell
+
+- **The editor opens maximized by default.** Office documents are a workspace, not a popup. A windowed layout is honored only when the user has explicitly resized or moved the editor, and the maximize/restore button now reflects the active state.
+- **The Alt8Mail 8 icon replaces the duplicated full wordmark in the editor.** The 8 icon is placed in the editor window header; the Collabora toolbar wordmark is hidden. The About dialog keeps the full wordmark and mark, and the webmail app header is unchanged.
+- **Branding fixes no longer require rebuilding the engine image.** The Office agent writes `branding.css` into `/var/lib/a8m-office/branding/` and mounts it over the container's `/usr/share/coolwsd/browser/dist/branding.css`.
+- Added agent and Compose tests for the branding file and mount.
+
 # Alt8Mail 3.11.6
 
 Release date: 2026-11-23. Complete the webmail-origin fix for the Collabora editor postMessage bridge. Includes all 3.11.5 changes.

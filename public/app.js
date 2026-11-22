@@ -6515,7 +6515,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.11.6";
+const MAIL_PROVIDER_ASSET_VERSION = "3.11.7";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
@@ -19024,6 +19024,12 @@ function readOfficeEditorWindowState() {
     ? server
     : (localHasGeometry ? local : (server && typeof server === "object" ? server : {}));
   officeEditorWindow = { ...candidate };
+  const hasGeometry = ["left", "top", "width", "height"].some((key) => Number(officeEditorWindow[key]) > 0);
+  if (officeEditorWindow.maximized === undefined || (officeEditorWindow.maximized === false && !hasGeometry)) {
+    // Documents are a workspace, not a popup. Default to the full editor and
+    // only honor a windowed layout when the user actually sized or moved one.
+    officeEditorWindow.maximized = true;
+  }
   return officeEditorWindow;
 }
 
@@ -19039,10 +19045,20 @@ function officeEditorIsCompact() {
   return window.matchMedia("(max-width: 720px)").matches;
 }
 
+function syncOfficeEditorMaximizeButton(maximized) {
+  const button = document.getElementById("officeEditorMaximize");
+  if (!button) return;
+  button.querySelector("use")?.setAttribute("href", maximized ? "#i-window-restore" : "#i-window-maximize");
+  button.setAttribute("aria-label", maximized ? t("ui.alt8mail-office.restore-editor") : t("ui.alt8mail-office.maximize-editor"));
+  button.title = maximized ? t("ui.alt8mail-office.restore-editor") : t("ui.alt8mail-office.maximize-editor");
+}
+
 function applyOfficeEditorGeometry() {
   const overlay = document.getElementById("officeEditorOverlay");
   const shell = document.getElementById("officeEditorShell");
   if (!overlay || !shell || overlay.hidden) return;
+  const state_ = readOfficeEditorWindowState();
+  syncOfficeEditorMaximizeButton(Boolean(state_.maximized));
   if (officeEditorIsCompact()) {
     shell.style.left = "";
     shell.style.top = "";
@@ -19050,7 +19066,6 @@ function applyOfficeEditorGeometry() {
     shell.style.height = "";
     return;
   }
-  const state_ = readOfficeEditorWindowState();
   if (state_.maximized) {
     overlay.classList.add("is-maximized");
     shell.style.left = "";
@@ -19092,7 +19107,6 @@ function applyOfficeEditorGeometry() {
 function setOfficeEditorMaximized(maximized) {
   const overlay = document.getElementById("officeEditorOverlay");
   const shell = document.getElementById("officeEditorShell");
-  const button = document.getElementById("officeEditorMaximize");
   const state_ = readOfficeEditorWindowState();
   state_.maximized = Boolean(maximized);
   storeOfficeEditorWindowState();
@@ -19103,11 +19117,7 @@ function setOfficeEditorMaximized(maximized) {
     shell.style.width = "";
     shell.style.height = "";
   }
-  if (button) {
-    button.querySelector("use")?.setAttribute("href", maximized ? "#i-window-restore" : "#i-window-maximize");
-    button.setAttribute("aria-label", maximized ? t("ui.alt8mail-office.restore-editor") : t("ui.alt8mail-office.maximize-editor"));
-    button.title = maximized ? t("ui.alt8mail-office.restore-editor") : t("ui.alt8mail-office.maximize-editor");
-  }
+  syncOfficeEditorMaximizeButton(Boolean(maximized));
   if (!maximized && shell) applyOfficeEditorGeometry();
 }
 
@@ -19246,10 +19256,8 @@ function updateOfficeEditorChrome(tab) {
   const meta = OFFICE_HUB_META[tab.documentType] || OFFICE_HUB_META.word;
   const title = document.getElementById("officeEditorTitle");
   const metaText = document.getElementById("officeEditorMeta");
-  const mark = document.querySelector(".office-editor-mark use");
   if (title) title.textContent = tab.name || t("ui.alt8mail-office.document");
   if (metaText) metaText.textContent = `${officeTypeLabel(tab.documentType)} · Alt8Mail Office`;
-  if (mark) mark.setAttribute("href", `#${officeTypeIcon(tab.documentType)}`);
   const search = document.getElementById("officeEditorSearch");
   if (search) {
     search.value = "";
@@ -19268,7 +19276,6 @@ function activateOfficeTab(tabId, { focus = true } = {}) {
   }
   const overlay = document.getElementById("officeEditorOverlay");
   if (!overlay) return false;
-  const wasHidden = overlay.hidden;
   officeDockActiveId = tab.id;
   officeDockTabs.forEach((entry) => { entry.minimized = entry.id !== tab.id; });
   state.officeFile = { id: tab.id, name: tab.name, documentType: tab.documentType };
@@ -19278,7 +19285,6 @@ function activateOfficeTab(tabId, { focus = true } = {}) {
   setTimeout(() => {
     try { frame.contentWindow?.dispatchEvent(new Event("resize")); } catch {}
   }, 60);
-  if (wasHidden) setOfficeEditorMaximized(false);
   updateOfficeEditorChrome(tab);
   overlay.hidden = false;
   document.body.classList.add("office-editor-open");
