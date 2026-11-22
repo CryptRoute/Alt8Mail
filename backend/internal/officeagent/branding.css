@@ -80,3 +80,49 @@ a[href*='collabora.com'] {
 #user-welcome {
 	display: none !important;
 }
+
+/* The stock Styles gallery is 36.8vw wide with 122px preview cells. At common
+   editor widths it pushes the ribbon controls aside and the preview images are
+   taller than their row, which clips labels such as "Title". Compact the
+   gallery so the ribbon reads like a desktop suite instead of a full-width
+   style picker. */
+#stylesview,
+#stylesview-iconview-list,
+#stylesview-iconview-list-dropdown {
+	width: min(430px, 70vw) !important;
+	min-width: min(430px, 70vw) !important;
+	grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)) !important;
+	grid-template-rows: repeat(auto-fit, minmax(30px, 1fr)) !important;
+}
+
+#stylesview .ui-iconview-entry,
+#stylesview-iconview-list .ui-iconview-entry,
+#stylesview-iconview-list-dropdown .ui-iconview-entry {
+	height: 30px !important;
+	min-width: 0 !important;
+	overflow: hidden !important;
+}
+
+/* IconView sets an inline width/height from the preview's natural size. Scale
+   the preview down inside the compact cell so the full style name fits. */
+#stylesview .ui-iconview-entry img,
+#stylesview-iconview-list .ui-iconview-entry img,
+#stylesview-iconview-list-dropdown .ui-iconview-entry img {
+	width: auto !important;
+	height: 26px !important;
+	max-width: 92px !important;
+	object-fit: contain !important;
+}
+
+#stylesview .icon-view-item-container,
+#stylesview-iconview-list .icon-view-item-container,
+#stylesview-iconview-list-dropdown .icon-view-item-container {
+	height: 30px !important;
+	min-width: 0 !important;
+}
+
+/* The dark palette dims the style previews with a brightness filter. The
+   previews are document thumbnails, so keep them at full contrast. */
+[data-theme='dark'] #stylesview {
+	filter: none !important;
+}

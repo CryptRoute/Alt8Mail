@@ -178,6 +178,11 @@ func TestOfficeEditorAssetsEmbedded(t *testing.T) {
 	if !bytes.Contains(officeEditorJS, []byte("Alt8OfficeAI")) || !bytes.Contains(officeEditorJS, []byte("/api/office/ai")) {
 		t.Error("editor script is missing the AI assistant bridge")
 	}
+	if !bytes.Contains(officeEditorJS, []byte(`searchParams.set("ui_defaults"`)) ||
+		!bytes.Contains(officeEditorJS, []byte("SavedUIState=false")) ||
+		!bytes.Contains(officeEditorJS, []byte("TextStatusbar=")) {
+		t.Error("editor script is missing the Collabora theme defaults")
+	}
 	if !bytes.Contains(officeEditorJS, []byte("/api/public/shares/")) {
 		t.Error("editor script is missing guest share mode")
 	}

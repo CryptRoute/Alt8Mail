@@ -60,11 +60,27 @@ are unchanged because `PutFile` calls the same save pipeline.
 
 ## AI assistant
 
-The existing in-editor AI panel uses Collabora's documented postMessage API:
+The floating Alt8Mail AI panel is part of the `/office-editor` host page and is
+available for authenticated documents (not public share links). In Collabora it
+uses the documented postMessage API:
 
 - `Action_Copy` with `Mimetype: text/plain;charset=utf-8` returns the selected
   text in `Action_Copy_Resp.Values.content`.
 - `Action_Paste` with `Mimetype` and `Data` inserts the generated text.
+
+Generation is served by `POST /api/office/ai`. The handler deliberately reuses
+the webmail AI configuration: `tenant_ai_settings`, the sealed provider key, the
+provider client, the monthly budget hooks and DLP redaction. No second API key
+or Office-specific AI setting is required.
+
+| Action | Context |
+|---|---|
+| Summarize, Rewrite, Translate, Continue, Ask AI | selected text via `Action_Copy` |
+| Ask document, Action items, Draft reply | latest saved version via `office.ExtractText` after a live file-access check |
+
+Document text is capped and treated as untrusted data in the prompt. The
+`aiEnabled` flag returned by the open endpoint is true when the paid Office AI
+hook allows the user or when the tenant webmail AI is enabled with a model.
 
 No browser patch is required for the AI bridge.
 
@@ -160,8 +176,22 @@ The agent writes `/var/lib/a8m-office/branding/branding.css` and
 `branding.js`, then mounts them over the container's `browser/dist` files, so
 branding changes ship with the agent without rebuilding the Collabora image.
 The gateway appends a content-hash query to both URLs; this prevents a browser
-from reusing an old cached wordmark CSS. The `branding.js` override closes the
-wide Styles sidebar on first run and respects the user's later choice.
+from reusing an old cached wordmark CSS.
+
+The host page passes `ui_defaults=UITheme=dark|light;SavedUIState=false` to
+Collabora, so the editor follows the webmail light/dark theme even when the user
+previously chose another theme inside Collabora. The `theme` and `ui_theme`
+parameters are also passed for branding/welcome resources. Collabora's
+`ui_defaults` cache reuses the parsed JSON for an identical string and does not
+restore `SavedUIState` on a cache hit, so each open includes a harmless unique
+`TextStatusbar` value. This keeps the host theme authoritative without an image
+rebuild. Changing the webmail theme while a document is open asks Collabora to
+save, then reloads the host page with the new theme. The
+`branding.js` override closes the wide Styles sidebar on first run, enables the
+ruler once per document type and applies 100% zoom when the document layer is
+ready; later user changes are respected. The `branding.css` override compacts
+the 36.8vw Styles gallery to a 430px ribbon element so its previews are not
+clipped.
 
 On Debian/Ubuntu, the remote prerequisite step installs Docker from the
 distribution and downloads the Docker Compose v2 CLI plugin from Docker's
@@ -173,8 +203,8 @@ package Compose v2 under any apt name, so this download replaces the old
 
 - The `/office-editor` CSP still allows broad `https:` frame sources. Tighten
   it to the configured office origin as a follow-up.
-- Live theme switching inside the iframe is not wired; the editor keeps its own
-  theme until the next open.
+- The compact Styles gallery still uses Collabora's generated preview images.
+  A full Office 365/OnlyOffice ribbon and style-picker skin remains Phase 2.
 - WOPI proof-key validation (`X-WOPI-Proof` from `/hosting/discovery`) is not
   enabled; add it at GA.
 - The browser end-to-end edit/save flow still needs a real-browser test.

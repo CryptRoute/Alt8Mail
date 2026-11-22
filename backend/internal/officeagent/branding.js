@@ -1,5 +1,5 @@
 /*
- * Alt8Mail Office — runtime branding.
+ * Alt8Mail Office — runtime branding and editor defaults.
  *
  * The Office agent mounts this file over the image's
  * /usr/share/coolwsd/browser/dist/branding.js. coolwsd injects it into
@@ -12,6 +12,9 @@
 	var PRODUCT_NAME = 'Alt8Mail Office';
 	var LEGAL_ID = 'a8m-legal-notice';
 	var SIDEBAR_KEY = 'a8m.sidebar-default';
+	var RULER_KEY = 'a8m.ruler-default';
+	var defaultsTimer = null;
+	var zoomApplied = false;
 
 	function addLegalNotice() {
 		var info = document.getElementById('about-dialog-info');
@@ -29,44 +32,94 @@
 		info.appendChild(note);
 	}
 
+	function currentDocType(map) {
+		try {
+			if (map && typeof map.getDocType === 'function') {
+				return String(map.getDocType() || 'text');
+			}
+		} catch (_error) {}
+		return 'text';
+	}
+
 	// OnlyOffice opens with the document canvas taking the full width. Collabora
 	// defaults ShowSidebar to true per document type, which produces a wide
 	// Styles panel on first use. Close it once, then respect whatever the user
 	// chooses afterwards.
-	function closeSidebarOnFirstRun() {
+	function closeSidebarOnFirstRun(map) {
 		try {
 			if (localStorage.getItem(SIDEBAR_KEY)) return;
+			var ui = map.uiManager;
+			if (!ui || typeof ui.setDocTypePref !== 'function') return;
+
+			ui.setDocTypePref('ShowSidebar', false);
+			if (map.sidebar && typeof map.sidebar.isVisible === 'function' && map.sidebar.isVisible()) {
+				map.sidebar.closeSidebar();
+			}
 			localStorage.setItem(SIDEBAR_KEY, '1');
-
-			var apply = function () {
-				try {
-					var map = window.app && window.app.map;
-					if (!map) return;
-					var ui = map.uiManager;
-					if (ui && typeof ui.setDocTypePref === 'function') {
-						ui.setDocTypePref('ShowSidebar', false);
-					}
-					if (map.sidebar && typeof map.sidebar.isVisible === 'function' && map.sidebar.isVisible()) {
-						map.sidebar.closeSidebar();
-					}
-				} catch (_error) {}
-			};
-
-			apply();
-			var attempts = 0;
-			var timer = setInterval(function () {
-				attempts++;
-				apply();
-				if (attempts >= 8) clearInterval(timer);
-			}, 500);
 		} catch (_error) {}
+	}
+
+	// Word and the other desktop suites open Writer with a ruler. Collabora
+	// stores ShowRuler per document type, so apply the default once for each
+	// type and leave the user's later choice alone.
+	function showRulerOnFirstRun(map) {
+		try {
+			var key = RULER_KEY + '.' + currentDocType(map);
+			if (localStorage.getItem(key)) return;
+
+			var ui = map.uiManager;
+			if (!ui || typeof ui.setDocTypePref !== 'function') return;
+
+			ui.setDocTypePref('ShowRuler', true);
+			if (typeof ui.isRulerVisible === 'function' &&
+				!ui.isRulerVisible() &&
+				typeof ui.showRuler === 'function') {
+				ui.showRuler();
+			}
+			localStorage.setItem(key, '1');
+		} catch (_error) {}
+	}
+
+	// Collabora's status bar scale is 10 for 100%. Apply it once the document
+	// layer exists; a later zoom change by the user is not overridden.
+	function setDefaultZoom(map) {
+		if (zoomApplied) return;
+		try {
+			if (!map || !map._docLayer || typeof map.setZoom !== 'function') return;
+			map.setZoom(10, null, false /* animate */);
+			zoomApplied = true;
+		} catch (_error) {}
+	}
+
+	function applyEditorDefaults() {
+		var map = window.app && window.app.map;
+		if (!map) return;
+		closeSidebarOnFirstRun(map);
+		showRulerOnFirstRun(map);
+		setDefaultZoom(map);
+	}
+
+	function startEditorDefaults() {
+		if (defaultsTimer) return;
+		applyEditorDefaults();
+		var attempts = 0;
+		defaultsTimer = setInterval(function () {
+			attempts++;
+			applyEditorDefaults();
+			// Keep trying for fifteen seconds: the document layer and the
+			// per-document UI preferences are not ready when initializedUI runs.
+			if (attempts >= 30) {
+				clearInterval(defaultsTimer);
+				defaultsTimer = null;
+			}
+		}, 500);
 	}
 
 	function brandDocument() {
 		document.title = PRODUCT_NAME;
 		document.documentElement.classList.add('a8m-branded');
 		addLegalNotice();
-		closeSidebarOnFirstRun();
+		startEditorDefaults();
 	}
 
 	window.initializedUI = function () {

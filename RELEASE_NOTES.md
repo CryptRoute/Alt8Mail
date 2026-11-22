@@ -1,3 +1,16 @@
+# Alt8Mail 3.11.10
+
+Release date: 2026-11-23. Phase 1 Office editor polish: theme sync, ruler and 100% zoom, a working webmail-backed AI assistant, and a compact Styles gallery.
+
+## 3.11.10 Office editor polish
+
+- **The Collabora editor follows the webmail theme.** The editor host passes `ui_defaults=UITheme=dark|light;SavedUIState=false` (plus `theme`/`ui_theme` for branding resources), so a dark webmail opens a dark editor and a light webmail opens a light editor even if the user chose a different theme in a previous editor session. Each open varies a harmless status-bar token because Collabora's `ui_defaults` cache otherwise drops `SavedUIState` after the first identical request. Changing the webmail theme while an editable document is open asks Collabora to save, then reloads the session only after a successful save; a failed or missing save leaves the document open to protect unsaved work.
+- **Documents open with the ruler and 100% zoom.** The agent-mounted `branding.js` enables `ShowRuler` once per document type and sets Collabora's status-bar scale to 10 (100%) as soon as the document layer is ready. Later user changes to either setting are respected.
+- **The floating AI assistant works inside the Office editor and uses the webmail AI configuration.** `/api/office/ai` uses the same `tenant_ai_settings`, sealed provider key, DLP redaction, budget hooks and provider client as the webmail `/api/ai/*` routes. The `aiEnabled` flag becomes true when the tenant webmail assistant is configured, so no separate Office AI entitlement is needed. Selected-text actions use Collabora's `Action_Copy`/`Action_Paste` bridge; Ask document, Action items and Draft reply read the latest saved version through `office.ExtractText` after re-checking the user's file access.
+- **The Styles gallery is compact.** The stock 36.8vw picker is capped at 430px with 96px cells and 26px previews. The ribbon keeps room for editing controls and style names are no longer clipped. Dark mode renders the previews at full contrast.
+- **Floating AI placement and copy.** The AI button now sits above the Collabora status bar, and the panel explains that document-level actions send document content to the organization's provider.
+- Added prompt-builder tests; the Office, WOPI, Collabora and agent generation suites remain green.
+
 # Alt8Mail 3.11.9
 
 Release date: 2026-11-23. Cache-bust the editor branding and default the Styles sidebar closed.

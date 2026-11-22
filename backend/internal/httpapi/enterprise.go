@@ -15,7 +15,6 @@ import (
 
 	"github.com/CryptRoute/Alt8Mail/backend/internal/config"
 	"github.com/CryptRoute/Alt8Mail/backend/internal/enterprise"
-	"github.com/CryptRoute/Alt8Mail/backend/internal/office"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -451,37 +450,10 @@ func (h enterpriseHost) OfficeAIAllowed(ctx context.Context, principal enterpris
 }
 
 func (h enterpriseHost) OfficeDocumentText(ctx context.Context, principal enterprise.Principal, documentID string) (string, string, error) {
-	var fileID, name, storageKey string
-	err := h.server.store.DB.QueryRow(ctx, `
-		SELECT d.file_id, f.name, v.storage_key
-		FROM public.office_documents d
-		JOIN public.files f ON f.id=d.file_id
-		JOIN LATERAL (
-		  SELECT storage_key FROM public.office_document_versions
-		  WHERE document_id=d.id ORDER BY version DESC LIMIT 1
-		) v ON true
-		WHERE d.id=$1 AND d.tenant_id=$2
-	`, documentID, principal.TenantID).Scan(&fileID, &name, &storageKey)
-	if err != nil {
-		return "", "", err
-	}
-	user := userRecord{
+	return h.server.officeDocumentText(ctx, userRecord{
 		ID: principal.UserID, TenantID: principal.TenantID, Email: principal.Email,
 		Name: principal.Name, Role: principal.Role,
-	}
-	access, err := h.server.fileAccessForUser(ctx, user, fileID)
-	if err != nil || access.Access == "" {
-		return "", "", fmt.Errorf("document not accessible")
-	}
-	data, err := h.server.officeReadStorage(storageKey)
-	if err != nil {
-		return "", "", err
-	}
-	text, err := office.ExtractText(name, data)
-	if err != nil {
-		return "", "", err
-	}
-	return name, text, nil
+	}, documentID)
 }
 
 func (h enterpriseHost) RegisterOfficeAIEnabled(check func(ctx context.Context, principal enterprise.Principal) bool) {

@@ -508,6 +508,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ai/compose", s.requireUser(s.aiCompose))
 	mux.HandleFunc("POST /api/ai/threads/{id}/commitments", s.requireUser(s.aiThreadCommitments))
 	mux.HandleFunc("POST /api/ai/tone", s.requireUser(s.aiToneSuggestion))
+	// Fill /api/office/ai from the core when no enterprise module registered the
+	// exact route. An exact handler wins over this subtree, so a paid Office AI
+	// module can own the endpoint without a duplicate-pattern panic.
+	mux.HandleFunc("POST /api/office/", s.requireUser(s.officeAIFallback))
 	mux.HandleFunc("GET /api/catch-up", s.requireUser(s.catchUpSummary))
 	mux.HandleFunc("GET /api/messages/{id}/trust-explanation", s.requireUser(s.messageTrustExplanation))
 	s.registerCollaborationRoutes(mux)

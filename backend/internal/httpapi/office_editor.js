@@ -12,6 +12,19 @@
   var pendingThemeReload = false;
   var collabora = null;
   var collaboraCopyPending = null;
+  var collaboraThemeReload = null;
+  var collaboraThemeTimer = null;
+  function clearCollaboraThemeReload() {
+    if (collaboraThemeTimer) {
+      window.clearTimeout(collaboraThemeTimer);
+      collaboraThemeTimer = null;
+    }
+    collaboraThemeReload = null;
+  }
+  function finishCollaboraThemeReload() {
+    clearCollaboraThemeReload();
+    reloadWithTheme();
+  }
   function applyHostTheme() {
     document.documentElement.setAttribute("data-theme", theme === "theme-dark" ? "dark" : "light");
   }
@@ -22,6 +35,34 @@
     window.location.replace(next.toString());
   }
   function applyEditorTheme() {
+    if (collabora) {
+      if (collaboraThemeReload) return;
+      if (!collabora.editable) {
+        reloadWithTheme();
+        return;
+      }
+      // Collabora cannot repaint an open document in another UI theme. Ask it
+      // to flush pending edits, then reload the host page with the new theme.
+      // If the save fails or never reports, leave the document open: losing
+      // unsaved work is worse than applying the theme on the next open.
+      collaboraThemeTimer = window.setTimeout(clearCollaboraThemeReload, 8000);
+      collaboraThemeReload = finishCollaboraThemeReload;
+      try {
+        collabora.frame.contentWindow.postMessage(JSON.stringify({
+          MessageId: "Action_Save",
+          SendTime: Date.now(),
+          Values: {
+            DontTerminateEdit: true,
+            DontSaveIfUnmodified: false,
+            ExtendedData: "",
+            Notify: true
+          }
+        }), collabora.origin);
+      } catch (_error) {
+        clearCollaboraThemeReload();
+      }
+      return;
+    }
     if (!editor) return;
     if (typeof editor.setTheme === "function") {
       try { editor.setTheme(theme); return; } catch (_error) {}
@@ -74,7 +115,12 @@
       return;
     }
     if (payload.MessageId === "Action_Save_Resp") {
-      notifyParent("a8m-office-saved", fileId || shareToken);
+      var saveFailed = payload.Values && payload.Values.success === false;
+      if (!saveFailed) notifyParent("a8m-office-saved", fileId || shareToken);
+      if (collaboraThemeReload) {
+        if (saveFailed) clearCollaboraThemeReload();
+        else finishCollaboraThemeReload();
+      }
     }
   });
   var state = document.getElementById("state");
@@ -148,17 +194,33 @@
       return;
     }
     var origin = "";
-    try { origin = new URL(data.editorUrl).origin; } catch (_error) {}
+    var editorURL = null;
+    try {
+      editorURL = new URL(data.editorUrl, window.location.href);
+      origin = editorURL.origin;
+      var editorTheme = theme === "theme-dark" ? "dark" : "light";
+      // Collabora's browser UI reads the theme from ui_defaults, not from the
+      // ui_theme query parameter. SavedUIState must be false so the host's
+      // theme wins over a theme the user picked inside a previous session.
+      // Its ui_defaults cache drops SavedUIState on a repeated string, so vary
+      // a recognized, harmless key per open to keep the defaults authoritative.
+      var defaultsToken = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      editorURL.searchParams.set("ui_defaults",
+        "UITheme=" + editorTheme + ";SavedUIState=false;TextStatusbar=" + defaultsToken);
+      editorURL.searchParams.set("theme", editorTheme);
+      editorURL.searchParams.set("ui_theme", editorTheme);
+    } catch (_error) {}
     var host = document.getElementById("editor");
     var frame = document.createElement("iframe");
     frame.id = "collabora-frame";
-    frame.src = data.editorUrl;
+    frame.src = editorURL ? editorURL.toString() : data.editorUrl;
     frame.allow = "clipboard-read; clipboard-write";
     frame.setAttribute("title", "Alt8Mail Office document");
-    frame.style.cssText = "display:block;border:0;width:100%;height:100%;background:#fff;";
+    frame.style.cssText = "display:block;border:0;width:100%;height:100%;background:" +
+      (theme === "theme-dark" ? "#1f2126" : "#fff") + ";";
     host.innerHTML = "";
     host.appendChild(frame);
-    collabora = { frame: frame, origin: origin };
+    collabora = { frame: frame, origin: origin, editable: data.editable !== false };
     if (state) state.hidden = true;
     if (data.file && data.file.name) document.title = data.file.name + " · Alt8Mail Office";
     notifyParent("a8m-office-ready", fileId || shareToken);

@@ -27,7 +27,7 @@
     .spinner { width: 22px; height: 22px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 14px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-    .ai-fab { position: fixed; right: 18px; bottom: 18px; z-index: 20; border: 0; border-radius: 999px; padding: 11px 18px; background: var(--accent); color: #fff; font: inherit; font-weight: 750; cursor: pointer; box-shadow: 0 12px 30px rgba(15, 108, 189, .32); }
+    .ai-fab { position: fixed; right: 18px; bottom: 48px; z-index: 20; border: 0; border-radius: 999px; padding: 11px 18px; background: var(--accent); color: #fff; font: inherit; font-weight: 750; cursor: pointer; box-shadow: 0 12px 30px rgba(15, 108, 189, .32); }
     .ai-panel { position: fixed; top: 14px; right: 14px; bottom: 14px; z-index: 30; width: min(370px, calc(100vw - 28px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: 0 24px 70px rgba(7, 16, 30, .28); }
     .ai-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
     .ai-head > div { display: flex; flex-direction: column; gap: 2px; }
@@ -71,7 +71,7 @@
   <button id="aiFab" class="ai-fab" type="button" hidden aria-label="Open Alt8Mail AI assistant">AI</button>
   <aside id="aiPanel" class="ai-panel" hidden aria-label="Alt8Mail AI assistant">
     <header class="ai-head">
-      <div><strong>Alt8Mail AI</strong><span>Work with the selected text</span></div>
+      <div><strong>Alt8Mail AI</strong><span>Ask, rewrite, or summarize this document</span></div>
       <button id="aiClose" class="ai-close" type="button" aria-label="Close AI assistant">×</button>
     </header>
     <div class="ai-body">
@@ -112,7 +112,7 @@
           <button id="aiCopy" type="button">Copy</button>
         </div>
       </div>
-      <p class="ai-note">The selected text is sent to your organization's AI provider. Review generated text before inserting it.</p>
+      <p class="ai-note">The selected text or document content is sent to your organization's AI provider. Review generated text before inserting it.</p>
     </div>
   </aside>
   <script src="/office-editor.js" defer></script>

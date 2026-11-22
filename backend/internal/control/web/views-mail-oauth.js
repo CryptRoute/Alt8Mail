@@ -1,5 +1,5 @@
 /* Mail OAuth: server-wide Gmail and Microsoft sign-in applications. */
-import * as ui from './ui.js?v=3.11.9';
+import * as ui from './ui.js?v=3.11.10';
 
 const esc = ui.esc;
 
