@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func testMailOwner(t *testing.T) {
@@ -106,6 +107,13 @@ func TestVerifyMailHomeFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(target, "Maildir", "cur", "extra"), []byte("extra"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A target-only delivery changes the target directory mtime. Make that
+	// difference explicit so the rsync path cannot pass by timing accident.
+	targetCur := filepath.Join(target, "Maildir", "cur")
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(targetCur, past, past); err != nil {
 		t.Fatal(err)
 	}
 	if err := server.verifyMailHome(t.Context(), storageMoveItem{SourceHome: source, TargetHome: target}, "standard"); err != nil {

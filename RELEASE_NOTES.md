@@ -1,3 +1,12 @@
+# Alt8Mail 3.11.3
+
+Release date: 2026-11-23. Supersedes 3.11.2, whose release workflow failed on a pre-existing storage-move verification flake. Includes all 3.11.2 changes.
+
+## 3.11.3 storage move verification
+
+- **Target-only deliveries no longer fail verification.** The rsync verification used `--itemize-changes` with directory times, so a message that arrived only on the target after the switch changed the target Maildir directory mtime and produced `.d..t...... Maildir/cur/`, failing the move even though every source message was present. Verification now passes `--omit-dir-times`; target-only files were already allowed and remain allowed.
+- **Regression coverage:** `TestVerifyMailHomeFallback` now forces the target directory mtime to differ and is exercised against the real rsync path on Linux.
+
 # Alt8Mail 3.11.2
 
 Release date: 2026-11-22. Hardening for the Collabora Office engine.

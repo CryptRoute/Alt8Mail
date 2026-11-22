@@ -468,7 +468,10 @@ func copyMailHomeFallback(source, target, mode string) error {
 
 func (s *Server) verifyMailHome(ctx context.Context, item storageMoveItem, verifyMode string) error {
 	if rsyncAvailable() {
-		args := []string{"-aHAX", "--numeric-ids", "--dry-run", "--itemize-changes",
+		// A delivery that arrives only on the target after the switch changes the
+		// target directory mtime. That is not a file mismatch; target-only files
+		// are explicitly allowed below.
+		args := []string{"-aHAX", "--numeric-ids", "--dry-run", "--itemize-changes", "--omit-dir-times",
 			"--exclude=dovecot.index*", "--exclude=dovecot-uidlist",
 			"--exclude=dovecot.list.index*", "--exclude=maildirsize"}
 		if verifyMode == "thorough" {

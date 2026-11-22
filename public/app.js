@@ -6515,7 +6515,7 @@ const MAIL_ACCOUNT_PROVIDERS = [
   }
 ];
 
-const MAIL_PROVIDER_ASSET_VERSION = "3.11.2";
+const MAIL_PROVIDER_ASSET_VERSION = "3.11.3";
 
 function normalizeMailProviderId(value) {
   const provider = String(value || "").toLowerCase().trim();
