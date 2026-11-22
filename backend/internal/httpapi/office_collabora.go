@@ -17,11 +17,11 @@ import (
 
 // collaboraHandler is built per request so a rotated signing secret is picked
 // up without restarting the API.
-func (s *Server) collaboraHandler() *officecollabora.Handler {
+func (s *Server) collaboraHandler(r *http.Request) *officecollabora.Handler {
 	return &officecollabora.Handler{
 		Secret:            s.officeSigningSecret(),
 		Service:           &collaboraService{server: s},
-		PostMessageOrigin: s.officePublicBase(),
+		PostMessageOrigin: s.officeWopiBase(r),
 		MaxBytes:          100 << 20,
 	}
 }

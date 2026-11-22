@@ -145,6 +145,8 @@ frame inside either origin:
   rotation.
 - An unrecognized request host falls back to the configured public webmail URL
   rather than becoming a WOPI host.
+- `CheckFileInfo` returns the same validated origin as `PostMessageOrigin`, so
+  the editor's postMessage bridge targets the iframe parent.
 
 On Debian/Ubuntu, the remote prerequisite step installs Docker from the
 distribution and downloads the Docker Compose v2 CLI plugin from Docker's

@@ -61,16 +61,16 @@ func (s *Server) registerOfficeDocumentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/office/callback", s.officeCallback)
 	mux.HandleFunc("POST /api/public/shares/{token}/office", s.publicShareOfficeOpen)
 	mux.HandleFunc("GET /api/office/wopi/files/{id}", func(w http.ResponseWriter, r *http.Request) {
-		s.collaboraHandler().CheckFileInfo(w, r)
+		s.collaboraHandler(r).CheckFileInfo(w, r)
 	})
 	mux.HandleFunc("GET /api/office/wopi/files/{id}/contents", func(w http.ResponseWriter, r *http.Request) {
-		s.collaboraHandler().GetFile(w, r)
+		s.collaboraHandler(r).GetFile(w, r)
 	})
 	mux.HandleFunc("POST /api/office/wopi/files/{id}/contents", func(w http.ResponseWriter, r *http.Request) {
-		s.collaboraHandler().PutFile(w, r)
+		s.collaboraHandler(r).PutFile(w, r)
 	})
 	mux.HandleFunc("POST /api/office/wopi/files/{id}", func(w http.ResponseWriter, r *http.Request) {
-		s.collaboraHandler().Lock(w, r)
+		s.collaboraHandler(r).Lock(w, r)
 	})
 }
 

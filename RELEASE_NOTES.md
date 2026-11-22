@@ -1,3 +1,11 @@
+# Alt8Mail 3.11.6
+
+Release date: 2026-11-23. Complete the webmail-origin fix for the Collabora editor postMessage bridge. Includes all 3.11.5 changes.
+
+## 3.11.6 postMessage origin
+
+- The WOPI `CheckFileInfo` `PostMessageOrigin` now follows the validated webmail origin of the WOPI request, matching the editor iframe parent. This keeps the AI copy/paste bridge and editor-to-parent messages working when webmail is opened from the primary mail domain.
+
 # Alt8Mail 3.11.5
 
 Release date: 2026-11-23. Fix the Office editor iframe when webmail is opened from the primary mail domain. Includes all 3.11.4 changes.
