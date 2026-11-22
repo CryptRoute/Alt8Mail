@@ -13,7 +13,7 @@ offline signing device. Set `A8M_LICENSE_PUBLIC_KEY` (and optionally
 `A8M_LICENSE_PUBLIC_KEY_ID`) when building a release:
 
 ```bash
-A8M_LICENSE_PUBLIC_KEY=<base64-ed25519-public-key> A8M_LICENSE_PUBLIC_KEY_ID=2026-11 A8M_LICENSE_PORTAL_URL=https://licenses.example.com   bash scripts/build-release.sh 3.11.7 dist
+A8M_LICENSE_PUBLIC_KEY=<base64-ed25519-public-key> A8M_LICENSE_PUBLIC_KEY_ID=2026-11 A8M_LICENSE_PORTAL_URL=https://licenses.example.com   bash scripts/build-release.sh 3.11.8 dist
 ```
 
 The GitHub release workflow reads the public key from the repository secret

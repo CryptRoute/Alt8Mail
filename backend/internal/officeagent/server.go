@@ -1324,6 +1324,11 @@ func (s *Server) prepareOfficeDirs() error {
 			return fmt.Errorf("could not write %s: %w", brandingFile, err)
 		}
 	}
+	// The agent service umask can turn 0644 into 0640; the container's cool
+	// user must be able to read the mounted override.
+	if err := os.Chmod(brandingFile, 0o644); err != nil {
+		return fmt.Errorf("could not set permissions on %s: %w", brandingFile, err)
+	}
 	return nil
 }
 

@@ -1,3 +1,12 @@
+# Alt8Mail 3.11.8
+
+Release date: 2026-11-23. Fix the branding override permissions.
+
+## 3.11.8 branding mount
+
+- The Office agent's service umask could create `/var/lib/a8m-office/branding/branding.css` as root:root `0640`. The container's `cool` user could not read the mounted file, so the branding CSS was served empty and the Collabora toolbar wordmark remained. The agent now sets `0644` explicitly.
+- `TestStatusAndInstallWithFakeDocker` verifies the branding file is prepared on Linux.
+
 # Alt8Mail 3.11.7
 
 Release date: 2026-11-23. Enterprise editor shell and branding cleanup.
