@@ -132,6 +132,51 @@ func TestValidateEngineImage(t *testing.T) {
 	}
 }
 
+func TestRemoveConflictingContainer(t *testing.T) {
+	if got := composeServiceForEngine("collabora"); got != "office" {
+		t.Fatalf("collabora Compose service = %q", got)
+	}
+	if got := composeServiceForEngine("onlyoffice"); got != "documentserver" {
+		t.Fatalf("onlyoffice Compose service = %q", got)
+	}
+	cases := []struct {
+		name     string
+		existing string
+		engine   string
+		removed  bool
+	}{
+		{"other engine", "documentserver", "collabora", true},
+		{"same engine", "office", "collabora", false},
+		{"no Compose label", "", "collabora", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			server := &Server{cfg: Config{
+				ContainerName: "a8m-office",
+				DockerBin:     "docker",
+				Runner: func(_ context.Context, _ time.Duration, name string, args ...string) (string, string, error) {
+					calls = append(calls, name+" "+strings.Join(args, " "))
+					if name == "docker" && len(args) > 0 && args[0] == "inspect" {
+						return tc.existing + "\n", "", nil
+					}
+					return "", "", nil
+				},
+			}}
+			server.removeConflictingContainer(context.Background(), tc.engine)
+			removed := false
+			for _, call := range calls {
+				if call == "docker rm -f a8m-office" {
+					removed = true
+				}
+			}
+			if removed != tc.removed {
+				t.Fatalf("removed=%v, want %v; calls: %v", removed, tc.removed, calls)
+			}
+		})
+	}
+}
+
 func TestStatusAndInstallWithFakeDocker(t *testing.T) {
 	temp := t.TempDir()
 	tokenFile := filepath.Join(temp, "agent-token")

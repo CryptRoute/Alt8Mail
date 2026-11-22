@@ -399,6 +399,7 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	if err := s.pullImage(ctx, image, engine, false); err != nil {
 		return Status{Error: err.Error()}, err
 	}
+	s.removeConflictingContainer(ctx, engine)
 	if _, stderr, err := s.run(ctx, 5*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d"); err != nil {
 		return Status{Error: commandFailure("Starting "+engineLabel(engine), err, stderr)}, fmt.Errorf("start %s: %w", engineLabel(engine), err)
 	}
@@ -426,6 +427,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	engine := normalizeEngine(st.Engine)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.removeConflictingContainer(r.Context(), engine)
 	if _, stderr, err := s.run(r.Context(), 2*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d"); err != nil {
 		writeError(w, http.StatusBadGateway, "START", commandFailure("Starting "+engineLabel(engine), err, stderr))
 		return
@@ -523,6 +525,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "PULL", err.Error())
 		return
 	}
+	s.removeConflictingContainer(r.Context(), engine)
 	if _, stderr, err := s.run(r.Context(), 5*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d", "--force-recreate"); err != nil {
 		writeError(w, http.StatusBadGateway, "UPDATE", commandFailure("Updating "+engineLabel(engine), err, stderr))
 		return
@@ -564,6 +567,7 @@ func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 			return
 		}
+		s.removeConflictingContainer(r.Context(), engine)
 		if _, stderr, err := s.run(r.Context(), 3*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d", "--force-recreate"); err != nil {
 			writeError(w, http.StatusBadGateway, "ROTATE", commandFailure("Restarting Collabora with the new admin password", err, stderr))
 			return
@@ -596,6 +600,7 @@ func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
+	s.removeConflictingContainer(r.Context(), engine)
 	if _, stderr, err := s.run(r.Context(), 3*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d", "--force-recreate"); err != nil {
 		writeError(w, http.StatusBadGateway, "ROTATE", commandFailure("Restarting OnlyOffice with the new JWT secret", err, stderr))
 		return
@@ -1218,6 +1223,30 @@ func validateEngineImage(engine, image string) error {
 		return nil
 	}
 	return fmt.Errorf("the image %s is a %s image, but the current engine is %s", image, engineLabel(family), engineLabel(engine))
+}
+
+func composeServiceForEngine(engine string) string {
+	if normalizeEngine(engine) == officeEngineCollabora {
+		return "office"
+	}
+	return "documentserver"
+}
+
+// removeConflictingContainer removes a container left by the other engine's
+// Compose service. Both engines reuse the configured container name, so Compose
+// otherwise sees the old container as an orphan and refuses to create the new
+// one with the same name.
+func (s *Server) removeConflictingContainer(ctx context.Context, engine string) {
+	out, _, err := s.run(ctx, 20*time.Second, s.cfg.DockerBin, "inspect", "--format",
+		`{{index .Config.Labels "com.docker.compose.service"}}`, s.cfg.ContainerName)
+	if err != nil {
+		return
+	}
+	existing := strings.TrimSpace(out)
+	if existing == "" || existing == composeServiceForEngine(engine) {
+		return
+	}
+	_, _, _ = s.run(ctx, 30*time.Second, s.cfg.DockerBin, "rm", "-f", s.cfg.ContainerName)
 }
 
 func healthPath(engine string) string {

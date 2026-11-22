@@ -1,3 +1,13 @@
+# Alt8Mail 3.11.4
+
+Release date: 2026-11-23. Fix switching an existing Office deployment between engines. Includes all 3.11.3 changes.
+
+## 3.11.4 Office engine switch
+
+- **Switching ONLYOFFICE ↔ Collabora no longer fails on the reused container name.** Both engines use the `a8m-office` container name but different Compose service names (`documentserver` and `office`). Compose treated the previous container as an orphan and then refused to create the new one with `container name "/a8m-office" is already in use`.
+- The agent now inspects the existing container's `com.docker.compose.service` label and removes it only when it belongs to the other engine's service, before starting the new Compose project. The guard applies to install, start, update, font mount and credential rotation; same-engine operations are unchanged.
+- Added a unit test for the container-removal decision.
+
 # Alt8Mail 3.11.3
 
 Release date: 2026-11-23. Supersedes 3.11.2, whose release workflow failed on a pre-existing storage-move verification flake. Includes all 3.11.2 changes.

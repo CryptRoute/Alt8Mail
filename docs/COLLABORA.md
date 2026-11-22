@@ -124,6 +124,12 @@ The agent's data root defaults to the parent of `OFFICE_AGENT_STATE_FILE`
 `logs/` there and uses the same root for the Collabora cache/log mounts and the
 ONLYOFFICE data/log mounts, so custom state paths and non-root hosts work.
 
+Switching engines reuses the `a8m-office` container name but changes the Compose
+service (`documentserver` for ONLYOFFICE, `office` for Collabora). The agent
+inspects the existing container's `com.docker.compose.service` label and removes
+it when it belongs to the other engine before starting the new Compose project.
+This avoids the Compose orphan/name-conflict error on a live engine switch.
+
 On Debian/Ubuntu, the remote prerequisite step installs Docker from the
 distribution and downloads the Docker Compose v2 CLI plugin from Docker's
 GitHub release into `/usr/local/lib/docker/cli-plugins`. Debian 12 does not

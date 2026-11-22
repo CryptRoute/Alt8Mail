@@ -139,6 +139,7 @@ fi
 	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
 		return result, fmt.Errorf("could not write the Office Compose file: %w", err)
 	}
+	s.removeConflictingContainer(ctx, engine)
 	if _, stderr, err := s.run(ctx, 10*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d"); err != nil {
 		return result, fmt.Errorf("could not apply the font mount: %s", trim(stderr))
 	}
