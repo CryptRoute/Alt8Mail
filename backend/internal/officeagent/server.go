@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,8 +36,10 @@ type Config struct {
 	ComposeFile    string
 	SecretFile     string
 	StateFile      string
-	DefaultImage   string
-	ContainerName  string
+	DefaultImage          string
+	DefaultCollaboraImage string
+	AdminPasswordFile     string
+	ContainerName         string
 	HTTPPort       int
 	NginxSite      string
 	NginxEnabled   string
@@ -59,6 +62,7 @@ type Server struct {
 type state struct {
 	PublicURL string `json:"publicUrl"`
 	Image     string `json:"image"`
+	Engine    string `json:"engine,omitempty"`
 	TLSCert   string `json:"tlsCert,omitempty"`
 	TLSKey    string `json:"tlsKey,omitempty"`
 	PortalURL string `json:"portalUrl,omitempty"`
@@ -69,6 +73,7 @@ type Status struct {
 	Running           bool   `json:"running"`
 	Status            string `json:"status"`
 	ContainerStatus   string `json:"containerStatus"`
+	Engine            string `json:"engine"`
 	Image             string `json:"image"`
 	Version           string `json:"version"`
 	PublicURL         string `json:"publicUrl"`
@@ -105,6 +110,14 @@ func New(cfg Config) (*Server, error) {
 	cfg.DefaultImage = strings.TrimSpace(cfg.DefaultImage)
 	if cfg.DefaultImage == "" {
 		cfg.DefaultImage = "onlyoffice/documentserver:9.4.0.1"
+	}
+	cfg.DefaultCollaboraImage = strings.TrimSpace(cfg.DefaultCollaboraImage)
+	if cfg.DefaultCollaboraImage == "" {
+		cfg.DefaultCollaboraImage = "altgence/office:25.04"
+	}
+	cfg.AdminPasswordFile = strings.TrimSpace(cfg.AdminPasswordFile)
+	if cfg.AdminPasswordFile == "" {
+		cfg.AdminPasswordFile = "/etc/a8m/office-admin-password"
 	}
 	cfg.ContainerName = strings.TrimSpace(cfg.ContainerName)
 	if cfg.ContainerName == "" {
@@ -268,6 +281,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 type installRequest struct {
 	PublicURL      string `json:"publicUrl"`
+	Engine         string `json:"engine"`
 	Image          string `json:"image"`
 	TLSCert        string `json:"tlsCert"`
 	TLSKey         string `json:"tlsKey"`
@@ -299,9 +313,14 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	if err := validPublicURL(publicURL); err != nil {
 		return Status{}, err
 	}
+	previous, _ := s.loadState()
+	engine := normalizeEngine(opts.Engine)
+	if strings.TrimSpace(opts.Engine) == "" {
+		engine = normalizeEngine(previous.Engine)
+	}
 	image := strings.TrimSpace(opts.Image)
 	if image == "" {
-		image = s.cfg.DefaultImage
+		image = defaultImageForEngine(s.cfg, engine)
 	}
 	if err := validImage(image); err != nil {
 		return Status{}, err
@@ -313,13 +332,15 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	}
 	// A reinstall without new TLS fields keeps the gateway that was configured
 	// previously, so changing the public URL also updates that gateway.
-	previous, _ := s.loadState()
 	portalURL := strings.TrimSpace(opts.PortalURL)
 	if portalURL == "" {
 		portalURL = previous.PortalURL
 	}
 	if err := validPortalURL(portalURL); err != nil {
 		return Status{}, err
+	}
+	if engine == officeEngineCollabora && portalURL == "" {
+		return Status{}, fmt.Errorf("the Alt8Mail public URL is required for Collabora")
 	}
 	if opts.DisableGateway {
 		tlsCert, tlsKey = "", ""
@@ -336,7 +357,14 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 			return Status{}, certErr
 		}
 	}
-	secret, err := s.ensureSecret()
+	secret := ""
+	adminPassword := ""
+	var err error
+	if engine == officeEngineCollabora {
+		adminPassword, err = s.ensureAdminPassword()
+	} else {
+		secret, err = s.ensureSecret()
+	}
 	if err != nil {
 		return Status{}, err
 	}
@@ -346,18 +374,21 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	if err := os.MkdirAll(s.cfg.FontsDir, 0o755); err != nil {
 		return Status{}, fmt.Errorf("could not prepare the Office font directory: %w", err)
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(image, secret, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir)), 0o640); err != nil {
+	if err := s.prepareOfficeDirs(); err != nil {
 		return Status{}, err
 	}
-	st := state{PublicURL: publicURL, Image: image, TLSCert: tlsCert, TLSKey: tlsKey, PortalURL: portalURL}
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, publicURL, portalURL)), 0o640); err != nil {
+		return Status{}, err
+	}
+	st := state{PublicURL: publicURL, Image: image, Engine: engine, TLSCert: tlsCert, TLSKey: tlsKey, PortalURL: portalURL}
 	if err := s.saveState(st); err != nil {
 		return Status{}, err
 	}
-	if _, stderr, err := s.run(ctx, 10*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "pull"); err != nil {
-		return Status{Error: commandFailure("Pulling the OnlyOffice image", err, stderr)}, fmt.Errorf("pull OnlyOffice image: %w", err)
+	if err := s.pullImage(ctx, image, engine, false); err != nil {
+		return Status{Error: err.Error()}, err
 	}
 	if _, stderr, err := s.run(ctx, 5*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d"); err != nil {
-		return Status{Error: commandFailure("Starting OnlyOffice", err, stderr)}, fmt.Errorf("start OnlyOffice: %w", err)
+		return Status{Error: commandFailure("Starting "+engineLabel(engine), err, stderr)}, fmt.Errorf("start %s: %w", engineLabel(engine), err)
 	}
 	if opts.DisableGateway {
 		_ = os.Remove(s.cfg.NginxEnabled)
@@ -370,7 +401,7 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 			return status, err
 		}
 	}
-	if err := s.waitHealthy(ctx); err != nil {
+	if err := s.waitHealthy(ctx, engine); err != nil {
 		status, _ := s.status(ctx)
 		status.Error = err.Error()
 		return status, err
@@ -379,13 +410,15 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 }
 
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
+	st, _ := s.loadState()
+	engine := normalizeEngine(st.Engine)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, stderr, err := s.run(r.Context(), 2*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d"); err != nil {
-		writeError(w, http.StatusBadGateway, "START", commandFailure("Starting OnlyOffice", err, stderr))
+		writeError(w, http.StatusBadGateway, "START", commandFailure("Starting "+engineLabel(engine), err, stderr))
 		return
 	}
-	if err := s.waitHealthy(r.Context()); err != nil {
+	if err := s.waitHealthy(r.Context(), engine); err != nil {
 		status, _ := s.status(r.Context())
 		status.Error = err.Error()
 		writeJSON(w, http.StatusBadGateway, status)
@@ -396,10 +429,12 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	st, _ := s.loadState()
+	engine := normalizeEngine(st.Engine)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, stderr, err := s.run(r.Context(), time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "stop"); err != nil {
-		writeError(w, http.StatusBadGateway, "STOP", commandFailure("Stopping OnlyOffice", err, stderr))
+		writeError(w, http.StatusBadGateway, "STOP", commandFailure("Stopping "+engineLabel(engine), err, stderr))
 		return
 	}
 	status, _ := s.status(r.Context())
@@ -407,13 +442,15 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	st, _ := s.loadState()
+	engine := normalizeEngine(st.Engine)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, stderr, err := s.run(r.Context(), 2*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "restart"); err != nil {
-		writeError(w, http.StatusBadGateway, "RESTART", commandFailure("Restarting OnlyOffice", err, stderr))
+		writeError(w, http.StatusBadGateway, "RESTART", commandFailure("Restarting "+engineLabel(engine), err, stderr))
 		return
 	}
-	if err := s.waitHealthy(r.Context()); err != nil {
+	if err := s.waitHealthy(r.Context(), engine); err != nil {
 		status, _ := s.status(r.Context())
 		status.Error = err.Error()
 		writeJSON(w, http.StatusBadGateway, status)
@@ -431,37 +468,50 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st, _ := s.loadState()
+	engine := normalizeEngine(st.Engine)
 	image := strings.TrimSpace(body.Image)
 	if image == "" {
 		image = st.Image
 	}
 	if image == "" {
-		image = s.cfg.DefaultImage
+		image = defaultImageForEngine(s.cfg, engine)
 	}
 	if err := validImage(image); err != nil {
 		writeError(w, http.StatusBadRequest, "IMAGE", err.Error())
 		return
 	}
-	secret, err := s.ensureSecret()
+	secret := ""
+	adminPassword := ""
+	var err error
+	if engine == officeEngineCollabora {
+		adminPassword, err = s.ensureAdminPassword()
+	} else {
+		secret, err = s.ensureSecret()
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "SECRET", err.Error())
 		return
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(image, secret, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir)), 0o640); err != nil {
+	if err := s.prepareOfficeDirs(); err != nil {
+		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
+		return
+	}
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
 	st.Image = image
+	st.Engine = engine
 	_ = s.saveState(st)
-	if _, stderr, err := s.run(r.Context(), 10*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "pull"); err != nil {
-		writeError(w, http.StatusBadGateway, "PULL", commandFailure("Pulling the OnlyOffice image", err, stderr))
+	if err := s.pullImage(r.Context(), image, engine, engine != officeEngineCollabora); err != nil {
+		writeError(w, http.StatusBadGateway, "PULL", err.Error())
 		return
 	}
 	if _, stderr, err := s.run(r.Context(), 5*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d", "--force-recreate"); err != nil {
-		writeError(w, http.StatusBadGateway, "UPDATE", commandFailure("Updating OnlyOffice", err, stderr))
+		writeError(w, http.StatusBadGateway, "UPDATE", commandFailure("Updating "+engineLabel(engine), err, stderr))
 		return
 	}
-	if err := s.waitHealthy(r.Context()); err != nil {
+	if err := s.waitHealthy(r.Context(), engine); err != nil {
 		status, _ := s.status(r.Context())
 		status.Error = err.Error()
 		writeJSON(w, http.StatusBadGateway, status)
@@ -474,6 +524,45 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	st, _ := s.loadState()
+	engine := normalizeEngine(st.Engine)
+	if st.Image == "" {
+		st.Image = defaultImageForEngine(s.cfg, engine)
+	}
+
+	if engine == officeEngineCollabora {
+		password, err := randomToken()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "SECRET", "Could not create an admin password")
+			return
+		}
+		if err := writeSecretFile(s.cfg.AdminPasswordFile, password); err != nil {
+			writeError(w, http.StatusInternalServerError, "SECRET", err.Error())
+			return
+		}
+		if err := s.prepareOfficeDirs(); err != nil {
+			writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
+			return
+		}
+		if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, "", password, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
+			writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
+			return
+		}
+		if _, stderr, err := s.run(r.Context(), 3*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d", "--force-recreate"); err != nil {
+			writeError(w, http.StatusBadGateway, "ROTATE", commandFailure("Restarting Collabora with the new admin password", err, stderr))
+			return
+		}
+		if err := s.waitHealthy(r.Context(), engine); err != nil {
+			status, _ := s.status(r.Context())
+			status.Error = err.Error()
+			writeJSON(w, http.StatusBadGateway, status)
+			return
+		}
+		status, _ := s.status(r.Context())
+		writeJSON(w, http.StatusOK, status)
+		return
+	}
+
 	secret, err := randomToken()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "SECRET", "Could not create a JWT secret")
@@ -483,11 +572,11 @@ func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "SECRET", err.Error())
 		return
 	}
-	st, _ := s.loadState()
-	if st.Image == "" {
-		st.Image = s.cfg.DefaultImage
+	if err := s.prepareOfficeDirs(); err != nil {
+		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
+		return
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(st.Image, secret, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, secret, "", s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
@@ -495,7 +584,7 @@ func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "ROTATE", commandFailure("Restarting OnlyOffice with the new JWT secret", err, stderr))
 		return
 	}
-	if err := s.waitHealthy(r.Context()); err != nil {
+	if err := s.waitHealthy(r.Context(), engine); err != nil {
 		status, _ := s.status(r.Context())
 		status.Error = err.Error()
 		writeJSON(w, http.StatusBadGateway, status)
@@ -576,16 +665,21 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) status(ctx context.Context) (Status, error) {
 	st, _ := s.loadState()
+	engine := normalizeEngine(st.Engine)
 	status := Status{
 		Container:     s.cfg.ContainerName,
+		Engine:        engine,
 		Image:         st.Image,
 		PublicURL:     st.PublicURL,
 		SecretPresent: s.secretPresent(),
 		GatewayStatus: s.gatewayStatus(),
 		CheckedAt:     time.Now().UTC().Format(time.RFC3339),
 	}
+	if engine == officeEngineCollabora {
+		status.SecretPresent = s.adminPasswordPresent()
+	}
 	if status.Image == "" {
-		status.Image = s.cfg.DefaultImage
+		status.Image = defaultImageForEngine(s.cfg, engine)
 	}
 	status.Version = imageVersion(status.Image)
 	status.GatewayConfigured = status.GatewayStatus == "configured"
@@ -612,7 +706,8 @@ func (s *Server) status(ctx context.Context) (Status, error) {
 	}
 	if status.Running {
 		status.Status = "running"
-		if err := s.cfg.Health(ctx, fmt.Sprintf("http://127.0.0.1:%d/healthcheck", s.cfg.HTTPPort)); err != nil {
+		healthURL := fmt.Sprintf("http://127.0.0.1:%d%s", s.cfg.HTTPPort, healthPath(engine))
+		if err := s.cfg.Health(ctx, healthURL); err != nil {
 			status.Health = "unhealthy"
 		} else {
 			status.Health = "ok"
@@ -739,7 +834,7 @@ func (s *Server) configureGateway(st state) error {
 	if err := certificateCoversHost(st.TLSCert, host); err != nil {
 		return err
 	}
-	config := nginxContents(host, st.TLSCert, st.TLSKey, st.PortalURL, s.cfg.HTTPPort, s.cfg.CertbotWebroot)
+	config := nginxContents(normalizeEngine(st.Engine), host, st.TLSCert, st.TLSKey, st.PortalURL, s.cfg.HTTPPort, s.cfg.CertbotWebroot)
 	if err := os.MkdirAll(filepath.Dir(s.cfg.NginxSite), 0o755); err != nil {
 		return err
 	}
@@ -774,14 +869,15 @@ func (s *Server) configureGateway(st state) error {
 	return nil
 }
 
-func (s *Server) waitHealthy(ctx context.Context) error {
+func (s *Server) waitHealthy(ctx context.Context, engine string) error {
 	deadline := time.Now().Add(180 * time.Second)
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d%s", s.cfg.HTTPPort, healthPath(engine))
 	for {
-		if err := s.cfg.Health(ctx, fmt.Sprintf("http://127.0.0.1:%d/healthcheck", s.cfg.HTTPPort)); err == nil {
+		if err := s.cfg.Health(ctx, healthURL); err == nil {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("OnlyOffice did not become healthy within 180 seconds")
+			return fmt.Errorf("%s did not become healthy within 180 seconds", engineLabel(engine))
 		}
 		select {
 		case <-ctx.Done():
@@ -810,6 +906,28 @@ func (s *Server) ensureSecret() (string, error) {
 
 func (s *Server) secretPresent() bool {
 	data, err := os.ReadFile(s.cfg.SecretFile)
+	return err == nil && len(strings.TrimSpace(string(data))) >= 32
+}
+
+func (s *Server) ensureAdminPassword() (string, error) {
+	if data, err := os.ReadFile(s.cfg.AdminPasswordFile); err == nil {
+		password := strings.TrimSpace(string(data))
+		if len(password) >= 32 {
+			return password, nil
+		}
+	}
+	password, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	if err := writeSecretFile(s.cfg.AdminPasswordFile, password); err != nil {
+		return "", err
+	}
+	return password, nil
+}
+
+func (s *Server) adminPasswordPresent() bool {
+	data, err := os.ReadFile(s.cfg.AdminPasswordFile)
 	return err == nil && len(strings.TrimSpace(string(data))) >= 32
 }
 
@@ -1034,7 +1152,105 @@ func redactLogs(value string) []string {
 	return out
 }
 
-func composeContents(image, secret, container string, port int, fontsDir string) string {
+const (
+	officeEngineOnlyOffice = "onlyoffice"
+	officeEngineCollabora  = "collabora"
+)
+
+func normalizeEngine(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case officeEngineCollabora, "cool", "collabora-online":
+		return officeEngineCollabora
+	default:
+		return officeEngineOnlyOffice
+	}
+}
+
+func engineLabel(engine string) string {
+	if normalizeEngine(engine) == officeEngineCollabora {
+		return "Collabora Online"
+	}
+	return "OnlyOffice"
+}
+
+func defaultImageForEngine(cfg Config, engine string) string {
+	if normalizeEngine(engine) == officeEngineCollabora {
+		return cfg.DefaultCollaboraImage
+	}
+	return cfg.DefaultImage
+}
+
+func healthPath(engine string) string {
+	if normalizeEngine(engine) == officeEngineCollabora {
+		return "/hosting/discovery"
+	}
+	return "/healthcheck"
+}
+
+func portalOrigin(value string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("the Alt8Mail portal URL is not a valid origin")
+	}
+	return parsed.Scheme + "://" + parsed.Host, nil
+}
+
+// prepareOfficeDirs creates the Collabora cache/log mounts and gives them to
+// the container UID. A non-root agent cannot chown; the container then reports
+// the non-writable mount, which is clearer than hiding the problem here.
+func (s *Server) prepareOfficeDirs() error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	for _, dir := range []string{"/var/lib/a8m-office/cache", "/var/lib/a8m-office/logs"} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("could not prepare %s: %w", dir, err)
+		}
+		_ = os.Chown(dir, 1001, 1001)
+	}
+	return nil
+}
+
+// pullImage reuses a locally built image (the normal case for the Alt8Mail
+// Office image) and falls back to a Compose pull when it is absent.
+func (s *Server) pullImage(ctx context.Context, image, engine string, force bool) error {
+	if !force {
+		if _, _, err := s.run(ctx, 30*time.Second, s.cfg.DockerBin, "image", "inspect", image); err == nil {
+			return nil
+		}
+	}
+	if _, stderr, err := s.run(ctx, 10*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "pull"); err != nil {
+		return errors.New(commandFailure("Pulling the "+engineLabel(engine)+" image", err, stderr))
+	}
+	return nil
+}
+
+func composeContents(engine, image, secret, adminPassword, container string, port int, fontsDir, publicURL, portalURL string) string {
+	if normalizeEngine(engine) == officeEngineCollabora {
+		host, _ := publicHost(publicURL)
+		origin, _ := portalOrigin(portalURL)
+		return fmt.Sprintf(`services:
+  office:
+    image: %s
+    container_name: %s
+    restart: unless-stopped
+    cap_add:
+      - MKNOD
+    ports:
+      - "127.0.0.1:%d:9980"
+    environment:
+      aliasgroup1: "%s"
+      extra_params: "--o:ssl.enable=false --o:ssl.termination=true --o:net.frame_ancestors=%s --o:logging.level=warning"
+      DONT_GEN_SSL_CERT: "true"
+      server_name: "%s"
+      username: "admin"
+      password: "%s"
+    volumes:
+      - /var/lib/a8m-office/cache:/opt/cool/cache
+      - /var/lib/a8m-office/logs:/var/log
+      - %s:/usr/share/fonts/truetype/custom:ro
+`, image, container, port, origin, origin, host, adminPassword, fontsDir)
+	}
 	return fmt.Sprintf(`services:
   documentserver:
     image: %s
@@ -1054,7 +1270,7 @@ func composeContents(image, secret, container string, port int, fontsDir string)
 `, image, container, port, secret, fontsDir)
 }
 
-func nginxContents(host, cert, key, portalURL string, port int, webroot string) string {
+func nginxContents(engine, host, cert, key, portalURL string, port int, webroot string) string {
 	rootLocations := `    location = / { return 404; }
     location = /welcome { return 404; }
     location = /welcome/ { return 404; }
@@ -1064,6 +1280,12 @@ func nginxContents(host, cert, key, portalURL string, port int, webroot string) 
     location = /welcome { return 302 %s; }
     location = /welcome/ { return 302 %s; }
 `, portalURL, portalURL, portalURL)
+	}
+	engineBlocks := ""
+	if normalizeEngine(engine) == officeEngineCollabora {
+		engineBlocks = `    location /browser/dist/admin/ { return 404; }
+    location = /cool/adminws { return 404; }
+`
 	}
 	return fmt.Sprintf(`# Managed by the Alt8Mail Office Agent.
 server {
@@ -1084,7 +1306,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Content-Type-Options nosniff always;
     client_max_body_size 100m;
-%s    location / {
+%s%s    location / {
         proxy_pass http://127.0.0.1:%d;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -1099,7 +1321,7 @@ server {
         proxy_send_timeout 3600s;
     }
 }
-`, host, webroot, host, cert, key, rootLocations, port)
+`, host, webroot, host, cert, key, rootLocations, engineBlocks, port)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

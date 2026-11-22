@@ -13,10 +13,11 @@ import (
 const (
 	TokenKindContent  = "content"
 	TokenKindCallback = "callback"
+	TokenKindWOPI     = "wopi"
 )
 
-// URLToken is a short-lived, HMAC-signed capability used for the URLs that the
-// OnlyOffice Document Server fetches or calls without a browser session.
+// URLToken is a short-lived, HMAC-signed capability used for URLs that an
+// office engine fetches or calls without a browser session.
 type URLToken struct {
 	Kind         string `json:"k"`
 	DocumentID   string `json:"d,omitempty"`
@@ -25,9 +26,12 @@ type URLToken struct {
 	TenantID     string `json:"t"`
 	Key          string `json:"key,omitempty"`
 	ShareID      string `json:"s,omitempty"`
+	ShareToken   string `json:"st,omitempty"`
 	GuestEmail   string `json:"ge,omitempty"`
 	EditorUserID string `json:"eu,omitempty"`
 	Actor        string `json:"a,omitempty"`
+	DisplayName  string `json:"dn,omitempty"`
+	CanWrite     bool   `json:"cw,omitempty"`
 	ExpiresAt    int64  `json:"exp"`
 }
 
@@ -42,10 +46,13 @@ func SignURLToken(secret string, token URLToken) (string, error) {
 	if strings.TrimSpace(secret) == "" {
 		return "", fmt.Errorf("office signing secret is unavailable")
 	}
-	if token.Kind != TokenKindContent && token.Kind != TokenKindCallback {
+	if token.Kind != TokenKindContent && token.Kind != TokenKindCallback && token.Kind != TokenKindWOPI {
 		return "", fmt.Errorf("invalid token kind")
 	}
 	if token.UserID == "" || token.TenantID == "" || token.ExpiresAt == 0 {
+		return "", fmt.Errorf("incomplete token")
+	}
+	if token.Kind == TokenKindWOPI && token.FileID == "" {
 		return "", fmt.Errorf("incomplete token")
 	}
 	payload, err := json.Marshal(token)
@@ -80,7 +87,7 @@ func VerifyURLToken(secret, raw string, now time.Time) (URLToken, error) {
 	if err := json.Unmarshal(payload, &token); err != nil {
 		return token, fmt.Errorf("invalid signed URL")
 	}
-	if token.Kind != TokenKindContent && token.Kind != TokenKindCallback {
+	if token.Kind != TokenKindContent && token.Kind != TokenKindCallback && token.Kind != TokenKindWOPI {
 		return token, fmt.Errorf("invalid signed URL")
 	}
 	if token.ExpiresAt < now.Unix() {

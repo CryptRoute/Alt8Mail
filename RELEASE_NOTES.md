@@ -1,3 +1,22 @@
+# Alt8Mail 3.11.0
+
+Release date: 2026-11-22. Selectable Collabora Office engine and the Debian/Ubuntu remote prerequisite fix.
+
+## 3.11.0 office engine
+
+- **Collabora Online is now a selectable Office engine** alongside ONLYOFFICE. System Control → Office gains a Document engine selector, and `office_settings.engine` stores `onlyoffice` or `collabora`.
+- **Same Cabinet model.** Collabora saves through the WOPI `PutFile` endpoint into the existing immutable-version pipeline: Cabinet storage, `files.version`, DLP on save, quota, legal hold, eDiscovery, audit, version compare/review/restore and share links are unchanged.
+- **Same deployment model.** `a8m-office-agent` generates the engine-specific Compose project, nginx gateway, health check (`/hosting/discovery`), font refresh and credential rotation. Remote deployment over SSH works for both engines.
+- **AI panel preserved.** The in-editor assistant uses Collabora's documented `Action_Copy`/`Action_Paste` postMessage API; no browser fork is required.
+- **Image:** the white-labelled Collabora image is published as `altgence/office:25.04` (linux/amd64). Remote Office hosts pull it; a private Docker Hub repository requires `docker login` on the Office host first.
+- **Migration:** `0057_office_collabora.sql` adds `office_settings.engine`. Existing installations remain on `onlyoffice` until the engine is switched.
+
+## 3.11.0 Debian/Ubuntu remote prerequisites
+
+- **Fixed the remote prerequisite installer on distributions that do not package Docker Compose v2.** Debian 12/13 and Ubuntu 22.04 provide `docker.io` and Compose v1, not `docker-compose-v2` or `docker-compose-plugin`; the previous script exited with `No Docker Compose v2 package is available in apt.` before installing anything.
+- The installer now installs Docker, curl, CA certificates, nginx and certbot from the distribution, then downloads the official Compose v2 CLI plugin from Docker's GitHub release into `/usr/local/lib/docker/cli-plugins` using the host architecture (`amd64`, `arm64`, `armhf`, `ppc64el`, `s390x`, `riscv64`).
+- The Office host must be able to reach `github.com` for the plugin download. A host with Docker and Compose v2 already installed skips the download.
+
 # Alt8Mail 3.10.1
 
 Release date: 2026-11-20. Admin portal hostname and mail/admin DNS preflight.

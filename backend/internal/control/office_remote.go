@@ -399,15 +399,11 @@ packages=""
 if ! command -v docker >/dev/null 2>&1; then
   packages="$packages docker.io"
 fi
-if ! docker compose version >/dev/null 2>&1; then
-  if apt-cache show docker-compose-v2 >/dev/null 2>&1; then
-    packages="$packages docker-compose-v2"
-  elif apt-cache show docker-compose-plugin >/dev/null 2>&1; then
-    packages="$packages docker-compose-plugin"
-  else
-    echo "No Docker Compose v2 package is available in apt." >&2
-    exit 1
-  fi
+if ! command -v curl >/dev/null 2>&1; then
+  packages="$packages curl"
+fi
+if [ ! -f /etc/ssl/certs/ca-certificates.crt ]; then
+  packages="$packages ca-certificates"
 fi
 if ! command -v nginx >/dev/null 2>&1; then
   packages="$packages nginx"
@@ -439,6 +435,23 @@ if command -v docker >/dev/null 2>&1; then
     fi
     sleep 2
   done
+fi
+# Debian/Ubuntu do not package Docker Compose v2 under any current apt name.
+# Install the official CLI plugin binary into Docker's system plugin path.
+if ! docker compose version >/dev/null 2>&1; then
+  case "$(dpkg --print-architecture)" in
+    amd64) compose_arch=x86_64 ;;
+    arm64) compose_arch=aarch64 ;;
+    armhf) compose_arch=armv7 ;;
+    ppc64el) compose_arch=ppc64le ;;
+    s390x) compose_arch=s390x ;;
+    riscv64) compose_arch=riscv64 ;;
+    *) echo "Unsupported CPU architecture for the Docker Compose plugin" >&2; exit 1 ;;
+  esac
+  plugin_dir=/usr/local/lib/docker/cli-plugins
+  install -d -m 0755 "$plugin_dir"
+  curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${compose_arch}" -o "${plugin_dir}/docker-compose"
+  chmod 0755 "${plugin_dir}/docker-compose"
 fi
 if command -v nginx >/dev/null 2>&1; then
   systemctl enable --now nginx >/dev/null 2>&1 || true
@@ -606,7 +619,7 @@ func (s *Server) officeRemotePreflight(ctx context.Context, target officeRemoteT
 		}
 		result.MemoryDetail = "Remote host memory is sufficient"
 		if !result.MemoryOK {
-			result.MemoryDetail = "OnlyOffice needs at least 2 GB; 4 GB or more is recommended"
+			result.MemoryDetail = "Office needs at least 2 GB; 4 GB or more is recommended"
 			result.Blockers = append(result.Blockers, "Remote host has less than 2 GB RAM")
 		}
 	} else {
@@ -806,13 +819,19 @@ func (s *Server) officeAgentBinaryPath() (string, error) {
 	return "", fmt.Errorf("a8m-office-agent binary was not found next to the control plane binary")
 }
 
-func remoteOfficeAgentEnv(image string) string {
+func remoteOfficeAgentEnv(image, collaboraImage string) string {
+	collaboraImage = strings.TrimSpace(collaboraImage)
+	if collaboraImage == "" {
+		collaboraImage = "altgence/office:25.04"
+	}
 	return fmt.Sprintf(`OFFICE_AGENT_LISTEN=127.0.0.1:8098
 OFFICE_AGENT_TOKEN_FILE=/etc/a8m/office-agent-token
 OFFICE_AGENT_COMPOSE_FILE=/etc/a8m/office/docker-compose.yml
 OFFICE_AGENT_SECRET_FILE=/etc/a8m/office-jwt-secret
 OFFICE_AGENT_STATE_FILE=/var/lib/a8m-office/state.json
 OFFICE_AGENT_IMAGE=%s
+OFFICE_AGENT_COLLABORA_IMAGE=%s
+OFFICE_AGENT_ADMIN_PASSWORD_FILE=/etc/a8m/office-admin-password
 OFFICE_AGENT_CONTAINER=a8m-office
 OFFICE_AGENT_HTTP_PORT=8082
 OFFICE_AGENT_NGINX_SITE=/etc/nginx/sites-available/a8m-office
@@ -821,7 +840,7 @@ OFFICE_AGENT_CERTBOT=certbot
 OFFICE_AGENT_CERTBOT_DIR=/etc/letsencrypt/live
 OFFICE_AGENT_CERTBOT_WEBROOT=/var/www/certbot
 OFFICE_AGENT_FONTS_DIR=/var/lib/a8m-office/fonts
-`, image)
+`, image, collaboraImage)
 }
 
 const remoteOfficeAgentUnit = `[Unit]
@@ -953,7 +972,7 @@ func (s *Server) bootstrapRemoteAgent(ctx context.Context, client *ssh.Client, i
 	if err := uploadRemoteFile(ctx, client, "/etc/a8m/office-agent-token", []byte(token+"\n"), "0600", elevate); err != nil {
 		return "", "", err
 	}
-	if err := uploadRemoteFile(ctx, client, "/etc/a8m/office-agent.env", []byte(remoteOfficeAgentEnv(image)), "0640", elevate); err != nil {
+	if err := uploadRemoteFile(ctx, client, "/etc/a8m/office-agent.env", []byte(remoteOfficeAgentEnv(image, s.cfg.OfficeCollaboraImage)), "0640", elevate); err != nil {
 		return "", "", err
 	}
 	if err := uploadRemoteFile(ctx, client, "/etc/systemd/system/a8m-office-agent.service", []byte(remoteOfficeAgentUnit), "0644", elevate); err != nil {

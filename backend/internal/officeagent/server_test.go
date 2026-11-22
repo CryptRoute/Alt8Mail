@@ -55,7 +55,7 @@ func writeTestCertificate(t *testing.T, dir, hostname string) (string, string) {
 }
 
 func TestComposeContents(t *testing.T) {
-	text := composeContents("onlyoffice/documentserver:9.4.0.1", "test-secret", "a8m-office", 8082, "/var/lib/a8m-office/fonts")
+	text := composeContents("onlyoffice", "onlyoffice/documentserver:9.4.0.1", "test-secret", "", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "https://office.example.com", "https://mail.example.com")
 	for _, expected := range []string{
 		"image: onlyoffice/documentserver:9.4.0.1",
 		"JWT_SECRET: \"test-secret\"",
@@ -65,6 +65,24 @@ func TestComposeContents(t *testing.T) {
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("compose file is missing %q:\n%s", expected, text)
+		}
+	}
+}
+
+func TestComposeContentsCollabora(t *testing.T) {
+	text := composeContents("collabora", "altgence/office:25.04", "", "admin-password", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "https://office.example.com", "https://mail.example.com")
+	for _, expected := range []string{
+		"image: altgence/office:25.04",
+		"127.0.0.1:8082:9980",
+		`aliasgroup1: "https://mail.example.com"`,
+		`server_name: "office.example.com"`,
+		`username: "admin"`,
+		`password: "admin-password"`,
+		"MKNOD",
+		"/var/lib/a8m-office/fonts:/usr/share/fonts/truetype/custom:ro",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("Collabora compose file is missing %q:\n%s", expected, text)
 		}
 	}
 }
@@ -172,10 +190,19 @@ func TestAgentRequiresBearerToken(t *testing.T) {
 }
 
 func TestNginxContentsProxiesWebSockets(t *testing.T) {
-	text := nginxContents("office.example.com", "/etc/ssl/office.crt", "/etc/ssl/office.key", "https://mail.example.com", 8082, "/var/www/certbot")
+	text := nginxContents("onlyoffice", "office.example.com", "/etc/ssl/office.crt", "/etc/ssl/office.key", "https://mail.example.com", 8082, "/var/www/certbot")
 	for _, expected := range []string{"server_name office.example.com;", "proxy_pass http://127.0.0.1:8082;", "Upgrade $http_upgrade", "proxy_read_timeout 3600s", "location = / { return 302 https://mail.example.com; }", "location = /welcome/ { return 302 https://mail.example.com; }"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("nginx contents are missing %q", expected)
+		}
+	}
+}
+
+func TestNginxContentsCollaboraBlocksAdmin(t *testing.T) {
+	text := nginxContents("collabora", "office.example.com", "/etc/ssl/office.crt", "/etc/ssl/office.key", "https://mail.example.com", 8082, "/var/www/certbot")
+	for _, expected := range []string{"location /browser/dist/admin/ { return 404; }", "location = /cool/adminws { return 404; }"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("Collabora nginx contents are missing %q", expected)
 		}
 	}
 }

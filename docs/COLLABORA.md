@@ -1,0 +1,122 @@
+# Alt8Mail Office — Collabora engine
+
+Alt8Mail can run its document editor on either ONLYOFFICE (the existing
+integration) or a white-labelled Collabora Online build. The engine is selected
+per installation in `office_settings.engine` (`onlyoffice` or `collabora`).
+
+## Data flow
+
+1. `POST /api/office/documents/{id}/open` (or the guest share endpoint) resolves
+   the file and the user's permission exactly as before.
+2. With `engine = 'collabora'`, the API returns an `editorUrl` instead of a
+   DocsAPI configuration:
+
+   ```text
+   https://office.example.com/browser/dist/cool.html?WOPISrc=<encoded>&access_token=<token>
+   ```
+
+3. `/office-editor` embeds that URL in an iframe (the isolated host page is
+   unchanged; the iframe uses Collabora's own origin).
+4. Collabora calls the WOPI host:
+
+   | Method | Path | Purpose |
+   |---|---|---|
+   | `GET` | `/api/office/wopi/files/{id}` | `CheckFileInfo` |
+   | `GET` | `/api/office/wopi/files/{id}/contents` | `GetFile` (Range supported) |
+   | `POST` | `/api/office/wopi/files/{id}/contents` | `PutFile` |
+   | `POST` | `/api/office/wopi/files/{id}` | lock family; returns 501 (timestamp mode) |
+
+5. `PutFile` re-checks the live share/grant/policy, DLP, quota and legal-hold
+   rules, then writes an immutable version through the existing
+   `officeSaveCallbackVersion` pipeline.
+
+## Conflict and version model
+
+- `CheckFileInfo` returns `LastModifiedTime` (`files.updated_at`) and `Version`
+  (`files.checksum`).
+- `PutFile` compares `X-COOL-WOPI-Timestamp` with the current
+  `files.updated_at`. A stale base returns `409 {"COOLStatusCode":1010}`;
+  Collabora retries without the header on explicit user overwrite.
+- Identical saves are deduplicated with the existing
+  `office_callback_events` table: `document_key = 'wopi:<document id>'`,
+  `status = 2`, and an event key built from the content SHA-256 plus the base
+  timestamp. No new save table is required.
+- Every distinct save creates a new `office_document_versions` row. Tune the
+  editor's save interval if a tenant wants fewer intermediate versions.
+
+## Permissions
+
+The WOPI token is HMAC-signed with the existing office secret and carries:
+tenant, file, owner, editor (internal share), share id and share token (guest),
+display name, can-write and expiry. Every request re-resolves the file:
+
+- **Owner:** `loadFileContent`.
+- **Internal editor:** `loadAccessibleFileContent` plus a live
+  `file_permissions` check.
+- **Guest:** `loadPublicShare` plus lock, expiry, revocation and guest policy.
+
+DLP, quota, legal hold, eDiscovery, audit, version compare/review and restore
+are unchanged because `PutFile` calls the same save pipeline.
+
+## AI assistant
+
+The existing in-editor AI panel uses Collabora's documented postMessage API:
+
+- `Action_Copy` with `Mimetype: text/plain;charset=utf-8` returns the selected
+  text in `Action_Copy_Resp.Values.content`.
+- `Action_Paste` with `Mimetype` and `Data` inserts the generated text.
+
+No browser patch is required for the AI bridge.
+
+## Configuration
+
+- `office_settings.engine = 'collabora'`
+- `office_settings.public_url` = the Collabora public origin
+  (`https://office.example.com`).
+- The Alt8Mail public URL must be reachable by Collabora; it is the WOPI host
+  origin.
+- The office secret file (`OFFICE_JWT_SECRET_FILE`) still signs the WOPI token;
+  it is no longer shared with the office engine. If it does not exist, create it
+  with `openssl rand -base64 48 > /etc/a8m/office-jwt-secret`, then set
+  `root:a8m` and `0640`.
+
+## Migration
+
+`0057_office_collabora.sql` adds `office_settings.engine`.
+
+## Tests
+
+```sh
+go test ./internal/officecollabora ./internal/office
+go test ./internal/httpapi -run 'Office|WOPI|Collabora'
+```
+
+## Deployment
+
+The Control Plane and `a8m-office-agent` now support both engines. Set
+`office_settings.engine` (or choose the engine in System Control → Office), and
+the agent generates the matching Compose project, nginx gateway, health check,
+font refresh and credential-rotation path. `install/install.sh` in the
+Alt8Office workspace remains a standalone fallback for a hand-managed host.
+
+For remote deployments, the Collabora image is pulled as
+`altgence/office:25.04`. If the Docker Hub repository is private, run
+`docker login` on the Office host first (prefer a read-only token); the agent's
+`docker compose pull` uses the host's Docker credentials. The agent skips the
+pull when the image already exists locally.
+
+On Debian/Ubuntu, the remote prerequisite step installs Docker from the
+distribution and downloads the Docker Compose v2 CLI plugin from Docker's
+GitHub release into `/usr/local/lib/docker/cli-plugins`. Debian 12 does not
+package Compose v2 under any apt name, so this download replaces the old
+`apt-cache` lookup. The Office host must be able to reach `github.com`.
+
+## Not yet wired
+
+- The `/office-editor` CSP still allows broad `https:` frame sources. Tighten
+  it to the configured office origin as a follow-up.
+- Live theme switching inside the iframe is not wired; the editor keeps its own
+  theme until the next open.
+- WOPI proof-key validation (`X-WOPI-Proof` from `/hosting/discovery`) is not
+  enabled; add it at GA.
+- The browser end-to-end edit/save flow still needs a real-browser test.

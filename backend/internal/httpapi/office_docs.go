@@ -60,6 +60,18 @@ func (s *Server) registerOfficeDocumentRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/office/content", s.officeSignedContent)
 	mux.HandleFunc("POST /api/office/callback", s.officeCallback)
 	mux.HandleFunc("POST /api/public/shares/{token}/office", s.publicShareOfficeOpen)
+	mux.HandleFunc("GET /api/office/wopi/files/{id}", func(w http.ResponseWriter, r *http.Request) {
+		s.collaboraHandler().CheckFileInfo(w, r)
+	})
+	mux.HandleFunc("GET /api/office/wopi/files/{id}/contents", func(w http.ResponseWriter, r *http.Request) {
+		s.collaboraHandler().GetFile(w, r)
+	})
+	mux.HandleFunc("POST /api/office/wopi/files/{id}/contents", func(w http.ResponseWriter, r *http.Request) {
+		s.collaboraHandler().PutFile(w, r)
+	})
+	mux.HandleFunc("POST /api/office/wopi/files/{id}", func(w http.ResponseWriter, r *http.Request) {
+		s.collaboraHandler().Lock(w, r)
+	})
 }
 
 func (s *Server) createOfficeDocument(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +214,10 @@ func (s *Server) openOfficeDocument(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "OFFICE", err.Error())
+		return
+	}
+	if runtime.Engine == "collabora" {
+		s.openOfficeDocumentCollabora(w, r, sess, runtime, file, document, format)
 		return
 	}
 	base := s.officePublicBase()

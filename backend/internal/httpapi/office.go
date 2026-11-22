@@ -16,6 +16,7 @@ type officeRuntime struct {
 	Enabled          bool
 	Ready            bool
 	SecretConfigured bool
+	Engine           string
 	PublicURL        string
 	Status           string
 	Version          string
@@ -24,13 +25,16 @@ type officeRuntime struct {
 }
 
 func (s *Server) officeRuntime(ctx context.Context) (officeRuntime, error) {
-	runtime := officeRuntime{Status: "not_installed"}
+	runtime := officeRuntime{Status: "not_installed", Engine: "onlyoffice"}
 	err := s.store.DB.QueryRow(ctx, `
-		SELECT enabled, public_url, status, version, last_health_at
+		SELECT enabled, public_url, status, version, last_health_at, COALESCE(engine,'onlyoffice')
 		FROM public.office_settings WHERE id = 'default'
-	`).Scan(&runtime.Enabled, &runtime.PublicURL, &runtime.Status, &runtime.Version, &runtime.LastHealthAt)
+	`).Scan(&runtime.Enabled, &runtime.PublicURL, &runtime.Status, &runtime.Version, &runtime.LastHealthAt, &runtime.Engine)
 	if err != nil {
 		return runtime, err
+	}
+	if runtime.Engine == "" {
+		runtime.Engine = "onlyoffice"
 	}
 	if path := strings.TrimSpace(s.cfg.OfficeJWTSecretFile); path != "" {
 		if data, readErr := os.ReadFile(path); readErr == nil {
@@ -107,7 +111,7 @@ func (s *Server) officeConfig(w http.ResponseWriter, r *http.Request) {
 	ready := runtime.Ready && allowed
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled": enabled, "ready": ready, "publicUrl": runtime.PublicURL,
-		"status": runtime.Status, "version": runtime.Version,
+		"status": runtime.Status, "version": runtime.Version, "engine": runtime.Engine,
 		"secretConfigured": runtime.SecretConfigured, "mode": "editor",
 		"formats": office.SupportedPayload(),
 		"policy": map[string]any{

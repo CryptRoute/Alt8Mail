@@ -3,6 +3,8 @@ package control
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +25,7 @@ type officeSettings struct {
 	Enabled             bool       `json:"enabled"`
 	MonitoringEnabled   bool       `json:"monitoringEnabled"`
 	DeploymentMode      string     `json:"deploymentMode"`
+	Engine              string     `json:"engine"`
 	PublicURL           string     `json:"publicUrl"`
 	Status              string     `json:"status"`
 	ContainerStatus     string     `json:"containerStatus"`
@@ -51,6 +54,7 @@ type officeAgentStatus struct {
 	Running           bool   `json:"running"`
 	Status            string `json:"status"`
 	ContainerStatus   string `json:"containerStatus"`
+	Engine            string `json:"engine"`
 	Image             string `json:"image"`
 	Version           string `json:"version"`
 	PublicURL         string `json:"publicUrl"`
@@ -109,14 +113,16 @@ func (s *Server) officeSettings(ctx context.Context) (officeSettings, error) {
 func (s *Server) readOfficeSettings(ctx context.Context) (officeSettings, error) {
 	var settings officeSettings
 	err := s.db.QueryRow(ctx, `
-		SELECT id, enabled, monitoring_enabled, deployment_mode, public_url, status, container_status, version,
+		SELECT id, enabled, monitoring_enabled, deployment_mode, COALESCE(engine,'onlyoffice'), public_url,
+		       status, container_status, version,
 		       image, gateway_status, gateway_host, last_error, last_health_at,
 		       COALESCE(remote_host,''), COALESCE(remote_port,22), COALESCE(remote_user,'root'),
 		       COALESCE(remote_auth,'key'), COALESCE(remote_secret,''), COALESCE(remote_passphrase,''),
 		       COALESCE(remote_host_key,''), COALESCE(remote_public_ip,''), COALESCE(remote_agent_token,''),
 		       COALESCE(remote_agent_path,'')
 		FROM public.office_settings WHERE id = 'default'
-	`).Scan(&settings.ID, &settings.Enabled, &settings.MonitoringEnabled, &settings.DeploymentMode, &settings.PublicURL,
+	`).Scan(&settings.ID, &settings.Enabled, &settings.MonitoringEnabled, &settings.DeploymentMode,
+		&settings.Engine, &settings.PublicURL,
 		&settings.Status, &settings.ContainerStatus, &settings.Version, &settings.Image,
 		&settings.GatewayStatus, &settings.GatewayHost, &settings.LastError, &settings.LastHealthAt,
 		&settings.RemoteHost, &settings.RemotePort, &settings.RemoteUser, &settings.RemoteAuth,
@@ -171,6 +177,7 @@ func (s *Server) handleOfficeGet(w http.ResponseWriter, r *http.Request, sess *s
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settings": settings, "agent": agent, "agentError": agentError,
 		"certificates": certificates, "defaultImage": s.cfg.OfficeImage,
+		"defaultCollaboraImage": s.cfg.OfficeCollaboraImage,
 		"host":            s.probe.hostMetrics(r.Context(), false),
 		"tlsEmail":        s.settingString(r.Context(), "ssl.admin_email", ""),
 		"lastSaveFailure": s.officeLastSaveFailure(r.Context()),
@@ -404,6 +411,7 @@ func (s *Server) handleOfficePatch(w http.ResponseWriter, r *http.Request, sess 
 func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	var body struct {
 		PublicURL           string              `json:"publicUrl"`
+		Engine              string              `json:"engine"`
 		Image               string              `json:"image"`
 		TLSMode             string              `json:"tlsMode"`
 		TLSEmail            string              `json:"tlsEmail"`
@@ -427,10 +435,27 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 	if body.DeploymentMode == "" {
 		body.DeploymentMode = "local"
 	}
+	body.Engine = strings.ToLower(strings.TrimSpace(body.Engine))
+	if body.Engine == "" {
+		if settings, settingsErr := s.officeSettings(r.Context()); settingsErr == nil && strings.TrimSpace(settings.Engine) != "" {
+			body.Engine = strings.ToLower(strings.TrimSpace(settings.Engine))
+		}
+	}
+	if body.Engine == "" {
+		body.Engine = "onlyoffice"
+	}
+	if body.Engine != "onlyoffice" && body.Engine != "collabora" {
+		writeError(w, http.StatusBadRequest, "OFFICE_ENGINE", "Choose ONLYOFFICE or Collabora")
+		return
+	}
 	if body.TLSMode == "" {
 		body.TLSMode = "keep"
 	}
-	image := firstNonEmpty(body.Image, s.cfg.OfficeImage)
+	engineDefaultImage := s.cfg.OfficeImage
+	if body.Engine == "collabora" {
+		engineDefaultImage = s.cfg.OfficeCollaboraImage
+	}
+	image := firstNonEmpty(body.Image, engineDefaultImage)
 	if err := validOfficeImage(image); err != nil {
 		writeError(w, http.StatusBadRequest, "OFFICE_IMAGE", err.Error())
 		return
@@ -565,11 +590,11 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 				deployment_mode='remote', remote_host=$1, remote_port=$2, remote_user=$3,
 				remote_auth=$4, remote_secret=$5, remote_passphrase=$6, remote_host_key=$7,
 				remote_public_ip=$8, remote_agent_token=$9, remote_agent_path=$10,
-				public_url=$11, image=$12, updated_at=now()
+				public_url=$11, image=$12, engine=$13, updated_at=now()
 			WHERE id='default'
 		`, remoteTarget.Host, remoteTarget.Port, remoteTarget.User, remoteTarget.Auth,
 			remoteSecret, remotePassphrase, remoteTarget.HostKey, remoteTarget.PublicIP,
-			agentToken, agentPath, body.PublicURL, image); dbErr != nil {
+			agentToken, agentPath, body.PublicURL, image, body.Engine); dbErr != nil {
 			writeError(w, http.StatusInternalServerError, "OFFICE_REMOTE", "Could not save the remote Office deployment target")
 			return
 		}
@@ -580,7 +605,7 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 		_, _ = s.db.Exec(r.Context(), `UPDATE public.office_settings SET deployment_mode='local', updated_at=now() WHERE id='default'`)
 	}
 	agentBody := map[string]any{
-		"publicUrl": body.PublicURL, "image": image,
+		"publicUrl": body.PublicURL, "engine": body.Engine, "image": image,
 		"tlsCert": body.TLSCert, "tlsKey": body.TLSKey,
 		"autoTls": body.TLSMode == "auto", "tlsEmail": body.TLSEmail,
 		"disableGateway": body.TLSMode == "none", "portalUrl": s.officePortalURL(r.Context()),
@@ -592,7 +617,13 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	s.persistOfficeStatus(r.Context(), agent)
-	if body.DeploymentMode == "remote" {
+	if body.Engine == "collabora" {
+		if err := s.ensureLocalOfficeSecret(); err != nil {
+			writeError(w, http.StatusInternalServerError, "OFFICE_SECRET", "Could not prepare the local Office signing secret: "+err.Error())
+			return
+		}
+	}
+	if body.DeploymentMode == "remote" && body.Engine != "collabora" {
 		client, _, syncDialErr := s.dialOfficeRemote(r.Context(), remoteTarget)
 		if syncDialErr != nil {
 			writeError(w, http.StatusBadGateway, "OFFICE_REMOTE_SECRET", "Office installed but the JWT secret could not be synchronized: "+syncDialErr.Error())
@@ -612,19 +643,19 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 	if body.DeploymentMode == "local" {
 		_, _ = s.scanCertificates(r.Context())
 		_, _ = s.db.Exec(r.Context(), `
-			UPDATE public.office_settings SET public_url=$1, image=$2, deployment_mode='local', updated_at=now() WHERE id='default'
-		`, body.PublicURL, image)
+			UPDATE public.office_settings SET public_url=$1, image=$2, engine=$3, deployment_mode='local', updated_at=now() WHERE id='default'
+		`, body.PublicURL, image, body.Engine)
 	} else {
 		_, _ = s.db.Exec(r.Context(), `
-			UPDATE public.office_settings SET public_url=$1, image=$2, updated_at=now() WHERE id='default'
-		`, body.PublicURL, image)
+			UPDATE public.office_settings SET public_url=$1, image=$2, engine=$3, updated_at=now() WHERE id='default'
+		`, body.PublicURL, image, body.Engine)
 	}
 	host := ""
 	if parsed, parseErr := url.Parse(body.PublicURL); parseErr == nil {
 		host = parsed.Hostname()
 	}
 	_, _ = s.db.Exec(r.Context(), `UPDATE public.office_settings SET gateway_host=$1 WHERE id='default'`, host)
-	auditDetails := map[string]any{"publicUrl": body.PublicURL, "image": image, "deploymentMode": body.DeploymentMode}
+	auditDetails := map[string]any{"publicUrl": body.PublicURL, "image": image, "engine": body.Engine, "deploymentMode": body.DeploymentMode}
 	if body.DeploymentMode == "remote" {
 		auditDetails["remoteHost"] = remoteTarget.Host
 		auditDetails["remoteUser"] = remoteTarget.User
@@ -632,7 +663,7 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 			auditDetails["installedDependencies"] = remotePreflight.MissingPackages
 		}
 	}
-	s.actorAudit(r, sess, "office.install", "office", "Installed or reconfigured OnlyOffice", auditDetails)
+	s.actorAudit(r, sess, "office.install", "office", "Installed or reconfigured the Office engine", auditDetails)
 	settings, _ := s.officeSettings(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"settings": settings, "agent": agent})
 }
@@ -658,7 +689,7 @@ func (s *Server) handleOfficeAction(action string) authedHandler {
 		}
 		s.persistOfficeStatus(r.Context(), agent)
 		if action == "rotate-jwt" {
-			if settings, settingsErr := s.officeSettings(r.Context()); settingsErr == nil && settings.DeploymentMode == "remote" {
+			if settings, settingsErr := s.officeSettings(r.Context()); settingsErr == nil && settings.DeploymentMode == "remote" && settings.Engine != "collabora" {
 				target, targetErr := s.officeRemoteTargetFromSettings(settings)
 				if targetErr != nil {
 					writeError(w, http.StatusBadGateway, "OFFICE_REMOTE_SECRET", "Office rotated the remote JWT secret but it could not be loaded: "+targetErr.Error())
@@ -972,16 +1003,33 @@ func officeCertificateCovers(cert officeCertificate, hostname string) bool {
 	return false
 }
 
+// ensureLocalOfficeSecret keeps the Alt8Mail-side WOPI token signer available
+// for Collabora, where no shared JWT secret is synchronized from the engine.
+func (s *Server) ensureLocalOfficeSecret() error {
+	path := strings.TrimSpace(s.cfg.OfficeSecretFile)
+	if path == "" {
+		return fmt.Errorf("CONTROL_OFFICE_JWT_SECRET_FILE is not configured")
+	}
+	if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) >= 32 {
+		return nil
+	}
+	buf := make([]byte, 48)
+	if _, err := rand.Read(buf); err != nil {
+		return err
+	}
+	return s.writeLocalOfficeJWTSecret(base64.RawURLEncoding.EncodeToString(buf))
+}
+
 func validOfficeImage(value string) error {
 	if value == "" || len(value) > 255 {
-		return fmt.Errorf("OnlyOffice image is invalid")
+		return fmt.Errorf("Office image is invalid")
 	}
 	for _, char := range value {
 		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
 			(char >= '0' && char <= '9') || strings.ContainsRune("._/:@-", char) {
 			continue
 		}
-		return fmt.Errorf("OnlyOffice image contains unsupported characters")
+		return fmt.Errorf("Office image contains unsupported characters")
 	}
 	return nil
 }

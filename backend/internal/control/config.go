@@ -60,6 +60,7 @@ type Config struct {
 	OfficeAgentURL        string
 	OfficeAgentToken      string
 	OfficeImage           string
+	OfficeCollaboraImage  string
 	OfficeSecretFile      string
 	LicenseFile           string
 	LicensePublicKey      string
@@ -130,8 +131,9 @@ func LoadConfig() (Config, error) {
 		RedisPasswordFile:   env("CONTROL_REDIS_PASSWORD_FILE", "/opt/a8m/secrets/redis_password"),
 		OfficeAgentURL:      strings.TrimRight(env("CONTROL_OFFICE_AGENT_URL", "http://127.0.0.1:8098"), "/"),
 		OfficeAgentToken:    env("CONTROL_OFFICE_AGENT_TOKEN_FILE", "/etc/a8m/office-agent-token"),
-		OfficeImage:         env("CONTROL_OFFICE_IMAGE", "onlyoffice/documentserver:9.4.0.1"),
-		OfficeSecretFile:    env("CONTROL_OFFICE_JWT_SECRET_FILE", "/etc/a8m/office-jwt-secret"),
+		OfficeImage:          env("CONTROL_OFFICE_IMAGE", "onlyoffice/documentserver:9.4.0.1"),
+		OfficeCollaboraImage: env("CONTROL_OFFICE_COLLABORA_IMAGE", "altgence/office:25.04"),
+		OfficeSecretFile:     env("CONTROL_OFFICE_JWT_SECRET_FILE", "/etc/a8m/office-jwt-secret"),
 		// The Control Plane and webmail must point at the same license file so
 		// an upload here is the file the webmail loads after its next restart.
 		LicenseFile:           env("CONTROL_LICENSE_FILE", "/etc/a8m/license.token"),

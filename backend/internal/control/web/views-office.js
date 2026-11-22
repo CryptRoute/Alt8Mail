@@ -1,5 +1,5 @@
-/* Office / OnlyOffice lifecycle and feature flag. */
-import * as ui from './ui.js?v=3.10.1';
+/* Office engine lifecycle and feature flag (ONLYOFFICE or Collabora). */
+import * as ui from './ui.js?v=3.11.0';
 
 const esc = ui.esc;
 
@@ -10,7 +10,7 @@ export async function renderOffice(ctx) {
   try {
     payload = await ctx.api('/control/api/office');
   } catch (error) {
-    ctx.root.innerHTML = `${ui.pageHeader({ eyebrow: 'Infrastructure', title: 'Office', description: 'OnlyOffice Document Server lifecycle and the webmail Office feature flag.' })}
+    ctx.root.innerHTML = `${ui.pageHeader({ eyebrow: 'Infrastructure', title: 'Office', description: 'Office document engine lifecycle and the webmail Office feature flag.' })}
       ${ui.inlineNotice('critical', 'Could not load Office', error.message || String(error))}`;
     return;
   }
@@ -29,18 +29,25 @@ export async function renderOffice(ctx) {
     })))
     .concat([{ value: 'none', label: 'Install without a public gateway' }]);
   const defaultTls = settings.gatewayStatus === 'configured' ? 'keep' : 'auto';
+  const currentEngine = settings.engine === 'collabora' ? 'collabora' : 'onlyoffice';
+  const defaultForEngine = currentEngine === 'collabora'
+    ? (payload.defaultCollaboraImage || 'altgence/office:25.04')
+    : (payload.defaultImage || 'onlyoffice/documentserver:9.4.0.1');
+  const engineLabel = currentEngine === 'collabora' ? 'Alt8Mail Office (Collabora)' : 'ONLYOFFICE Docs';
   let preflightReady = false;
   let preflightGeneration = 0;
   const statusTone = running ? 'good' : settings.enabled ? 'warning' : 'neutral';
   ctx.root.innerHTML = `${ui.pageHeader({
     eyebrow: 'Infrastructure',
     title: 'Office',
-    description: 'Keep the OnlyOffice Document Server on a separate Docker host or container, managed by a narrow lifecycle agent. Webmail only exposes Office when this control plane marks it healthy and enabled.',
+    description: 'Keep the Office document engine on a separate Docker host or container, managed by a narrow lifecycle agent. Webmail only exposes Office when this control plane marks it healthy and enabled.',
     actions: `<button class="btn btn-secondary" type="button" id="office-refresh">${ui.icon('refresh', 15)} Refresh</button>`,
     meta: `<span class="summary-pill">${ui.icon('plug', 13)} ${running ? 'Ready' : installed ? 'Installed' : agentOnline ? 'Not installed' : 'Agent offline'}</span>`,
   })}
   ${payload.agentError ? ui.inlineNotice('warning', 'Office agent is not reachable', payload.agentError, `<a class="btn btn-secondary btn-sm" href="#/services">${ui.icon('server', 13)} Open services</a>`) : ''}
-  ${ui.inlineNotice('info', 'Separate compute is mandatory', 'OnlyOffice Document Server runs Node.js, PostgreSQL, RabbitMQ and Redis. Do not co-locate it on a 4 GB mail host. The agent listens on loopback and only manages its own compose project.', '')}
+  ${currentEngine === 'collabora'
+    ? ui.inlineNotice('info', 'Separate compute is mandatory', 'Collabora runs a headless LibreOffice engine. Each open document is a kit process, so size this host by concurrent documents. No PostgreSQL, Redis or RabbitMQ is required. The agent listens on loopback and only manages its own compose project.', '')
+    : ui.inlineNotice('info', 'Separate compute is mandatory', 'OnlyOffice Document Server runs Node.js, PostgreSQL, RabbitMQ and Redis. Do not co-locate it on a 4 GB mail host. The agent listens on loopback and only manages its own compose project.', '')}
   <div class="office-grid">
     <section class="card">
       <header class="card-head"><div><h3>Service status</h3><p>Agent, container and gateway health</p></div>${ui.badge(running ? 'Running' : installed ? 'Stopped' : agentOnline ? 'Not installed' : 'Offline', statusTone, running ? 'check-circle' : 'alert')}</header>
@@ -48,9 +55,10 @@ export async function renderOffice(ctx) {
         ${ui.kv([
           ['Agent', payload.agentError ? 'Unreachable' : 'Reachable'],
           ['Container', esc(agent.containerStatus || settings.containerStatus || 'not installed')],
+          ['Engine', esc(agent.engine === 'collabora' || currentEngine === 'collabora' ? 'Alt8Mail Office (Collabora)' : 'ONLYOFFICE Docs')],
           ['Version', esc(agent.version || settings.version || '—')],
-          ['Image', `<span class="mono">${esc(agent.image || settings.image || payload.defaultImage || '—')}</span>`],
-          ['JWT secret', agent.secretPresent ? ui.badge('Present', 'good', 'lock') : ui.badge('Missing', 'warning', 'lock')],
+          ['Image', `<span class="mono">${esc(agent.image || settings.image || defaultForEngine)}</span>`],
+          [currentEngine === 'collabora' ? 'Admin credentials' : 'JWT secret', agent.secretPresent ? ui.badge('Present', 'good', 'lock') : ui.badge('Missing', 'warning', 'lock')],
           ['Gateway', agent.gatewayConfigured ? ui.badge('Configured', 'good', 'check-circle') : ui.badge('Not configured', 'neutral', 'link')],
           ['Public URL', esc(settings.publicUrl || agent.publicUrl || '—')],
           ['Host memory', settings.deploymentMode === 'remote' ? 'See remote preflight' : (host.memoryTotalBytes ? `${ui.bytes(host.memoryTotalBytes)} total · ${Number(host.memoryPercent || 0).toFixed(0)}% used` : 'Unavailable')],
@@ -68,7 +76,7 @@ export async function renderOffice(ctx) {
                 ? 'Webmail will show Office controls only after this flag is enabled.'
                 : settings.enabled
                   ? 'Office is enabled, but the container is not healthy. Disable it here or restore the service.'
-                  : 'Start a healthy OnlyOffice container before enabling webmail Office.'
+                  : 'Start a healthy Office container before enabling webmail Office.'
               : 'You need server.manage permission to change this flag.',
             extra: 'data-office-enabled',
           })}
@@ -80,8 +88,9 @@ export async function renderOffice(ctx) {
       <div class="card-body">
         <div class="office-fields">
           ${ui.field({ label: 'Deployment', name: 'office-deployment', type: 'select', value: settings.deploymentMode === 'remote' ? 'remote' : 'local', options: [{ value: 'local', label: 'Local Docker host' }, { value: 'remote', label: 'Remote server over SSH' }], help: 'Remote mode provisions and manages the Office host through an SSH connection from this Control Plane.' })}
-          ${ui.field({ label: 'Public Office URL', name: 'office-url', value: settings.publicUrl || '', placeholder: 'https://office.example.com', help: 'The browser and OnlyOffice callback origin. Use a dedicated HTTPS hostname.', required: true })}
-          ${ui.field({ label: 'OnlyOffice image', name: 'office-image', value: settings.image || payload.defaultImage || '', placeholder: 'onlyoffice/documentserver:9.4.0.1', help: 'Pin a tested image tag before production.', required: true })}
+          ${ui.field({ label: 'Document engine', name: 'office-engine', type: 'select', value: currentEngine, options: [{ value: 'onlyoffice', label: 'ONLYOFFICE Docs' }, { value: 'collabora', label: 'Alt8Mail Office (Collabora)' }], help: 'Both run as a separate Docker container managed by the Office agent. Switching engines reinstalls the container.' })}
+          ${ui.field({ label: 'Public Office URL', name: 'office-url', value: settings.publicUrl || '', placeholder: 'https://office.example.com', help: 'The browser and WOPI host origin. Use a dedicated HTTPS hostname.', required: true })}
+          ${ui.field({ label: 'Office image', name: 'office-image', value: settings.image || defaultForEngine, placeholder: defaultForEngine, help: 'Pin a tested image tag before production. For Collabora, publish the built image to a registry the Office host can pull from, or load it on the host.', required: true })}
           ${ui.field({ label: 'TLS for gateway', name: 'office-cert', type: 'select', value: defaultTls, options: certOptions.map((option) => ({ ...option, disabled: settings.deploymentMode === 'remote' && option.value.startsWith('cert:') })), help: 'Automatic mode runs certbot through the Office agent using the HTTP-01 webroot challenge. DNS must already point here.' })}
           ${ui.field({ label: "Let's Encrypt account email", name: 'office-tls-email', type: 'email', value: payload.tlsEmail || '', placeholder: 'hostmaster@example.com', help: 'Required for automatic issuance and renewal notices.' })}
         </div>
@@ -113,14 +122,14 @@ export async function renderOffice(ctx) {
     <div class="card-body" id="office-preflight-body"><div class="empty-mini">Enter the public Office URL, then run the preflight.</div></div>
   </section>
   <section class="card" style="margin-top:16px">
-    <header class="card-head"><div><h3>Lifecycle</h3><p>Start, stop, restart, update and rotate the JWT secret</p></div></header>
+    <header class="card-head"><div><h3>Lifecycle</h3><p>Start, stop, restart, update and rotate credentials</p></div></header>
     <div class="card-body">
       <div class="office-actions">
         <button class="btn btn-secondary" type="button" data-office-action="start" ${canManage && installed ? '' : 'disabled'}>${ui.icon('play', 14)} Start</button>
         <button class="btn btn-secondary" type="button" data-office-action="stop" ${canManage && installed ? '' : 'disabled'}>${ui.icon('pause', 14)} Stop</button>
         <button class="btn btn-secondary" type="button" data-office-action="restart" ${canManage && installed ? '' : 'disabled'}>${ui.icon('refresh', 14)} Restart</button>
         <button class="btn btn-secondary" type="button" data-office-action="update" ${canManage && installed ? '' : 'disabled'}>${ui.icon('download', 14)} Update image</button>
-        <button class="btn btn-secondary" type="button" data-office-action="rotate-jwt" ${canManage && installed ? '' : 'disabled'}>${ui.icon('key', 14)} Rotate JWT secret</button>
+        <button class="btn btn-secondary" type="button" data-office-action="rotate-jwt" ${canManage && installed ? '' : 'disabled'}>${ui.icon('key', 14)} ${currentEngine === 'collabora' ? 'Rotate admin password' : 'Rotate JWT secret'}</button>
         <button class="btn btn-secondary" type="button" data-office-action="gateway" ${canManage && installed ? '' : 'disabled'}>${ui.icon('link', 14)} Reconfigure gateway</button>
         <button class="btn btn-secondary" type="button" id="office-logs">${ui.icon('terminal', 14)} View logs</button>
       </div>
@@ -142,7 +151,7 @@ export async function renderOffice(ctx) {
   <section class="card office-fonts-card" id="office-fonts-card" style="margin-top:16px">
     <header class="card-head"><div><h3>Document fonts</h3><p>Metric-compatible fonts for Word, Excel and PowerPoint</p></div><span class="badge tone-neutral">${settings.deploymentMode === 'remote' ? 'Remote Office host' : 'Local Office host'}</span></header>
     <div class="card-body">
-      <p class="form-note" style="margin-top:0">OnlyOffice ships with a small font set. Install open, metric-compatible families so documents created in Microsoft Office keep their intended layout: <strong>Carlito</strong> (Calibri), <strong>Caladea</strong> (Cambria), <strong>Liberation Sans/Serif/Mono</strong> (Arial, Times New Roman, Courier New), <strong>DejaVu</strong> and <strong>Noto</strong>. Microsoft's proprietary font files are not redistributed by Alt8Mail.</p>
+      <p class="form-note" style="margin-top:0">The Office engine ships with a small font set. Install open, metric-compatible families so documents created in Microsoft Office keep their intended layout: <strong>Carlito</strong> (Calibri), <strong>Caladea</strong> (Cambria), <strong>Liberation Sans/Serif/Mono</strong> (Arial, Times New Roman, Courier New), <strong>DejaVu</strong> and <strong>Noto</strong>. Microsoft's proprietary font files are not redistributed by Alt8Mail.</p>
       <div class="form-actions">
         <span class="form-note" id="office-fonts-result">${installed ? 'Install or refresh the compatible font set on the Office host.' : 'Install Office first, then add the font set.'}</span>
         <button class="btn btn-secondary" type="button" id="office-fonts-install" ${canManage && installed ? '' : 'disabled'}>${ui.icon('download', 14)} Install compatible fonts</button>
@@ -261,7 +270,7 @@ export async function renderOffice(ctx) {
     const host = settings.deploymentMode === 'remote' ? 'the remote Office host' : 'this server';
     if (!(await ctx.confirm({
       title: 'Install compatible document fonts?',
-      message: `This installs open font packages on ${host}, mounts the font directory into OnlyOffice, and restarts the Document Server so the fonts appear in the editor. Open editor sessions will be interrupted.`,
+      message: `This installs open font packages on ${host}, mounts the font directory into the Office engine, and restarts it so the fonts appear in the editor. Open editor sessions will be interrupted.`,
       confirmLabel: 'Install fonts',
       tone: 'danger',
     }))) return;
@@ -269,7 +278,7 @@ export async function renderOffice(ctx) {
     button.disabled = true;
     button.textContent = 'Installing fonts…';
     const result = document.getElementById('office-fonts-result');
-    if (result) result.textContent = 'Installing packages and regenerating the OnlyOffice font cache. This can take several minutes.';
+    if (result) result.textContent = 'Installing packages and refreshing the Office font cache. This can take several minutes.';
     try {
       const data = await ctx.api('/control/api/office/fonts', { method: 'POST' });
       ui.toast(data.message || 'Compatible fonts installed.', 'good');
@@ -514,6 +523,7 @@ export async function renderOffice(ctx) {
   async function install() {
     const button = document.getElementById('office-install');
     const publicUrl = document.querySelector('[name="office-url"]')?.value.trim() || '';
+    const engine = document.querySelector('[name="office-engine"]')?.value || 'onlyoffice';
     const image = document.querySelector('[name="office-image"]')?.value.trim() || '';
     const mode = document.querySelector('[name="office-cert"]')?.value || 'auto';
     const tlsEmail = document.querySelector('[name="office-tls-email"]')?.value.trim() || '';
@@ -529,7 +539,7 @@ export async function renderOffice(ctx) {
       return;
     }
     const body = {
-      publicUrl, image, tlsMode: mode.startsWith('cert:') ? 'existing' : mode,
+      engine, publicUrl, image, tlsMode: mode.startsWith('cert:') ? 'existing' : mode,
       tlsEmail, tlsCert: cert?.certPath || '', tlsKey: cert?.keyPath || '',
       deploymentMode: deployment,
       installDependencies: deployment === 'remote' ? autoInstallDependencies() : false,
@@ -546,12 +556,33 @@ export async function renderOffice(ctx) {
       if (button) { button.disabled = false; button.innerHTML = label || 'Install / reconfigure'; }
     }
   }
+  document.querySelector('[name="office-engine"]')?.addEventListener('change', (event) => {
+    const image = document.querySelector('[name="office-image"]');
+    if (!image) return;
+    const onlyofficeDefault = payload.defaultImage || 'onlyoffice/documentserver:9.4.0.1';
+    const collaboraDefault = payload.defaultCollaboraImage || 'altgence/office:25.04';
+    const next = event.target.value === 'collabora' ? collaboraDefault : onlyofficeDefault;
+    if (!image.value.trim() || image.value.trim() === onlyofficeDefault || image.value.trim() === collaboraDefault) {
+      image.value = next;
+    }
+  });
   document.getElementById('office-install')?.addEventListener('click', install);
 
   document.querySelectorAll('[data-office-action]').forEach((button) => {
     button.addEventListener('click', async () => {
       const action = button.getAttribute('data-office-action');
-      if (action === 'rotate-jwt' && !(await ctx.confirm({ title: 'Rotate the Office JWT secret?', message: 'Open editor sessions will be invalidated. Webmail will read the new secret from the shared file.', confirmLabel: 'Rotate secret', tone: 'danger' }))) return;
+      if (action === 'rotate-jwt') {
+        const isCollabora = (document.querySelector('[name="office-engine"]')?.value || currentEngine) === 'collabora';
+        const confirmed = await ctx.confirm({
+          title: isCollabora ? 'Rotate the Collabora admin password?' : 'Rotate the Office JWT secret?',
+          message: isCollabora
+            ? 'Open editor sessions will be invalidated. The new admin console password replaces the old one.'
+            : 'Open editor sessions will be invalidated. Webmail will read the new secret from the shared file.',
+          confirmLabel: isCollabora ? 'Rotate password' : 'Rotate secret',
+          tone: 'danger',
+        });
+        if (!confirmed) return;
+      }
       let body = {};
       if (action === 'update') {
         body = { image: document.querySelector('[name="office-image"]')?.value.trim() || '' };

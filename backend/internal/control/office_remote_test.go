@@ -86,7 +86,10 @@ func TestRemotePrepareCommandInstallsOfficePrerequisites(t *testing.T) {
 		"apt-get update",
 		"dpkg --configure -a",
 		"DPkg::Lock::Timeout=300",
-		"docker-compose-v2",
+		"docker compose version",
+		"/usr/local/lib/docker/cli-plugins",
+		"docker-compose-linux-",
+		"dpkg --print-architecture",
 		"nginx",
 		"certbot",
 		"systemctl enable --now docker",
@@ -103,7 +106,7 @@ func TestRemotePrepareCommandInstallsOfficePrerequisites(t *testing.T) {
 }
 
 func TestRemoteOfficeAgentEnvUsesImage(t *testing.T) {
-	text := remoteOfficeAgentEnv("onlyoffice/documentserver:9.4.0.1")
+	text := remoteOfficeAgentEnv("onlyoffice/documentserver:9.4.0.1", "altgence/office:25.04")
 	for _, expected := range []string{
 		"OFFICE_AGENT_LISTEN=127.0.0.1:8098",
 		"OFFICE_AGENT_IMAGE=onlyoffice/documentserver:9.4.0.1",

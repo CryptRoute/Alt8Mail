@@ -115,25 +115,49 @@ fi
 		return result, fmt.Errorf("no TrueType or OpenType fonts were found on the Office host")
 	}
 	st, _ := s.loadState()
+	engine := normalizeEngine(st.Engine)
 	image := strings.TrimSpace(st.Image)
 	if image == "" {
-		image = strings.TrimSpace(s.cfg.DefaultImage)
+		image = strings.TrimSpace(defaultImageForEngine(s.cfg, engine))
 	}
 	if image == "" {
-		return result, fmt.Errorf("the OnlyOffice image is not configured")
+		return result, fmt.Errorf("the %s image is not configured", engineLabel(engine))
 	}
-	secret, err := s.ensureSecret()
+	secret := ""
+	adminPassword := ""
+	if engine == officeEngineCollabora {
+		adminPassword, err = s.ensureAdminPassword()
+	} else {
+		secret, err = s.ensureSecret()
+	}
 	if err != nil {
 		return result, err
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(image, secret, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir)), 0o640); err != nil {
+	if err := s.prepareOfficeDirs(); err != nil {
+		return result, fmt.Errorf("could not prepare the Office directories: %w", err)
+	}
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
 		return result, fmt.Errorf("could not write the Office Compose file: %w", err)
 	}
 	if _, stderr, err := s.run(ctx, 10*time.Minute, s.cfg.DockerBin, "compose", "-f", s.cfg.ComposeFile, "up", "-d"); err != nil {
 		return result, fmt.Errorf("could not apply the font mount: %s", trim(stderr))
 	}
-	if err := s.waitHealthy(ctx); err != nil {
+	if err := s.waitHealthy(ctx, engine); err != nil {
 		return result, fmt.Errorf("the Office container did not become healthy after applying the font mount: %w", err)
+	}
+	if engine == officeEngineCollabora {
+		if _, stderr, err := s.run(ctx, 5*time.Minute, s.cfg.DockerBin, "exec", s.cfg.ContainerName, "fc-cache", "-f"); err != nil {
+			return result, fmt.Errorf("the fonts were mounted, but the Collabora font cache refresh failed: %s", trim(stderr))
+		}
+		if _, stderr, err := s.run(ctx, 3*time.Minute, s.cfg.DockerBin, "restart", s.cfg.ContainerName); err != nil {
+			return result, fmt.Errorf("fonts were refreshed but Collabora could not restart: %s", trim(stderr))
+		}
+		if err := s.waitHealthy(ctx, engine); err != nil {
+			return result, fmt.Errorf("fonts were refreshed but Collabora did not become healthy: %w", err)
+		}
+		result.OK = true
+		result.Message = fmt.Sprintf("Installed %d compatible font files and refreshed the Collabora font cache", len(result.Files))
+		return result, nil
 	}
 	// The Document Server image scans the mounted custom-font directory during
 	// its font generation pass. Run the generator explicitly, then restart so
@@ -151,7 +175,7 @@ fi
 	if _, stderr, err := s.run(ctx, 3*time.Minute, s.cfg.DockerBin, "restart", s.cfg.ContainerName); err != nil {
 		return result, fmt.Errorf("fonts were generated but OnlyOffice could not restart: %s", trim(stderr))
 	}
-	if err := s.waitHealthy(ctx); err != nil {
+	if err := s.waitHealthy(ctx, engine); err != nil {
 		return result, fmt.Errorf("fonts were generated but OnlyOffice did not become healthy: %w", err)
 	}
 	result.OK = true

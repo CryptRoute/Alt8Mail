@@ -10,6 +10,8 @@
   var editor = null;
   var documentDirty = false;
   var pendingThemeReload = false;
+  var collabora = null;
+  var collaboraCopyPending = null;
   function applyHostTheme() {
     document.documentElement.setAttribute("data-theme", theme === "theme-dark" ? "dark" : "light");
   }
@@ -54,6 +56,26 @@
     theme = nextTheme;
     applyHostTheme();
     applyEditorTheme();
+  });
+  // Collabora runs on its own origin and speaks the documented postMessage
+  // protocol. Action_Copy returns the current selection; Action_Paste inserts
+  // text at the cursor. Both are used by the Alt8Mail AI panel.
+  window.addEventListener("message", function (event) {
+    if (!collabora || event.origin !== collabora.origin) return;
+    var payload = event.data;
+    if (typeof payload === "string") {
+      try { payload = JSON.parse(payload); } catch (_error) { return; }
+    }
+    if (!payload || !payload.MessageId) return;
+    if (payload.MessageId === "Action_Copy_Resp") {
+      var pending = collaboraCopyPending;
+      collaboraCopyPending = null;
+      if (pending) pending(payload.Values || {});
+      return;
+    }
+    if (payload.MessageId === "Action_Save_Resp") {
+      notifyParent("a8m-office-saved", fileId || shareToken);
+    }
   });
   var state = document.getElementById("state");
   var spinner = document.getElementById("spinner");
@@ -108,6 +130,43 @@
     });
   }
 
+  function collaboraContent(values) {
+    var content = values && values.content;
+    if (typeof content !== "string") return "";
+    if (content.charAt(0) === "{") {
+      try {
+        var parsed = JSON.parse(content);
+        return parsed["text/plain;charset=utf-8"] || parsed["text/plain"] || content;
+      } catch (_error) {}
+    }
+    return content;
+  }
+
+  function openCollabora(data) {
+    if (!data.editorUrl) {
+      fail("The Collabora editor URL is missing.");
+      return;
+    }
+    var origin = "";
+    try { origin = new URL(data.editorUrl).origin; } catch (_error) {}
+    var host = document.getElementById("editor");
+    var frame = document.createElement("iframe");
+    frame.id = "collabora-frame";
+    frame.src = data.editorUrl;
+    frame.allow = "clipboard-read; clipboard-write";
+    frame.setAttribute("title", "Alt8Mail Office document");
+    frame.style.cssText = "display:block;border:0;width:100%;height:100%;background:#fff;";
+    host.innerHTML = "";
+    host.appendChild(frame);
+    collabora = { frame: frame, origin: origin };
+    if (state) state.hidden = true;
+    if (data.file && data.file.name) document.title = data.file.name + " · Alt8Mail Office";
+    notifyParent("a8m-office-ready", fileId || shareToken);
+    if (!shareToken && data.aiEnabled && typeof window.Alt8OfficeAI === "function") {
+      window.Alt8OfficeAI(null, data.document && data.document.id, collabora);
+    }
+  }
+
   async function boot() {
     if (!fileId && !shareToken) {
       fail("No document was selected.");
@@ -135,6 +194,10 @@
     try { data = await response.json(); } catch (_error) {}
     if (!response.ok) {
       fail(data.error || "Office is not available for this document.");
+      return;
+    }
+    if (data.engine === "collabora" && data.editorUrl) {
+      openCollabora(data);
       return;
     }
     if (!data.documentServerUrl || !data.config) {
@@ -179,7 +242,7 @@
   }
 
 
-  window.Alt8OfficeAI = function (docEditor, documentId) {
+  window.Alt8OfficeAI = function (docEditor, documentId, bridge) {
     var fab = document.getElementById("aiFab");
     var panel = document.getElementById("aiPanel");
     var close = document.getElementById("aiClose");
@@ -215,6 +278,37 @@
 
     function ensureConnector() {
       if (connector) return Promise.resolve(connector);
+      if (bridge) {
+        connector = {
+          selectedText: function () {
+            return new Promise(function (resolve) {
+              var timer = window.setTimeout(function () {
+                collaboraCopyPending = null;
+                resolve("");
+              }, 15000);
+              collaboraCopyPending = function (values) {
+                window.clearTimeout(timer);
+                resolve(collaboraContent(values));
+              };
+              bridge.frame.contentWindow.postMessage(JSON.stringify({
+                MessageId: "Action_Copy",
+                SendTime: Date.now(),
+                Values: { Mimetype: "text/plain;charset=utf-8" }
+              }), bridge.origin);
+            });
+          },
+          pasteText: function (text) {
+            try { bridge.frame.focus(); } catch (_error) {}
+            bridge.frame.contentWindow.postMessage(JSON.stringify({
+              MessageId: "Action_Paste",
+              SendTime: Date.now(),
+              Values: { Mimetype: "text/plain;charset=utf-8", Data: text }
+            }), bridge.origin);
+            return Promise.resolve(true);
+          }
+        };
+        return Promise.resolve(connector);
+      }
       if (connectorPromise) return connectorPromise;
       connectorPromise = new Promise(function (resolve) {
         var attempts = 0;
@@ -241,6 +335,7 @@
     function selectedText() {
       return ensureConnector().then(function (ready) {
         if (!ready) return "";
+        if (typeof ready.selectedText === "function") return ready.selectedText();
         return new Promise(function (resolve) {
           try {
             ready.executeMethod("GetSelectedText", [{ Numbering: false, Math: false }], function (result) {
@@ -376,6 +471,14 @@
         if (!ready) {
           copyResult().then(function (copied) {
             setStatus(copied ? "Copied. Paste it into the document." : "Insert is unavailable. Select and copy the result manually.", !copied);
+          });
+          return;
+        }
+        if (typeof ready.pasteText === "function") {
+          ready.pasteText(lastResult).then(function () {
+            setStatus("Inserted into the document.", false);
+          }, function () {
+            setStatus("Insert is unavailable. Copy the result and paste it manually.", true);
           });
           return;
         }

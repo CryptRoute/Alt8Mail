@@ -64,6 +64,10 @@ func (s *Server) publicShareOfficeOpen(w http.ResponseWriter, r *http.Request) {
 	if editable {
 		mode = "edit"
 	}
+	if runtime.Engine == "collabora" {
+		s.openPublicShareOfficeCollabora(w, r, runtime, share, document, editable, guestEmail, token)
+		return
+	}
 	theme := "theme-light"
 	var body struct {
 		Theme string `json:"theme"`
