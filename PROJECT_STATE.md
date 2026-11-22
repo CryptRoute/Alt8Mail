@@ -21,4 +21,4 @@
 ### Not Started
 - Post-roadmap work only.
 
-Phase 6 implementation is complete for the shipped v1 slices. 3.11.0 adds the selectable Collabora Online Office engine and fixes the Debian/Ubuntu Docker Compose v2 remote prerequisite install; see `RELEASE_NOTES.md`. The Phase 5 encryption operator gate in `docs/RELEASE_GAP_AUDIT.md` remains.
+Phase 6 implementation is complete for the shipped v1 slices. 3.11.1 adds the selectable Collabora Online Office engine and fixes the Debian/Ubuntu Docker Compose v2 remote prerequisite install; see `RELEASE_NOTES.md`. The Phase 5 encryption operator gate in `docs/RELEASE_GAP_AUDIT.md` remains.

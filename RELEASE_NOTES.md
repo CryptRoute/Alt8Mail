@@ -1,3 +1,17 @@
+# Alt8Mail 3.11.1
+
+Release date: 2026-11-22. Supersedes 3.11.0 with the Office agent install fix.
+
+## 3.11.1 office agent
+
+- **Fixed the Office agent install on non-root hosts and Linux CI.** Preparing the
+  Collabora data directories always created `/var/lib/a8m-office/cache` and
+  `/var/lib/a8m-office/logs`, even when the agent state file was configured
+  elsewhere, so a non-root runner failed with `permission denied`. The data root
+  now defaults to the parent of an explicitly configured state file (and
+  `/var/lib/a8m-office` otherwise), and the same root feeds the cache, logs and
+  ONLYOFFICE data volume mounts. The backend test suite passes on Linux CI again.
+
 # Alt8Mail 3.11.0
 
 Release date: 2026-11-22. Selectable Collabora Office engine and the Debian/Ubuntu remote prerequisite fix.

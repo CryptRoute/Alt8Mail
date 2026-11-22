@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -55,7 +56,7 @@ func writeTestCertificate(t *testing.T, dir, hostname string) (string, string) {
 }
 
 func TestComposeContents(t *testing.T) {
-	text := composeContents("onlyoffice", "onlyoffice/documentserver:9.4.0.1", "test-secret", "", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "https://office.example.com", "https://mail.example.com")
+	text := composeContents("onlyoffice", "onlyoffice/documentserver:9.4.0.1", "test-secret", "", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "/var/lib/a8m-office", "https://office.example.com", "https://mail.example.com")
 	for _, expected := range []string{
 		"image: onlyoffice/documentserver:9.4.0.1",
 		"JWT_SECRET: \"test-secret\"",
@@ -70,7 +71,7 @@ func TestComposeContents(t *testing.T) {
 }
 
 func TestComposeContentsCollabora(t *testing.T) {
-	text := composeContents("collabora", "altgence/office:25.04", "", "admin-password", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "https://office.example.com", "https://mail.example.com")
+	text := composeContents("collabora", "altgence/office:25.04", "", "admin-password", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "/var/lib/a8m-office", "https://office.example.com", "https://mail.example.com")
 	for _, expected := range []string{
 		"image: altgence/office:25.04",
 		"127.0.0.1:8082:9980",
@@ -166,6 +167,17 @@ func TestStatusAndInstallWithFakeDocker(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(runs, "\n"), "compose") {
 		t.Fatalf("docker compose was not invoked: %v", runs)
+	}
+	if server.cfg.DataDir != filepath.Join(temp, "office") {
+		t.Fatalf("data dir = %q", server.cfg.DataDir)
+	}
+	if runtime.GOOS != "windows" {
+		for _, name := range []string{"cache", "logs"} {
+			dir := filepath.Join(temp, "office", name)
+			if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+				t.Fatalf("expected prepared directory %s: %v", dir, err)
+			}
+		}
 	}
 }
 

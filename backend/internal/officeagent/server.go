@@ -31,26 +31,27 @@ import (
 type Runner func(ctx context.Context, timeout time.Duration, name string, args ...string) (stdout, stderr string, err error)
 
 type Config struct {
-	Listen         string
-	TokenFile      string
-	ComposeFile    string
-	SecretFile     string
-	StateFile      string
+	Listen                string
+	TokenFile             string
+	ComposeFile           string
+	SecretFile            string
+	StateFile             string
+	DataDir               string
 	DefaultImage          string
 	DefaultCollaboraImage string
 	AdminPasswordFile     string
 	ContainerName         string
-	HTTPPort       int
-	NginxSite      string
-	NginxEnabled   string
-	CertRoots      []string
-	CertbotBin     string
-	CertbotDir     string
-	CertbotWebroot string
-	FontsDir       string
-	DockerBin      string
-	Runner         Runner
-	Health         func(ctx context.Context, address string) error
+	HTTPPort              int
+	NginxSite             string
+	NginxEnabled          string
+	CertRoots             []string
+	CertbotBin            string
+	CertbotDir            string
+	CertbotWebroot        string
+	FontsDir              string
+	DockerBin             string
+	Runner                Runner
+	Health                func(ctx context.Context, address string) error
 }
 
 type Server struct {
@@ -104,8 +105,16 @@ func New(cfg Config) (*Server, error) {
 		cfg.SecretFile = "/etc/a8m/office-jwt-secret"
 	}
 	cfg.StateFile = strings.TrimSpace(cfg.StateFile)
+	cfg.DataDir = strings.TrimSpace(cfg.DataDir)
+	if cfg.DataDir == "" {
+		if cfg.StateFile != "" {
+			cfg.DataDir = filepath.Dir(cfg.StateFile)
+		} else {
+			cfg.DataDir = "/var/lib/a8m-office"
+		}
+	}
 	if cfg.StateFile == "" {
-		cfg.StateFile = "/var/lib/a8m-office/state.json"
+		cfg.StateFile = filepath.Join(cfg.DataDir, "state.json")
 	}
 	cfg.DefaultImage = strings.TrimSpace(cfg.DefaultImage)
 	if cfg.DefaultImage == "" {
@@ -377,7 +386,7 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	if err := s.prepareOfficeDirs(); err != nil {
 		return Status{}, err
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, publicURL, portalURL)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, publicURL, portalURL)), 0o640); err != nil {
 		return Status{}, err
 	}
 	st := state{PublicURL: publicURL, Image: image, Engine: engine, TLSCert: tlsCert, TLSKey: tlsKey, PortalURL: portalURL}
@@ -496,7 +505,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
@@ -544,7 +553,7 @@ func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 			return
 		}
-		if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, "", password, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
+		if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, "", password, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
 			writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 			return
 		}
@@ -576,7 +585,7 @@ func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, secret, "", s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, secret, "", s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
@@ -1202,7 +1211,8 @@ func (s *Server) prepareOfficeDirs() error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	for _, dir := range []string{"/var/lib/a8m-office/cache", "/var/lib/a8m-office/logs"} {
+	for _, name := range []string{"cache", "logs"} {
+		dir := filepath.Join(s.cfg.DataDir, name)
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("could not prepare %s: %w", dir, err)
 		}
@@ -1225,7 +1235,11 @@ func (s *Server) pullImage(ctx context.Context, image, engine string, force bool
 	return nil
 }
 
-func composeContents(engine, image, secret, adminPassword, container string, port int, fontsDir, publicURL, portalURL string) string {
+func composeContents(engine, image, secret, adminPassword, container string, port int, fontsDir, dataDir, publicURL, portalURL string) string {
+	dataDir = strings.TrimRight(dataDir, "/")
+	cacheDir := dataDir + "/cache"
+	logsDir := dataDir + "/logs"
+	officeDataDir := dataDir + "/data"
 	if normalizeEngine(engine) == officeEngineCollabora {
 		host, _ := publicHost(publicURL)
 		origin, _ := portalOrigin(portalURL)
@@ -1246,10 +1260,10 @@ func composeContents(engine, image, secret, adminPassword, container string, por
       username: "admin"
       password: "%s"
     volumes:
-      - /var/lib/a8m-office/cache:/opt/cool/cache
-      - /var/lib/a8m-office/logs:/var/log
+      - %s:/opt/cool/cache
+      - %s:/var/log
       - %s:/usr/share/fonts/truetype/custom:ro
-`, image, container, port, origin, origin, host, adminPassword, fontsDir)
+`, image, container, port, origin, origin, host, adminPassword, cacheDir, logsDir, fontsDir)
 	}
 	return fmt.Sprintf(`services:
   documentserver:
@@ -1264,10 +1278,10 @@ func composeContents(engine, image, secret, adminPassword, container string, por
       JWT_HEADER: "Authorization"
       JWT_IN_BODY: "true"
     volumes:
-      - /var/lib/a8m-office/data:/var/www/onlyoffice/Data
-      - /var/lib/a8m-office/logs:/var/log/onlyoffice
+      - %s:/var/www/onlyoffice/Data
+      - %s:/var/log/onlyoffice
       - %s:/usr/share/fonts/truetype/custom:ro
-`, image, container, port, secret, fontsDir)
+`, image, container, port, secret, officeDataDir, logsDir, fontsDir)
 }
 
 func nginxContents(engine, host, cert, key, portalURL string, port int, webroot string) string {
