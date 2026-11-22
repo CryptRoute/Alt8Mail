@@ -56,7 +56,7 @@ func writeTestCertificate(t *testing.T, dir, hostname string) (string, string) {
 }
 
 func TestComposeContents(t *testing.T) {
-	text := composeContents("onlyoffice", "onlyoffice/documentserver:9.4.0.1", "test-secret", "", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "/var/lib/a8m-office", "https://office.example.com", "https://mail.example.com")
+	text := composeContents("onlyoffice", "onlyoffice/documentserver:9.4.0.1", "test-secret", "", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "/var/lib/a8m-office", "https://office.example.com", "https://mail.example.com", "")
 	for _, expected := range []string{
 		"image: onlyoffice/documentserver:9.4.0.1",
 		"JWT_SECRET: \"test-secret\"",
@@ -71,11 +71,12 @@ func TestComposeContents(t *testing.T) {
 }
 
 func TestComposeContentsCollabora(t *testing.T) {
-	text := composeContents("collabora", "altgence/office:25.04", "", "admin-password", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "/var/lib/a8m-office", "https://office.example.com", "https://mail.example.com")
+	text := composeContents("collabora", "altgence/office:25.04", "", "admin-password", "a8m-office", 8082, "/var/lib/a8m-office/fonts", "/var/lib/a8m-office", "https://office.example.com", "https://mail.example.com", "https://mail.example.com,https://example.com")
 	for _, expected := range []string{
 		"image: altgence/office:25.04",
 		"127.0.0.1:8082:9980",
-		`aliasgroup1: "https://mail.example.com"`,
+		`aliasgroup1: "https://mail.example.com,https://example.com"`,
+		"frame_ancestors=https://mail.example.com",
 		`server_name: "office.example.com"`,
 		`username: "admin"`,
 		`password: "admin-password"`,
@@ -128,6 +129,30 @@ func TestValidateEngineImage(t *testing.T) {
 		}
 		if !tc.ok && err == nil {
 			t.Errorf("validateEngineImage(%q, %q) accepted a mismatched image", tc.engine, tc.image)
+		}
+	}
+}
+
+func TestValidAliasGroup(t *testing.T) {
+	for _, value := range []string{
+		"https://mail.example.com",
+		"https://mail.example.com,https://example.com",
+		"https://mail.example.com:8443,https://example.com",
+		"http://localhost:8080",
+	} {
+		if err := validAliasGroup(value); err != nil {
+			t.Errorf("valid alias group %q was rejected: %v", value, err)
+		}
+	}
+	for _, value := range []string{
+		"mail.example.com",
+		"ftp://mail.example.com",
+		"https://mail.example.com/path",
+		"https://mail.example.com,not-a-url",
+		"https://mail.example.com?x=1",
+	} {
+		if err := validAliasGroup(value); err == nil {
+			t.Errorf("invalid alias group %q was accepted", value)
 		}
 	}
 }

@@ -1,5 +1,5 @@
 /* System Control — release updates, version history, host reboot tracking. */
-import * as ui from './ui.js?v=3.11.4';
+import * as ui from './ui.js?v=3.11.5';
 
 const esc = ui.esc;
 const fmt = {

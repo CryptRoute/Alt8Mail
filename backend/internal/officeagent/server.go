@@ -61,12 +61,13 @@ type Server struct {
 }
 
 type state struct {
-	PublicURL string `json:"publicUrl"`
-	Image     string `json:"image"`
-	Engine    string `json:"engine,omitempty"`
-	TLSCert   string `json:"tlsCert,omitempty"`
-	TLSKey    string `json:"tlsKey,omitempty"`
-	PortalURL string `json:"portalUrl,omitempty"`
+	PublicURL  string `json:"publicUrl"`
+	Image      string `json:"image"`
+	Engine     string `json:"engine,omitempty"`
+	TLSCert    string `json:"tlsCert,omitempty"`
+	TLSKey     string `json:"tlsKey,omitempty"`
+	PortalURL  string `json:"portalUrl,omitempty"`
+	AliasGroup string `json:"aliasGroup,omitempty"`
 }
 
 type Status struct {
@@ -296,6 +297,7 @@ type installRequest struct {
 	TLSKey         string `json:"tlsKey"`
 	TLSEmail       string `json:"tlsEmail"`
 	PortalURL      string `json:"portalUrl"`
+	AliasGroup     string `json:"aliasGroup"`
 	AutoTLS        bool   `json:"autoTls"`
 	DisableGateway bool   `json:"disableGateway"`
 }
@@ -354,6 +356,13 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	if engine == officeEngineCollabora && portalURL == "" {
 		return Status{}, fmt.Errorf("the Alt8Mail public URL is required for Collabora")
 	}
+	aliasGroup := strings.TrimSpace(opts.AliasGroup)
+	if aliasGroup == "" {
+		aliasGroup = portalURL
+	}
+	if err := validAliasGroup(aliasGroup); err != nil {
+		return Status{}, err
+	}
 	if opts.DisableGateway {
 		tlsCert, tlsKey = "", ""
 	} else if tlsCert == "" && tlsKey == "" && !opts.AutoTLS {
@@ -389,10 +398,10 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	if err := s.prepareOfficeDirs(); err != nil {
 		return Status{}, err
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, publicURL, portalURL)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, publicURL, portalURL, aliasGroup)), 0o640); err != nil {
 		return Status{}, err
 	}
-	st := state{PublicURL: publicURL, Image: image, Engine: engine, TLSCert: tlsCert, TLSKey: tlsKey, PortalURL: portalURL}
+	st := state{PublicURL: publicURL, Image: image, Engine: engine, TLSCert: tlsCert, TLSKey: tlsKey, PortalURL: portalURL, AliasGroup: aliasGroup}
 	if err := s.saveState(st); err != nil {
 		return Status{}, err
 	}
@@ -514,7 +523,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL, aliasGroupForState(st))), 0o640); err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
@@ -563,7 +572,7 @@ func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 			return
 		}
-		if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, "", password, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
+		if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, "", password, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL, aliasGroupForState(st))), 0o640); err != nil {
 			writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 			return
 		}
@@ -596,7 +605,7 @@ func (s *Server) handleRotateJWT(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, secret, "", s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, st.Image, secret, "", s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL, aliasGroupForState(st))), 0o640); err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPOSE", err.Error())
 		return
 	}
@@ -1024,6 +1033,21 @@ func validPortalURL(value string) error {
 	return nil
 }
 
+func validAliasGroup(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	for _, raw := range strings.Split(value, ",") {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
+			(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("invalid Office WOPI alias %q", strings.TrimSpace(raw))
+		}
+	}
+	return nil
+}
+
 func validPublicURL(value string) error {
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
@@ -1232,6 +1256,13 @@ func composeServiceForEngine(engine string) string {
 	return "documentserver"
 }
 
+func aliasGroupForState(st state) string {
+	if strings.TrimSpace(st.AliasGroup) != "" {
+		return st.AliasGroup
+	}
+	return st.PortalURL
+}
+
 // removeConflictingContainer removes a container left by the other engine's
 // Compose service. Both engines reuse the configured container name, so Compose
 // otherwise sees the old container as an orphan and refuses to create the new
@@ -1295,7 +1326,7 @@ func (s *Server) pullImage(ctx context.Context, image, engine string, force bool
 	return nil
 }
 
-func composeContents(engine, image, secret, adminPassword, container string, port int, fontsDir, dataDir, publicURL, portalURL string) string {
+func composeContents(engine, image, secret, adminPassword, container string, port int, fontsDir, dataDir, publicURL, portalURL, aliasGroup string) string {
 	dataDir = strings.TrimRight(dataDir, "/")
 	cacheDir := dataDir + "/cache"
 	logsDir := dataDir + "/logs"
@@ -1303,6 +1334,9 @@ func composeContents(engine, image, secret, adminPassword, container string, por
 	if normalizeEngine(engine) == officeEngineCollabora {
 		host, _ := publicHost(publicURL)
 		origin, _ := portalOrigin(portalURL)
+		if strings.TrimSpace(aliasGroup) == "" {
+			aliasGroup = origin
+		}
 		return fmt.Sprintf(`services:
   office:
     image: %s
@@ -1323,7 +1357,7 @@ func composeContents(engine, image, secret, adminPassword, container string, por
       - %s:/opt/cool/cache
       - %s:/var/log
       - %s:/usr/share/fonts/truetype/custom:ro
-`, image, container, port, origin, origin, host, adminPassword, cacheDir, logsDir, fontsDir)
+`, image, container, port, aliasGroup, origin, host, adminPassword, cacheDir, logsDir, fontsDir)
 	}
 	return fmt.Sprintf(`services:
   documentserver:

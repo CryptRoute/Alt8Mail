@@ -22,6 +22,20 @@ func TestValidOfficeURL(t *testing.T) {
 	}
 }
 
+func TestOfficeOrigins(t *testing.T) {
+	got := officeOrigins(
+		"https://mail.example.com",
+		"https://example.com/",
+		"https://mail.example.com",
+		"not-a-url",
+		"http://insecure.example.com",
+	)
+	want := "https://mail.example.com,https://example.com"
+	if got != want {
+		t.Fatalf("officeOrigins = %q, want %q", got, want)
+	}
+}
+
 func TestOfficeImageEngine(t *testing.T) {
 	cases := []struct {
 		image string

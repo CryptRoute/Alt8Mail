@@ -1,3 +1,15 @@
+# Alt8Mail 3.11.5
+
+Release date: 2026-11-23. Fix the Office editor iframe when webmail is opened from the primary mail domain. Includes all 3.11.4 changes.
+
+## 3.11.5 webmail origins
+
+- **The editor iframe follows the webmail origin.** Alt8Mail serves webmail on the mail hostname and the primary mail domain (for example `mail.example.com` and `example.com`). Collabora only allowed `frame-ancestors` for the configured webmail URL, so opening the editor from the primary domain showed `office.example.com refused to connect`.
+- The Collabora WOPI base now uses the validated webmail origin of the open request. Collabora automatically includes the WOPI host in `frame-ancestors`, so the iframe parent is allowed from either webmail hostname.
+- The Control Plane adds every configured webmail origin (webmail URL, mail hostname and primary mail domain) to Collabora's `aliasgroup1` WOPI allowlist. The agent stores and reuses that list for updates, font mounts and credential rotation.
+- Unknown request hosts fall back to the configured public webmail URL. Alias groups accept HTTP only for local development; production origins are HTTPS.
+- Added tests for origin normalization, WOPI base selection and alias-group validation.
+
 # Alt8Mail 3.11.4
 
 Release date: 2026-11-23. Fix switching an existing Office deployment between engines. Includes all 3.11.3 changes.

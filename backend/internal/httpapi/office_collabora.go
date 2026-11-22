@@ -316,7 +316,7 @@ func (s *Server) collaboraEditorURL(runtime officeRuntime, base, fileID, token s
 }
 
 func (s *Server) openOfficeDocumentCollabora(w http.ResponseWriter, r *http.Request, sess *sessionRecord, runtime officeRuntime, file contentFile, document officeDocumentRecord, format office.Format) {
-	base := s.officePublicBase()
+	base := s.officeWopiBase(r)
 	if base == "" {
 		writeError(w, http.StatusConflict, "OFFICE_URL", "The webmail public URL is not configured")
 		return
@@ -354,7 +354,7 @@ func (s *Server) openOfficeDocumentCollabora(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) openPublicShareOfficeCollabora(w http.ResponseWriter, r *http.Request, runtime officeRuntime, share publicShare, document officeDocumentRecord, editable bool, guestEmail, shareToken string) {
-	base := s.officePublicBase()
+	base := s.officeWopiBase(r)
 	if base == "" {
 		writeError(w, http.StatusConflict, "OFFICE_URL", "The webmail public URL is not configured")
 		return

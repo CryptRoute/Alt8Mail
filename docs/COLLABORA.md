@@ -130,6 +130,22 @@ inspects the existing container's `com.docker.compose.service` label and removes
 it when it belongs to the other engine before starting the new Compose project.
 This avoids the Compose orphan/name-conflict error on a live engine switch.
 
+## Webmail origins and frame ancestors
+
+Alt8Mail serves webmail on both the mail hostname (`mail.example.com`) and the
+primary mail domain (`example.com`). The Collabora editor must be allowed to
+frame inside either origin:
+
+- The `open` endpoint uses the validated request host as the WOPI base, so
+  Collabora sees the same origin that is embedding the editor and automatically
+  adds it to `frame-ancestors` via the `WOPISrc` host.
+- The Control Plane sends the webmail URL, mail hostname and primary mail
+  domain to the agent as the comma-separated `aliasgroup1` WOPI allowlist. The
+  agent persists that list and reuses it for updates, font mounts and credential
+  rotation.
+- An unrecognized request host falls back to the configured public webmail URL
+  rather than becoming a WOPI host.
+
 On Debian/Ubuntu, the remote prerequisite step installs Docker from the
 distribution and downloads the Docker Compose v2 CLI plugin from Docker's
 GitHub release into `/usr/local/lib/docker/cli-plugins`. Debian 12 does not

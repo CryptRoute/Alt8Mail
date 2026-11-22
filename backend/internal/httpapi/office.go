@@ -93,6 +93,40 @@ func (s *Server) officePublicBase() string {
 	return strings.TrimRight(strings.TrimSpace(s.cfg.PublicURL), "/")
 }
 
+// officeWopiBase returns the Alt8Mail origin Collabora should use for WOPI.
+// The webmail can be served from the mail hostname or the primary mail domain;
+// using the request host keeps the WOPI host and the iframe parent origin the
+// same, so Collabora automatically allows that parent as a frame ancestor.
+func (s *Server) officeWopiBase(r *http.Request) string {
+	host := strings.ToLower(strings.TrimSpace(r.Host))
+	if host != "" && s.officeWebmailHostAllowed(r.Context(), host) {
+		scheme := "https"
+		if parsed, err := url.Parse(strings.TrimSpace(s.cfg.PublicURL)); err == nil && parsed.Scheme != "" {
+			scheme = parsed.Scheme
+		}
+		return scheme + "://" + host
+	}
+	return s.officePublicBase()
+}
+
+func (s *Server) officeWebmailHostAllowed(ctx context.Context, host string) bool {
+	if parsed, err := url.Parse(strings.TrimSpace(s.cfg.PublicURL)); err == nil &&
+		parsed.Scheme == "https" && strings.EqualFold(parsed.Host, host) {
+		return true
+	}
+	if s.store == nil || s.store.DB == nil {
+		return false
+	}
+	var primary string
+	if err := s.store.DB.QueryRow(ctx, `
+		SELECT domain::text FROM public.mail_domains
+		WHERE is_primary ORDER BY created_at LIMIT 1
+	`).Scan(&primary); err != nil {
+		return false
+	}
+	return primary != "" && strings.EqualFold(primary, host)
+}
+
 // officeConfig exposes only the browser-safe Office feature state. The JWT
 // secret and the Office agent credentials never leave the server.
 func (s *Server) officeConfig(w http.ResponseWriter, r *http.Request) {

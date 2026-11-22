@@ -143,6 +143,51 @@ func (s *Server) officePortalURL(ctx context.Context) string {
 	return ""
 }
 
+func officeOrigins(values ...string) string {
+	seen := map[string]bool{}
+	origins := []string{}
+	for _, raw := range values {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			continue
+		}
+		origin := parsed.Scheme + "://" + parsed.Host
+		if seen[origin] {
+			continue
+		}
+		seen[origin] = true
+		origins = append(origins, origin)
+	}
+	return strings.Join(origins, ",")
+}
+
+// officeAliasGroup lists every webmail origin that may call the Office host.
+// The webmail is served from the mail hostname and the primary mail domain;
+// Collabora's storage.wopi.alias_groups must allow both.
+func (s *Server) officeAliasGroup(ctx context.Context) string {
+	values := []string{s.cfg.WebmailURL}
+	if host := strings.TrimSpace(s.mailHostname(ctx)); host != "" {
+		values = append(values, "https://"+host)
+	}
+	var primary string
+	if s.db != nil {
+		_ = s.db.QueryRow(ctx, `
+			SELECT domain::text FROM public.mail_domains
+			WHERE is_primary ORDER BY created_at LIMIT 1
+		`).Scan(&primary)
+		if primary == "" {
+			_ = s.db.QueryRow(ctx, `
+				SELECT domain::text FROM public.mail_domains
+				ORDER BY created_at LIMIT 1
+			`).Scan(&primary)
+		}
+	}
+	if primary != "" {
+		values = append(values, "https://"+primary)
+	}
+	return officeOrigins(values...)
+}
+
 func (s *Server) handleOfficeGet(w http.ResponseWriter, r *http.Request, sess *sessionRecord) {
 	settings, err := s.officeSettings(r.Context())
 	if err != nil {
@@ -611,7 +656,8 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 	}
 	agentBody := map[string]any{
 		"publicUrl": body.PublicURL, "engine": body.Engine, "image": image,
-		"tlsCert": body.TLSCert, "tlsKey": body.TLSKey,
+		"aliasGroup": s.officeAliasGroup(r.Context()),
+		"tlsCert":    body.TLSCert, "tlsKey": body.TLSKey,
 		"autoTls": body.TLSMode == "auto", "tlsEmail": body.TLSEmail,
 		"disableGateway": body.TLSMode == "none", "portalUrl": s.officePortalURL(r.Context()),
 	}

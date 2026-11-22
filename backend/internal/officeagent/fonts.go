@@ -136,7 +136,7 @@ fi
 	if err := s.prepareOfficeDirs(); err != nil {
 		return result, fmt.Errorf("could not prepare the Office directories: %w", err)
 	}
-	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL)), 0o640); err != nil {
+	if err := os.WriteFile(s.cfg.ComposeFile, []byte(composeContents(engine, image, secret, adminPassword, s.cfg.ContainerName, s.cfg.HTTPPort, s.cfg.FontsDir, s.cfg.DataDir, st.PublicURL, st.PortalURL, aliasGroupForState(st))), 0o640); err != nil {
 		return result, fmt.Errorf("could not write the Office Compose file: %w", err)
 	}
 	s.removeConflictingContainer(ctx, engine)
