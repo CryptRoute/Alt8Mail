@@ -107,6 +107,31 @@ func TestValidPublicURLAndImage(t *testing.T) {
 	}
 }
 
+func TestValidateEngineImage(t *testing.T) {
+	cases := []struct {
+		engine string
+		image  string
+		ok     bool
+	}{
+		{"onlyoffice", "onlyoffice/documentserver:9.4.0.1", true},
+		{"onlyoffice", "altgence/office:25.04", false},
+		{"collabora", "altgence/office:25.04", true},
+		{"collabora", "docker.io/altgence/office:latest", true},
+		{"collabora", "onlyoffice/documentserver:9.4.0.1", false},
+		{"onlyoffice", "registry.example.com/team/custom-office:1", true},
+		{"collabora", "registry.example.com/team/custom-office:1", true},
+	}
+	for _, tc := range cases {
+		err := validateEngineImage(tc.engine, tc.image)
+		if tc.ok && err != nil {
+			t.Errorf("validateEngineImage(%q, %q) rejected a matching image: %v", tc.engine, tc.image, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("validateEngineImage(%q, %q) accepted a mismatched image", tc.engine, tc.image)
+		}
+	}
+}
+
 func TestStatusAndInstallWithFakeDocker(t *testing.T) {
 	temp := t.TempDir()
 	tokenFile := filepath.Join(temp, "agent-token")

@@ -1,5 +1,5 @@
 /* Web Net: webmail and administration hostnames, edge policy and traffic. */
-import * as ui from './ui.js?v=3.11.1';
+import * as ui from './ui.js?v=3.11.2';
 
 const esc = ui.esc;
 

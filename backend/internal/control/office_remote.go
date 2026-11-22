@@ -617,9 +617,9 @@ func (s *Server) officeRemotePreflight(ctx context.Context, target officeRemoteT
 				result.MemoryPercent = float64(result.MemoryUsedBytes) / float64(total) * 100
 			}
 		}
-		result.MemoryDetail = "Remote host memory is sufficient"
+		result.MemoryDetail = "Enough memory to start the Office engine; 8 GB or more is recommended for Collabora with concurrent documents"
 		if !result.MemoryOK {
-			result.MemoryDetail = "Office needs at least 2 GB; 4 GB or more is recommended"
+			result.MemoryDetail = "The Office engine needs at least 2 GB; 4 GB or more is recommended (8 GB for Collabora with concurrent documents)"
 			result.Blockers = append(result.Blockers, "Remote host has less than 2 GB RAM")
 		}
 	} else {

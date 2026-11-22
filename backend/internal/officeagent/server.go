@@ -334,6 +334,9 @@ func (s *Server) install(ctx context.Context, opts installRequest) (Status, erro
 	if err := validImage(image); err != nil {
 		return Status{}, err
 	}
+	if err := validateEngineImage(engine, image); err != nil {
+		return Status{}, err
+	}
 	tlsCert := strings.TrimSpace(opts.TLSCert)
 	tlsKey := strings.TrimSpace(opts.TLSKey)
 	if (tlsCert == "") != (tlsKey == "") {
@@ -486,6 +489,10 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		image = defaultImageForEngine(s.cfg, engine)
 	}
 	if err := validImage(image); err != nil {
+		writeError(w, http.StatusBadRequest, "IMAGE", err.Error())
+		return
+	}
+	if err := validateEngineImage(engine, image); err != nil {
 		writeError(w, http.StatusBadRequest, "IMAGE", err.Error())
 		return
 	}
@@ -1187,6 +1194,30 @@ func defaultImageForEngine(cfg Config, engine string) string {
 		return cfg.DefaultCollaboraImage
 	}
 	return cfg.DefaultImage
+}
+
+// imageEngine identifies the engine family of a well-known Office image.
+// Custom images return "" and are accepted for either engine.
+func imageEngine(image string) string {
+	ref := strings.ToLower(strings.TrimSpace(image))
+	switch {
+	case strings.Contains(ref, "altgence/office"),
+		strings.Contains(ref, "collabora/code"),
+		strings.Contains(ref, "collabora/online"):
+		return officeEngineCollabora
+	case strings.Contains(ref, "onlyoffice/documentserver"):
+		return officeEngineOnlyOffice
+	default:
+		return ""
+	}
+}
+
+func validateEngineImage(engine, image string) error {
+	family := imageEngine(image)
+	if family == "" || family == normalizeEngine(engine) {
+		return nil
+	}
+	return fmt.Errorf("the image %s is a %s image, but the current engine is %s", image, engineLabel(family), engineLabel(engine))
 }
 
 func healthPath(engine string) string {

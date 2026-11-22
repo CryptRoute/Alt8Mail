@@ -1,5 +1,5 @@
 /* Office engine lifecycle and feature flag (ONLYOFFICE or Collabora). */
-import * as ui from './ui.js?v=3.11.1';
+import * as ui from './ui.js?v=3.11.2';
 
 const esc = ui.esc;
 
@@ -20,7 +20,10 @@ export async function renderOffice(ctx) {
   const certificates = Array.isArray(payload.certificates) ? payload.certificates : [];
   const agentOnline = !payload.agentError;
   const installed = Boolean(agent.installed);
-  const running = agent.running && agent.health === 'ok';
+  const containerRunning = Boolean(agent.running);
+  const healthy = agent.health === 'ok';
+  const running = containerRunning && healthy;
+  const unhealthy = containerRunning && !healthy;
   const certOptions = [{ value: 'auto', label: "Automatic Let's Encrypt (recommended)" }]
     .concat(settings.gatewayStatus === 'configured' ? [{ value: 'keep', label: 'Keep the current gateway certificate' }] : [])
     .concat(certificates.map((cert) => ({
@@ -36,13 +39,17 @@ export async function renderOffice(ctx) {
   const engineLabel = currentEngine === 'collabora' ? 'Alt8Mail Office (Collabora)' : 'ONLYOFFICE Docs';
   let preflightReady = false;
   let preflightGeneration = 0;
-  const statusTone = running ? 'good' : settings.enabled ? 'warning' : 'neutral';
+  let lifecycleBusy = false;
+  const statusTone = running ? 'good' : unhealthy ? 'critical' : settings.enabled ? 'warning' : 'neutral';
+  const officeIssue = settings.lastError || agent.error || (unhealthy
+    ? 'The Office container is running but its health check is failing. Check the engine logs below.'
+    : '');
   ctx.root.innerHTML = `${ui.pageHeader({
     eyebrow: 'Infrastructure',
     title: 'Office',
     description: 'Keep the Office document engine on a separate Docker host or container, managed by a narrow lifecycle agent. Webmail only exposes Office when this control plane marks it healthy and enabled.',
     actions: `<button class="btn btn-secondary" type="button" id="office-refresh">${ui.icon('refresh', 15)} Refresh</button>`,
-    meta: `<span class="summary-pill">${ui.icon('plug', 13)} ${running ? 'Ready' : installed ? 'Installed' : agentOnline ? 'Not installed' : 'Agent offline'}</span>`,
+    meta: `<span class="summary-pill">${ui.icon('plug', 13)} ${running ? 'Ready' : unhealthy ? 'Unhealthy' : installed ? 'Installed' : agentOnline ? 'Not installed' : 'Agent offline'}</span>`,
   })}
   ${payload.agentError ? ui.inlineNotice('warning', 'Office agent is not reachable', payload.agentError, `<a class="btn btn-secondary btn-sm" href="#/services">${ui.icon('server', 13)} Open services</a>`) : ''}
   ${currentEngine === 'collabora'
@@ -50,11 +57,12 @@ export async function renderOffice(ctx) {
     : ui.inlineNotice('info', 'Separate compute is mandatory', 'OnlyOffice Document Server runs Node.js, PostgreSQL, RabbitMQ and Redis. Do not co-locate it on a 4 GB mail host. The agent listens on loopback and only manages its own compose project.', '')}
   <div class="office-grid">
     <section class="card">
-      <header class="card-head"><div><h3>Service status</h3><p>Agent, container and gateway health</p></div>${ui.badge(running ? 'Running' : installed ? 'Stopped' : agentOnline ? 'Not installed' : 'Offline', statusTone, running ? 'check-circle' : 'alert')}</header>
+      <header class="card-head"><div><h3>Service status</h3><p>Agent, container and gateway health</p></div>${ui.badge(running ? 'Running' : unhealthy ? 'Unhealthy' : installed ? 'Stopped' : agentOnline ? 'Not installed' : 'Offline', statusTone, running ? 'check-circle' : 'alert')}</header>
       <div class="card-body">
         ${ui.kv([
           ['Agent', payload.agentError ? 'Unreachable' : 'Reachable'],
           ['Container', esc(agent.containerStatus || settings.containerStatus || 'not installed')],
+          ['Health', agent.health ? ui.badge(agent.health === 'ok' ? 'OK' : 'Unhealthy', agent.health === 'ok' ? 'good' : 'critical', agent.health === 'ok' ? 'check-circle' : 'alert') : '—'],
           ['Engine', esc(agent.engine === 'collabora' || currentEngine === 'collabora' ? 'Alt8Mail Office (Collabora)' : 'ONLYOFFICE Docs')],
           ['Version', esc(agent.version || settings.version || '—')],
           ['Image', `<span class="mono">${esc(agent.image || settings.image || defaultForEngine)}</span>`],
@@ -64,7 +72,7 @@ export async function renderOffice(ctx) {
           ['Host memory', settings.deploymentMode === 'remote' ? 'See remote preflight' : (host.memoryTotalBytes ? `${ui.bytes(host.memoryTotalBytes)} total · ${Number(host.memoryPercent || 0).toFixed(0)}% used` : 'Unavailable')],
           ['Last health', esc(settings.lastHealthAt ? new Date(settings.lastHealthAt).toLocaleString() : '—')],
         ], 'is-2')}
-        ${settings.lastError || agent.error ? `<p class="form-note office-error">${esc(settings.lastError || agent.error)}</p>` : ''}
+        ${officeIssue ? `<p class="form-note office-error">${esc(officeIssue)}</p>` : ''}
         <div class="office-feature">
           ${ui.switchField({
             label: 'Enable Office for webmail',
@@ -390,7 +398,17 @@ export async function renderOffice(ctx) {
   function setPreflightReady(ready) {
     preflightReady = Boolean(ready);
     const installButton = document.getElementById('office-install');
-    if (installButton) installButton.disabled = !canManage || !preflightReady;
+    if (installButton) installButton.disabled = lifecycleBusy || !canManage || !preflightReady;
+  }
+  function setLifecycleBusy(busy) {
+    lifecycleBusy = Boolean(busy);
+    const installButton = document.getElementById('office-install');
+    if (installButton) installButton.disabled = lifecycleBusy || !canManage || !preflightReady;
+    document.querySelectorAll('[data-office-action], #office-fonts-install').forEach((button) => {
+      button.disabled = lifecycleBusy || !canManage || !installed;
+    });
+    const enabledSwitch = document.querySelector('[data-office-enabled]');
+    if (enabledSwitch) enabledSwitch.disabled = lifecycleBusy || !canManage || (!running && !settings.enabled);
   }
   function renderPreflight(data) {
     const body = document.getElementById('office-preflight-body');
@@ -398,7 +416,12 @@ export async function renderOffice(ctx) {
     const expected = Array.isArray(data.expected) && data.expected.length ? data.expected.join(', ') : 'no known local address';
     const resolved = Array.isArray(data.resolved) && data.resolved.length ? data.resolved.join(', ') : 'none';
     const memory = data.memoryTotalBytes ? `${ui.bytes(data.memoryTotalBytes)} total · ${Number(data.memoryPercent || 0).toFixed(0)}% used` : 'unavailable';
-    body.innerHTML = `<div class="timeline">${preflightItem('DNS record', data.dnsOk, `${data.dnsDetail || ''} · resolved ${resolved} · expected ${expected}`)}${preflightItem('Host memory', data.memoryOk, `${memory} · ${data.memoryDetail || ''}`)}</div><p class="form-note" style="margin-top:12px">${data.ready ? 'Preflight passed. Installation can proceed.' : 'Fix the blocked checks before installing. DNS changes can take a few minutes to propagate.'}</p>`;
+    const engine = document.querySelector('[name="office-engine"]')?.value || 'onlyoffice';
+    const recommended = (engine === 'collabora' ? 8 : 4) * 1024 ** 3;
+    const memoryWarning = data.memoryTotalBytes && data.memoryTotalBytes < recommended
+      ? ` · below the ${ui.bytes(recommended)} recommendation for ${engine === 'collabora' ? 'Collabora' : 'ONLYOFFICE'}`
+      : '';
+    body.innerHTML = `<div class="timeline">${preflightItem('DNS record', data.dnsOk, `${data.dnsDetail || ''} · resolved ${resolved} · expected ${expected}`)}${preflightItem('Host memory', data.memoryOk, `${memory}${memoryWarning} · ${data.memoryDetail || ''}`)}</div><p class="form-note" style="margin-top:12px">${data.ready ? 'Preflight passed. Installation can proceed.' : 'Fix the blocked checks before installing. DNS changes can take a few minutes to propagate.'}</p>`;
     setPreflightReady(data.ready);
   }
   function renderRemotePreflight(data) {
@@ -411,6 +434,11 @@ export async function renderOffice(ctx) {
     const expected = Array.isArray(data.expected) && data.expected.length ? data.expected.join(', ') : 'no remote address discovered';
     const resolved = Array.isArray(data.resolved) && data.resolved.length ? data.resolved.join(', ') : 'none';
     const memory = data.memoryTotalBytes ? `${ui.bytes(data.memoryTotalBytes)} total · ${Number(data.memoryPercent || 0).toFixed(0)}% used` : 'not checked yet';
+    const engine = document.querySelector('[name="office-engine"]')?.value || 'onlyoffice';
+    const recommended = (engine === 'collabora' ? 8 : 4) * 1024 ** 3;
+    const memoryWarning = data.memoryTotalBytes && data.memoryTotalBytes < recommended
+      ? ` · below the ${ui.bytes(recommended)} recommendation for ${engine === 'collabora' ? 'Collabora' : 'ONLYOFFICE'}`
+      : '';
     const awaitingTrust = !data.hostKeyTrusted;
     const pending = awaitingTrust ? 'Will run after the SSH host key is trusted.' : '';
     const keyLabel = data.hostKeyType ? ` (${data.hostKeyType})` : '';
@@ -428,7 +456,7 @@ export async function renderOffice(ctx) {
     const rows = [
       preflightItem('SSH host key', data.hostKeyTrusted, data.hostKeyTrusted ? `Pinned ${data.hostKeyFingerprint}${keyLabel}` : `Review the fingerprint ${data.hostKeyFingerprint || '—'}${keyLabel} before trusting it`, awaitingTrust ? 'Review' : ''),
       preflightItem('SSH privilege', data.sudo, awaitingTrust ? pending : data.sudo ? 'Root or passwordless sudo is available' : 'The SSH account needs root or passwordless sudo', awaitingTrust ? 'Pending' : ''),
-      preflightItem('Host memory', data.memoryOk, awaitingTrust ? pending : memory, awaitingTrust ? 'Pending' : ''),
+      preflightItem('Host memory', data.memoryOk, awaitingTrust ? pending : `${memory}${memoryWarning}`, awaitingTrust ? 'Pending' : ''),
       preflightItem('Docker Compose', data.docker && data.dockerCompose, dockerDetail, dockerState),
       preflightItem('nginx and certbot', data.nginx && data.certbot, webDetail, webState),
       preflightItem('systemd', data.systemd, awaitingTrust ? pending : data.systemd ? 'systemd is available' : 'systemd is missing', awaitingTrust ? 'Pending' : ''),
@@ -521,6 +549,7 @@ export async function renderOffice(ctx) {
     }
   }
   async function install() {
+    if (lifecycleBusy) return;
     const button = document.getElementById('office-install');
     const publicUrl = document.querySelector('[name="office-url"]')?.value.trim() || '';
     const engine = document.querySelector('[name="office-engine"]')?.value || 'onlyoffice';
@@ -533,6 +562,16 @@ export async function renderOffice(ctx) {
     if (mode === 'auto' && !tlsEmail) { ui.toast("Enter the Let's Encrypt account email for automatic TLS.", 'warning'); return; }
     if (mode.startsWith('cert:') && !cert) { ui.toast('Choose a valid TLS certificate.', 'warning'); return; }
     if (deployment === 'remote' && mode.startsWith('cert:')) { ui.toast('Existing certificates are local to this server. Use automatic Let’s Encrypt for a remote host.', 'warning'); return; }
+    const collaboraImage = /altgence\/office|collabora\/(code|online)/i.test(image);
+    const onlyofficeImage = /onlyoffice\/documentserver/i.test(image);
+    if (engine === 'onlyoffice' && collaboraImage) {
+      ui.toast('This is a Collabora image. Select Alt8Mail Office (Collabora) as the document engine.', 'critical', { title: 'Engine and image do not match' });
+      return;
+    }
+    if (engine === 'collabora' && onlyofficeImage) {
+      ui.toast('This is an ONLYOFFICE image. Select ONLYOFFICE Docs as the document engine.', 'critical', { title: 'Engine and image do not match' });
+      return;
+    }
     const preflight = await runPreflight({ quiet: true });
     if (!preflight || !preflight.ready) {
       ui.toast('Preflight must pass before Office can be installed.', 'critical');
@@ -546,14 +585,16 @@ export async function renderOffice(ctx) {
     };
     if (deployment === 'remote') body.remote = remoteTargetValues();
     const label = button?.innerHTML;
-    if (button) { button.disabled = true; button.innerHTML = 'Installing…'; }
+    if (button) button.innerHTML = 'Installing…';
+    setLifecycleBusy(true);
     try {
       await ctx.api('/control/api/office/install', { method: 'POST', body });
       ui.toast('Office installed or reconfigured.', 'good');
       await reload();
     } catch (error) {
       ui.toast(error.message || 'Office installation failed.', 'critical', { title: 'Office install' });
-      if (button) { button.disabled = false; button.innerHTML = label || 'Install / reconfigure'; }
+      if (button) button.innerHTML = label || 'Install / reconfigure';
+      setLifecycleBusy(false);
     }
   }
   document.querySelector('[name="office-engine"]')?.addEventListener('change', (event) => {
@@ -566,10 +607,21 @@ export async function renderOffice(ctx) {
       image.value = next;
     }
   });
+  document.querySelector('[name="office-image"]')?.addEventListener('change', (event) => {
+    const value = (event.target.value || '').trim().toLowerCase();
+    const engineSelect = document.querySelector('[name="office-engine"]');
+    if (!engineSelect) return;
+    if (value.includes('altgence/office') || value.includes('collabora/code') || value.includes('collabora/online')) {
+      engineSelect.value = 'collabora';
+    } else if (value.includes('onlyoffice/documentserver')) {
+      engineSelect.value = 'onlyoffice';
+    }
+  });
   document.getElementById('office-install')?.addEventListener('click', install);
 
   document.querySelectorAll('[data-office-action]').forEach((button) => {
     button.addEventListener('click', async () => {
+      if (lifecycleBusy) return;
       const action = button.getAttribute('data-office-action');
       if (action === 'rotate-jwt') {
         const isCollabora = (document.querySelector('[name="office-engine"]')?.value || currentEngine) === 'collabora';
@@ -602,14 +654,14 @@ export async function renderOffice(ctx) {
           tlsCert: cert?.certPath || '', tlsKey: cert?.keyPath || '',
         };
       }
-      button.disabled = true;
+      setLifecycleBusy(true);
       try {
         await ctx.api(`/control/api/office/${action}`, { method: 'POST', body });
         ui.toast(`Office ${action.replace('-', ' ')} completed.`, 'good');
         await reload();
       } catch (error) {
         ui.toast(error.message || `Office ${action} failed.`, 'critical', { title: 'Office action' });
-        button.disabled = false;
+        setLifecycleBusy(false);
       }
     });
   });

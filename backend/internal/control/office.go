@@ -178,9 +178,9 @@ func (s *Server) handleOfficeGet(w http.ResponseWriter, r *http.Request, sess *s
 		"settings": settings, "agent": agent, "agentError": agentError,
 		"certificates": certificates, "defaultImage": s.cfg.OfficeImage,
 		"defaultCollaboraImage": s.cfg.OfficeCollaboraImage,
-		"host":            s.probe.hostMetrics(r.Context(), false),
-		"tlsEmail":        s.settingString(r.Context(), "ssl.admin_email", ""),
-		"lastSaveFailure": s.officeLastSaveFailure(r.Context()),
+		"host":                  s.probe.hostMetrics(r.Context(), false),
+		"tlsEmail":              s.settingString(r.Context(), "ssl.admin_email", ""),
+		"lastSaveFailure":       s.officeLastSaveFailure(r.Context()),
 	})
 }
 
@@ -287,9 +287,9 @@ func (s *Server) officePreflight(ctx context.Context, publicURL string) officePr
 	if host.MemoryTotalBytes == 0 {
 		result.MemoryDetail = "Could not read host memory"
 	} else if result.MemoryOK {
-		result.MemoryDetail = "Enough memory for the local OnlyOffice container"
+		result.MemoryDetail = "Enough memory to start the Office engine; 8 GB or more is recommended for Collabora with concurrent documents"
 	} else {
-		result.MemoryDetail = "OnlyOffice needs at least 2 GB; 4 GB or more is recommended"
+		result.MemoryDetail = "The Office engine needs at least 2 GB; 4 GB or more is recommended (8 GB for Collabora with concurrent documents)"
 	}
 	result.Ready = result.DNSOK && result.MemoryOK
 	return result
@@ -460,6 +460,12 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 		writeError(w, http.StatusBadRequest, "OFFICE_IMAGE", err.Error())
 		return
 	}
+	if family := officeImageEngine(image); family != "" && family != body.Engine {
+		writeError(w, http.StatusBadRequest, "OFFICE_ENGINE_IMAGE",
+			fmt.Sprintf("The image %s is a %s image. Select the %s engine or use a matching image.",
+				image, officeEngineDisplayName(family), officeEngineDisplayName(body.Engine)))
+		return
+	}
 	if err := validOfficeURL(body.PublicURL); err != nil {
 		writeError(w, http.StatusBadRequest, "OFFICE_URL", err.Error())
 		return
@@ -589,12 +595,11 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 			UPDATE public.office_settings SET
 				deployment_mode='remote', remote_host=$1, remote_port=$2, remote_user=$3,
 				remote_auth=$4, remote_secret=$5, remote_passphrase=$6, remote_host_key=$7,
-				remote_public_ip=$8, remote_agent_token=$9, remote_agent_path=$10,
-				public_url=$11, image=$12, engine=$13, updated_at=now()
+				remote_public_ip=$8, remote_agent_token=$9, remote_agent_path=$10, updated_at=now()
 			WHERE id='default'
 		`, remoteTarget.Host, remoteTarget.Port, remoteTarget.User, remoteTarget.Auth,
 			remoteSecret, remotePassphrase, remoteTarget.HostKey, remoteTarget.PublicIP,
-			agentToken, agentPath, body.PublicURL, image, body.Engine); dbErr != nil {
+			agentToken, agentPath); dbErr != nil {
 			writeError(w, http.StatusInternalServerError, "OFFICE_REMOTE", "Could not save the remote Office deployment target")
 			return
 		}
@@ -617,6 +622,16 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 		return
 	}
 	s.persistOfficeStatus(r.Context(), agent)
+	// Only record the requested engine and image after the agent has installed
+	// and health-checked them. A failed install must leave the previous state.
+	if _, dbErr := s.db.Exec(r.Context(), `
+		UPDATE public.office_settings SET
+			public_url=$1, image=$2, engine=$3, last_error='', updated_at=now()
+		WHERE id='default'
+	`, body.PublicURL, image, body.Engine); dbErr != nil {
+		writeError(w, http.StatusInternalServerError, "OFFICE", "Office was installed but its settings could not be saved")
+		return
+	}
 	if body.Engine == "collabora" {
 		if err := s.ensureLocalOfficeSecret(); err != nil {
 			writeError(w, http.StatusInternalServerError, "OFFICE_SECRET", "Could not prepare the local Office signing secret: "+err.Error())
@@ -642,13 +657,6 @@ func (s *Server) handleOfficeInstall(w http.ResponseWriter, r *http.Request, ses
 	}
 	if body.DeploymentMode == "local" {
 		_, _ = s.scanCertificates(r.Context())
-		_, _ = s.db.Exec(r.Context(), `
-			UPDATE public.office_settings SET public_url=$1, image=$2, engine=$3, deployment_mode='local', updated_at=now() WHERE id='default'
-		`, body.PublicURL, image, body.Engine)
-	} else {
-		_, _ = s.db.Exec(r.Context(), `
-			UPDATE public.office_settings SET public_url=$1, image=$2, engine=$3, updated_at=now() WHERE id='default'
-		`, body.PublicURL, image, body.Engine)
 	}
 	host := ""
 	if parsed, parseErr := url.Parse(body.PublicURL); parseErr == nil {
@@ -957,10 +965,7 @@ func (s *Server) persistOfficeStatus(ctx context.Context, agent officeAgentStatu
 	if agent.Status == "" && agent.Error == "" {
 		return
 	}
-	status := agent.Status
-	if status == "" {
-		status = "error"
-	}
+	status := officeStatusFromAgent(agent)
 	lastHealth := any(nil)
 	if agent.Health == "ok" {
 		lastHealth = time.Now().UTC()
@@ -968,10 +973,19 @@ func (s *Server) persistOfficeStatus(ctx context.Context, agent officeAgentStatu
 	_, _ = s.db.Exec(ctx, `
 		UPDATE public.office_settings SET
 			status=$1, container_status=$2, version=$3, image=$4,
-			gateway_status=$5, last_error=$6, last_health_at=COALESCE($7, last_health_at),
+			gateway_status=$5,
+			last_error=CASE
+				WHEN $6 = 'ok' THEN ''
+				WHEN COALESCE($7,'') <> '' THEN $7
+				ELSE last_error
+			END,
+			last_health_at=COALESCE($8, last_health_at),
+			engine=COALESCE(NULLIF($9,''), engine),
+			public_url=COALESCE(NULLIF($10,''), public_url),
 			updated_at=now()
 		WHERE id='default'
-	`, status, agent.ContainerStatus, agent.Version, agent.Image, agent.GatewayStatus, agent.Error, lastHealth)
+	`, status, agent.ContainerStatus, agent.Version, agent.Image, agent.GatewayStatus,
+		agent.Health, agent.Error, lastHealth, agent.Engine, agent.PublicURL)
 }
 
 func (s *Server) officeCertificateForPaths(ctx context.Context, certPath, keyPath string) (officeCertificate, error) {
@@ -1032,6 +1046,42 @@ func validOfficeImage(value string) error {
 		return fmt.Errorf("Office image contains unsupported characters")
 	}
 	return nil
+}
+
+// officeImageEngine identifies the engine family of a well-known Office image.
+// Custom images return "" and are accepted for either engine.
+func officeImageEngine(image string) string {
+	ref := strings.ToLower(strings.TrimSpace(image))
+	switch {
+	case strings.Contains(ref, "altgence/office"),
+		strings.Contains(ref, "collabora/code"),
+		strings.Contains(ref, "collabora/online"):
+		return "collabora"
+	case strings.Contains(ref, "onlyoffice/documentserver"):
+		return "onlyoffice"
+	default:
+		return ""
+	}
+}
+
+func officeEngineDisplayName(engine string) string {
+	if strings.EqualFold(engine, "collabora") {
+		return "Alt8Mail Office (Collabora)"
+	}
+	return "ONLYOFFICE Docs"
+}
+
+// officeStatusFromAgent keeps the stored status honest when the container is
+// running but its health endpoint is failing.
+func officeStatusFromAgent(agent officeAgentStatus) string {
+	status := agent.Status
+	if status == "" {
+		status = "error"
+	}
+	if agent.Running && agent.Health != "" && agent.Health != "ok" {
+		status = "unhealthy"
+	}
+	return status
 }
 
 func validOfficeURL(value string) error {

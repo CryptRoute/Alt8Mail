@@ -1,3 +1,15 @@
+# Alt8Mail 3.11.2
+
+Release date: 2026-11-22. Hardening for the Collabora Office engine.
+
+## 3.11.2 engine/image safety
+
+- **Engine and image must match.** The Control Plane and `a8m-office-agent` now reject `engine=onlyoffice` with a Collabora image (and the reverse). This prevents the agent from generating an ONLYOFFICE Compose around a Collabora image, which left the container running but unreachable on port 80 instead of Collabora's port 9980.
+- **Failed installs no longer pre-record the requested engine/image.** The remote transport is recorded before the agent call, but `public_url`, `image` and `engine` are saved only after the agent runs. The status refresh follows what the agent actually deployed; if the request fails before deployment, the previous values remain.
+- **Unhealthy is a first-class state.** A running container whose health endpoint fails is stored as `unhealthy`; webmail refuses to open documents until health is OK. `last_error` is preserved across status polls until a healthy check or successful install, and the agent's actual engine/public URL are persisted so the Control Plane cannot drift from the Office host.
+- **Control UI:** the status card shows **Unhealthy** with a health row and a log hint instead of "Stopped"; entering a known image family selects the matching engine; install rejects a mismatched engine/image before sending; and lifecycle buttons are disabled while an install, start, stop or rotate operation runs, preventing overlapping agent calls.
+- **Preflight memory guidance** now calls out the 8 GB recommendation for Collabora with concurrent documents; the hard minimum remains 2 GB.
+
 # Alt8Mail 3.11.1
 
 Release date: 2026-11-22. Supersedes 3.11.0 with the Office agent install fix.

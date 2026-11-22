@@ -79,6 +79,20 @@ No browser patch is required for the AI bridge.
   it is no longer shared with the office engine. If it does not exist, create it
   with `openssl rand -base64 48 > /etc/a8m/office-jwt-secret`, then set
   `root:a8m` and `0640`.
+- The engine and image must name the same product. The Control Plane and the
+  agent reject `engine=onlyoffice` with `altgence/office` (or another Collabora
+  image) and `engine=collabora` with `onlyoffice/documentserver`. Custom images
+  whose names are not recognized are accepted for either engine.
+
+## Health and failure states
+
+- A running container whose health endpoint fails is stored as `unhealthy`, not
+  `running`. Webmail refuses to open documents until health is OK again.
+- `last_error` is preserved across status polls until a healthy check or a
+  successful install, so a transient poll does not hide the original failure.
+- The requested engine and image are not pre-recorded before the agent runs.
+  The status refresh follows the engine and image the agent actually deployed;
+  if the request fails before deployment, the previous values remain.
 
 ## Migration
 
@@ -104,6 +118,11 @@ For remote deployments, the Collabora image is pulled as
 `docker login` on the Office host first (prefer a read-only token); the agent's
 `docker compose pull` uses the host's Docker credentials. The agent skips the
 pull when the image already exists locally.
+
+The agent's data root defaults to the parent of `OFFICE_AGENT_STATE_FILE`
+(`/var/lib/a8m-office` in the generated environment). It prepares `cache/` and
+`logs/` there and uses the same root for the Collabora cache/log mounts and the
+ONLYOFFICE data/log mounts, so custom state paths and non-root hosts work.
 
 On Debian/Ubuntu, the remote prerequisite step installs Docker from the
 distribution and downloads the Docker Compose v2 CLI plugin from Docker's

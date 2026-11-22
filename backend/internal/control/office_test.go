@@ -22,6 +22,44 @@ func TestValidOfficeURL(t *testing.T) {
 	}
 }
 
+func TestOfficeImageEngine(t *testing.T) {
+	cases := []struct {
+		image string
+		want  string
+	}{
+		{"onlyoffice/documentserver:9.4.0.1", "onlyoffice"},
+		{"docker.io/onlyoffice/documentserver:latest", "onlyoffice"},
+		{"altgence/office:25.04", "collabora"},
+		{"docker.io/altgence/office:latest", "collabora"},
+		{"collabora/code:latest", "collabora"},
+		{"registry.example.com/team/custom-office:1", ""},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := officeImageEngine(tc.image); got != tc.want {
+			t.Errorf("officeImageEngine(%q) = %q, want %q", tc.image, got, tc.want)
+		}
+	}
+}
+
+func TestOfficeStatusFromAgent(t *testing.T) {
+	cases := []struct {
+		agent officeAgentStatus
+		want  string
+	}{
+		{officeAgentStatus{Status: "running", Running: true, Health: "ok"}, "running"},
+		{officeAgentStatus{Status: "running", Running: true, Health: "unhealthy"}, "unhealthy"},
+		{officeAgentStatus{Status: "running", Running: true}, "running"},
+		{officeAgentStatus{Status: "stopped"}, "stopped"},
+		{officeAgentStatus{}, "error"},
+	}
+	for _, tc := range cases {
+		if got := officeStatusFromAgent(tc.agent); got != tc.want {
+			t.Errorf("officeStatusFromAgent(%#v) = %q, want %q", tc.agent, got, tc.want)
+		}
+	}
+}
+
 func TestOfficeCertificateCovers(t *testing.T) {
 	cert := officeCertificate{SANs: []string{"office.example.com", "*.docs.example.net"}}
 	for _, host := range []string{"office.example.com", "team.docs.example.net"} {
