@@ -156,9 +156,12 @@ The Collabora toolbar wordmark is hidden because it duplicated the product mark
 and overflowed the notebookbar. The About dialog keeps the full wordmark and
 mark.
 
-The agent writes `/var/lib/a8m-office/branding/branding.css` and mounts it over
-`/usr/share/coolwsd/browser/dist/branding.css`, so branding changes ship with
-the agent without rebuilding the Collabora image.
+The agent writes `/var/lib/a8m-office/branding/branding.css` and
+`branding.js`, then mounts them over the container's `browser/dist` files, so
+branding changes ship with the agent without rebuilding the Collabora image.
+The gateway appends a content-hash query to both URLs; this prevents a browser
+from reusing an old cached wordmark CSS. The `branding.js` override closes the
+wide Styles sidebar on first run and respects the user's later choice.
 
 On Debian/Ubuntu, the remote prerequisite step installs Docker from the
 distribution and downloads the Docker Compose v2 CLI plugin from Docker's

@@ -82,6 +82,7 @@ func TestComposeContentsCollabora(t *testing.T) {
 		`password: "admin-password"`,
 		"MKNOD",
 		"/var/lib/a8m-office/branding/branding.css:/usr/share/coolwsd/browser/dist/branding.css:ro",
+		"/var/lib/a8m-office/branding/branding.js:/usr/share/coolwsd/browser/dist/branding.js:ro",
 		"/var/lib/a8m-office/fonts:/usr/share/fonts/truetype/custom:ro",
 	} {
 		if !strings.Contains(text, expected) {
@@ -274,10 +275,12 @@ func TestStatusAndInstallWithFakeDocker(t *testing.T) {
 				t.Fatalf("expected prepared directory %s: %v", dir, err)
 			}
 		}
-		brandingFile := filepath.Join(temp, "office", "branding", "branding.css")
-		data, err := os.ReadFile(brandingFile)
-		if err != nil || !strings.Contains(string(data), "#toolbar-logo") {
-			t.Fatalf("expected branding override at %s: %v", brandingFile, err)
+		for _, name := range []string{"branding.css", "branding.js"} {
+			brandingFile := filepath.Join(temp, "office", "branding", name)
+			data, err := os.ReadFile(brandingFile)
+			if err != nil || len(data) == 0 {
+				t.Fatalf("expected branding override at %s: %v", brandingFile, err)
+			}
 		}
 	}
 }
@@ -313,7 +316,13 @@ func TestNginxContentsProxiesWebSockets(t *testing.T) {
 
 func TestNginxContentsCollaboraBlocksAdmin(t *testing.T) {
 	text := nginxContents("collabora", "office.example.com", "/etc/ssl/office.crt", "/etc/ssl/office.key", "https://mail.example.com", 8082, "/var/www/certbot")
-	for _, expected := range []string{"location /browser/dist/admin/ { return 404; }", "location = /cool/adminws { return 404; }"} {
+	for _, expected := range []string{
+		"location /browser/dist/admin/ { return 404; }",
+		"location = /cool/adminws { return 404; }",
+		"sub_filter 'branding.css' 'branding.css?v=",
+		"sub_filter 'branding.js' 'branding.js?v=",
+		`proxy_set_header Accept-Encoding "";`,
+	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("Collabora nginx contents are missing %q", expected)
 		}

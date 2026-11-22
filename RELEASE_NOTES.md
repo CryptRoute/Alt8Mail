@@ -1,3 +1,14 @@
+# Alt8Mail 3.11.9
+
+Release date: 2026-11-23. Cache-bust the editor branding and default the Styles sidebar closed.
+
+## 3.11.9 editor polish
+
+- The Office gateway appends a content-hash query to the injected `branding.css` and `branding.js` URLs. Browsers therefore fetch the agent-mounted override instead of reusing a cached copy of the old wordmark CSS.
+- The agent mounts a `branding.js` override that closes Collabora's wide Styles sidebar on first run (`ShowSidebar=false`). The user's later choice is respected. The document canvas gets the full editor width, closer to the ONLYOFFICE layout.
+- The gateway clears `Accept-Encoding` on the proxy so `sub_filter` can rewrite the HTML reliably.
+- Added tests for the nginx cache-buster, JS mount and branding files.
+
 # Alt8Mail 3.11.8
 
 Release date: 2026-11-23. Fix the branding override permissions.

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
 	_ "embed"
@@ -32,6 +33,9 @@ import (
 
 //go:embed branding.css
 var officeBrandingCSS []byte
+
+//go:embed branding.js
+var officeBrandingJS []byte
 
 type Runner func(ctx context.Context, timeout time.Duration, name string, args ...string) (stdout, stderr string, err error)
 
@@ -1268,6 +1272,13 @@ func aliasGroupForState(st state) string {
 	return st.PortalURL
 }
 
+func brandingAssetVersion() string {
+	sum := sha256.New()
+	sum.Write(officeBrandingCSS)
+	sum.Write(officeBrandingJS)
+	return fmt.Sprintf("%x", sum.Sum(nil)[:4])
+}
+
 // removeConflictingContainer removes a container left by the other engine's
 // Compose service. Both engines reuse the configured container name, so Compose
 // otherwise sees the old container as an orphan and refuses to create the new
@@ -1318,16 +1329,22 @@ func (s *Server) prepareOfficeDirs() error {
 	if err := os.MkdirAll(brandingDir, 0o755); err != nil {
 		return fmt.Errorf("could not prepare %s: %w", brandingDir, err)
 	}
-	brandingFile := filepath.Join(brandingDir, "branding.css")
-	if current, err := os.ReadFile(brandingFile); err != nil || !bytes.Equal(current, officeBrandingCSS) {
-		if err := os.WriteFile(brandingFile, officeBrandingCSS, 0o644); err != nil {
-			return fmt.Errorf("could not write %s: %w", brandingFile, err)
-		}
+	brandingFiles := map[string][]byte{
+		"branding.css": officeBrandingCSS,
+		"branding.js":  officeBrandingJS,
 	}
-	// The agent service umask can turn 0644 into 0640; the container's cool
-	// user must be able to read the mounted override.
-	if err := os.Chmod(brandingFile, 0o644); err != nil {
-		return fmt.Errorf("could not set permissions on %s: %w", brandingFile, err)
+	for name, content := range brandingFiles {
+		file := filepath.Join(brandingDir, name)
+		if current, err := os.ReadFile(file); err != nil || !bytes.Equal(current, content) {
+			if err := os.WriteFile(file, content, 0o644); err != nil {
+				return fmt.Errorf("could not write %s: %w", file, err)
+			}
+		}
+		// The agent service umask can turn 0644 into 0640; the container's cool
+		// user must be able to read the mounted override.
+		if err := os.Chmod(file, 0o644); err != nil {
+			return fmt.Errorf("could not set permissions on %s: %w", file, err)
+		}
 	}
 	return nil
 }
@@ -1352,6 +1369,7 @@ func composeContents(engine, image, secret, adminPassword, container string, por
 	logsDir := dataDir + "/logs"
 	officeDataDir := dataDir + "/data"
 	brandingFile := dataDir + "/branding/branding.css"
+	brandingJSFile := dataDir + "/branding/branding.js"
 	if normalizeEngine(engine) == officeEngineCollabora {
 		host, _ := publicHost(publicURL)
 		origin, _ := portalOrigin(portalURL)
@@ -1378,8 +1396,9 @@ func composeContents(engine, image, secret, adminPassword, container string, por
       - %s:/opt/cool/cache
       - %s:/var/log
       - %s:/usr/share/coolwsd/browser/dist/branding.css:ro
+      - %s:/usr/share/coolwsd/browser/dist/branding.js:ro
       - %s:/usr/share/fonts/truetype/custom:ro
-`, image, container, port, aliasGroup, origin, host, adminPassword, cacheDir, logsDir, brandingFile, fontsDir)
+`, image, container, port, aliasGroup, origin, host, adminPassword, cacheDir, logsDir, brandingFile, brandingJSFile, fontsDir)
 	}
 	return fmt.Sprintf(`services:
   documentserver:
@@ -1413,9 +1432,12 @@ func nginxContents(engine, host, cert, key, portalURL string, port int, webroot 
 	}
 	engineBlocks := ""
 	if normalizeEngine(engine) == officeEngineCollabora {
-		engineBlocks = `    location /browser/dist/admin/ { return 404; }
+		engineBlocks = fmt.Sprintf(`    location /browser/dist/admin/ { return 404; }
     location = /cool/adminws { return 404; }
-`
+    sub_filter_once off;
+    sub_filter 'branding.css' 'branding.css?v=%s';
+    sub_filter 'branding.js' 'branding.js?v=%s';
+`, brandingAssetVersion(), brandingAssetVersion())
 	}
 	return fmt.Sprintf(`# Managed by the Alt8Mail Office Agent.
 server {
@@ -1441,6 +1463,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header Accept-Encoding "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
