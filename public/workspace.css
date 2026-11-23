@@ -3351,3 +3351,33 @@ body.popout .overlay { z-index: 120; }
 .reminder-postpone-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 12px 0; }
 .reminder-postpone-presets button { justify-content: center; }
 .reminder-postpone-custom input { width: 100%; }
+
+/* ============================================================
+   Compact document window chrome
+   ============================================================ */
+.office-editor-head {
+  grid-template-columns: minmax(150px, 1fr) minmax(220px, 380px) auto auto;
+  gap: 10px;
+  padding: 6px 10px;
+}
+.office-editor-mark { width: 26px; height: 26px; border-radius: 6px; }
+.office-editor-mark img { width: 20px; height: 20px; }
+.office-editor-title { gap: 8px; }
+.office-editor-title strong { font-size: 0.75rem; }
+.office-editor-title span { display: none; }
+.office-editor-search { height: 30px; }
+.office-editor-search input { font-size: 0.75rem; }
+.office-editor-tools { gap: 6px; }
+.office-editor-tools .btn-small {
+  min-height: 28px;
+  height: 28px;
+  padding-inline: 10px;
+  font-size: 0.75rem;
+}
+.office-window-controls { padding: 1px; }
+.office-window-btn { width: 28px; height: 26px; }
+.office-window-btn svg { width: 14px; height: 14px; }
+
+@media (max-width: 900px) {
+  .office-editor-head { grid-template-columns: minmax(120px, 1fr) minmax(160px, 260px) auto auto; }
+}

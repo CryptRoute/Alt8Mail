@@ -1,6 +1,6 @@
 /* TLS, access control, API keys, webhooks and notification views. */
-import * as ui from './ui.js?v=3.11.10';
-import * as i18n from './i18n.js?v=3.11.10';
+import * as ui from './ui.js?v=3.12.0';
+import * as i18n from './i18n.js?v=3.12.0';
 
 const esc = ui.esc;
 const fmt = {

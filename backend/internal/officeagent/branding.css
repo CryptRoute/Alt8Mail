@@ -1,10 +1,12 @@
 /*
- * Alt8Mail Office — Collabora Online white-label layer.
+ * Alt8Mail Office — Collabora Online white-label and desktop-suite skin.
  *
  * The Office agent mounts this file over the image's
- * /usr/share/coolwsd/browser/dist/branding.css so branding fixes do not
- * require rebuilding the Collabora image. Asset URLs stay relative to that
- * directory and resolve against the image's existing images/ assets.
+ * /usr/share/coolwsd/browser/dist/branding.css so the layout can be refreshed
+ * without rebuilding the Collabora image. The skin intentionally mirrors the
+ * compact desktop ribbon used by Office/ONLYOFFICE: small tabs, icon-first
+ * controls, a horizontal text style strip, and a narrow right rail instead of
+ * a wide default sidebar.
  */
 
 :root {
@@ -22,20 +24,69 @@
 	--color-primary-lighter: var(--a8m-teal-light);
 	--color-primary-text: var(--a8m-navy);
 	--color-warning: var(--a8m-orange);
+
+	/* Skin tokens. */
+	--a8m-ui-font: "Segoe UI", "Inter", Tahoma, Arial, Helvetica, sans-serif;
+	--a8m-tab-row: #f3f4f6;
+	--a8m-ribbon: #ffffff;
+	--a8m-panel: #ffffff;
+	--a8m-canvas: #e9ebef;
+	--a8m-line: #e1e4e8;
+	--a8m-line-strong: #d0d5dd;
+	--a8m-text: #24292f;
+	--a8m-muted: #57606a;
+	--a8m-hover: #eef1f5;
+	--a8m-accent: #0f6cbd;
+	--a8m-accent-soft: #e8f1fb;
+	--a8m-style-blue: #2f6fc4;
+	--a8m-rail-width: 38px;
 }
 
-[data-theme='dark'] {
+html[data-theme='dark'] {
 	--color-primary: var(--a8m-teal);
 	--color-primary-dark: var(--a8m-teal-dark);
 	--color-primary-darker: var(--a8m-teal-darker);
 	--color-primary-lighter: var(--a8m-teal-light);
 	--color-primary-text: var(--a8m-navy);
+
+	--a8m-tab-row: #171a1f;
+	--a8m-ribbon: #1f2329;
+	--a8m-panel: #1f2329;
+	--a8m-canvas: #2b2f36;
+	--a8m-line: #333941;
+	--a8m-line-strong: #414852;
+	--a8m-text: #e6e8eb;
+	--a8m-muted: #a6adb7;
+	--a8m-hover: #2a3037;
+	--a8m-accent: #58a6f4;
+	--a8m-accent-soft: #1d334d;
+	--a8m-style-blue: #7db2ff;
+}
+
+/* Compact the engine's own metrics before laying out the skin. */
+html.a8m-skin {
+	--btn-size: 26px;
+	--btn-padding: 3px;
+	--btn-img-size: 20px;
+	--btn-size-s: 20px;
+	--btn-img-size-s: 16px;
+	--notebookbar-element-height: 60px;
+	--header-font-size: 12px;
+	--overflow-group-font-size: 0;
+	--tb-min-fs: 12px;
+	--tb-fs-s: 12px;
+	--tb-max-fs: 12px;
+	--tb-min-fs-u: 12;
+	--tb-max-fs-u: 12;
+	--sidebar-header-height: 30px;
+	--header-height: 30px;
 }
 
 /* The webmail editor header carries the Alt8Mail 8 icon. The Collabora
    toolbar wordmark is intentionally hidden: it duplicated the product mark and
    overflowed the notebookbar at common window sizes. */
-#toolbar-logo {
+#toolbar-logo,
+.a8m-skin #navigator-floating-icon {
 	display: none !important;
 }
 
@@ -81,48 +132,540 @@ a[href*='collabora.com'] {
 	display: none !important;
 }
 
-/* The stock Styles gallery is 36.8vw wide with 122px preview cells. At common
-   editor widths it pushes the ribbon controls aside and the preview images are
-   taller than their row, which clips labels such as "Title". Compact the
-   gallery so the ribbon reads like a desktop suite instead of a full-width
-   style picker. */
-#stylesview,
-#stylesview-iconview-list,
-#stylesview-iconview-list-dropdown {
-	width: min(430px, 70vw) !important;
-	min-width: min(430px, 70vw) !important;
-	grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)) !important;
-	grid-template-rows: repeat(auto-fit, minmax(30px, 1fr)) !important;
+.a8m-legal-notice {
+	margin: 10px 0 0;
+	max-width: 520px;
+	color: var(--a8m-muted);
+	font: 11px/1.45 var(--a8m-ui-font);
+	opacity: .86;
 }
 
-#stylesview .ui-iconview-entry,
-#stylesview-iconview-list .ui-iconview-entry,
-#stylesview-iconview-list-dropdown .ui-iconview-entry {
+/* -------------------------------------------------------------------------
+   Tabs and top bar
+   ------------------------------------------------------------------------- */
+
+.a8m-skin .notebookbar,
+.a8m-skin .notebookbar button,
+.a8m-skin .notebookbar input,
+.a8m-skin .notebookbar select,
+.a8m-skin .notebookbar .unolabel,
+.a8m-skin .notebookbar-tabs-container,
+.a8m-skin #document-titlebar,
+.a8m-skin #document-titlebar input {
+	font-family: var(--a8m-ui-font) !important;
+}
+
+.a8m-skin .notebookbar-tabs-container {
 	height: 30px !important;
-	min-width: 0 !important;
-	overflow: hidden !important;
+	min-height: 30px !important;
+	margin: 0 0 0 6px !important;
+	align-items: center !important;
 }
 
-/* IconView sets an inline width/height from the preview's natural size. Scale
-   the preview down inside the compact cell so the full style name fits. */
-#stylesview .ui-iconview-entry img,
-#stylesview-iconview-list .ui-iconview-entry img,
-#stylesview-iconview-list-dropdown .ui-iconview-entry img {
+.a8m-skin .ui-tabs.notebookbar {
+	height: 30px !important;
+	align-items: center !important;
+	padding: 0 !important;
+	background: transparent !important;
+	scrollbar-width: none !important;
+}
+
+.a8m-skin .ui-tabs.notebookbar::-webkit-scrollbar {
+	display: none !important;
+}
+
+.a8m-skin button.ui-tab.notebookbar {
+	height: 30px !important;
+	min-height: 30px !important;
+	padding: 0 10px !important;
+	margin: 0 1px !important;
+	border: 1px solid transparent !important;
+	border-radius: 4px 4px 0 0 !important;
+	background: transparent !important;
+	color: var(--a8m-muted) !important;
+	font: 500 12px/30px var(--a8m-ui-font) !important;
+	letter-spacing: 0 !important;
+	box-sizing: border-box !important;
+}
+
+.a8m-skin button.ui-tab.notebookbar:hover {
+	background: var(--a8m-hover) !important;
+	color: var(--a8m-text) !important;
+}
+
+.a8m-skin button.ui-tab.notebookbar.selected {
+	background: var(--a8m-ribbon) !important;
+	border-color: var(--a8m-line) !important;
+	border-bottom-color: var(--a8m-ribbon) !important;
+	color: var(--a8m-text) !important;
+	font-weight: 650 !important;
+}
+
+.a8m-skin .ui-tab.notebookbar.a8m-tab-hidden {
+	display: none !important;
+}
+
+.a8m-skin #ContextContainer,
+.a8m-skin #document-titlebar {
+	background: var(--a8m-tab-row) !important;
+}
+
+.a8m-skin #document-titlebar {
+	height: 30px !important;
+	min-height: 30px !important;
+	border-bottom: 0 !important;
+}
+
+.a8m-skin .document-title,
+.a8m-skin #document-titlebar .document-title {
+	color: var(--a8m-text) !important;
+	font: 650 13px/30px var(--a8m-ui-font) !important;
+}
+
+.a8m-skin #document-name-input {
+	height: 24px !important;
+	padding: 0 6px !important;
+	border: 1px solid transparent !important;
+	border-radius: 3px !important;
+	background: transparent !important;
+	color: var(--a8m-text) !important;
+	font: 650 13px/24px var(--a8m-ui-font) !important;
+}
+
+/* The webmail Office window header already shows the document name. Avoid
+   repeating it in the tab row when the editor is embedded there. */
+.a8m-embedded #document-titlebar .document-title,
+.a8m-embedded #document-name-input,
+.a8m-embedded .document-title {
+	display: none !important;
+}
+
+.a8m-skin #viewModeDropdownButton {
+	height: 24px !important;
+	min-height: 24px !important;
+	padding: 0 9px !important;
+	border: 1px solid var(--a8m-line-strong) !important;
+	border-radius: 3px !important;
+	background: var(--a8m-panel) !important;
+	color: var(--a8m-text) !important;
+	font: 600 12px/22px var(--a8m-ui-font) !important;
+}
+
+.a8m-skin #viewModeDropdownButton .unolabel {
+	display: inline !important;
+	padding: 0 !important;
+	font-size: 12px !important;
+}
+
+/* -------------------------------------------------------------------------
+   Ribbon
+   ------------------------------------------------------------------------- */
+
+.a8m-skin .notebookbar-scroll-wrapper {
+	height: 64px !important;
+	min-height: 64px !important;
+	background: var(--a8m-ribbon) !important;
+	border-top: 1px solid var(--a8m-line) !important;
+	border-bottom: 1px solid var(--a8m-line) !important;
+	scrollbar-width: none !important;
+}
+
+.a8m-skin .notebookbar-scroll-wrapper::-webkit-scrollbar {
+	display: none !important;
+}
+
+.a8m-skin .notebookbar.ui-tabpage,
+.a8m-skin .ui-tabpage,
+.a8m-skin .ui-overflow-manager {
+	height: 64px !important;
+	min-height: 64px !important;
+	align-items: stretch !important;
+}
+
+.a8m-skin .notebookbar.ui-overflow-group,
+.a8m-skin .ui-overflow-group {
+	height: 64px !important;
+	min-height: 64px !important;
+	padding: 0 5px !important;
+	align-items: center !important;
+	border-inline-end: 1px solid var(--a8m-line) !important;
+	box-sizing: border-box !important;
+}
+
+.a8m-skin .ui-overflow-group-inner,
+.a8m-skin .ui-overflow-group-content {
+	height: 64px !important;
+	min-height: 64px !important;
+	align-items: center !important;
+}
+
+/* ONLYOFFICE does not put a caption under every ribbon group. */
+.a8m-skin .ui-overflow-group-label,
+.a8m-skin .ui-overflow-group-bottom,
+.a8m-skin .notebookbar.ui-overflow-group-bottom {
+	display: none !important;
+}
+
+.a8m-skin .ui-separator.vertical {
+	width: 1px !important;
+	height: 34px !important;
+	margin: 0 2px !important;
+	background: var(--a8m-line) !important;
+}
+
+/* Icon-first controls. */
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton {
 	width: auto !important;
+	min-width: 26px !important;
 	height: 26px !important;
-	max-width: 92px !important;
-	object-fit: contain !important;
+	margin: 1px !important;
+	padding: 0 !important;
+	border-radius: 3px !important;
+	align-items: center !important;
+	justify-content: center !important;
 }
 
-#stylesview .icon-view-item-container,
-#stylesview-iconview-list .icon-view-item-container,
-#stylesview-iconview-list-dropdown .icon-view-item-container {
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton .unobutton {
+	width: 26px !important;
+	height: 26px !important;
+	padding: 3px !important;
+	border-radius: 3px !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+}
+
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton .unobutton > img,
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton .unobutton .icon-maskable {
+	width: 20px !important;
+	height: 20px !important;
+}
+
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton:hover {
+	background: var(--a8m-hover) !important;
+}
+
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton .unolabel {
+	display: none !important;
+}
+
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton.has-label {
+	width: 26px !important;
+}
+
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton.has-label > *:not(.arrowbackground) {
+	display: flex !important;
+	width: 26px !important;
+}
+
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton.has-dropdown,
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton.has-dropdown.has-label {
+	width: 38px !important;
+}
+
+.a8m-skin .notebookbar-scroll-wrapper .arrowbackground {
+	width: 12px !important;
+	min-width: 12px !important;
+}
+
+.a8m-skin .notebookbar-scroll-wrapper .unotoolbutton .unoarrow {
+	width: 8px !important;
+	height: 8px !important;
+}
+
+.a8m-skin .notebookbar .ui-combobox {
+	height: 26px !important;
+	margin: 0 2px !important;
+}
+
+.a8m-skin #fontnamecombobox {
+	width: 122px !important;
+}
+
+.a8m-skin #fontsizecombobox {
+	width: 54px !important;
+}
+
+.a8m-skin .notebookbar .ui-combobox-content {
+	height: 24px !important;
+	padding: 0 6px !important;
+	border: 1px solid var(--a8m-line-strong) !important;
+	border-radius: 3px !important;
+	background: var(--a8m-panel) !important;
+	color: var(--a8m-text) !important;
+	font: 12px/22px var(--a8m-ui-font) !important;
+	box-sizing: border-box !important;
+}
+
+.a8m-skin .notebookbar .ui-combobox-button {
+	width: 18px !important;
+	height: 24px !important;
+	border: 1px solid var(--a8m-line-strong) !important;
+	border-inline-start: 0 !important;
+	border-radius: 0 3px 3px 0 !important;
+	background: var(--a8m-panel) !important;
+}
+
+.a8m-skin .notebookbar .ui-listbox-arrow {
+	width: 8px !important;
+	height: 8px !important;
+}
+
+/* Home is the desktop home strip: clipboard, font, paragraph, styles. The
+   Insert and Search groups remain reachable from their own tabs and rail. */
+.a8m-skin #home-insert,
+.a8m-skin .ui-overflow-group.a8m-home-hidden,
+.a8m-skin #home-find-n-filter {
+	display: none !important;
+}
+
+/* -------------------------------------------------------------------------
+   Text style strip
+   ------------------------------------------------------------------------- */
+
+.a8m-skin #home-stylesview-group {
+	display: none !important;
+}
+
+.a8m-style-strip {
+	display: flex !important;
+	flex: 0 0 auto !important;
+	align-items: stretch !important;
+	height: 44px !important;
+	margin: 0 6px !important;
+	border: 1px solid var(--a8m-line-strong) !important;
+	border-radius: 3px !important;
+	background: var(--a8m-panel) !important;
+	overflow: hidden !important;
+	box-sizing: border-box !important;
+}
+
+.a8m-style-tile {
+	height: 42px !important;
+	min-width: 64px !important;
+	padding: 0 10px !important;
+	border: 0 !important;
+	border-inline-end: 1px solid var(--a8m-line) !important;
+	background: transparent !important;
+	color: var(--a8m-text) !important;
+	font: 500 13px/1.1 var(--a8m-ui-font) !important;
+	white-space: nowrap !important;
+	cursor: pointer !important;
+	box-sizing: border-box !important;
+}
+
+.a8m-style-tile:last-child {
+	border-inline-end: 0 !important;
+}
+
+.a8m-style-tile:hover {
+	background: var(--a8m-hover) !important;
+}
+
+.a8m-style-tile.is-active {
+	background: var(--a8m-panel) !important;
+	color: var(--a8m-accent) !important;
+	box-shadow: inset 0 0 0 1px var(--a8m-accent), inset 0 -2px 0 var(--a8m-accent) !important;
+}
+
+.a8m-style-tile[data-level='1'] {
+	color: var(--a8m-style-blue) !important;
+	font-size: 17px !important;
+	font-weight: 650 !important;
+}
+
+.a8m-style-tile[data-level='2'] {
+	color: var(--a8m-style-blue) !important;
+	font-size: 16px !important;
+	font-weight: 600 !important;
+}
+
+.a8m-style-tile[data-level='3'] {
+	color: var(--a8m-style-blue) !important;
+	font-size: 15px !important;
+	font-weight: 600 !important;
+}
+
+.a8m-style-tile[data-level='4'] {
+	color: var(--a8m-style-blue) !important;
+	font-size: 14px !important;
+	font-weight: 600 !important;
+}
+
+.a8m-style-tile[data-title-style='1'] {
+	font-size: 15px !important;
+	font-weight: 650 !important;
+}
+
+/* -------------------------------------------------------------------------
+   Sidebars and rails
+   ------------------------------------------------------------------------- */
+
+.a8m-skin #document-container {
+	background: var(--a8m-canvas) !important;
+}
+
+.a8m-skin #sidebar-dock-wrapper,
+.a8m-skin #navigator-dock-wrapper {
+	max-width: 320px !important;
+	background: var(--a8m-panel) !important;
+	border-inline-start: 1px solid var(--a8m-line) !important;
+}
+
+.a8m-skin #sidebar-panel,
+.a8m-skin #sidebar-container {
+	font-family: var(--a8m-ui-font) !important;
+	font-size: 12px !important;
+}
+
+.a8m-skin #sidebar-panel .ui-expander-label,
+.a8m-skin #sidebar-panel button,
+.a8m-skin #sidebar-panel input {
+	font-family: var(--a8m-ui-font) !important;
+	font-size: 12px !important;
+}
+
+.a8m-skin #sidebar-panel .ui-treeview-row,
+.a8m-skin #sidebar-panel .ui-listbox-entry {
+	min-height: 24px !important;
+	line-height: 24px !important;
+	padding: 2px 4px !important;
+}
+
+.a8m-skin #sidebar-panel .ui-expander-heading {
+	height: 28px !important;
+	min-height: 28px !important;
+}
+
+.a8m-skin #sidebar-panel .ui-expander-label {
+	line-height: 28px !important;
+}
+
+.a8m-skin #sidebar-panel .ui-combobox-content {
+	height: 24px !important;
+	line-height: 22px !important;
+}
+
+.a8m-rail {
+	flex: 0 0 var(--a8m-rail-width) !important;
+	width: var(--a8m-rail-width) !important;
+	min-width: var(--a8m-rail-width) !important;
+	height: 100% !important;
+	background: var(--a8m-panel) !important;
+	display: flex !important;
+	flex-direction: column !important;
+	align-items: center !important;
+	gap: 4px !important;
+	padding: 8px 0 !important;
+	box-sizing: border-box !important;
+	z-index: 990 !important;
+}
+
+.a8m-rail-right {
+	border-inline-start: 1px solid var(--a8m-line) !important;
+}
+
+.a8m-rail-left {
+	border-inline-end: 1px solid var(--a8m-line) !important;
+}
+
+.a8m-rail-button {
+	width: 30px !important;
 	height: 30px !important;
-	min-width: 0 !important;
+	padding: 0 !important;
+	border: 0 !important;
+	border-radius: 4px !important;
+	background: transparent !important;
+	color: var(--a8m-muted) !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	cursor: pointer !important;
 }
 
-/* The dark palette dims the style previews with a brightness filter. The
-   previews are document thumbnails, so keep them at full contrast. */
-[data-theme='dark'] #stylesview {
-	filter: none !important;
+.a8m-rail-button:hover {
+	background: var(--a8m-hover) !important;
+	color: var(--a8m-text) !important;
+}
+
+.a8m-rail-button.is-active {
+	background: var(--a8m-accent-soft) !important;
+	color: var(--a8m-accent) !important;
+}
+
+.a8m-rail-button svg {
+	width: 18px !important;
+	height: 18px !important;
+	display: block !important;
+}
+
+/* -------------------------------------------------------------------------
+   Ruler and document canvas
+   ------------------------------------------------------------------------- */
+
+.a8m-skin .cool-ruler {
+	height: 20px !important;
+	background: var(--a8m-panel) !important;
+	border-bottom: 1px solid var(--a8m-line) !important;
+}
+
+.a8m-skin #vertical-ruler {
+	display: none !important;
+}
+
+.a8m-skin #map {
+	background: var(--a8m-canvas) !important;
+}
+
+/* Narrow editor windows keep the most-used styles instead of clipping the
+   strip at the right edge. The full set remains available in the Styles pane. */
+@media (max-width: 1560px) {
+	.a8m-skin .a8m-style-tile[data-style-title='Title'],
+	.a8m-skin .a8m-style-tile[data-style-title='Subtitle'] {
+		display: none !important;
+	}
+}
+
+@media (max-width: 1400px) {
+	.a8m-skin .a8m-style-tile[data-level='4'] {
+		display: none !important;
+	}
+
+	.a8m-skin .a8m-style-tile {
+		min-width: 58px !important;
+		padding: 0 8px !important;
+	}
+}
+
+@media (max-width: 1300px) {
+	.a8m-skin .a8m-style-tile[data-level='3'],
+	.a8m-skin .a8m-style-tile[data-level='4'],
+	.a8m-skin .a8m-style-tile[data-style-title='No Spacing'] {
+		display: none !important;
+	}
+}
+
+@media (max-width: 1080px) {
+	.a8m-skin .a8m-style-tile[data-level='2'],
+	.a8m-skin .a8m-style-tile[data-level='3'],
+	.a8m-skin .a8m-style-tile[data-level='4'] {
+		display: none !important;
+	}
+}
+
+@media (max-width: 760px) {
+	.a8m-rail {
+		display: none !important;
+	}
+
+	.a8m-style-strip {
+		height: 40px !important;
+	}
+
+	.a8m-style-tile {
+		height: 38px !important;
+		min-width: 64px !important;
+		padding: 0 10px !important;
+		font-size: 12px !important;
+	}
 }

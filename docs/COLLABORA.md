@@ -187,11 +187,23 @@ restore `SavedUIState` on a cache hit, so each open includes a harmless unique
 `TextStatusbar` value. This keeps the host theme authoritative without an image
 rebuild. Changing the webmail theme while a document is open asks Collabora to
 save, then reloads the host page with the new theme. The
-`branding.js` override closes the wide Styles sidebar on first run, enables the
-ruler once per document type and applies 100% zoom when the document layer is
-ready; later user changes are respected. The `branding.css` override compacts
-the 36.8vw Styles gallery to a 430px ribbon element so its previews are not
-clipped.
+`branding.js` applies the desktop-suite skin after the document type is known:
+it closes the wide Styles sidebar by default, enables the ruler, applies 100%
+zoom, replaces the image-based Collabora style gallery with a horizontal text
+style strip that drives the native style commands, and adds narrow left/right
+icon rails. The right rail is the far-right flex item, so an opened sidebar sits
+to its left exactly like a desktop suite; the Style and Property decks open from
+the rail. The strip hides lower-priority styles at narrower editor widths instead
+of clipping. The skin also hides the duplicate document title when the editor is
+embedded in the webmail Office window, where the window header already carries
+the name.
+
+The skin is CSS/DOM-only and ships in the agent's mounted `branding.css` and
+`branding.js`; it does not rebuild the Collabora image. The webmail
+`workspace.css` keeps the outer Office window header to a compact title bar so
+the shell and editor read as one application. The widescreen style strip steps
+down from eight to six, five, three and two styles as the iframe narrows; the
+full style list remains available in the Styles sidebar.
 
 On Debian/Ubuntu, the remote prerequisite step installs Docker from the
 distribution and downloads the Docker Compose v2 CLI plugin from Docker's
@@ -203,8 +215,9 @@ package Compose v2 under any apt name, so this download replaces the old
 
 - The `/office-editor` CSP still allows broad `https:` frame sources. Tighten
   it to the configured office origin as a follow-up.
-- The compact Styles gallery still uses Collabora's generated preview images.
-  A full Office 365/OnlyOffice ribbon and style-picker skin remains Phase 2.
+- The ribbon is a CSS/DOM skin over Collabora's command model. A source-level
+  rewrite of the notebookbar definitions is not required for the shipped look,
+  but the native dialogs and secondary panels keep their engine styling.
 - WOPI proof-key validation (`X-WOPI-Proof` from `/hosting/discovery`) is not
   enabled; add it at GA.
 - The browser end-to-end edit/save flow still needs a real-browser test.

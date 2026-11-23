@@ -1,3 +1,17 @@
+# Alt8Mail 3.12.0
+
+Release date: 2026-11-23. The Office editor is rebuilt as a compact desktop-suite workspace: ONLYOFFICE-style tabs, icon-first ribbon, a native text style strip, right-edge sidebar rail, ruler and 100% zoom on load, and compact webmail document chrome.
+
+## 3.12.0 Office editor overhaul
+
+- **Compact desktop ribbon.** The notebookbar is reduced to 12px tabs, icon-first 26px controls without group captions, 24px font/size fields and a 64px ribbon. The image-based Collabora style gallery is replaced by an ONLYOFFICE-style horizontal text strip (Normal, No spacing, Heading 1–4, Title, Subtitle). Each tile applies the real native style; the active tile tracks the document style. Lower-priority tiles drop out progressively at narrower window widths, and the complete list stays in the Styles sidebar.
+- **Sidebars sit like a desktop suite.** The wide Styles panel no longer opens by default. A narrow left icon rail carries Search, Comments and Navigator; a narrow right rail carries Properties, Styles and Accessibility. Opening a deck puts the panel between the canvas and the right rail, and the rail remains at the far edge.
+- **Ruler, 100% zoom and full-width canvas.** The skin now waits for the real document type and document layer before applying `ShowRuler`, so the ruler reliably appears on load. The status-bar scale is set to 10 (100%) and confirmed before the default stops; the sidebar closes and Leaflet is invalidated so the canvas reclaims the width.
+- **Light and dark themes.** The tab strip, ribbon, style strip, rails, sidebar and ruler have matched light and dark tokens and follow the webmail theme.
+- **Compact document window chrome.** The webmail Office window header is reduced to a 43px title bar: 26px product mark, 12px document name, compact Open/Versions controls and a 380px document search. The subtitle is hidden, and the duplicate document name inside the embedded editor is suppressed.
+- **No Collabora image rebuild.** The skin is delivered entirely through the agent-mounted `branding.css`/`branding.js` and the webmail asset bundle. The document engine, WOPI, DLP, versions and save pipeline are unchanged.
+- Keyboard commands, native dialogs, the Styles sidebar, Find and Replace, Comments and the existing AI panel remain available.
+
 # Alt8Mail 3.11.10
 
 Release date: 2026-11-23. Phase 1 Office editor polish: theme sync, ruler and 100% zoom, a working webmail-backed AI assistant, and a compact Styles gallery.
