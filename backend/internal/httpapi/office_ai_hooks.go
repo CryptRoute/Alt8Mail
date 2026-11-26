@@ -2,24 +2,20 @@ package httpapi
 
 import (
 	"context"
-	"strings"
 
 	"github.com/CryptRoute/Alt8Mail/backend/internal/enterprise"
 )
 
-// officeAIEnabled reports whether the Office AI module is available. The paid
-// Office AI module can grant access through its hook; otherwise the in-editor
-// assistant uses the same tenant AI configuration and credentials as the
-// webmail assistant. That keeps one AI provider setup for the whole product.
+// officeAIEnabled reports whether the Office AI module is available. Office AI
+// is a paid capability, so only the enterprise module can enable the editor
+// panel; the webmail assistant does not grant it implicitly.
 func (s *Server) officeAIEnabled(ctx context.Context, user userRecord) bool {
-	if hook := s.officeAIEnabledHook; hook != nil {
-		if hook(ctx, enterprise.Principal{
-			UserID: user.ID, TenantID: user.TenantID, Email: user.Email,
-			Name: user.Name, Role: user.Role,
-		}) {
-			return true
-		}
+	hook := s.officeAIEnabledHook
+	if hook == nil {
+		return false
 	}
-	settings, err := s.aiSettingsFor(ctx, user.TenantID)
-	return err == nil && settings.Enabled && strings.TrimSpace(settings.Model) != ""
+	return hook(ctx, enterprise.Principal{
+		UserID: user.ID, TenantID: user.TenantID, Email: user.Email,
+		Name: user.Name, Role: user.Role,
+	})
 }

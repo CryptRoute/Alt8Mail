@@ -480,16 +480,19 @@ func (s *Server) adminUpdateAI(w http.ResponseWriter, r *http.Request) {
 	if body.TimeoutSeconds != nil {
 		timeoutSeconds = *body.TimeoutSeconds
 	}
-	if body.MonthlyBudgetCents != nil {
+	// The assistant configuration itself is a community feature. Budget, triage
+	// and obligation automation are separate paid AI modules, so a community
+	// server ignores those fields instead of storing settings it cannot apply.
+	if body.MonthlyBudgetCents != nil && s.entitled(FeatureAIBudget) {
 		monthlyBudgetCents = *body.MonthlyBudgetCents
 	}
-	if body.TriageAutoLabel != nil {
+	if body.TriageAutoLabel != nil && s.entitled(FeatureAITriage) {
 		triageAutoLabel = *body.TriageAutoLabel
 	}
-	if body.TriageMinConfidence != nil {
+	if body.TriageMinConfidence != nil && s.entitled(FeatureAITriage) {
 		triageMinConfidence = *body.TriageMinConfidence
 	}
-	if body.ObligationsAutoTask != nil {
+	if body.ObligationsAutoTask != nil && s.entitled(FeatureAIObligations) {
 		obligationsAutoTask = *body.ObligationsAutoTask
 	}
 	if provider != "openai" && provider != "anthropic" {

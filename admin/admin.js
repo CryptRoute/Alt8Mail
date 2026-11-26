@@ -357,7 +357,7 @@ async function logout() {
    Navigation / route
 ------------------------------------------------------------ */
 const views = new Set(["overview", "users", "user-detail", "import-users", "import-mailboxes", "groups", "team-inboxes", "org-units", "domains", "roles", "provisioning", "policies", "addons", "storage", "ai", "quarantine", "audit", "compliance", "integrations", "enterprise-features", "analytics", "crm", "workspace", "mcp", "identity", "support-ops", "backup", "tenants", "settings"]);
-const paidViews = new Set(["team-inboxes", "import-mailboxes", "provisioning", "ai", "compliance", "integrations", "enterprise-features", "analytics", "crm", "workspace", "mcp", "identity", "support-ops", "backup"]);
+const paidViews = new Set(["team-inboxes", "import-mailboxes", "provisioning", "compliance", "integrations", "enterprise-features", "analytics", "crm", "workspace", "mcp", "identity", "support-ops", "backup"]);
 const enterpriseViewTitles = { "team-inboxes": "Team inboxes", "import-mailboxes": "Import mailboxes", provisioning: "Provisioning", ai: "AI assistant", compliance: "Compliance", integrations: "Integrations", "enterprise-features": "Enterprise features", analytics: "Usage analytics", crm: "CRM sync", workspace: "Workspace features", mcp: "MCP governance", identity: "Identity & SSO", "support-ops": "Support operations", backup: "Backup & restore" };
 
 function route() {
@@ -1819,7 +1819,7 @@ function policySections(policy) {
       ${toggleRow("Office enabled", "Allow the Office editor, document creation, conversion and guest document links.", "office.enabled", office.enabled)}
       ${toggleRow("Internal sharing", "Let file owners grant view or edit access to colleagues and groups from the Cabinet.", "office.internalSharing", office.internalSharing)}
       ${toggleRow("Guest editing", "Allow edit links to change Office documents. When off, guest links are always view-only.", "office.externalEditing", office.externalEditing)}
-      ${toggleRow("AI assistant", "Show the Office AI panel to users. Requires an AI provider in System Control.", "office.ai", office.ai)}
+      ${state.enterprise ? toggleRow("AI assistant", "Show the Office AI panel to users. Requires an AI provider in System Control.", "office.ai", office.ai) : ""}
       ${toggleRow("DLP on save", "Scan document text when the Office editor saves a version and record the classification and matches.", "office.dlpOnSave", office.dlpOnSave)}
       <div class="setting-row"><div class="setting-copy"><b>Version retention</b><small>Keep this many newest versions per Office document. 0 keeps every version. Retention is applied after each save and releases version storage.</small></div><div class="setting-control"><div class="input-group"><input class="input" type="number" min="0" max="1000" data-policy-input="office.versionRetention" value="${Number(office.versionRetention) || 0}"><span class="muted">versions</span></div></div></div>
     </div>
@@ -2175,35 +2175,23 @@ async function renderAI() {
     state.ai = data.ai;
     const ai = data.ai;
     const providers = data.providers || [];
+    const enterprise = state.enterprise;
+    // Usage and customer-managed keys are paid modules. A community server has
+    // no route for them, so skip the calls instead of showing empty cards.
     let usage = null;
-    try { usage = await api("ai/usage"); } catch { usage = null; }
+    if (enterprise) {
+      try { usage = await api("ai/usage"); } catch { usage = null; }
+    }
     let encryption = null;
-    try { encryption = await api("encryption"); } catch { encryption = null; }
-    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>AI assistant</h1><p>Let people use your organization's own AI provider inside compose and the reading pane.</p></div><div class="view-actions"><span class="badge ${ai.enabled ? "ok" : "system"}">${ai.enabled ? "Enabled" : "Disabled"}</span></div></div>
-      <div class="dashboard-grid">
-        <div class="card card-pad">
-          <div class="setting-row" style="padding-top:0"><div class="setting-copy"><b>Enable AI assistant</b><small>Adds compose generation, message summaries and translation to every mailbox in this organization.</small></div><div class="setting-control"><button class="switch" type="button" id="aiEnabledToggle" data-ai-toggle="enabled" aria-checked="${ai.enabled ? "true" : "false"}" aria-label="Enable AI assistant"></button></div></div>
-          <div class="field-row"><label class="field"><span>Provider</span><select class="input" id="aiProvider">${providers.map((provider) => `<option value="${esc(provider.code)}" ${ai.provider === provider.code ? "selected" : ""}>${esc(provider.name)}</option>`).join("")}</select></label><label class="field"><span>Model</span><input class="input" id="aiModel" value="${esc(ai.model || "")}" placeholder="gpt-4o-mini / claude-sonnet-5-5 / deepseek-chat"></label></div>
-          <label class="field"><span>API endpoint</span><input class="input" id="aiEndpoint" value="${esc(ai.endpoint || "")}" placeholder="https://api.openai.com/v1 or https://api.anthropic.com"><small class="muted">OpenAI-compatible endpoints are accepted for OpenAI, DeepSeek, Azure gateways and self-hosted models. Claude uses the Anthropic Messages API.</small></label>
-          <label class="field"><span>API key ${ai.hasKey ? '<small class="muted">— a key is configured; leave blank to keep it</small>' : ""}</span><input class="input" id="aiKey" type="password" autocomplete="new-password" placeholder="${ai.hasKey ? "••••••••••••••••" : "sk-..."}"><small class="muted">Keys are encrypted with AES-GCM before they reach PostgreSQL and are never returned to the browser.</small></label>
-          <div class="field-row"><label class="field"><span>Max tokens</span><input class="input" id="aiMaxTokens" type="number" min="64" max="8192" value="${ai.maxTokens || 1024}"></label><label class="field"><span>Temperature</span><input class="input" id="aiTemperature" type="number" min="0" max="2" step="0.05" value="${ai.temperature ?? 0.7}"></label><label class="field"><span>Timeout (seconds)</span><input class="input" id="aiTimeout" type="number" min="5" max="120" value="${ai.timeoutSeconds || 30}"></label></div>
+    if (enterprise) {
+      try { encryption = await api("encryption"); } catch { encryption = null; }
+    }
+    const enterpriseControls = enterprise ? `
           <label class="field"><span>Monthly AI budget (USD) <small class="muted">0 = uncapped</small></span><input class="input" id="aiBudget" type="number" min="0" step="1" value="${((ai.monthlyBudgetCents || 0) / 100).toFixed(2)}"><small class="muted">Estimated from characters sent to and received from the provider. When the cap is reached, AI features return a budget message until the next month or until an administrator raises it.</small></label>
           <div class="setting-row"><div class="setting-copy"><b>Auto-label triage results</b><small>Apply an <code>AI/…</code> label when confidence meets the threshold. Results below the threshold stay suggestions only.</small></div><div class="setting-control"><button class="switch" type="button" id="aiTriageAutoLabel" aria-checked="${ai.triageAutoLabel ? "true" : "false"}" aria-label="Auto-label triage results"></button></div></div>
           <label class="field"><span>Auto-label confidence threshold</span><input class="input" id="aiTriageConfidence" type="number" min="0" max="1" step="0.05" value="${ai.triageMinConfidence ?? 0.8}"></label>
-          <div class="setting-row"><div class="setting-copy"><b>Turn obligations into tasks</b><small>When the obligations ledger extracts a promise or deadline above the model's confidence, create a linked task automatically.</small></div><div class="setting-control"><button class="switch" type="button" id="aiObligationsAutoTask" aria-checked="${ai.obligationsAutoTask ? "true" : "false"}" aria-label="Create tasks from obligations automatically"></button></div></div>
-          <label class="field"><span>Organization system prompt <small class="muted">optional</small></span><textarea class="input" id="aiSystemPrompt" rows="3" placeholder="Writing rules, tone and compliance guidance for every AI request.">${esc(ai.systemPrompt || "")}</textarea></label>
-          <div class="policy-save" style="margin-top:18px"><span>AI requests leave Alt8Mail for the endpoint you configure. The provider's data policy applies.</span><button class="btn secondary" type="button" data-action="test-ai">${icon("sparkles")}Save &amp; test</button><button class="btn primary" type="button" data-action="save-ai">${icon("check")}Save AI settings</button></div>
-          <div id="aiTestResult" class="form-error" style="margin-top:12px" hidden></div>
-        </div>
-        <div>
-          <div class="card card-pad"><div class="card-head" style="padding:0 0 12px"><div><h2>What users get</h2><p>Every capability respects the workspace language and the organization's provider.</p></div></div>
-            <div class="detail-list">
-              <div class="detail-row"><span>Compose assistant</span><b>8 styles · 3 lengths · creativity control</b></div>
-              <div class="detail-row"><span>Languages</span><b>36 languages, including cross-language drafting</b></div>
-              <div class="detail-row"><span>Reading pane</span><b>Summaries and translation in one click</b></div>
-              <div class="detail-row"><span>Data path</span><b>Tenant-scoped · no shared provider key</b></div>
-            </div>
-          </div>
+          <div class="setting-row"><div class="setting-copy"><b>Turn obligations into tasks</b><small>When the obligations ledger extracts a promise or deadline above the model's confidence, create a linked task automatically.</small></div><div class="setting-control"><button class="switch" type="button" id="aiObligationsAutoTask" aria-checked="${ai.obligationsAutoTask ? "true" : "false"}" aria-label="Create tasks from obligations automatically"></button></div></div>` : "";
+    const enterprisePanels = enterprise ? `
           <div class="card card-pad" style="margin-top:14px"><div class="card-head" style="padding:0 0 12px"><div><h2>Usage this month</h2><p>Estimated spend against the organization budget.</p></div><span class="badge ${usage?.budgetExhausted ? "warn" : "ok"}">${usage?.budgetExhausted ? "Budget reached" : "Within budget"}</span></div>
             <div class="detail-list">
               <div class="detail-row"><span>AI requests</span><b>${usage ? Number(usage.requests).toLocaleString() : "—"}</b></div>
@@ -2221,7 +2209,40 @@ async function renderAI() {
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
               ${!encryption?.enabled ? `<button class="btn secondary small" type="button" data-encryption-action="enable">Enable BYOK</button>` : `<button class="btn secondary small" type="button" data-encryption-action="unlock">Unlock</button><button class="btn secondary small" type="button" data-encryption-action="lock">Lock</button><button class="btn secondary small" type="button" data-encryption-action="rotate">Rotate data key</button>`}
             </div>
+          </div>` : `
+          <div class="card card-pad" style="margin-top:14px"><div class="card-head" style="padding:0 0 12px"><div><h2>Enterprise AI controls</h2><p>These AI capabilities are available in the Alt8Mail Enterprise release.</p></div><span class="badge warning">${icon("lock")}Enterprise</span></div>
+            <div class="detail-list">
+              <div class="detail-row"><span>AI triage</span><b>Priority classification and feedback</b></div>
+              <div class="detail-row"><span>AI obligations</span><b>Commitment extraction and automatic tasks</b></div>
+              <div class="detail-row"><span>AI search and meeting prep</span><b>Natural-language search and sender intelligence</b></div>
+              <div class="detail-row"><span>Office AI</span><b>Document summaries, drafting and Q&amp;A</b></div>
+              <div class="detail-row"><span>AI budget and BYOK</span><b>Usage quotas and customer-managed keys</b></div>
+            </div>
+            <a class="btn secondary small" href="#/enterprise-features" style="margin-top:12px">${icon("sparkles")}Explore enterprise AI features</a>
+          </div>`;
+    $("#viewRoot").innerHTML = `<div class="view-head"><div><h1>AI assistant</h1><p>Let people use your organization's own AI provider inside compose and the reading pane.</p></div><div class="view-actions"><span class="badge ${ai.enabled ? "ok" : "system"}">${ai.enabled ? "Enabled" : "Disabled"}</span></div></div>
+      <div class="dashboard-grid">
+        <div class="card card-pad">
+          <div class="setting-row" style="padding-top:0"><div class="setting-copy"><b>Enable AI assistant</b><small>Adds compose generation, message summaries and translation to every mailbox in this organization.</small></div><div class="setting-control"><button class="switch" type="button" id="aiEnabledToggle" data-ai-toggle="enabled" aria-checked="${ai.enabled ? "true" : "false"}" aria-label="Enable AI assistant"></button></div></div>
+          <div class="field-row"><label class="field"><span>Provider</span><select class="input" id="aiProvider">${providers.map((provider) => `<option value="${esc(provider.code)}" ${ai.provider === provider.code ? "selected" : ""}>${esc(provider.name)}</option>`).join("")}</select></label><label class="field"><span>Model</span><input class="input" id="aiModel" value="${esc(ai.model || "")}" placeholder="gpt-4o-mini / claude-sonnet-5-5 / deepseek-chat"></label></div>
+          <label class="field"><span>API endpoint</span><input class="input" id="aiEndpoint" value="${esc(ai.endpoint || "")}" placeholder="https://api.openai.com/v1 or https://api.anthropic.com"><small class="muted">OpenAI-compatible endpoints are accepted for OpenAI, DeepSeek, Azure gateways and self-hosted models. Claude uses the Anthropic Messages API.</small></label>
+          <label class="field"><span>API key ${ai.hasKey ? '<small class="muted">— a key is configured; leave blank to keep it</small>' : ""}</span><input class="input" id="aiKey" type="password" autocomplete="new-password" placeholder="${ai.hasKey ? "••••••••••••••••" : "sk-..."}"><small class="muted">Keys are encrypted with AES-GCM before they reach PostgreSQL and are never returned to the browser.</small></label>
+          <div class="field-row"><label class="field"><span>Max tokens</span><input class="input" id="aiMaxTokens" type="number" min="64" max="8192" value="${ai.maxTokens || 1024}"></label><label class="field"><span>Temperature</span><input class="input" id="aiTemperature" type="number" min="0" max="2" step="0.05" value="${ai.temperature ?? 0.7}"></label><label class="field"><span>Timeout (seconds)</span><input class="input" id="aiTimeout" type="number" min="5" max="120" value="${ai.timeoutSeconds || 30}"></label></div>
+          ${enterpriseControls}
+          <label class="field"><span>Organization system prompt <small class="muted">optional</small></span><textarea class="input" id="aiSystemPrompt" rows="3" placeholder="Writing rules, tone and compliance guidance for every AI request.">${esc(ai.systemPrompt || "")}</textarea></label>
+          <div class="policy-save" style="margin-top:18px"><span>AI requests leave Alt8Mail for the endpoint you configure. The provider's data policy applies.</span><button class="btn secondary" type="button" data-action="test-ai">${icon("sparkles")}Save &amp; test</button><button class="btn primary" type="button" data-action="save-ai">${icon("check")}Save AI settings</button></div>
+          <div id="aiTestResult" class="form-error" style="margin-top:12px" hidden></div>
+        </div>
+        <div>
+          <div class="card card-pad"><div class="card-head" style="padding:0 0 12px"><div><h2>What users get</h2><p>Every capability respects the workspace language and the organization's provider.</p></div></div>
+            <div class="detail-list">
+              <div class="detail-row"><span>Compose assistant</span><b>8 styles · 3 lengths · creativity control</b></div>
+              <div class="detail-row"><span>Languages</span><b>36 languages, including cross-language drafting</b></div>
+              <div class="detail-row"><span>Reading pane</span><b>Summaries and translation in one click</b></div>
+              <div class="detail-row"><span>Data path</span><b>Tenant-scoped · no shared provider key</b></div>
+            </div>
           </div>
+          ${enterprisePanels}
           <div class="card card-pad" style="margin-top:14px"><div class="card-head" style="padding:0 0 12px"><div><h2>Security notes</h2><p>Before enabling this in production.</p></div></div><div class="detail-list"><div class="detail-row"><span>Endpoint allowlist</span><b>HTTPS recommended</b></div><div class="detail-row"><span>API key storage</span><b>AES-GCM sealed</b></div><div class="detail-row"><span>Request retention</span><b>Cached summaries stay tenant-scoped</b></div></div><p class="muted" style="font-size:11px;margin:12px 0 0">Use a dedicated provider key with a spending cap. AI output is untrusted text and is rendered as plain text in the webmail.</p></div>
         </div>
       </div>`;
@@ -2258,7 +2279,7 @@ async function runEncryptionAction(action, button) {
 
 function collectAIForm() {
   const enabled = $("#aiEnabledToggle")?.getAttribute("aria-checked") === "true";
-  return {
+  const form = {
     enabled,
     provider: $("#aiProvider")?.value || "openai",
     endpoint: $("#aiEndpoint")?.value.trim() || "",
@@ -2267,12 +2288,19 @@ function collectAIForm() {
     maxTokens: Number($("#aiMaxTokens")?.value || 1024),
     temperature: Number($("#aiTemperature")?.value || 0.7),
     timeoutSeconds: Number($("#aiTimeout")?.value || 30),
-    monthlyBudgetCents: Math.round(Number($("#aiBudget")?.value || 0) * 100),
-    triageAutoLabel: $("#aiTriageAutoLabel")?.getAttribute("aria-checked") === "true",
-    triageMinConfidence: Number($("#aiTriageConfidence")?.value || 0.8),
-    obligationsAutoTask: $("#aiObligationsAutoTask")?.getAttribute("aria-checked") === "true",
     systemPrompt: $("#aiSystemPrompt")?.value || ""
   };
+  // Paid AI controls are absent in the community console. Omitting them keeps
+  // the stored enterprise values untouched when an assistant setting is saved.
+  const budget = $("#aiBudget");
+  if (budget) form.monthlyBudgetCents = Math.round(Number(budget.value || 0) * 100);
+  const triage = $("#aiTriageAutoLabel");
+  if (triage) form.triageAutoLabel = triage.getAttribute("aria-checked") === "true";
+  const confidence = $("#aiTriageConfidence");
+  if (confidence) form.triageMinConfidence = Number(confidence.value || 0.8);
+  const obligations = $("#aiObligationsAutoTask");
+  if (obligations) form.obligationsAutoTask = obligations.getAttribute("aria-checked") === "true";
+  return form;
 }
 
 async function saveAI({ test = false } = {}) {
@@ -2803,7 +2831,9 @@ function renderEnterprisePreview(view, featureKey) {
 
 function renderEnterpriseFeaturePreview(featureKey) {
   const management = ENTERPRISE_MANAGEMENT[featureKey];
-  const view = management && paidViews.has(management.view) ? management.view : "generic";
+  // The AI assistant page is a community surface, but the paid AI features
+  // still use its provider preview card in the enterprise catalog.
+  const view = management && (paidViews.has(management.view) || management.view === "ai") ? management.view : "generic";
   renderEnterprisePreview(view, featureKey);
 }
 

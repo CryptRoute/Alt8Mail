@@ -1,3 +1,15 @@
+# Alt8Mail 3.12.1
+
+Release date: 2026-11-26. Restore the AI assistant to the community edition and keep the specialist AI modules in Enterprise.
+
+## 3.12.1 AI assistant edition split
+
+- **The AI assistant is a community feature again.** The admin console serves `#/ai` in a community build, so an organization can configure its own provider, model, endpoint, API key, token limits, temperature, timeout and system prompt without an Enterprise license.
+- **The webmail assistant works in Community.** Compose generation, reading-pane summaries, translation, “What did I commit to?” commitment extraction and Reply with AI use the core `/api/ai/*` endpoints and the tenant-scoped provider key.
+- **Paid AI modules stay Enterprise.** AI triage, obligations automation, AI search, meeting prep, AI policy assist, AI budget controls and BYOK are hidden from the community AI page and remain gated by their existing entitlements.
+- **Office AI is Enterprise-only.** `/api/office/ai` now requires the `office_ai` entitlement, and the editor panel is enabled only by the enterprise module. This supersedes the 3.11.10 behavior that let the webmail assistant enable Office AI without a separate entitlement. The Office AI policy toggle is hidden in the community console.
+- **Community saves cannot alter paid AI settings.** The admin API ignores budget, triage and obligation fields when the matching entitlement is absent, so upgrading or downgrading does not rewrite enterprise configuration from a community console.
+
 # Alt8Mail 3.12.0
 
 Release date: 2026-11-23. The Office editor is rebuilt as a compact desktop-suite workspace: ONLYOFFICE-style tabs, icon-first ribbon, a native text style strip, right-edge sidebar rail, ruler and 100% zoom on load, and compact webmail document chrome.

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,5 +43,23 @@ func TestOfficeAIFallbackRejectsOtherOfficePaths(t *testing.T) {
 	(&Server{}).officeAIFallback(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestOfficeAIEnabledRequiresEnterpriseModule(t *testing.T) {
+	if (&Server{}).officeAIEnabled(context.Background(), userRecord{}) {
+		t.Fatal("a community server must not enable Office AI")
+	}
+}
+
+func TestOfficeAIFallbackRequiresOfficeAIEntitlement(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/office/ai", strings.NewReader(`{"action":"summarize","text":"Hello"}`))
+	rec := httptest.NewRecorder()
+	(&Server{}).officeAIFallback(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"FEATURE_REQUIRED"`) {
+		t.Fatalf("body does not report FEATURE_REQUIRED: %s", rec.Body.String())
 	}
 }

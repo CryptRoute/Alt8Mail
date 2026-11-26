@@ -17,7 +17,8 @@ const (
 // officeAIFallback is registered on the POST /api/office/ subtree. Exact
 // routes win over the subtree in net/http, so an enterprise module that
 // registers POST /api/office/ai takes precedence and this fallback is only
-// used when no such module is present.
+// used when no such module is present. The handler still requires the paid
+// office_ai entitlement, so a community build returns FEATURE_REQUIRED.
 func (s *Server) officeAIFallback(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/api/office/ai" {
 		http.NotFound(w, r)
@@ -30,6 +31,10 @@ func (s *Server) officeAIFallback(w http.ResponseWriter, r *http.Request) {
 // tenant_ai_settings, sealed API key, DLP redaction, budget hooks and provider
 // client as the webmail assistant, so administrators configure AI once.
 func (s *Server) officeAI(w http.ResponseWriter, r *http.Request) {
+	if !s.entitled(FeatureOfficeAI) {
+		s.writeFeatureRequired(w, FeatureOfficeAI, "Office AI is part of Alt8Mail Enterprise. Install the enterprise release and a license that includes office_ai.")
+		return
+	}
 	sess := s.requireSessionFromContext(r)
 	settings, err := s.aiReady(r.Context(), sess.User.TenantID)
 	if err != nil {
