@@ -1,3 +1,20 @@
+# Alt8Mail 3.12.2
+
+Release date: 2026-11-28. Installer hardening for minimal Debian and Ubuntu hosts.
+
+## 3.12.2 Installer reliability
+
+- **Minimal-image dependencies are explicit.** The base package set now includes `cron`, `openssh-client`, `tzdata`, `hostname` and `iproute2`, so the release phase no longer aborts because a minimal Debian image has no `cron.service`.
+- **Dependency audit after package installation.** A command-to-package and unit-to-package check runs before the build phase, installs anything still missing with noninteractive apt, and reports the exact unresolved command or unit if installation cannot satisfy it.
+- **Per-unit service handling.** The release phase enables units individually and starts core and support services separately. Fail2Ban is enabled during release but started in phase 14 after the Alt8Mail `backend = systemd` jail and port-scoped action are installed, avoiding the stock-config `no log file for sshd jail` failure.
+- **Optional services no longer abort installation.** Fail2Ban, ClamAV and other optional units warn instead of failing the release. The health phase now treats core/support units as errors and optional units as warnings.
+- **Resumed installs reload state.** A retry after a failed phase reloads the generated database and owner secrets, PostgreSQL major version and detected public addresses instead of failing with unbound variables.
+- **Mail logging is ready before Control starts.** `/var/log/mail.log` is created with the correct ownership during system setup.
+- **Failure dialogs show the real command.** `run()` and `run_spin()` append `FAIL(rc): command` to the phase log read by the installer dialog.
+- **PostgreSQL cluster enable is guarded.** An empty detected major version can no longer create an invalid `postgresql@-main.service`; the cluster unit is persistently enabled with the detected version.
+
+Tested on a minimal Debian 12 VM: the dependency audit installed `cron`, the install resumed through tenant, firewall and health, and all health checks passed with Fail2Ban, ClamAV, cron and all Alt8Mail services active.
+
 # Alt8Mail 3.12.1
 
 Release date: 2026-11-26. Restore the AI assistant to the community edition and keep the specialist AI modules in Enterprise.

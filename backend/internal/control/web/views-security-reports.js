@@ -1,5 +1,5 @@
 /* Cross-tenant phishing, spam and malware reports. */
-import * as ui from './ui.js?v=3.12.1';
+import * as ui from './ui.js?v=3.12.2';
 
 const esc = ui.esc;
 const fmt = {

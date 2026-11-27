@@ -1,5 +1,5 @@
 /* Deliverability, queue, relay/outbound routing and suppression views. */
-import * as ui from './ui.js?v=3.12.1';
+import * as ui from './ui.js?v=3.12.2';
 
 const esc = ui.esc;
 const fmt = {
