@@ -83,7 +83,10 @@ detect_public_ipv6() {
 
 detect_pg_major() {
   local major=""
-  major="$(psql -V 2>/dev/null | sed -nE 's/.* ([0-9]+)\..*/\1/p' | head -n1)"
+  # This also runs before the mail-stack packages exist on a fresh host.
+  if command -v psql >/dev/null 2>&1; then
+    major="$(psql -V 2>/dev/null | sed -nE 's/.* ([0-9]+)\..*/\1/p' | head -n1 || true)"
+  fi
   if [[ -z "$major" && -d /etc/postgresql ]]; then
     major="$(find /etc/postgresql -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null \
       | sort -V | tail -n1)"

@@ -1,3 +1,12 @@
+# Alt8Mail 3.12.3
+
+Release date: 2026-11-28. Fix the fresh-install failure before the mail-stack packages are installed.
+
+## 3.12.3 Installer startup fix
+
+- **PostgreSQL detection no longer requires psql.** The resumed-install environment loader runs immediately after the bootstrap tools are installed, before PostgreSQL exists on a fresh minimal host. `detect_pg_major` called `psql` unconditionally, so the missing command propagated through the pipeline and the installer aborted with `Unexpected error (rc=127) at line 86: head -n1`. The detector now checks for `psql` first and falls back to the PostgreSQL configuration directory, returning an empty value until phase 7 sets the real major version.
+- This is the only change in 3.12.3; the 3.12.2 dependency audit, per-unit service startup, Fail2Ban ordering and resumed-install secret reloading remain in place.
+
 # Alt8Mail 3.12.2
 
 Release date: 2026-11-28. Installer hardening for minimal Debian and Ubuntu hosts.
