@@ -145,6 +145,7 @@ log_init
 state_init
 a8m_install_traps
 precheck_bootstrap_tools
+load_install_environment
 
 # Interactive collection
 if [[ "$A8M_NONINTERACTIVE" != "1" ]]; then
@@ -216,6 +217,7 @@ phase_run bootstrap  phase_bootstrap  "$F"
 phase_run swap       phase_swap       "$F"
 phase_run repos      phase_repos      "$F"
 phase_run mailstack  phase_mailstack  "$F"
+precheck_runtime_dependencies || exit 1
 phase_run build      phase_build      "$F"
 phase_run system     phase_system     "$F"
 phase_run postgres   phase_postgres   "$F"

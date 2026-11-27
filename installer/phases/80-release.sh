@@ -2,6 +2,12 @@
 set -Eeuo pipefail
 
 phase_release() {
+  if [[ -z "${A8M_PG_MAJOR:-}" ]]; then
+    A8M_PG_MAJOR="$(detect_pg_major)"
+    export A8M_PG_MAJOR
+  fi
+  [[ -n "${A8M_PG_MAJOR:-}" ]] \
+    || { ui_err "Could not determine the PostgreSQL major version"; return 1; }
   resolve_release_source || { ui_err "No built release is available"; return 1; }
   local src="$A8M_RELEASE_SOURCE"
   [[ -x "$src/bin/a8m-server" ]] || { ui_err "Release has no bin/a8m-server: $src"; return 1; }
@@ -33,10 +39,34 @@ phase_release() {
   done
   run release -- systemctl daemon-reload || return 1
 
-  # Every monitored unit must be enabled at boot.
+  # Every monitored unit must be enabled at boot. Enable one at a time so a
+  # missing unit on a minimal image cannot hide the others, and so the log
+  # names the unit that failed.
   ui_task "Enabling every monitored unit at boot"
-  run release -- systemctl enable --now postgresql redis-server dovecot rspamd \
-    nginx postfix fail2ban cron chrony || return 1
+  for unit in $(distro_core_units) $(distro_support_units) $(distro_optional_units); do
+    if ! run release -- systemctl enable "$unit"; then
+      case " $(distro_core_units) " in
+        *" $unit "*) ui_warn "Required unit $unit could not be enabled at boot" ;;
+        *) ui_warn "Optional unit $unit could not be enabled at boot" ;;
+      esac
+    fi
+  done
+
+  ui_task "Starting core services"
+  for unit in $(distro_core_units); do
+    if ! run release -- systemctl start "$unit"; then
+      ui_err "Required service $unit failed to start; see $A8M_LOG_DIR/release.log"
+      return 1
+    fi
+  done
+  for unit in $(distro_support_units); do
+    run release -- systemctl start "$unit" \
+      || ui_warn "Service $unit is not active yet; the health check will report it"
+  done
+
+  # Fail2Ban starts in phase 14 after its Alt8Mail jail (systemd backend,
+  # port-scoped action) is installed. Starting the stock package config here
+  # fails on minimal images where /var/log/auth.log does not exist yet.
   run release -- systemctl enable --now clamav-freshclam \
     || ui_warn "clamav-freshclam could not start yet"
   run release -- systemctl enable --now clamav-daemon \
@@ -55,7 +85,9 @@ phase_release() {
   fi
 
   ui_task "Restarting mail services"
-  run release -- systemctl restart dovecot rspamd || return 1
+  for unit in dovecot rspamd; do
+    run release -- systemctl restart "$unit" || return 1
+  done
   run release -- systemctl restart clamav-daemon \
     || ui_warn "clamav-daemon is not ready yet; the timer/health check will report it"
   run release -- systemctl enable --now postfix || return 1
@@ -66,9 +98,15 @@ phase_release() {
   fi
 
   ui_task "Starting Alt8Mail web, admin and Control services"
-  run release -- systemctl enable --now a8m-server a8m-admin alt8mail-control || return 1
-  run release -- systemctl enable --now a8m-mailprovision.timer a8m-dkimprovision.timer || return 1
-  run release -- systemctl restart a8m-server a8m-admin alt8mail-control || return 1
+  for unit in a8m-server a8m-admin alt8mail-control; do
+    run release -- systemctl enable --now "$unit" || return 1
+  done
+  for unit in a8m-mailprovision.timer a8m-dkimprovision.timer; do
+    run release -- systemctl enable --now "$unit" || return 1
+  done
+  for unit in a8m-server a8m-admin alt8mail-control; do
+    run release -- systemctl restart "$unit" || return 1
+  done
   run release -- systemctl enable --now a8m-office-agent \
     || ui_warn "Office agent did not start; install Docker, then start a8m-office-agent"
   ui_task_ok "Release installed and services started"

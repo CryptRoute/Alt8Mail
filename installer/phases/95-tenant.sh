@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 phase_tenant() {
+  # A resumed install skips phase_system, so reload the generated secrets
+  # before using the owner and Control passwords.
+  load_install_environment
   local release="$A8M_INSTALL_ROOT/current"
   [[ -x "$release/bin/a8m-admin" ]] \
     || { ui_err "$release/bin/a8m-admin is missing"; return 1; }

@@ -33,6 +33,13 @@ phase_system() {
   install -d -m 0750 /var/lib/a8m
   install -d -m 0750 -o root -g "$A8M_SERVICE_USER" /var/lib/a8m-office
   install -d -m 0750 "$A8M_CONFIG_ROOT/office"
+  # Control tails this file. rsyslog creates it on the first mail event, which
+  # can be after Control has already started on a quiet fresh host.
+  if [[ ! -e /var/log/mail.log ]]; then
+    : >/var/log/mail.log
+  fi
+  chown root:adm /var/log/mail.log 2>/dev/null || true
+  chmod 0640 /var/log/mail.log
 
   ui_task "Generating and normalizing service secrets"
   APP_DB_PASSWORD="$(read_or_create_secret "$A8M_SECRETS_DIR/postgres_app_password" 32)"

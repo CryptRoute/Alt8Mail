@@ -132,6 +132,49 @@ psql_postgres() {
   runuser -u postgres -- env "PGOPTIONS=${PGOPTIONS:-}" psql "$@"
 }
 
+# Reload values that phase_system generated. A resumed install skips that
+# phase, but later phases still need the owner passwords, database passwords,
+# PostgreSQL major version and public addresses.
+load_service_secret() {  # load_service_secret VARIABLE PATH
+  local variable="$1" path="$2" value
+  [[ -s "$path" ]] || return 0
+  value="$(tr -d '\n' <"$path")"
+  [[ -n "$value" ]] || return 0
+  printf -v "$variable" '%s' "$value"
+  export "$variable"
+}
+
+load_install_environment() {
+  local secrets="${A8M_SECRETS_DIR:-/opt/a8m/secrets}"
+  load_service_secret APP_DB_PASSWORD "$secrets/postgres_app_password"
+  load_service_secret MAIL_DB_PASSWORD "$secrets/postgres_mail_password"
+  load_service_secret CONTROL_DB_PASSWORD "$secrets/postgres_control_password"
+  load_service_secret REDIS_PASSWORD "$secrets/redis_password"
+  load_service_secret SESSION_SECRET "$secrets/session_secret"
+  load_service_secret CRYPTO_SECRET "$secrets/crypto_secret"
+  load_service_secret CSRF_SECRET "$secrets/csrf_secret"
+  load_service_secret CONTROL_SESSION_SECRET "$secrets/control_session_secret"
+  load_service_secret CONTROL_CSRF_SECRET "$secrets/control_csrf_secret"
+  load_service_secret CONTROL_SECRET_KEY "$secrets/control_secret_key"
+  load_service_secret IMAP_MASTER_PASSWORD "$secrets/imap_master_password"
+  load_service_secret OWNER_WEB_PASSWORD "$secrets/owner_web_password"
+  load_service_secret OWNER_MAIL_PASSWORD "$secrets/owner_mail_password"
+  load_service_secret CONTROL_ADMIN_PASSWORD "$secrets/control_admin_password"
+
+  if [[ -z "${A8M_PG_MAJOR:-}" ]]; then
+    A8M_PG_MAJOR="$(detect_pg_major)"
+    export A8M_PG_MAJOR
+  fi
+  if [[ -z "${A8M_PUBLIC_IP:-}" ]]; then
+    A8M_PUBLIC_IP="$(detect_public_ip)"
+    export A8M_PUBLIC_IP
+  fi
+  if [[ -z "${A8M_PUBLIC_IPV6:-}" ]]; then
+    A8M_PUBLIC_IPV6="$(detect_public_ipv6)"
+    export A8M_PUBLIC_IPV6
+  fi
+}
+
 apply_install_hostname() {  # apply_install_hostname <hostname> [domain]
   local new="$1" domain="${2:-}"
   [[ -n "$new" ]] || return 0

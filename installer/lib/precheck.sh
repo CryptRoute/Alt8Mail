@@ -156,6 +156,56 @@ Continue anyway (not recommended)?"; then
   fi
 }
 
+# Ensure every command and systemd unit used by later phases is present. This
+# runs after the base and mail-stack package phases and installs anything a
+# minimal image did not provide (for example the cron daemon).
+precheck_runtime_dependencies() {
+  local -A seen=()
+  local packages=() cmd pkg unit
+
+  while read -r cmd pkg; do
+    [[ -n "$cmd" ]] || continue
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      if [[ -z "${seen[$pkg]:-}" ]]; then seen[$pkg]=1; packages+=("$pkg"); fi
+    fi
+  done < <(distro_runtime_command_packages)
+
+  while read -r unit pkg; do
+    [[ -n "$unit" ]] || continue
+    if ! systemctl cat "$unit" >/dev/null 2>&1; then
+      if [[ -z "${seen[$pkg]:-}" ]]; then seen[$pkg]=1; packages+=("$pkg"); fi
+    fi
+  done < <(distro_runtime_unit_packages)
+
+  if (( ${#packages[@]} > 0 )); then
+    if [[ "${A8M_SKIP_PACKAGES:-0}" == "1" ]]; then
+      ui_err "Missing runtime packages: ${packages[*]} (package installation was skipped)"
+      return 1
+    fi
+    ui_task "Installing missing runtime dependencies: ${packages[*]}"
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
+    run_spin bootstrap "Installing missing runtime dependencies" -- \
+      apt-get -o DPkg::Lock::Timeout=300 \
+      -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+      install -y --no-install-recommends "${packages[@]}" || return 1
+  fi
+
+  local unresolved=()
+  while read -r cmd pkg; do
+    [[ -n "$cmd" ]] || continue
+    command -v "$cmd" >/dev/null 2>&1 || unresolved+=("$cmd ($pkg)")
+  done < <(distro_runtime_command_packages)
+  while read -r unit pkg; do
+    [[ -n "$unit" ]] || continue
+    systemctl cat "$unit" >/dev/null 2>&1 || unresolved+=("unit:$unit ($pkg)")
+  done < <(distro_runtime_unit_packages)
+  if (( ${#unresolved[@]} > 0 )); then
+    ui_err "Runtime dependencies are still missing: ${unresolved[*]}"
+    return 1
+  fi
+  ui_ok "Installer runtime dependencies present (${#packages[@]} package(s) added)"
+}
+
 # Ensure git/curl/whiptail/dig exist so the rest of the installer can run.
 precheck_bootstrap_tools() {
   local missing=() packages=()

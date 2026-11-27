@@ -2,23 +2,50 @@
 set -Eeuo pipefail
 
 phase_health() {
+  if [[ -z "${A8M_PG_MAJOR:-}" ]]; then
+    A8M_PG_MAJOR="$(detect_pg_major)"
+    export A8M_PG_MAJOR
+  fi
   local failed=0
-  local units=(postgresql "postgresql@${A8M_PG_MAJOR}-main" redis-server dovecot
-    postfix rspamd clamav-daemon clamav-freshclam nginx fail2ban cron chrony
-    a8m-server a8m-admin alt8mail-control)
+  local core_units=($(distro_core_units))
+  local support_units=($(distro_support_units))
+  local optional_units=($(distro_optional_units))
+  local app_units=(a8m-server a8m-admin alt8mail-control)
+  local cluster_unit="postgresql@${A8M_PG_MAJOR}-main"
+  local units=("${core_units[@]}" "$cluster_unit" "${support_units[@]}"
+    "${optional_units[@]}" "${app_units[@]}")
 
-  local unit enabled_state
+  local unit enabled_state optional
   for unit in "${units[@]}"; do
     systemctl cat "$unit" >/dev/null 2>&1 || continue
+    optional=0
+    case " ${optional_units[*]} " in *" $unit "*) optional=1 ;; esac
     enabled_state="$(systemctl is-enabled "$unit" 2>/dev/null || true)"
     case "$enabled_state" in
-      enabled|enabled-runtime) ui_ok "service $unit: enabled" ;;
-      *) ui_err "service $unit: not enabled at boot"; failed=1 ;;
+      enabled) ui_ok "service $unit: enabled" ;;
+      enabled-runtime)
+        if [[ "$unit" == postgresql@* ]]; then
+          ui_warn "service $unit: enabled for this boot only; persistent drop-in is not active"
+        elif (( optional )); then
+          ui_warn "service $unit: enabled for this boot only"
+        else
+          ui_err "service $unit: not persistently enabled at boot"
+          failed=1
+        fi
+        ;;
+      *)
+        if (( optional )); then
+          ui_warn "service $unit: not enabled at boot"
+        else
+          ui_err "service $unit: not enabled at boot"
+          failed=1
+        fi
+        ;;
     esac
     if systemctl is-active --quiet "$unit"; then
       ui_ok "service $unit: active"
-    elif [[ "$unit" == clamav-* ]]; then
-      ui_warn "service $unit is still starting or updating signatures"
+    elif (( optional )); then
+      ui_warn "service $unit is not active yet; inspect journalctl -u $unit"
     else
       ui_err "service $unit: not active"
       failed=1

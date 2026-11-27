@@ -19,6 +19,15 @@ log_write() {  # log_write phase message
   printf '[%s] [%s] %s\n' "$(date -u +%FT%TZ)" "$phase" "$*" | tee -a "$A8M_LOG_FILE" >/dev/null
 }
 
+# Keep the failing command in the phase log as well as install.log. The
+# installer failure dialog reads the phase log, so without this line the last
+# visible output can be a daemon's chatter rather than the failed command.
+log_phase_failure() {  # log_phase_failure phase rc cmd...
+  local phase="$1" rc="$2"; shift 2
+  printf '[%s] FAIL(%s): %s\n' "$(date -u +%FT%TZ)" "$rc" "$*" \
+    >>"$A8M_LOG_DIR/${phase}.log"
+}
+
 # Run a command quietly; output captured to phase log; prints nothing on success.
 run() {  # run phase -- cmd...
   local phase="$1"; shift
@@ -31,6 +40,7 @@ run() {  # run phase -- cmd...
   else
     local rc=$?
     log_write "$phase" "FAIL($rc): $*"
+    log_phase_failure "$phase" "$rc" "$*"
     return "$rc"
   fi
 }
@@ -62,6 +72,7 @@ run_spin() {  # run_spin <phase> <message> -- cmd...
     fi
     rc=$?
     log_write "$phase" "FAIL($rc): $*"
+    log_phase_failure "$phase" "$rc" "$*"
     ui_err "$msg failed (see $plog)"
     tail -n 25 "$plog" >&2 || true
     return "$rc"
@@ -83,6 +94,7 @@ run_spin() {  # run_spin <phase> <message> -- cmd...
     return 0
   fi
   log_write "$phase" "FAIL($rc): $*"
+  log_phase_failure "$phase" "$rc" "$*"
   ui_err "$msg failed (see $plog)"
   tail -n 25 "$plog" >&2 || true
   return "$rc"
